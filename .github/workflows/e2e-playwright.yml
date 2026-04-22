@@ -1,0 +1,21 @@
+# Automated Playwright E2E is paused in CI (job not wired yet). Specs remain in tests/e2e for manual runs:
+#   npm run test:e2e
+#
+# Backend auth limits are relaxed when the API runs with NODE_ENV=development; optional local bypass:
+# RATE_LIMIT_MODE=off or RATE_LIMIT_DISABLED=true (never production). See README "Development Auth Rate Limiting".
+#
+# To re-enable CI: add push/pull_request (or schedule) under `on:`, remove `if: false`
+# on the job, and implement checkout + install + dev server + playwright steps.
+
+name: E2E (Playwright) — paused
+
+on:
+  workflow_dispatch:
+
+jobs:
+  playwright-e2e:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skipped
+        run: echo "E2E job disabled — see workflow header comment"

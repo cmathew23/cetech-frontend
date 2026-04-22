@@ -1,0 +1,49 @@
+CETECH / PEAKFLOW UI RULES (strict contract)
+============================================
+
+POLICY — PRAGMATIC TAILWIND ON PAGES
+------------------------------------
+On route pages (app/**/page.tsx) and non-ui layout files:
+
+  ALLOWED Tailwind utilities ONLY for:
+    • grid / flex layout structure
+    • responsive breakpoints (sm:, md:, lg:, etc.)
+    • positioning and size that are purely layout (max-w, w-full, etc.)
+
+  NOT allowed on pages:
+    • color utilities (text-*, bg-*, border-* except where tokenized elsewhere)
+    • ad-hoc spacing (mt-*, mb-*, py-*, gap-* not from designSystem)
+    • typography overrides (text-xl, font-*, etc.)
+
+  All visual styling (color, type scale, field chrome, spacing rhythm) MUST come
+  from designSystem.* or from UI components that read designSystem.
+
+COMPONENTS
+----------
+  • Use FormField for every labeled field (label, required *, control, helper, error).
+  • Use Select from @/components/ui/Select for dropdowns (not raw <select> on pages).
+  • Use Stack with spacing: sm | md | lg | page (maps to designSystem.spacing).
+  • Use FormSection for vertical stacks of FormFields (uses spacing.form).
+  • Use Heading variants h1 | h2 | h3 only (classes from designSystem.typography).
+
+SPACING CONTRACT (designSystem.spacing)
+---------------------------------------
+  • form   → space-y-4  — fields inside FormSection
+  • section → space-y-6 — major blocks inside Card (Card applies this)
+  • page   → space-y-8  — Stack spacing="page"
+  • dense  → space-y-2  — Stack spacing="sm"
+
+LAYOUT PATTERNS
+---------------
+  • Auth split card (login): designSystem.layout.authSplit.*
+    — grid, breakpoint lg, column chrome, CTA gradient copy (ctaTitle, ctaBody).
+  • Register form actions row: designSystem.layout.registerForm.actions
+
+COMPOSITION
+-----------
+  • Use cn() in components when merging designSystem class strings with props.
+
+MISSING PRIMITIVE
+-----------------
+  If a pattern repeats and has no token: add it to design-system.js first, then
+  implement a UI component. Do not patch pages with one-off utilities.

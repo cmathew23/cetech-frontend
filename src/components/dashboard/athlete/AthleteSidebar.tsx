@@ -9,7 +9,7 @@ import { usePathname } from "next/navigation";
 
 const ATHLETE_NAV_ITEMS = [
   { href: "/athlete/dashboard", label: "Dashboard" },
-  { href: "/athlete/invitations", label: "Invitations" },
+  { href: "/athlete/dashboard/invitations", label: "Invitations" },
   { href: "/athlete/profile-planning", label: "Athlete Profile Planning" },
   { href: "/athlete/settings", label: "Settings" },
 ] as const;
@@ -17,9 +17,9 @@ const ATHLETE_NAV_ITEMS = [
 export function AthleteSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
-  const { hasActiveAcademyMembership, pendingCount, isGateReady } =
+  const { invitationAccessLocked, pendingCount, isGateReady } =
     useAthleteInvitationGate();
-  const athleteNavLocked = isGateReady && !hasActiveAcademyMembership;
+  const athleteNavLocked = isGateReady && invitationAccessLocked;
 
   return (
     <DashboardSidebarFrame
@@ -31,11 +31,14 @@ export function AthleteSidebar() {
       }
     >
       {ATHLETE_NAV_ITEMS.map((item) => {
+        const invitationRoute = "/athlete/dashboard/invitations";
         const gatedOff =
-          athleteNavLocked && item.href !== "/athlete/invitations";
+          athleteNavLocked && item.href !== invitationRoute;
         const active = athleteNavLocked
-          ? item.href === "/athlete/invitations"
-          : pathname === item.href;
+          ? item.href === invitationRoute
+          : item.href === "/athlete/dashboard"
+            ? pathname === item.href
+            : pathname === item.href || pathname?.startsWith(`${item.href}/`);
         const linkClass = cn(
           link,
           active && linkActive,
@@ -61,7 +64,7 @@ export function AthleteSidebar() {
               >
                 <span className="inline-flex min-w-0 flex-1 items-center gap-2">
                   <span className="truncate">{item.label}</span>
-                  {item.href === "/athlete/invitations" &&
+                  {item.href === invitationRoute &&
                   isGateReady &&
                   pendingCount > 0 ? (
                     <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">

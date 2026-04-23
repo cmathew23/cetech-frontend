@@ -13,6 +13,8 @@ import { AthleteUpcomingScheduleCard } from "@/components/dashboard/athlete/Athl
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useAuth } from "@/hooks/useAuth";
+import { routeFromAccessContext } from "@/lib/accessContext";
 import { useRouter } from "next/navigation";
 
 function isPendingStatus(status: string): boolean {
@@ -21,6 +23,7 @@ function isPendingStatus(status: string): boolean {
 
 export function AthleteDashboardShell() {
   const router = useRouter();
+  const { refreshSession } = useAuth();
   const {
     invitations,
     isGateReady,
@@ -42,7 +45,11 @@ export function AthleteDashboardShell() {
             invitation={pendingInvitation}
             onAccept={async () => {
               await acceptInvitation(pendingInvitation.id);
-              router.replace("/athlete/dashboard");
+              const session = await refreshSession();
+              const nextRoute = routeFromAccessContext(session?.accessContext);
+              if (nextRoute && nextRoute !== "/athlete/dashboard") {
+                router.replace(nextRoute);
+              }
             }}
             onDecline={async () => {
               await declineInvitation(pendingInvitation.id);

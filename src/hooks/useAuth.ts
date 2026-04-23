@@ -9,13 +9,14 @@ import type {
   RegisterResponse,
 } from "@/types/auth.types";
 import { paths } from "@/config/endpoints";
+import { clearAthleteOnboardingHardExit } from "@/lib/athleteOnboardingHardExit";
+import { clearCoachOnboardingHardExit } from "@/lib/coachOnboardingHardExit";
 import {
-  bootstrapRedirectsToMembershipInactive,
   fetchAccessContext,
   type AccessContextPayload,
 } from "@/lib/accessContext";
 import { getToken, removeToken, setToken } from "@/lib/auth";
-import { apiRequest, MEMBERSHIP_INACTIVE_ROUTE } from "@/lib/apiClient";
+import { apiRequest } from "@/lib/apiClient";
 import {
   isNormalizedApiError,
   type NormalizedApiError,
@@ -92,6 +93,8 @@ export function useAuth() {
   const isAuthenticated = user !== null;
 
   const resetAuthState = useCallback(() => {
+    clearAthleteOnboardingHardExit();
+    clearCoachOnboardingHardExit();
     setUser(null);
     setRoles([]);
     setAccessContext(null);
@@ -128,14 +131,6 @@ export function useAuth() {
       }
       setAccessContext(ctx);
       setAccessGateReady(true);
-      if (
-        bootstrapRedirectsToMembershipInactive(ctx) &&
-        typeof window !== "undefined"
-      ) {
-        if (!window.location.pathname.startsWith(MEMBERSHIP_INACTIVE_ROUTE)) {
-          window.location.replace(MEMBERSHIP_INACTIVE_ROUTE);
-        }
-      }
       return { ...me, accessContext: ctx };
     } catch (e) {
       removeToken();
@@ -158,6 +153,9 @@ export function useAuth() {
       setAccessGateReady(true);
       return null;
     }
+    setAccessGateReady(false);
+    setAccessContext(null);
+    setError(null);
     try {
       const me = await fetchMe();
       let ctx: AccessContextPayload | null = null;
@@ -168,17 +166,10 @@ export function useAuth() {
       }
       setAccessContext(ctx);
       setAccessGateReady(true);
-      if (
-        bootstrapRedirectsToMembershipInactive(ctx) &&
-        typeof window !== "undefined"
-      ) {
-        if (!window.location.pathname.startsWith(MEMBERSHIP_INACTIVE_ROUTE)) {
-          window.location.replace(MEMBERSHIP_INACTIVE_ROUTE);
-        }
-      }
       return { ...me, accessContext: ctx };
     } catch (e) {
       setError(toNormalizedError(e));
+      setAccessGateReady(true);
       return null;
     }
   }, [fetchMe]);
@@ -229,14 +220,6 @@ export function useAuth() {
         }
         setAccessContext(ctx);
         setAccessGateReady(true);
-        if (
-          bootstrapRedirectsToMembershipInactive(ctx) &&
-          typeof window !== "undefined"
-        ) {
-          if (!window.location.pathname.startsWith(MEMBERSHIP_INACTIVE_ROUTE)) {
-            window.location.replace(MEMBERSHIP_INACTIVE_ROUTE);
-          }
-        }
         return { ...me, accessContext: ctx };
       } catch (e) {
         const normalized = toNormalizedError(e);

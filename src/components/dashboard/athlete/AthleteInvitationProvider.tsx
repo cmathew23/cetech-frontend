@@ -6,9 +6,9 @@ import {
   fetchMyEntityInvitations,
   type MyEntityInvitationRow,
 } from "@/lib/api/entityInvitationsMe";
-import { getOnboardingStatus } from "@/lib/api/onboarding";
+import { useAuth } from "@/hooks/useAuth";
 import { isNormalizedApiError } from "@/lib/apiClient";
-import { parseOnboardingPayload, type ParsedOnboardingStatus } from "@/lib/onboarding-status";
+import { bootstrapAthleteRequiresInvitationInbox } from "@/lib/accessContext";
 import {
   createContext,
   useCallback,
@@ -28,12 +28,13 @@ type AthleteInvitationContextValue = {
   loading: boolean;
   loadError: string | null;
   refreshInvitations: () => Promise<void>;
-  refreshMembershipFromServer: () => Promise<void>;
   acceptInvitation: (invitationId: string) => Promise<void>;
   declineInvitation: (invitationId: string) => Promise<void>;
   isGateReady: boolean;
-  /** True when GET /onboarding/status reports at least one active academy membership. */
+  /** True when GET /me/app-context reports an active academy membership. */
   hasActiveAcademyMembership: boolean;
+  /** Invitation-locked athlete state from GET /me/app-context. */
+  invitationAccessLocked: boolean;
   hasPendingInvitations: boolean;
   pendingCount: number;
 };
@@ -48,11 +49,10 @@ function formatLoadError(e: unknown, fallback: string): string {
 }
 
 export function AthleteInvitationProvider({ children }: { children: ReactNode }) {
+  const { accessContext, accessGateReady, refreshSession } = useAuth();
   const [invitations, setInvitations] = useState<MyEntityInvitationRow[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [onboardingSnapshot, setOnboardingSnapshot] =
-    useState<ParsedOnboardingStatus | null>(null);
 
   const refreshInvitations = useCallback(async () => {
     setLoadError(null);
@@ -65,15 +65,6 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
     }
   }, []);
 
-  const refreshMembershipFromServer = useCallback(async () => {
-    try {
-      const raw = await getOnboardingStatus();
-      setOnboardingSnapshot(parseOnboardingPayload(raw));
-    } catch {
-      setOnboardingSnapshot(null);
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -82,21 +73,12 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
         (rows) => ({ ok: true as const, rows }),
         (e) => ({ ok: false as const, e }),
       );
-      const onbResult = await getOnboardingStatus().then(
-        (raw) => ({ ok: true as const, raw }),
-        () => ({ ok: false as const }),
-      );
       if (cancelled) return;
       if (invResult.ok) {
         setInvitations(invResult.rows);
       } else {
         setLoadError(formatLoadError(invResult.e, "Could not load invitations."));
         setInvitations([]);
-      }
-      if (onbResult.ok) {
-        setOnboardingSnapshot(parseOnboardingPayload(onbResult.raw));
-      } else {
-        setOnboardingSnapshot(null);
       }
       setInitialLoading(false);
     })();
@@ -108,23 +90,25 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
   const acceptInvitation = useCallback(
     async (invitationId: string) => {
       await acceptEntityInvitation(invitationId);
-      await Promise.all([refreshInvitations(), refreshMembershipFromServer()]);
+      await Promise.all([refreshInvitations(), refreshSession()]);
     },
-    [refreshInvitations, refreshMembershipFromServer],
+    [refreshInvitations, refreshSession],
   );
 
   const declineInvitation = useCallback(
     async (invitationId: string) => {
       await declineEntityInvitation(invitationId);
-      await Promise.all([refreshInvitations(), refreshMembershipFromServer()]);
+      await Promise.all([refreshInvitations(), refreshSession()]);
     },
-    [refreshInvitations, refreshMembershipFromServer],
+    [refreshInvitations, refreshSession],
   );
 
-  const hasActiveAcademyMembership = useMemo(() => {
-    const n = onboardingSnapshot?.activeMembershipCount;
-    return typeof n === "number" && Number.isFinite(n) && n > 0;
-  }, [onboardingSnapshot]);
+  const hasActiveAcademyMembership = accessContext?.academy.hasMembership === true;
+
+  const invitationAccessLocked = useMemo(
+    () => bootstrapAthleteRequiresInvitationInbox(accessContext),
+    [accessContext],
+  );
 
   const hasPendingInvitations = useMemo(
     () => invitations.some((i) => isPendingStatus(i.status)),
@@ -136,7 +120,7 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
     [invitations],
   );
 
-  const isGateReady = !initialLoading;
+  const isGateReady = !initialLoading && accessGateReady;
 
   const value = useMemo(
     () => ({
@@ -144,11 +128,11 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
       loading: initialLoading,
       loadError,
       refreshInvitations,
-      refreshMembershipFromServer,
       acceptInvitation,
       declineInvitation,
       isGateReady,
       hasActiveAcademyMembership,
+      invitationAccessLocked,
       hasPendingInvitations,
       pendingCount,
     }),
@@ -157,11 +141,11 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
       initialLoading,
       loadError,
       refreshInvitations,
-      refreshMembershipFromServer,
       acceptInvitation,
       declineInvitation,
       isGateReady,
       hasActiveAcademyMembership,
+      invitationAccessLocked,
       hasPendingInvitations,
       pendingCount,
     ],

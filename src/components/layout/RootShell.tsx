@@ -10,11 +10,13 @@ export function RootShell({ children }: { children: React.ReactNode }) {
     pathname === "/register" ||
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
+    pathname === "/access/invitation-required" ||
     pathname === "/membership-inactive" ||
     pathname?.startsWith("/login/") ||
     pathname?.startsWith("/register/") ||
     pathname?.startsWith("/forgot-password/") ||
-    pathname?.startsWith("/reset-password/");
+    pathname?.startsWith("/reset-password/") ||
+    pathname?.startsWith("/access/invitation-required/");
   const isAthleteRoute =
     pathname === "/athlete" || pathname?.startsWith("/athlete/");
   /** Full-width app shell: sidebar dashboards (no marketing header / max-w-4xl column). */

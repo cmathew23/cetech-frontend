@@ -8,7 +8,7 @@ import { usePathname } from "next/navigation";
 
 const COACH_NAV_ITEMS = [
   { href: "/coach/dashboard", label: "Dashboard" },
-  { href: "/coach/invitations", label: "Invitations" },
+  { href: "/coach/dashboard/invitations", label: "Invitations" },
 ] as const;
 
 export function CoachSidebar() {
@@ -28,7 +28,10 @@ export function CoachSidebar() {
       }
     >
       {COACH_NAV_ITEMS.map((item) => {
-        const active = pathname === item.href;
+        const active =
+          item.href === "/coach/dashboard"
+            ? pathname === item.href
+            : pathname === item.href || pathname?.startsWith(`${item.href}/`);
         return (
           <Link
             key={item.href}

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
-const INVITATIONS_HREF = "/coach/invitations";
+const INVITATIONS_HREF = "/coach/dashboard/invitations";
 
 const PRIMARY_ACTION_CLASS =
   "flex w-full items-center justify-between gap-4 rounded-full border border-border bg-surface px-5 py-4 shadow-sm transition hover:bg-surfaceElevated";

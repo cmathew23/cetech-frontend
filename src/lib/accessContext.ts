@@ -4,7 +4,7 @@
  */
 
 import { paths } from "@/config/endpoints";
-import { apiRequest } from "@/lib/apiClient";
+import { apiRequest, MEMBERSHIP_INACTIVE_ROUTE } from "@/lib/apiClient";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 
 export type AppContextUser = {
@@ -27,10 +27,15 @@ export type AppContextInvitation = {
 /** Allowed `access.reasonCode` values from GET /me/app-context (backend contract). */
 export type AppContextReasonCode =
   | "READY"
+  | "WAIT_FOR_INVITATION"
   | "PROFILE_REQUIRED"
   | "INVITATION_ACTION_REQUIRED"
   | "MEMBERSHIP_REQUIRED"
   | "ACCESS_DENIED";
+
+export const INVITATION_REQUIRED_ROUTE = "/access/invitation-required";
+export const ATHLETE_INVITATION_ROUTE = "/athlete/dashboard/invitations";
+export const COACH_INVITATION_ROUTE = "/coach/dashboard/invitations";
 
 export type AppContextAccess = {
   canAccessDashboard: boolean;
@@ -51,6 +56,19 @@ export type AccessContextPayload = {
   access: AppContextAccess;
   coachSummary: AppContextCoachSummary;
 };
+
+function normalizedDashboardType(
+  access: AccessContextPayload | null | undefined,
+): string {
+  return access?.access.dashboardType.trim() ?? "";
+}
+
+export function appContextUsesStrictInvitationGate(
+  access: AccessContextPayload | null | undefined,
+): boolean {
+  const dashboardType = normalizedDashboardType(access);
+  return dashboardType === "ATHLETE" || dashboardType === "COACH";
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -151,6 +169,22 @@ export function bootstrapRedirectsToMembershipInactive(
 }
 
 /**
+ * Strict blocked-access state from GET /me/app-context.
+ * Frontend must not reinterpret invitation truth when backend says WAIT_FOR_INVITATION.
+ */
+export function bootstrapRequiresInvitationRequiredRoute(
+  access: AccessContextPayload | null | undefined,
+): boolean {
+  if (!access) return false;
+  const a = access.access;
+  return (
+    !a.canAccessDashboard &&
+    appContextUsesStrictInvitationGate(access) &&
+    a.reasonCode === "WAIT_FOR_INVITATION"
+  );
+}
+
+/**
  * Academy admin without org membership — backend signals setup via onboarding (not generic inactive page).
  */
 export function bootstrapAcademyAdminMembershipSetupRequired(
@@ -190,29 +224,34 @@ export function bootstrapRequiresOnboardingRoute(
 }
 
 /**
- * Non-athlete invitation action (e.g. coach) → `/onboarding`.
- * ATHLETE + INVITATION_ACTION_REQUIRED uses `/athlete/invitations` via `bootstrapAthleteRequiresInvitationInbox`.
+ * Invitation-action routes live inside the role dashboard shell.
  */
-export function bootstrapRequiresInvitationActionRoute(
+export function dashboardInvitationActionRoute(
   access: AccessContextPayload | null | undefined,
-): boolean {
-  if (!access) return false;
+): string | null {
+  if (!access) return null;
   const a = access.access;
-  if (a.dashboardType.trim() === "ATHLETE") return false;
-  return !a.canAccessDashboard && a.reasonCode === "INVITATION_ACTION_REQUIRED";
+  if (a.canAccessDashboard || a.reasonCode !== "INVITATION_ACTION_REQUIRED") {
+    return null;
+  }
+  const dashboardType = normalizedDashboardType(access);
+  if (dashboardType === "ATHLETE") return ATHLETE_INVITATION_ROUTE;
+  if (dashboardType === "COACH") return COACH_INVITATION_ROUTE;
+  return null;
 }
 
 /** ATHLETE + INVITATION_ACTION_REQUIRED → existing athlete invitation inbox. */
 export function bootstrapAthleteRequiresInvitationInbox(
   access: AccessContextPayload | null | undefined,
 ): boolean {
-  if (!access) return false;
-  const a = access.access;
-  return (
-    !a.canAccessDashboard &&
-    a.dashboardType.trim() === "ATHLETE" &&
-    a.reasonCode === "INVITATION_ACTION_REQUIRED"
-  );
+  return dashboardInvitationActionRoute(access) === ATHLETE_INVITATION_ROUTE;
+}
+
+/** COACH + INVITATION_ACTION_REQUIRED → existing coach invitation inbox. */
+export function bootstrapCoachRequiresInvitationInbox(
+  access: AccessContextPayload | null | undefined,
+): boolean {
+  return dashboardInvitationActionRoute(access) === COACH_INVITATION_ROUTE;
 }
 
 /** ATHLETE + MEMBERSHIP_REQUIRED → resolve via onboarding (membership / entity flow), not generic inactive. */
@@ -228,16 +267,53 @@ export function bootstrapAthleteMembershipResolutionRequired(
   );
 }
 
-/** Any bootstrap state that should resolve via `/onboarding` (profile, non-athlete invitation, admin or athlete membership setup). */
+/** Any bootstrap state that should resolve via `/onboarding` (profile, admin or athlete membership setup). */
 export function bootstrapRequiresOnboardingResolution(
   access: AccessContextPayload | null | undefined,
 ): boolean {
   return (
     bootstrapRequiresOnboardingRoute(access) ||
-    bootstrapRequiresInvitationActionRoute(access) ||
     bootstrapAcademyAdminMembershipSetupRequired(access) ||
     bootstrapAthleteMembershipResolutionRequired(access)
   );
+}
+
+/** Dashboard subtree access is fully owned by app-context for hardened coach/athlete flows. */
+export function appContextOwnsDashboardGate(
+  access: AccessContextPayload | null | undefined,
+): boolean {
+  if (!access) return false;
+  return (
+    appContextUsesStrictInvitationGate(access) &&
+    [
+      "READY",
+      "WAIT_FOR_INVITATION",
+      "INVITATION_ACTION_REQUIRED",
+      "PROFILE_REQUIRED",
+      "MEMBERSHIP_REQUIRED",
+    ].includes(access.access.reasonCode)
+  );
+}
+
+/** Top-level route dictated by GET /me/app-context when backend has a concrete answer. */
+export function routeFromAccessContext(
+  access: AccessContextPayload | null | undefined,
+): string | null {
+  if (!access) return null;
+  if (bootstrapRequiresInvitationRequiredRoute(access)) {
+    return INVITATION_REQUIRED_ROUTE;
+  }
+  const invitationActionRoute = dashboardInvitationActionRoute(access);
+  if (invitationActionRoute) {
+    return invitationActionRoute;
+  }
+  if (bootstrapRedirectsToMembershipInactive(access)) {
+    return MEMBERSHIP_INACTIVE_ROUTE;
+  }
+  if (bootstrapRequiresOnboardingResolution(access)) {
+    return "/onboarding";
+  }
+  return dashboardPathFromAppContextWhenReady(access);
 }
 
 /**

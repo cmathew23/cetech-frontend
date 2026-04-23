@@ -1,8 +1,12 @@
 /**
- * Coach invitation inbox must be reachable before onboarding COMPLETE (mirrors /athlete/invitations).
- * DashboardGate uses this to allow `/coach/invitations` while onboarding is still in invite-related phases.
+ * Coach invitation inbox access is governed by GET /me/app-context.
+ * Legacy onboarding-derived invite phases are no longer routing owners.
  */
 
+import {
+  bootstrapCoachRequiresInvitationInbox,
+  type AccessContextPayload,
+} from "@/lib/accessContext";
 import type { ParsedOnboardingStatus } from "@/lib/onboarding-status";
 
 /** True when coach is in a phase where pending entity invitations should be actionable. */
@@ -27,12 +31,18 @@ export function allowCoachInvitationInboxRoute(
   pathname: string,
   jwtRoles: string[],
   onboardingData: ParsedOnboardingStatus | null,
+  accessContext: AccessContextPayload | null = null,
 ): boolean {
   const path = pathname.trim() || "/";
-  if (!path.startsWith("/coach/invitations")) return false;
+  if (
+    !path.startsWith("/coach/dashboard/invitations") &&
+    !path.startsWith("/coach/invitations")
+  ) {
+    return false;
+  }
   const isCoach =
     jwtRoles.includes("COACH") ||
     onboardingData?.activeOnboardingRole === "COACH";
   if (!isCoach) return false;
-  return coachInInviteOnboardingPhase(onboardingData);
+  return bootstrapCoachRequiresInvitationInbox(accessContext);
 }

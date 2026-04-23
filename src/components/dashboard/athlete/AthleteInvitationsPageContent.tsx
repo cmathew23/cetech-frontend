@@ -4,8 +4,10 @@ import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardS
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
+import { useAuth } from "@/hooks/useAuth";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { routeFromAccessContext } from "@/lib/accessContext";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -48,12 +50,12 @@ async function afterSuccessAlertPaint() {
 
 export function AthleteInvitationsPageContent() {
   const router = useRouter();
+  const { refreshSession } = useAuth();
   const {
     invitations,
     loading,
     loadError,
     refreshInvitations,
-    refreshMembershipFromServer,
     acceptInvitation,
     declineInvitation,
   } = useAthleteInvitationGate();
@@ -94,7 +96,13 @@ export function AthleteInvitationsPageContent() {
       await acceptInvitation(id);
       setActionSuccess("Invitation accepted.");
       await afterSuccessAlertPaint();
-      if (navigateAfter) router.replace("/athlete/dashboard");
+      if (navigateAfter) {
+        const session = await refreshSession();
+        const nextRoute = routeFromAccessContext(session?.accessContext);
+        if (nextRoute && nextRoute !== "/athlete/dashboard/invitations") {
+          router.replace(nextRoute);
+        }
+      }
     } catch (e) {
       setActionError(formatActionError(e));
     } finally {
@@ -182,12 +190,7 @@ export function AthleteInvitationsPageContent() {
         <Button
           type="button"
           variant="secondary"
-          onClick={() =>
-            void (async () => {
-              await refreshInvitations();
-              await refreshMembershipFromServer();
-            })()
-          }
+          onClick={() => void refreshInvitations()}
         >
           Try again
         </Button>

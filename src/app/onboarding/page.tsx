@@ -1,5 +1,6 @@
 "use client";
 
+import { AccessGateLoadingState } from "@/components/access/AccessGateLoadingState";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -20,18 +21,11 @@ import {
   type AcademySetupPayload,
 } from "@/lib/api/onboarding";
 import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
-import { coachInInviteOnboardingPhase } from "@/lib/coach-invitation-gate";
 import { type ParsedOnboardingStatus } from "@/lib/onboarding-status";
 import { SPORT_VALUES } from "@/lib/sports";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  bootstrapAthleteRequiresInvitationInbox,
-  bootstrapRedirectsToMembershipInactive,
-  bootstrapRequiresOnboardingResolution,
-  dashboardPathFromAppContextWhenReady,
-} from "@/lib/accessContext";
+import { routeFromAccessContext } from "@/lib/accessContext";
 import { useOnboarding } from "@/hooks/useOnboarding";
-import { dashboardPathForActiveRole } from "@/lib/post-login-route";
 import type { RegistrationRole } from "@/types/auth.types";
 import type { OnboardingStatusEnum } from "@/types/onboarding.types";
 import { useRouter } from "next/navigation";
@@ -50,22 +44,6 @@ type OnboardingRoleChoice = (typeof ROLE_OPTIONS)[number];
 const ONBOARDING_ENTITY_TYPE = {
   ATHLETE_GROUP: "ATHLETE_GROUP",
 } as const;
-
-/**
- * COMPLETE redirect: prefer server `activeOnboardingRole`, then JWT roles (same as `resolvePostLoginDestination`).
- * Only used when onboarding status is already COMPLETE (e.g. after academy setup POST for admins).
- */
-function dashboardPathForComplete(
-  parsed: ParsedOnboardingStatus,
-  jwtRoles: string[],
-): string | null {
-  const fromServer = dashboardPathForActiveRole(parsed.activeOnboardingRole);
-  if (fromServer) return fromServer;
-  if (jwtRoles.includes("ACADEMY_ADMIN")) return "/admin/dashboard";
-  if (jwtRoles.includes("COACH")) return "/coach/dashboard";
-  if (jwtRoles.includes("ATHLETE")) return "/athlete/dashboard";
-  return null;
-}
 
 function onboardingPageTitle(
   phase: OnboardingStatusEnum,
@@ -473,9 +451,9 @@ function AthleteEntityActionPanel({
   );
 }
 
-function OnboardingInner() {
+function OnboardingContent() {
   const router = useRouter();
-  const { refreshSession, accessContext } = useAuth();
+  const { refreshSession, accessContext, accessGateReady } = useAuth();
   /** Avoid duplicate refresh/replace when `refreshSession` updates roles and re-runs this effect. */
   const dashboardRedirectInFlightRef = useRef(false);
   const {
@@ -499,78 +477,30 @@ function OnboardingInner() {
    */
 
   useEffect(() => {
-    if (!onboardingData) return;
+    if (!onboardingData || !accessGateReady) return;
     const ctxFromAuth = accessContext;
+    const appContextRoute = routeFromAccessContext(ctxFromAuth);
 
-    // App-context is the single routing source of truth once available.
-    const appContextDashboardPath = dashboardPathFromAppContextWhenReady(ctxFromAuth);
-    if (appContextDashboardPath) {
-      router.replace(appContextDashboardPath);
-      return;
-    }
-    if (bootstrapAthleteRequiresInvitationInbox(ctxFromAuth)) {
-      router.replace("/athlete/invitations");
-      return;
-    }
-    if (bootstrapRequiresOnboardingResolution(ctxFromAuth)) {
+    // App-context is the single routing source of truth once bootstrap finishes.
+    if (appContextRoute) {
+      if (appContextRoute !== "/onboarding") {
+        router.replace(appContextRoute);
+      }
       return;
     }
 
-    /** COMPLETE: refresh auth + app context; only navigate to dashboard when /me/app-context allows (avoids fighting AthleteRouteGate). */
     if (onboardingData.onboardingStatus === "COMPLETE") {
       if (dashboardRedirectInFlightRef.current) return;
       dashboardRedirectInFlightRef.current = true;
       void (async () => {
         const session = await refreshSession();
-        const ctx = session?.accessContext;
-        if (bootstrapAthleteRequiresInvitationInbox(ctx)) {
-          dashboardRedirectInFlightRef.current = false;
-          router.replace("/athlete/invitations");
+        const nextRoute = routeFromAccessContext(session?.accessContext);
+        if (nextRoute && nextRoute !== "/onboarding") {
+          router.replace(nextRoute);
           return;
         }
-        if (bootstrapRequiresOnboardingResolution(ctx)) {
-          dashboardRedirectInFlightRef.current = false;
-          return;
-        }
-        if (bootstrapRedirectsToMembershipInactive(session?.accessContext)) {
-          dashboardRedirectInFlightRef.current = false;
-          return;
-        }
-        const path = dashboardPathFromAppContextWhenReady(ctx);
-        if (path) {
-          router.replace(path);
-        } else {
-          const athleteFallback =
-            onboardingData.activeOnboardingRole === "ATHLETE" &&
-            session?.roles.includes("ATHLETE");
-          if (athleteFallback) {
-            router.replace("/athlete/dashboard");
-            return;
-          }
-          dashboardRedirectInFlightRef.current = false;
-          // App-context did not grant dashboard access; keep user in onboarding resolution.
-        }
+        dashboardRedirectInFlightRef.current = false;
       })();
-      return;
-    }
-
-    if (
-      onboardingData.activeOnboardingRole === "ATHLETE" &&
-      (onboardingData.onboardingStatus === "INVITE_PENDING_ACTION" ||
-        onboardingData.onboardingStatus === "WAITING_FOR_INVITE")
-    ) {
-      // Fallback for athlete invite phases when app-context is not yet available:
-      // invitation UX lives inside athlete dashboard shell, not standalone onboarding.
-      router.replace("/athlete/invitations");
-      return;
-    }
-
-    /** Coach pending entity invite: same as athlete — dedicated inbox (not a dead-end waiting panel). */
-    if (
-      onboardingData.activeOnboardingRole === "COACH" &&
-      coachInInviteOnboardingPhase(onboardingData)
-    ) {
-      router.replace("/coach/invitations");
       return;
     }
 
@@ -581,36 +511,16 @@ function OnboardingInner() {
     dashboardRedirectInFlightRef.current = true;
     void (async () => {
       const session = await refreshSession();
-      const ctx = session?.accessContext;
-      if (bootstrapAthleteRequiresInvitationInbox(ctx)) {
-        dashboardRedirectInFlightRef.current = false;
-        router.replace("/athlete/invitations");
-        return;
-      }
-      if (bootstrapRequiresOnboardingResolution(ctx)) {
+      const resolvedRoute = routeFromAccessContext(session?.accessContext);
+      if (!resolvedRoute || resolvedRoute === "/onboarding") {
         dashboardRedirectInFlightRef.current = false;
         return;
       }
-      if (bootstrapRedirectsToMembershipInactive(session?.accessContext)) {
-        dashboardRedirectInFlightRef.current = false;
-        return;
-      }
-      const path = dashboardPathFromAppContextWhenReady(ctx);
-      if (!path) {
-        const athleteFallback =
-          onboardingData.activeOnboardingRole === "ATHLETE" &&
-          session?.roles.includes("ATHLETE");
-        if (athleteFallback) {
-          router.replace("/athlete/dashboard");
-          return;
-        }
-        dashboardRedirectInFlightRef.current = false;
-        return;
-      }
-      router.replace(path);
+      router.replace(resolvedRoute);
     })();
   }, [
     accessContext,
+    accessGateReady,
     getNextRoute,
     onboardingData,
     refreshSession,
@@ -639,18 +549,35 @@ function OnboardingInner() {
     return runAction(() => fetchStatus());
   }
 
+  async function handleProfileSubmit<Payload>(
+    submit: (payload: Payload) => Promise<ParsedOnboardingStatus>,
+    payload: Payload,
+  ) {
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await submit(payload);
+      const session = await refreshSession();
+      const nextRoute = routeFromAccessContext(session?.accessContext);
+      if (nextRoute && nextRoute !== "/onboarding") {
+        router.replace(nextRoute);
+      }
+    } catch (e) {
+      setActionError(getErrMessage(e));
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleAcademyAdminSetupSubmit(payload: AcademySetupPayload) {
     setActionLoading(true);
     setActionError(null);
     try {
       await submitAcademySetupApi(payload);
-      const parsed = await fetchStatus();
+      await fetchStatus();
       const session = await refreshSession();
-      if (bootstrapRedirectsToMembershipInactive(session?.accessContext)) {
-        return;
-      }
-      const path = dashboardPathFromAppContextWhenReady(session.accessContext);
-      if (path) {
+      const path = routeFromAccessContext(session?.accessContext);
+      if (path && path !== "/onboarding") {
         router.replace(path);
       } else {
         setActionError(
@@ -664,12 +591,8 @@ function OnboardingInner() {
     }
   }
 
-  if (onboardingLoading && !onboardingData) {
-    return (
-      <div className="flex min-h-[40vh] w-full items-center justify-center">
-        <p className={designSystem.typography.muted}>Loading…</p>
-      </div>
-    );
+  if (!accessGateReady || (onboardingLoading && !onboardingData)) {
+    return <AccessGateLoadingState label="Loading access..." />;
   }
 
   if (!onboardingStatus || !onboardingData) {
@@ -696,21 +619,20 @@ function OnboardingInner() {
   const busy = actionLoading || onboardingLoading;
   const phase = onboardingStatus;
   const parsed = onboardingData;
-  /** While COMPLETE, hide chrome only when navigating to a dashboard — not when app-context still blocks (avoids blank shell during redirect fights). */
-  const completeDashboardPath = dashboardPathFromAppContextWhenReady(accessContext);
+  const appContextRoute = accessGateReady ? routeFromAccessContext(accessContext) : null;
+  /** While COMPLETE, hide chrome only when navigating to a non-onboarding destination. */
   const completeRedirecting =
-    phase === "COMPLETE" && completeDashboardPath != null;
-  const athleteInviteRedirecting = bootstrapAthleteRequiresInvitationInbox(
-    accessContext,
-  );
-  const coachInviteRedirecting =
-    parsed.activeOnboardingRole === "COACH" &&
-    coachInInviteOnboardingPhase(parsed);
+    appContextRoute != null && appContextRoute !== "/onboarding";
   const contextMessage = onboardingContextMessage(phase, onboardingData);
 
   // Keep redirect-only phases silent to avoid transient onboarding flash before final destination.
-  if (completeRedirecting || athleteInviteRedirecting || coachInviteRedirecting) {
-    return null;
+  if (completeRedirecting) {
+    return (
+      <AccessGateLoadingState
+        label="Resolving access..."
+        minHeightClassName="min-h-[20vh]"
+      />
+    );
   }
 
   return (
@@ -755,14 +677,16 @@ function OnboardingInner() {
           <AthleteProfileForm
             disabled={busy}
             onSubmit={(payload) =>
-              runAction(() => submitAthleteProfile(payload))
+              handleProfileSubmit(submitAthleteProfile, payload)
             }
           />
         ) : parsed.activeOnboardingRole === "COACH" ? (
           <CoachProfileForm
             disabled={busy}
             showAcademyIdField={parsed.pendingInvitationCount > 0}
-            onSubmit={(payload) => runAction(() => submitCoachProfile(payload))}
+            onSubmit={(payload) =>
+              handleProfileSubmit(submitCoachProfile, payload)
+            }
           />
         ) : parsed.activeOnboardingRole === "ACADEMY_ADMIN" ? (
           <Alert variant="danger">
@@ -796,6 +720,10 @@ function OnboardingInner() {
 
     </Stack>
   );
+}
+
+function OnboardingInner() {
+  return <OnboardingContent />;
 }
 
 export default function OnboardingPage() {

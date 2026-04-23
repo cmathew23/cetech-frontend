@@ -7,9 +7,14 @@ import { shouldRedirectAcademyAdminFromAdminRoutes } from "@/lib/academy-admin-d
 import { allowCoachInvitationInboxRoute } from "@/lib/coach-invitation-gate";
 import { MEMBERSHIP_INACTIVE_ROUTE } from "@/lib/apiClient";
 import {
+  appContextOwnsDashboardGate,
   bootstrapAthleteRequiresInvitationInbox,
+  bootstrapCoachRequiresInvitationInbox,
+  bootstrapRequiresInvitationRequiredRoute,
   bootstrapRedirectsToMembershipInactive,
   bootstrapRequiresOnboardingResolution,
+  COACH_INVITATION_ROUTE,
+  INVITATION_REQUIRED_ROUTE,
   type AccessContextPayload,
 } from "@/lib/accessContext";
 import type { ParsedOnboardingStatus } from "@/lib/onboarding-status";
@@ -20,8 +25,10 @@ import { useEffect } from "react";
 export type GuardRedirect =
   | "/login"
   | "/onboarding"
+  | "/access/invitation-required"
   | "/membership-inactive"
-  | "/athlete/invitations"
+  | "/athlete/dashboard/invitations"
+  | "/coach/dashboard/invitations"
   | null;
 
 export type AuthGuardResult = {
@@ -54,12 +61,14 @@ type ResolveGuardInput = {
  * Rules:
  * 1) No token or not authenticated → /login
  * 2) GET /me/app-context not ready → loading
- * 3) `MEMBERSHIP_REQUIRED` (typically COACH) → /membership-inactive — not ACADEMY_ADMIN or ATHLETE
- * 4) ATHLETE + `INVITATION_ACTION_REQUIRED` → /athlete/invitations when outside that route
- * 5) Profile / non-athlete invitation / admin or athlete membership resolution → /onboarding (except `/coach/invitations` when coach invite phase)
- * 6) Authenticated but onboardingStatus !== COMPLETE → /onboarding (coach invitation inbox exception)
- * 7) ACADEMY_ADMIN on /admin/* without completed academy setup (or missing trainingEntityId) → /onboarding
- * 8) COMPLETE → allow
+ * 3) `WAIT_FOR_INVITATION` → blocked access route (no dashboard / onboarding shell)
+ * 4) `MEMBERSHIP_REQUIRED` (typically COACH) → /membership-inactive — not ACADEMY_ADMIN or ATHLETE
+ * 5) `INVITATION_ACTION_REQUIRED` → role invitation inbox route
+ * 6) Profile / admin or athlete membership resolution → /onboarding
+ * 7) Hardened coach/athlete app-context states own dashboard access; stale onboarding must not override them
+ * 8) ACADEMY_ADMIN on /admin/* without completed academy setup (or missing trainingEntityId) → /onboarding
+ * 9) Remaining incomplete onboarding → /onboarding
+ * 10) COMPLETE → allow
  */
 export function resolveAuthGuard(input: ResolveGuardInput): AuthGuardResult {
   const {
@@ -88,6 +97,22 @@ export function resolveAuthGuard(input: ResolveGuardInput): AuthGuardResult {
   }
 
   const path = pathname.trim() || "/";
+  const coachInvitationPath = COACH_INVITATION_ROUTE;
+  const blockedInvitationPath = INVITATION_REQUIRED_ROUTE;
+
+  if (accessContext && bootstrapRequiresInvitationRequiredRoute(accessContext)) {
+    if (
+      path === blockedInvitationPath ||
+      path.startsWith(`${blockedInvitationPath}/`)
+    ) {
+      return { loading: false, allowed: true, redirectTo: null };
+    }
+    return {
+      loading: false,
+      allowed: false,
+      redirectTo: "/access/invitation-required",
+    };
+  }
 
   if (accessContext && bootstrapRedirectsToMembershipInactive(accessContext)) {
     if (
@@ -105,15 +130,26 @@ export function resolveAuthGuard(input: ResolveGuardInput): AuthGuardResult {
 
   if (accessContext && bootstrapAthleteRequiresInvitationInbox(accessContext)) {
     if (
-      path === "/athlete/invitations" ||
-      path.startsWith("/athlete/invitations/")
+      path === "/athlete/dashboard/invitations" ||
+      path.startsWith("/athlete/dashboard/invitations/")
     ) {
       return { loading: false, allowed: true, redirectTo: null };
     }
     return {
       loading: false,
       allowed: false,
-      redirectTo: "/athlete/invitations",
+      redirectTo: "/athlete/dashboard/invitations",
+    };
+  }
+
+  if (accessContext && bootstrapCoachRequiresInvitationInbox(accessContext)) {
+    if (path === coachInvitationPath || path.startsWith(`${coachInvitationPath}/`)) {
+      return { loading: false, allowed: true, redirectTo: null };
+    }
+    return {
+      loading: false,
+      allowed: false,
+      redirectTo: "/coach/dashboard/invitations",
     };
   }
 
@@ -128,6 +164,7 @@ export function resolveAuthGuard(input: ResolveGuardInput): AuthGuardResult {
       path,
       jwtRoles,
       onboardingData,
+      accessContext,
     );
     if (!onOnboardingPath && !coachInviteInbox) {
       return {
@@ -149,8 +186,12 @@ export function resolveAuthGuard(input: ResolveGuardInput): AuthGuardResult {
     return { loading: false, allowed: false, redirectTo: "/onboarding" };
   }
 
+  if (accessContext && appContextOwnsDashboardGate(accessContext)) {
+    return { loading: false, allowed: true, redirectTo: null };
+  }
+
   if (onboardingStatus !== "COMPLETE") {
-    if (allowCoachInvitationInboxRoute(path, jwtRoles, onboardingData)) {
+    if (allowCoachInvitationInboxRoute(path, jwtRoles, onboardingData, accessContext)) {
       return { loading: false, allowed: true, redirectTo: null };
     }
     return { loading: false, allowed: false, redirectTo: "/onboarding" };

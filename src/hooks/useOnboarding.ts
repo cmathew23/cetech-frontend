@@ -30,8 +30,6 @@ type NextRoute =
   | "/onboarding/role"
   | "/onboarding/profile"
   | "/onboarding/entity"
-  | "/onboarding/invites"
-  | "/onboarding/waiting"
   | "/dashboard";
 
 function toNormalizedError(e: unknown): NormalizedApiError {
@@ -51,9 +49,9 @@ function routeFromNextStep(nextStep: NextStepEnum | null): NextRoute | null {
     case "CREATE_OR_JOIN_ENTITY":
       return "/onboarding/entity";
     case "SHOW_INVITES":
-      return "/onboarding/invites";
+      return "/onboarding";
     case "WAIT_FOR_INVITE":
-      return "/onboarding/waiting";
+      return "/onboarding";
     case "COMPLETE_ACADEMY_SETUP":
       return "/onboarding";
     case "GO_TO_DASHBOARD":

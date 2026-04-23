@@ -1,19 +1,15 @@
 "use client";
 
-import { designSystem } from "@/config/design-system";
-import { useRequireCompleteOnboarding } from "@/hooks/useRequireCompleteOnboarding";
+import { AccessGateLoadingState } from "@/components/access/AccessGateLoadingState";
+import { useAuthGuard } from "@/middleware/authGuard";
 import type { ReactNode } from "react";
 
-/** Wraps role dashboards; requires onboarding COMPLETE (`useAuthGuard`). Aligns with `@/lib/post-login-route`. */
+/** Wraps role dashboards; access is decided entirely by `useAuthGuard`. */
 export function DashboardGate({ children }: { children: ReactNode }) {
-  const allowed = useRequireCompleteOnboarding();
+  const guard = useAuthGuard();
 
-  if (!allowed) {
-    return (
-      <div className="flex min-h-[40vh] w-full items-center justify-center">
-        <p className={designSystem.typography.muted}>Loading…</p>
-      </div>
-    );
+  if (guard.loading || !guard.allowed) {
+    return <AccessGateLoadingState label="Loading access..." />;
   }
 
   return <>{children}</>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { AthleteInvitationProvider } from "@/components/dashboard/athlete/AthleteInvitationProvider";
-import { AthleteRouteGate } from "@/components/dashboard/athlete/AthleteRouteGate";
+import { DashboardGate } from "@/components/layout/DashboardGate";
 
 export default function AthleteLayout({
   children,
@@ -9,8 +9,10 @@ export default function AthleteLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AthleteInvitationProvider>
-      <AthleteRouteGate>{children}</AthleteRouteGate>
-    </AthleteInvitationProvider>
+    <DashboardGate>
+      <AthleteInvitationProvider>
+        {children}
+      </AthleteInvitationProvider>
+    </DashboardGate>
   );
 }

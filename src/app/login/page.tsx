@@ -9,15 +9,10 @@ import { FormSection } from "@/components/ui/FormSection";
 import { Stack } from "@/components/ui/Stack";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  bootstrapAthleteRequiresInvitationInbox,
-  bootstrapRedirectsToMembershipInactive,
-  bootstrapRequiresOnboardingResolution,
-  dashboardPathFromAppContextWhenReady,
+  routeFromAccessContext,
 } from "@/lib/accessContext";
-import { fetchMyEntityInvitations } from "@/lib/api/entityInvitationsMe";
 import { getOnboardingStatus } from "@/lib/api/onboarding";
 import { isNormalizedApiError, type NormalizedApiError } from "@/lib/apiClient";
-import { coachInInviteOnboardingPhase } from "@/lib/coach-invitation-gate";
 import { parseOnboardingPayload } from "@/lib/onboarding-status";
 import { resolvePostLoginDestination } from "@/lib/post-login-route";
 import Link from "next/link";
@@ -84,44 +79,19 @@ export default function LoginPage() {
         }
       }
 
-      if (bootstrapAthleteRequiresInvitationInbox(resolvedAccessContext)) {
-        router.replace("/athlete/invitations");
+      const routeFromBootstrap = routeFromAccessContext(resolvedAccessContext);
+      if (routeFromBootstrap) {
+        router.replace(routeFromBootstrap);
         return;
       }
 
-      if (bootstrapRequiresOnboardingResolution(resolvedAccessContext)) {
+      if (resolvedAccessContext == null) {
         router.replace("/onboarding");
         return;
       }
 
-      if (bootstrapRedirectsToMembershipInactive(resolvedAccessContext)) {
-        return;
-      }
-
-      const isAthleteSession = session.roles.includes("ATHLETE");
-      const athleteInviteHome =
-        parsedOnboarding &&
-        (parsedOnboarding.activeOnboardingRole === "ATHLETE" ||
-          isAthleteSession) &&
-        (parsedOnboarding.onboardingStatus === "INVITE_PENDING_ACTION" ||
-          parsedOnboarding.onboardingStatus === "WAITING_FOR_INVITE");
-
-      const coachInviteHome =
-        parsedOnboarding &&
-        parsedOnboarding.activeOnboardingRole === "COACH" &&
-        coachInInviteOnboardingPhase(parsedOnboarding);
-
-      if (athleteInviteHome && resolvedAccessContext == null) {
-        router.replace("/athlete/invitations");
-        return;
-      }
-      if (coachInviteHome && resolvedAccessContext == null) {
-        router.replace("/coach/invitations");
-        return;
-      }
-
       const me = session;
-      /** Onboarding status is authoritative: incomplete users must not be sent to dashboards (avoids guard bounce). */
+      /** Fallback only when app-context resolves but has no explicit destination. */
       let destination = "/onboarding";
       try {
         if (parsedOnboarding) {
@@ -129,62 +99,6 @@ export default function LoginPage() {
         }
       } catch {
         destination = "/onboarding";
-      }
-
-      if (parsedOnboarding?.onboardingStatus === "COMPLETE") {
-        const fromAccess = dashboardPathFromAppContextWhenReady(
-          resolvedAccessContext,
-        );
-        if (fromAccess) {
-          destination = fromAccess;
-        }
-      }
-
-      if (
-        me.roles.includes("ATHLETE") &&
-        destination !== "/athlete/invitations" &&
-        destination.startsWith("/athlete")
-      ) {
-        try {
-          const inv = await fetchMyEntityInvitations();
-          if (
-            inv.some((r) => r.status.trim().toUpperCase() === "PENDING")
-          ) {
-            destination = "/athlete/invitations";
-          }
-        } catch {
-          // Athlete layout will load invitations; leave destination as resolved.
-        }
-      }
-
-      if (
-        me.roles.includes("COACH") &&
-        destination !== "/coach/invitations" &&
-        destination.startsWith("/coach")
-      ) {
-        try {
-          const inv = await fetchMyEntityInvitations();
-          if (
-            inv.some((r) => r.status.trim().toUpperCase() === "PENDING")
-          ) {
-            destination = "/coach/invitations";
-          }
-        } catch {
-          // Coach layout inbox will load invitations.
-        }
-      }
-
-      const ctx = resolvedAccessContext;
-      if (
-        ctx &&
-        !ctx.access.canAccessDashboard &&
-        (destination.startsWith("/admin") ||
-          destination.startsWith("/coach") ||
-          destination.startsWith("/athlete"))
-      ) {
-        destination = bootstrapAthleteRequiresInvitationInbox(ctx)
-          ? "/athlete/invitations"
-          : "/onboarding";
       }
 
       router.replace(destination);

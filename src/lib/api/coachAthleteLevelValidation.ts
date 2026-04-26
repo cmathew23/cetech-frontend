@@ -5,6 +5,11 @@ import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelV
 
 type AnyRecord = Record<string, unknown>;
 
+const SPORT_PERFORMANCE_LEVEL_FIELD =
+  "highestCompetitionLevelReachedPast12Months";
+const SPORT_PERFORMANCE_RANKING_FIELD =
+  "highestRankingAchievedAtThatLevelPast12Months";
+
 function asRecord(value: unknown): AnyRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as AnyRecord;
@@ -60,18 +65,67 @@ function readStringListFrom(records: Array<AnyRecord | null>, key: string): stri
   return [];
 }
 
+function readNestedRecordFrom(
+  records: Array<AnyRecord | null>,
+  key: string,
+): AnyRecord | null {
+  for (const record of records) {
+    const nested = asRecord(record?.[key]);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function collectNestedRecordsByKey(value: unknown, key: string): AnyRecord[] {
+  const out: AnyRecord[] = [];
+  const seen = new Set<AnyRecord>();
+
+  function visit(node: unknown): void {
+    const record = asRecord(node);
+    if (!record || seen.has(record)) return;
+    seen.add(record);
+
+    const nested = asRecord(record[key]);
+    if (nested && !seen.has(nested)) {
+      out.push(nested);
+    }
+
+    for (const child of Object.values(record)) {
+      if (Array.isArray(child)) {
+        for (const item of child) visit(item);
+        continue;
+      }
+      visit(child);
+    }
+  }
+
+  visit(value);
+  return out;
+}
+
 function parseLevelValidationPayload(data: unknown): TrainingPlanLevelValidationView {
   const root = asRecord(data);
   const nestedData = asRecord(root?.data);
   const suggestion = asRecord(root?.suggestion) ?? asRecord(nestedData?.suggestion);
 
   const sources = [root, nestedData, suggestion];
+  const sportPerformanceSources = [
+    ...collectNestedRecordsByKey(root, "sportPerformance"),
+    ...collectNestedRecordsByKey(nestedData, "sportPerformance"),
+    ...collectNestedRecordsByKey(suggestion, "sportPerformance"),
+  ];
 
   return {
     age: readNumberFrom(sources, "age"),
     ageBand: readStringFrom(sources, "ageBand"),
-    highestLevelReached: readStringFrom(sources, "highestLevelReached"),
-    rankingLevel: readStringFrom(sources, "rankingLevel"),
+    highestCompetitionLevelReachedPast12Months: readStringFrom(
+      sportPerformanceSources,
+      SPORT_PERFORMANCE_LEVEL_FIELD,
+    ),
+    highestRankingAchievedAtThatLevelPast12Months: readNumberFrom(
+      sportPerformanceSources,
+      SPORT_PERFORMANCE_RANKING_FIELD,
+    ),
     baseSuggestedLevel: readStringFrom(sources, "baseSuggestedLevel"),
     rankingOverrideApplied: readBooleanFrom(sources, "rankingOverrideApplied"),
     finalSuggestedLevel: readStringFrom(sources, "finalSuggestedLevel"),

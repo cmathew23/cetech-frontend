@@ -83,6 +83,16 @@ export const paths = {
     /** GET/POST — training plan level validation (coach review). */
     athleteTrainingPlanLevelValidation: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/level-validation`,
+    athleteTrainingPlanReadiness: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/readiness`,
+    athleteTrainingPlanWorkloadAssessment: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/workload-assessment`,
+    athleteTrainingPlanCompleteness: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/completeness`,
+    athleteTrainingPlanExecute: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/execute`,
+    athleteTrainingPlanPersistDraft: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/persist-draft`,
   },
   academies: {
     root: "/academies",
@@ -127,5 +137,25 @@ export const paths = {
   },
   athletes: {
     me: "/athletes/me",
+  },
+  seasonCycles: {
+    root: "/season-cycles",
+    byEntity: (entityId: string) =>
+      `/season-cycles/entity/${encodeURIComponent(entityId)}`,
+    byId: (seasonCycleId: string) =>
+      `/season-cycles/${encodeURIComponent(seasonCycleId)}`,
+    phase: "/season-cycles/phase",
+    phaseById: (phaseId: string) =>
+      `/season-cycles/phases/${encodeURIComponent(phaseId)}`,
+    phases: (seasonCycleId: string) =>
+      `/season-cycles/${encodeURIComponent(seasonCycleId)}/phases`,
+  },
+  goals: {
+    root: "/goals",
+    byAthlete: (athleteId: string) =>
+      `/goals/athlete/${encodeURIComponent(athleteId)}`,
+    byId: (goalId: string) => `/goals/${encodeURIComponent(goalId)}`,
+    patchStatus: (goalId: string) =>
+      `/goals/${encodeURIComponent(goalId)}/status`,
   },
 } as const;

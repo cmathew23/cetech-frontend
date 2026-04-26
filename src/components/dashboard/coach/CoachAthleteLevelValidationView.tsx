@@ -10,6 +10,7 @@ import {
   fetchCoachAthleteLevelValidation,
   postCoachAthleteLevelValidation,
 } from "@/lib/api/coachAthleteLevelValidation";
+import { fetchCoachAthletePlanningProfile } from "@/lib/api/coachAthletePlanningProfile";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   TRAINING_PLAN_VALIDATED_LEVELS,
@@ -18,10 +19,18 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+const LEGACY_LEVEL_VALIDATION_ACCESS_DENIED =
+  "Only Assistant Coach or Skills Coach can confirm validated level when Head Coach is not configured";
+const LEVEL_VALIDATION_ACCESS_DENIED_MESSAGE =
+  "Access Denied. Only the Head Coach or an Assistant Skills Coach can confirm the validated level.";
+
 function formatApiError(e: unknown, fallback: string): string {
   if (isNormalizedApiError(e)) {
     if (e.status === 403) {
       const server = e.message.trim();
+      if (server === LEGACY_LEVEL_VALIDATION_ACCESS_DENIED) {
+        return LEVEL_VALIDATION_ACCESS_DENIED_MESSAGE;
+      }
       return server !== ""
         ? `Access denied. ${server}`
         : "Access denied. You don't have permission to perform this action.";
@@ -40,6 +49,16 @@ function displayValue(
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "—";
   const text = value.trim();
   return text === "" ? "—" : text;
+}
+
+function displayRankingValue(value: number | null | undefined): string {
+  return value === null || value === undefined ? "Not provided" : displayValue(value);
+}
+
+function displayProvidedText(value: string | null | undefined): string {
+  return value === null || value === undefined || value.trim() === ""
+    ? "Not provided"
+    : value.trim();
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -64,6 +83,12 @@ function defaultSelectedLevel(data: LevelValidationData | null): string {
   return "";
 }
 
+function isMissingPlanningProfileError(e: unknown): boolean {
+  if (!isNormalizedApiError(e)) return false;
+  const msg = e.message.trim().toLowerCase();
+  return e.status === 404 || msg.includes("planning profile not found");
+}
+
 export function CoachAthleteLevelValidationView({
   athleteId,
 }: {
@@ -80,12 +105,16 @@ export function CoachAthleteLevelValidationView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missingPlanningProfile, setMissingPlanningProfile] = useState(false);
   const [data, setData] = useState<LevelValidationData | null>(null);
+  const [planningPerformance, setPlanningPerformance] = useState<{
+    highestCompetitionLevelReachedPast12Months: string | null;
+    highestRankingAchievedAtThatLevelPast12Months: number | null;
+  } | null>(null);
   const [selectedLevel, setSelectedLevel] = useState("");
   const [hasConfirmPermission, setHasConfirmPermission] = useState(true);
 
-  const confirmPermissionError =
-    "You do not have permission to confirm the athlete's planning level. Only authorized planning coaches can perform this action.";
+  const confirmPermissionError = LEVEL_VALIDATION_ACCESS_DENIED_MESSAGE;
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +125,8 @@ export function CoachAthleteLevelValidationView({
       }
       if (entityId === "" || athleteIdTrimmed === "") {
         setData(null);
+        setPlanningPerformance(null);
+        setMissingPlanningProfile(false);
         setError("Missing training entity or athlete identifier.");
         setLoading(false);
         return;
@@ -103,14 +134,43 @@ export function CoachAthleteLevelValidationView({
 
       setLoading(true);
       setError(null);
+      setPlanningPerformance(null);
+      setMissingPlanningProfile(false);
       try {
         const next = await fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed);
         if (cancelled) return;
         setData(next);
         setSelectedLevel(defaultSelectedLevel(next));
+        if (
+          next.highestCompetitionLevelReachedPast12Months == null ||
+          next.highestCompetitionLevelReachedPast12Months.trim() === "" ||
+          next.highestRankingAchievedAtThatLevelPast12Months == null
+        ) {
+          try {
+            const planningProfile = await fetchCoachAthletePlanningProfile(
+              entityId,
+              athleteIdTrimmed,
+            );
+            if (cancelled) return;
+            setPlanningPerformance({
+              highestCompetitionLevelReachedPast12Months:
+                planningProfile.highestCompetitionLevelReachedPast12Months,
+              highestRankingAchievedAtThatLevelPast12Months:
+                planningProfile.highestRankingAchievedAtThatLevelPast12Months,
+            });
+          } catch (planningError) {
+            if (cancelled || isMissingPlanningProfileError(planningError)) return;
+          }
+        }
       } catch (e) {
         if (cancelled) return;
         setData(null);
+        setPlanningPerformance(null);
+        if (isMissingPlanningProfileError(e)) {
+          setMissingPlanningProfile(true);
+          setError(null);
+          return;
+        }
         setError(
           formatApiError(
             e,
@@ -131,6 +191,14 @@ export function CoachAthleteLevelValidationView({
     data != null &&
     data.finalSuggestedLevel == null &&
     data.baseSuggestedLevel == null;
+  const performanceCompetitionLevel =
+    data?.highestCompetitionLevelReachedPast12Months?.trim() ||
+    planningPerformance?.highestCompetitionLevelReachedPast12Months?.trim() ||
+    null;
+  const performanceRanking =
+    data?.highestRankingAchievedAtThatLevelPast12Months ??
+    planningPerformance?.highestRankingAchievedAtThatLevelPast12Months ??
+    null;
 
   const systemLevelForCompare = data?.finalSuggestedLevel?.trim() ?? "";
   const coachIntent = selectedLevel.trim() || data?.validatedLevel?.trim() || "";
@@ -193,7 +261,7 @@ export function CoachAthleteLevelValidationView({
         </div>
         <Button
           type="button"
-          variant="neutral"
+          variant="secondary"
           onClick={() => router.push("/coach/dashboard")}
         >
           Back to Dashboard
@@ -201,8 +269,14 @@ export function CoachAthleteLevelValidationView({
       </header>
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
+      {missingPlanningProfile ? (
+        <Alert variant="warning">
+          Planning Profile Pending. The athlete must complete APP before training
+          plan validation can begin.
+        </Alert>
+      ) : null}
 
-      {insufficientSuggestion ? (
+      {data && insufficientSuggestion ? (
         <Alert variant="warning">Insufficient data to compute suggestion</Alert>
       ) : null}
 
@@ -224,10 +298,13 @@ export function CoachAthleteLevelValidationView({
           <DashboardCardShell title="Performance input">
             <dl className="space-y-2">
               <DetailRow
-                label="Highest Level Reached"
-                value={displayValue(data.highestLevelReached)}
+                label="Highest Competition Level"
+                value={displayProvidedText(performanceCompetitionLevel)}
               />
-              <DetailRow label="Ranking Level" value={displayValue(data.rankingLevel)} />
+              <DetailRow
+                label="Highest Ranking"
+                value={displayRankingValue(performanceRanking)}
+              />
             </dl>
           </DashboardCardShell>
 
@@ -304,7 +381,7 @@ export function CoachAthleteLevelValidationView({
             </div>
           </DashboardCardShell>
         </>
-      ) : !error ? (
+      ) : !error && !missingPlanningProfile ? (
         <Alert variant="warning">No level validation data available.</Alert>
       ) : null}
     </div>

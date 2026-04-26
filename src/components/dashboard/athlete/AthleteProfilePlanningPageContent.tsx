@@ -170,8 +170,13 @@ const SECTION_ORDER: Array<{
 ] as const;
 
 const KNOWN_FIELD_ORDER: Partial<Record<PlanningProfileGroupName, string[]>> = {
-  athleteContext: ["dateOfBirth", "sex"],
-  sportContext: ["primarySport", "disciplineOrEvent", "validatedLevel"],
+  athleteContext: ["dateOfBirth", "sex", "heightCm", "weightKg"],
+  sportContext: [
+    "primarySport",
+    "disciplineOrEvent",
+    "selfReportedLevel",
+    "validatedLevel",
+  ],
   sportPerformance: [
     SPORT_PERFORMANCE_LEVEL_FIELD,
     SPORT_PERFORMANCE_RANKING_FIELD,
@@ -182,7 +187,7 @@ const KNOWN_FIELD_ORDER: Partial<Record<PlanningProfileGroupName, string[]>> = {
     "weeklyAvailabilityDays",
     "weeklyAvailabilityHours",
   ],
-  healthStatus: ["heightCm", "weightKg", "injuryStatus", "injuryArea", "injuryNotes"],
+  healthStatus: ["injuryStatus", "injuryArea", "injuryNotes"],
   nutritionContext: [
     "dietType",
     "regionalCuisinePreference",
@@ -202,6 +207,7 @@ const KNOWN_FIELD_ORDER: Partial<Record<PlanningProfileGroupName, string[]>> = {
     "skeletalLeanMassKg",
     "skeletalFatMassKg",
     "visceralFatLevel",
+    "visceralFatArea",
     "bmrKcalDay",
     "muscleMassKg",
   ],
@@ -252,6 +258,7 @@ function toFieldLabel(field: string): string {
     sex: "Gender",
     primarySport: "Primary Sport",
     disciplineOrEvent: "Discipline / Event",
+    selfReportedLevel: "Self-Reported Level",
     trainingAgeYears: "How many years of training have you done so far?",
     currentWeeklyTrainingExposureHours:
       "How many hours do you usually train per week?",
@@ -273,8 +280,10 @@ function toFieldLabel(field: string): string {
     skeletalLeanMassKg: "Skeletal Muscle Mass (kg)",
     skeletalFatMassKg: "Body Fat Mass (kg)",
     visceralFatLevel: "Visceral Fat Level",
+    visceralFatArea: "Visceral Fat Area",
     bmrKcalDay: "Basal Metabolic Rate (kcal/day)",
     muscleMassKg: "Muscle Mass (kg)",
+    wearableStatus: "Wearable Status",
     weeklyAvailabilityDays:
       "How many days are you generally available to train in a week?",
     weeklyAvailabilityHours:
@@ -1089,6 +1098,10 @@ export function AthleteProfilePlanningPageContent() {
     const values = draft[group];
 
     if (group === "wearables") {
+      const wearableStatus =
+        typeof values.wearableStatus === "string" && values.wearableStatus.trim() !== ""
+          ? values.wearableStatus
+          : "NO";
       return (
         <DashboardCardShell
           key={group}
@@ -1099,7 +1112,9 @@ export function AthleteProfilePlanningPageContent() {
               <p className="text-sm text-textSecondary">{section.description}</p>
             ) : null}
             <div className="rounded-md border border-border bg-surface p-3">
-              <p className="text-sm text-textPrimary">Wearable Status: No</p>
+              <p className="text-sm text-textPrimary">
+                Wearable Status: {wearableStatus}
+              </p>
             </div>
           </div>
         </DashboardCardShell>
@@ -1186,7 +1201,10 @@ export function AthleteProfilePlanningPageContent() {
           {fields.length > 0 ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {fields.map((field) => {
-                if (group === "sportContext" && field === "validatedLevel") {
+                if (
+                  group === "sportContext" &&
+                  (field === "selfReportedLevel" || field === "validatedLevel")
+                ) {
                   return (
                     <div
                       key={`${group}-${field}`}
@@ -1196,7 +1214,11 @@ export function AthleteProfilePlanningPageContent() {
                         {toFieldLabel(field)}
                       </p>
                       <p className="text-sm text-textPrimary">
-                        {displayText(record?.validatedLevel)}
+                        {displayText(
+                          field === "selfReportedLevel"
+                            ? record?.selfReportedLevel
+                            : record?.validatedLevel,
+                        )}
                       </p>
                     </div>
                   );
@@ -1298,7 +1320,7 @@ export function AthleteProfilePlanningPageContent() {
                 </Button>
                 <Button
                   type="button"
-                  variant="neutral"
+                  variant="secondary"
                   disabled={saveBusy}
                   onClick={handleCancelEditing}
                 >
@@ -1308,7 +1330,7 @@ export function AthleteProfilePlanningPageContent() {
             ) : (
               <Button
                 type="button"
-                variant="secondary"
+                variant="primary"
                 disabled={saveBusy}
                 onClick={handleStartEditing}
               >

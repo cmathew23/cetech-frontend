@@ -16,8 +16,8 @@ export type TrainingPlanValidatedLevel =
 export type TrainingPlanLevelValidationView = {
   age: number | null;
   ageBand: string | null;
-  highestLevelReached: string | null;
-  rankingLevel: string | null;
+  highestCompetitionLevelReachedPast12Months: string | null;
+  highestRankingAchievedAtThatLevelPast12Months: number | null;
   baseSuggestedLevel: string | null;
   rankingOverrideApplied: boolean | null;
   finalSuggestedLevel: string | null;

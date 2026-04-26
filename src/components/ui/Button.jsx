@@ -14,6 +14,7 @@ export function Button({
   const styles = {
     primary: designSystem.button.primary,
     secondary: designSystem.button.secondary,
+    success: designSystem.button.success,
     neutral: designSystem.button.neutral,
     danger: designSystem.button.danger,
     destructive: designSystem.button.destructive ?? designSystem.button.danger,

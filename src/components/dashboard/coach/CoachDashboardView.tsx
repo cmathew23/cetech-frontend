@@ -2,6 +2,7 @@
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 import {
   Table,
   TableBody,
@@ -96,6 +97,54 @@ function DetailRow({
         {label}
       </dt>
       <dd className="min-w-0 text-sm text-textPrimary">{value}</dd>
+    </div>
+  );
+}
+
+function CoachAssignedAthleteActions({
+  athleteId,
+  hasPlanningProfile,
+}: {
+  athleteId: string;
+  hasPlanningProfile: boolean;
+}) {
+  const athleteIdTrimmed = athleteId.trim();
+
+  if (athleteIdTrimmed === "") {
+    return (
+      <span className="text-sm text-textMuted">Athlete route not available</span>
+    );
+  }
+
+  if (!hasPlanningProfile) {
+    return (
+      <div className="space-y-1.5">
+        <span className="inline-flex rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-textSecondary">
+          Planning Profile Pending
+        </span>
+        <p className="text-xs text-textMuted">
+          Athlete must complete APP before validation.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Link
+        href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/planning-profile`}
+      >
+        <Button type="button" variant="secondary">
+          View Planning Profile
+        </Button>
+      </Link>
+      <Link
+        href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`}
+      >
+        <Button type="button" variant="primary">
+          Validate Level
+        </Button>
+      </Link>
     </div>
   );
 }
@@ -339,7 +388,7 @@ export function CoachDashboardView() {
                   <Th>Email</Th>
                   <Th>Athlete status</Th>
                   <Th>Membership</Th>
-                  <Th>Planning profile</Th>
+                  <Th>Actions</Th>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -352,16 +401,10 @@ export function CoachDashboardView() {
                     <Td>{row.lifecycle}</Td>
                     <Td>{row.membershipStatus}</Td>
                     <Td>
-                      {row.hasPlanningProfile && row.athleteId.trim() !== "" ? (
-                        <Link
-                          href={`/coach/athletes/${encodeURIComponent(row.athleteId)}/planning-profile`}
-                          className="text-sm font-medium text-primary hover:underline"
-                        >
-                          View
-                        </Link>
-                      ) : (
-                        <span className="text-sm text-textMuted">Not Available</span>
-                      )}
+                      <CoachAssignedAthleteActions
+                        athleteId={row.athleteId}
+                        hasPlanningProfile={row.hasPlanningProfile}
+                      />
                     </Td>
                   </TableRow>
                 ))}

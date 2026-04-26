@@ -112,10 +112,15 @@ export const designSystem = {
 
   button: {
     base:
-      "inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-medium transition-all duration-150 hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
-    primary: "bg-primary text-card hover:bg-primaryDark",
-    secondary: "bg-blue-600 text-white hover:bg-blue-700",
-    neutral: "border border-border bg-card text-textPrimary shadow-sm hover:bg-bg",
+      "inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+    primary:
+      "bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:ring-blue-500",
+    secondary:
+      "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-100 hover:text-slate-900 focus:ring-slate-300",
+    success:
+      "bg-green-600 text-white shadow-sm hover:bg-green-700 focus:ring-green-500",
+    neutral:
+      "border border-border bg-card text-textPrimary shadow-sm hover:bg-bg focus:ring-slate-300",
     danger: "bg-danger text-card hover:bg-danger/90",
     destructive: "bg-danger text-card hover:bg-danger/90",
   },

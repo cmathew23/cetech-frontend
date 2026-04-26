@@ -5,6 +5,7 @@ import {
   isNormalizedApiError,
   type NormalizedApiError,
 } from "@/lib/apiClient";
+import type { AthleteLevelValue } from "@/lib/athlete-levels";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -57,6 +58,7 @@ export type PlanningProfileFormState = {
 };
 
 export type PlanningProfileRecord = PlanningProfileGroupedRecord & {
+  selfReportedLevel: AthleteLevelValue | null;
   validatedLevel: string | null;
   planningEligibilityStatus: string | null;
   planningInputCompleteness: string | null;
@@ -77,6 +79,8 @@ const FIELD_TYPE_HINTS: Partial<
   athleteContext: {
     dateOfBirth: "string",
     sex: "string",
+    heightCm: "number",
+    weightKg: "number",
   },
   sportContext: {
     primarySport: "string",
@@ -95,8 +99,6 @@ const FIELD_TYPE_HINTS: Partial<
     weeklyAvailabilityHours: "number",
   },
   healthStatus: {
-    heightCm: "number",
-    weightKg: "number",
     injuryStatus: "string",
     injuryArea: "string",
     injuryNotes: "string",
@@ -105,6 +107,9 @@ const FIELD_TYPE_HINTS: Partial<
     dietType: "string",
     regionalCuisinePreference: "string",
     allergiesIntolerances: "allergies",
+  },
+  wearables: {
+    wearableStatus: "string",
   },
   bloodReportParameters: {
     hemoglobin: "number",
@@ -120,6 +125,7 @@ const FIELD_TYPE_HINTS: Partial<
     skeletalLeanMassKg: "number",
     skeletalFatMassKg: "number",
     visceralFatLevel: "number",
+    visceralFatArea: "number",
     bmrKcalDay: "number",
     muscleMassKg: "number",
   },
@@ -129,23 +135,91 @@ const LEGACY_ALLERGIES_FIELD = "allergiesOrIntolerances";
 const ALLERGIES_FIELD = "allergiesIntolerances";
 const ALLERGIES_OTHERS_OPTION = "Others";
 const LEGACY_HIGHEST_LEVEL_REACHED_FIELD = "highestLevelReached";
+const LEGACY_HIGHEST_RANKING_LEVEL_FIELD = "highestRankingLevel";
 const LEGACY_RANKING_LEVEL_FIELD = "rankingLevel";
 const SPORT_PERFORMANCE_LEVEL_FIELD =
   "highestCompetitionLevelReachedPast12Months";
 const SPORT_PERFORMANCE_RANKING_FIELD =
   "highestRankingAchievedAtThatLevelPast12Months";
+const TRAINING_EXPOSURE_YEARS_FIELD = "trainingAgeYears";
+const TRAINING_EXPOSURE_HOURS_FIELD = "currentWeeklyTrainingExposureHours";
+const BACKEND_TRAINING_EXPOSURE_YEARS_FIELD = "yearsOfTraining";
+const BACKEND_TRAINING_EXPOSURE_HOURS_FIELD = "weeklyTrainingHours";
+const ATHLETE_CONTEXT_HEIGHT_FIELD = "heightCm";
+const ATHLETE_CONTEXT_WEIGHT_FIELD = "weightKg";
+const HEMOGLOBIN_FIELD = "hemoglobin";
+const VITAMIN_D_FIELD = "vitaminD";
+const VITAMIN_B12_FIELD = "vitaminB12";
+const FERRITIN_FIELD = "ferritin";
+const CRP_FIELD = "crp";
+const BACKEND_HEMOGLOBIN_FIELD = "hemoglobinGdl";
+const BACKEND_VITAMIN_D_FIELD = "vitaminDNgMl";
+const BACKEND_VITAMIN_B12_FIELD = "vitaminB12PgMl";
+const BACKEND_FERRITIN_FIELD = "ferritinNgMl";
+const BACKEND_CRP_FIELD = "crpMgL";
+const WEARABLE_STATUS_FIELD = "wearableStatus";
+const DEFAULT_WEARABLE_STATUS = "NO";
 const FASTING_BLOOD_GLUCOSE_FIELD = "fastingBloodGlucoseFBS";
 const POSTPRANDIAL_BLOOD_GLUCOSE_FIELD = "postprandialBloodGlucosePPBS";
+const BACKEND_FASTING_BLOOD_GLUCOSE_FIELD = "fastingBloodGlucoseFBS";
+const BACKEND_POSTPRANDIAL_BLOOD_GLUCOSE_FIELD = "postprandialBloodGlucosePPBS";
+const SKELETAL_LEAN_MASS_FIELD = "skeletalLeanMassKg";
+const SKELETAL_FAT_MASS_FIELD = "skeletalFatMassKg";
+const BMR_FIELD = "bmrKcalDay";
+const BACKEND_SKELETAL_LEAN_MASS_FIELD = "skeletalMuscleMassKg";
+const BACKEND_SKELETAL_FAT_MASS_FIELD = "bodyFatMassKg";
+const BACKEND_BMR_FIELD = "basalMetabolicRateKcal";
 const INJURY_AREA_FIELD = "injuryArea";
 const INJURY_NOTES_FIELD = "injuryNotes";
 const HIDDEN_FIELDS = new Set([
-  "selfReportedLevel",
   LEGACY_ALLERGIES_FIELD,
   LEGACY_HIGHEST_LEVEL_REACHED_FIELD,
+  LEGACY_HIGHEST_RANKING_LEVEL_FIELD,
   LEGACY_RANKING_LEVEL_FIELD,
 ]);
 const LOCKED_FIELDS = new Set(["primarySport", "validatedLevel"]);
 const REGIONAL_CUISINE_FIELD = "regionalCuisinePreference";
+const WRITABLE_FRONTEND_FIELDS: Record<PlanningProfileGroupName, Set<string>> = {
+  athleteContext: new Set([
+    "dateOfBirth",
+    "sex",
+    ATHLETE_CONTEXT_HEIGHT_FIELD,
+    ATHLETE_CONTEXT_WEIGHT_FIELD,
+  ]),
+  sportContext: new Set(["primarySport", "disciplineOrEvent"]),
+  sportPerformance: new Set([
+    SPORT_PERFORMANCE_LEVEL_FIELD,
+    SPORT_PERFORMANCE_RANKING_FIELD,
+  ]),
+  trainingExposure: new Set([
+    TRAINING_EXPOSURE_YEARS_FIELD,
+    TRAINING_EXPOSURE_HOURS_FIELD,
+    "weeklyAvailabilityDays",
+    "weeklyAvailabilityHours",
+  ]),
+  healthStatus: new Set(["injuryStatus", INJURY_AREA_FIELD, INJURY_NOTES_FIELD]),
+  nutritionContext: new Set(["dietType", REGIONAL_CUISINE_FIELD, ALLERGIES_FIELD]),
+  wearables: new Set([WEARABLE_STATUS_FIELD]),
+  derivedPlanningInputs: new Set(),
+  bloodReportParameters: new Set([
+    HEMOGLOBIN_FIELD,
+    VITAMIN_D_FIELD,
+    VITAMIN_B12_FIELD,
+    FERRITIN_FIELD,
+    CRP_FIELD,
+    FASTING_BLOOD_GLUCOSE_FIELD,
+    POSTPRANDIAL_BLOOD_GLUCOSE_FIELD,
+  ]),
+  bodyCompositionParameters: new Set([
+    "bodyFatPercent",
+    SKELETAL_LEAN_MASS_FIELD,
+    SKELETAL_FAT_MASS_FIELD,
+    "visceralFatLevel",
+    "visceralFatArea",
+    BMR_FIELD,
+    "muscleMassKg",
+  ]),
+};
 const ALLOWED_SEX_VALUES = new Set(["MALE", "FEMALE"]);
 const ALLOWED_SPORT_COMPETITION_LEVEL_VALUES = new Set([
   "DISTRICT",
@@ -367,21 +441,69 @@ function extractGroup(records: Array<AnyRecord | null>, key: PlanningProfileGrou
     if (!group) continue;
     const out: PlanningScalarRecord = {};
     for (const [field, value] of Object.entries(group)) {
+      const normalizedField = toFrontendPlanningFieldName(key, field);
       if (key === "nutritionContext" && field === ALLERGIES_FIELD) {
         const allergies = readAllergiesRecord(value);
         if (allergies) {
-          out[field] = allergies;
+          out[normalizedField] = allergies;
         }
         continue;
       }
       const scalar = readScalar(value);
       if (scalar !== undefined) {
-        out[field] = scalar;
+        out[normalizedField] = scalar;
       }
     }
     return out;
   }
   return {};
+}
+
+function toFrontendPlanningFieldName(
+  group: PlanningProfileGroupName,
+  field: string,
+): string {
+  if (group === "trainingExposure") {
+    if (field === BACKEND_TRAINING_EXPOSURE_YEARS_FIELD) {
+      return TRAINING_EXPOSURE_YEARS_FIELD;
+    }
+    if (field === BACKEND_TRAINING_EXPOSURE_HOURS_FIELD) {
+      return TRAINING_EXPOSURE_HOURS_FIELD;
+    }
+  }
+
+  if (group === "bloodReportParameters") {
+    if (field === BACKEND_HEMOGLOBIN_FIELD) return HEMOGLOBIN_FIELD;
+    if (field === BACKEND_VITAMIN_D_FIELD) return VITAMIN_D_FIELD;
+    if (field === BACKEND_VITAMIN_B12_FIELD) return VITAMIN_B12_FIELD;
+    if (field === BACKEND_FERRITIN_FIELD) return FERRITIN_FIELD;
+    if (field === BACKEND_CRP_FIELD) return CRP_FIELD;
+    if (field === BACKEND_FASTING_BLOOD_GLUCOSE_FIELD) {
+      return FASTING_BLOOD_GLUCOSE_FIELD;
+    }
+    if (field === BACKEND_POSTPRANDIAL_BLOOD_GLUCOSE_FIELD) {
+      return POSTPRANDIAL_BLOOD_GLUCOSE_FIELD;
+    }
+  }
+
+  if (group === "bodyCompositionParameters") {
+    if (field === BACKEND_SKELETAL_LEAN_MASS_FIELD) {
+      return SKELETAL_LEAN_MASS_FIELD;
+    }
+    if (field === BACKEND_SKELETAL_FAT_MASS_FIELD) {
+      return SKELETAL_FAT_MASS_FIELD;
+    }
+    if (field === BACKEND_BMR_FIELD) return BMR_FIELD;
+  }
+
+  return field;
+}
+
+function isWritablePlanningField(
+  group: PlanningProfileGroupName,
+  field: string,
+): boolean {
+  return WRITABLE_FRONTEND_FIELDS[group]?.has(field) ?? false;
 }
 
 function hasMeaningfulScalar(value: PlanningScalar | undefined): boolean {
@@ -777,6 +899,63 @@ function convertPatchValue(
   return trimWhenPresent(value, field);
 }
 
+function toBackendPlanningFieldName(
+  group: PlanningProfileGroupName,
+  field: string,
+): string {
+  if (group === "trainingExposure") {
+    if (field === TRAINING_EXPOSURE_YEARS_FIELD) {
+      return BACKEND_TRAINING_EXPOSURE_YEARS_FIELD;
+    }
+    if (field === TRAINING_EXPOSURE_HOURS_FIELD) {
+      return BACKEND_TRAINING_EXPOSURE_HOURS_FIELD;
+    }
+  }
+
+  if (group === "bloodReportParameters") {
+    if (field === HEMOGLOBIN_FIELD) return BACKEND_HEMOGLOBIN_FIELD;
+    if (field === VITAMIN_D_FIELD) return BACKEND_VITAMIN_D_FIELD;
+    if (field === VITAMIN_B12_FIELD) return BACKEND_VITAMIN_B12_FIELD;
+    if (field === FERRITIN_FIELD) return BACKEND_FERRITIN_FIELD;
+    if (field === CRP_FIELD) return BACKEND_CRP_FIELD;
+    if (field === FASTING_BLOOD_GLUCOSE_FIELD) {
+      return BACKEND_FASTING_BLOOD_GLUCOSE_FIELD;
+    }
+    if (field === POSTPRANDIAL_BLOOD_GLUCOSE_FIELD) {
+      return BACKEND_POSTPRANDIAL_BLOOD_GLUCOSE_FIELD;
+    }
+  }
+
+  return field;
+}
+
+function toBackendPlanningGroupName(
+  group: PlanningProfileGroupName,
+  field: string,
+): PlanningProfileGroupName {
+  if (
+    group === "healthStatus" &&
+    (field === ATHLETE_CONTEXT_HEIGHT_FIELD || field === ATHLETE_CONTEXT_WEIGHT_FIELD)
+  ) {
+    return "athleteContext";
+  }
+  return group;
+}
+
+function assignPlanningField(
+  body: Record<string, unknown>,
+  group: PlanningProfileGroupName,
+  field: string,
+  value: PlanningScalar,
+): void {
+  const targetGroup = toBackendPlanningGroupName(group, field);
+  const targetField = toBackendPlanningFieldName(targetGroup, field);
+  const current =
+    (body[targetGroup] as Record<string, PlanningScalar> | undefined) ?? {};
+  current[targetField] = value;
+  body[targetGroup] = current;
+}
+
 export function parsePlanningProfileRecord(data: unknown): PlanningProfileRecord {
   const root = asRecord(data);
   const nestedData = asRecord(root?.data);
@@ -793,6 +972,12 @@ export function parsePlanningProfileRecord(data: unknown): PlanningProfileRecord
     grouped[groupName] = extractGroup(sources, groupName);
   }
 
+  const selfReportedLevel =
+    readString(root?.selfReportedLevel)
+    ?? readString(nestedData?.selfReportedLevel)
+    ?? readString(profile?.selfReportedLevel)
+    ?? readString(status?.selfReportedLevel)
+    ?? readString(grouped.sportContext.selfReportedLevel);
   const validatedLevel =
     readString(derived?.validatedLevel)
     ?? readString(root?.validatedLevel)
@@ -818,6 +1003,12 @@ export function parsePlanningProfileRecord(data: unknown): PlanningProfileRecord
     .concat(readStringList(root?.missingRequiredFields))
     .filter((value, index, arr) => arr.indexOf(value) === index);
 
+  if (
+    selfReportedLevel &&
+    grouped.sportContext.selfReportedLevel === undefined
+  ) {
+    grouped.sportContext.selfReportedLevel = selfReportedLevel;
+  }
   if (validatedLevel && grouped.sportContext.validatedLevel === undefined) {
     grouped.sportContext.validatedLevel = validatedLevel;
   }
@@ -838,6 +1029,7 @@ export function parsePlanningProfileRecord(data: unknown): PlanningProfileRecord
 
   return {
     ...grouped,
+    selfReportedLevel: selfReportedLevel as AthleteLevelValue | null,
     validatedLevel,
     planningEligibilityStatus,
     planningInputCompleteness,
@@ -941,6 +1133,7 @@ export function buildPlanningProfileDefaults(input: {
 }): PlanningProfileFormState {
   const next = emptyFormState();
   next.nutritionContext[ALLERGIES_FIELD] = emptyAllergiesFormValue();
+  next.wearables[WEARABLE_STATUS_FIELD] = DEFAULT_WEARABLE_STATUS;
   const primarySport = input.primarySport?.trim() ?? "";
   if (primarySport !== "") {
     next.sportContext.primarySport = primarySport;
@@ -952,7 +1145,7 @@ export function shouldRenderField(
   group: PlanningProfileGroupName,
   field: string,
 ): boolean {
-  if (group === "wearables" || group === "derivedPlanningInputs") return false;
+  if (group === "derivedPlanningInputs") return false;
   return !HIDDEN_FIELDS.has(field);
 }
 
@@ -960,10 +1153,11 @@ export function isEditableField(
   group: PlanningProfileGroupName,
   field: string,
 ): boolean {
-  if (group === "wearables" || group === "derivedPlanningInputs") return false;
+  if (group === "derivedPlanningInputs") return false;
+  if (group === "wearables") return false;
   if (group === "sportContext" && LOCKED_FIELDS.has(field)) return false;
   if (HIDDEN_FIELDS.has(field)) return false;
-  return true;
+  return isWritablePlanningField(group, field);
 }
 
 export function getPlanningFieldType(
@@ -980,8 +1174,7 @@ export function buildPlanningProfileCreateBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
-    if (groupName === "wearables" || groupName === "derivedPlanningInputs") continue;
-    const groupBody: Record<string, PlanningScalar> = {};
+    if (groupName === "derivedPlanningInputs") continue;
     if (groupName === "sportPerformance") {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
@@ -1003,15 +1196,12 @@ export function buildPlanningProfileCreateBody(
       }
     }
     for (const [field, value] of Object.entries(draft[groupName])) {
-      if (!isEditableField(groupName, field)) continue;
+      if (!isWritablePlanningField(groupName, field)) continue;
       const type = inferFieldType(groupName, field, record);
       const converted = convertCreateValue(groupName, field, value, type);
       if (converted !== undefined) {
-        groupBody[field] = converted;
+        assignPlanningField(body, groupName, field, converted);
       }
-    }
-    if (Object.keys(groupBody).length > 0) {
-      body[groupName] = groupBody;
     }
   }
   return body;
@@ -1024,8 +1214,7 @@ export function buildPlanningProfilePatchBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
-    if (groupName === "wearables" || groupName === "derivedPlanningInputs") continue;
-    const groupBody: Record<string, PlanningScalar> = {};
+    if (groupName === "derivedPlanningInputs") continue;
     if (groupName === "sportPerformance") {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
@@ -1051,15 +1240,17 @@ export function buildPlanningProfilePatchBody(
       ...Object.keys(draft[groupName]),
     ]);
     for (const field of keys) {
-      if (!isEditableField(groupName, field)) continue;
+      if (!isWritablePlanningField(groupName, field)) continue;
       const previous = baseline[groupName][field];
       const next = draft[groupName][field];
       if (formValuesEqual(previous, next)) continue;
       const type = inferFieldType(groupName, field, record);
-      groupBody[field] = convertPatchValue(groupName, field, next, type);
-    }
-    if (Object.keys(groupBody).length > 0) {
-      body[groupName] = groupBody;
+      assignPlanningField(
+        body,
+        groupName,
+        field,
+        convertPatchValue(groupName, field, next, type),
+      );
     }
   }
   return body;
@@ -1152,11 +1343,11 @@ export function collectPlanningProfileValidationErrors(
       "Gender must be Male or Female.";
   }
 
-  validateNumber("healthStatus", "heightCm", {
+  validateNumber("athleteContext", "heightCm", {
     positive: true,
     message: "Height must be greater than 0.",
   });
-  validateNumber("healthStatus", "weightKg", {
+  validateNumber("athleteContext", "weightKg", {
     positive: true,
     message: "Weight must be greater than 0.",
   });
@@ -1367,6 +1558,7 @@ export function flattenPlanningProfileRecord(
     ...record.derivedPlanningInputs,
     ...record.bloodReportParameters,
     ...record.bodyCompositionParameters,
+    selfReportedLevel: record.selfReportedLevel,
     validatedLevel: record.validatedLevel,
     planningEligibilityStatus: record.planningEligibilityStatus,
     planningInputCompleteness: record.planningInputCompleteness,

@@ -99,6 +99,8 @@ export const paths = {
       generationDomain: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/domain-drafts/latest?generationDomain=${encodeURIComponent(generationDomain)}`,
+    athleteTrainingPlanRevise: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/revise`,
   },
   academies: {
     root: "/academies",

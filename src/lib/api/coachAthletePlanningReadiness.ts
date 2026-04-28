@@ -226,11 +226,18 @@ export type CoachAthleteGeneratedDraftDay = {
   sessions: CoachAthleteGeneratedDraftSession[];
 };
 
+export type CoachAthleteLatestDomainDraftRevision = {
+  feedback: string | null;
+  changeSummary: string[];
+};
+
 export type CoachAthleteLatestDomainDraft = {
   trainingPlanId: string | null;
   trainingPlanVersionId: string | null;
   versionNumber: number | null;
   status: string | null;
+  source: string | null;
+  revision: CoachAthleteLatestDomainDraftRevision | null;
   durationDays: number | null;
   daysCreated: number | null;
   sessionsCreated: number | null;
@@ -326,12 +333,28 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
     : null;
 }
 
+function parseLatestDomainDraftRevision(
+  value: unknown,
+): CoachAthleteLatestDomainDraftRevision | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const revision: CoachAthleteLatestDomainDraftRevision = {
+    feedback: readStringKey([record], ["feedback"]),
+    changeSummary: readStringListKey([record], ["changeSummary"]),
+  };
+  return revision.feedback || revision.changeSummary.length > 0 ? revision : null;
+}
+
 function parseLatestDomainDraftPayload(data: unknown): CoachAthleteLatestDomainDraft {
   const records = collectRecords(data);
   const days = readFirstArray(records, ["days"])
     .map(parseGeneratedDraftDay)
     .filter((day): day is CoachAthleteGeneratedDraftDay => day !== null)
     .sort((left, right) => (left.dayIndex ?? Number.MAX_SAFE_INTEGER) - (right.dayIndex ?? Number.MAX_SAFE_INTEGER));
+  const revision =
+    records
+      .map((record) => parseLatestDomainDraftRevision(record.revision))
+      .find((value) => value !== null) ?? null;
 
   return {
     trainingPlanId: readStringKey(records, ["trainingPlanId"]),
@@ -341,6 +364,8 @@ function parseLatestDomainDraftPayload(data: unknown): CoachAthleteLatestDomainD
     ]),
     versionNumber: readNumberKey(records, ["versionNumber"]),
     status: readStringKey(records, ["status"]),
+    source: readStringKey(records, ["source"]),
+    revision,
     durationDays: readNumberKey(records, ["durationDays"]),
     daysCreated: readNumberKey(records, ["daysCreated"]),
     sessionsCreated: readNumberKey(records, ["sessionsCreated"]),
@@ -642,4 +667,41 @@ export async function fetchLatestCoachAthleteDomainDraft(
     },
   );
   return parseLatestDomainDraftPayload(adaptBackendSuccess(raw));
+}
+
+export async function reviseCoachAthleteTrainingPlan(
+  entityId: string,
+  athleteId: string,
+  payload: {
+    trainingPlanId: string;
+    trainingPlanVersionId: string;
+    generationDomain: TrainingPlanGenerationDomain;
+    feedback: string;
+  },
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const trainingPlanId = payload.trainingPlanId.trim();
+  const trainingPlanVersionId = payload.trainingPlanVersionId.trim();
+  const feedback = payload.feedback.trim();
+  if (trainingPlanId === "" || trainingPlanVersionId === "" || feedback === "") {
+    throw {
+      message: "trainingPlanId, trainingPlanVersionId, and feedback are required",
+      status: 400,
+      code: "TRAINING_PLAN_REVISE_INPUT_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanRevise(ids.entityId, ids.athleteId),
+    {
+      method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+      body: JSON.stringify({
+        trainingPlanId,
+        trainingPlanVersionId,
+        generationDomain: payload.generationDomain,
+        feedback,
+      }),
+    },
+  );
+  adaptBackendSuccess(raw);
 }

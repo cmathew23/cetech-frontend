@@ -34,6 +34,7 @@ import {
   fetchCoachAthleteTrainingPlanReadiness,
   fetchCoachAthleteTrainingPlanWorkloadAssessment,
   persistCoachAthleteTrainingPlanDraft,
+  reviseCoachAthleteTrainingPlan,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanExecuteResult,
   type CoachAthleteLatestDomainDraft,
@@ -801,6 +802,10 @@ export function CoachAthletePlanningProfileView({
     useState<CoachAthleteLatestDomainDraft | null>(null);
   const [latestSkillsDraftMissing, setLatestSkillsDraftMissing] = useState(false);
   const [latestSkillsDraftError, setLatestSkillsDraftError] = useState<string | null>(null);
+  const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
+  const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
+  const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
+  const [reviseSkillsSuccess, setReviseSkillsSuccess] = useState<string | null>(null);
   const [setupLoading, setSetupLoading] = useState(true);
   const [seasonError, setSeasonError] = useState<string | null>(null);
   const [seasonSuccess, setSeasonSuccess] = useState<string | null>(null);
@@ -1463,6 +1468,50 @@ export function CoachAthletePlanningProfileView({
     if (!accessGateReady) return;
     void loadLatestSkillsDraft();
   }, [accessGateReady, loadLatestSkillsDraft]);
+
+  async function handleReviseSkillsPlan() {
+    if (
+      reviseSkillsLoading ||
+      entityId === "" ||
+      athleteIdTrimmed === "" ||
+      !latestSkillsDraft?.trainingPlanId ||
+      !latestSkillsDraft.trainingPlanVersionId
+    ) {
+      return;
+    }
+
+    const feedback = reviseSkillsFeedback.trim();
+    if (feedback === "") {
+      setReviseSkillsError("Enter revision feedback first.");
+      setReviseSkillsSuccess(null);
+      return;
+    }
+
+    setReviseSkillsLoading(true);
+    setReviseSkillsError(null);
+    setReviseSkillsSuccess(null);
+    try {
+      await reviseCoachAthleteTrainingPlan(entityId, athleteIdTrimmed, {
+        trainingPlanId: latestSkillsDraft.trainingPlanId,
+        trainingPlanVersionId: latestSkillsDraft.trainingPlanVersionId,
+        generationDomain: "SKILLS",
+        feedback,
+      });
+      await loadLatestSkillsDraft(true);
+      setReviseSkillsFeedback("");
+      setReviseSkillsSuccess("Revised skills plan version generated.");
+    } catch (e) {
+      if (isAiGenerationValidationError(e)) {
+        console.error("Training plan revision validation error", e);
+        setReviseSkillsError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
+      } else {
+        setReviseSkillsError("Unable to revise plan. Please try again.");
+      }
+      setReviseSkillsSuccess(null);
+    } finally {
+      setReviseSkillsLoading(false);
+    }
+  }
 
   function handleStartCreateSeason() {
     const defaultYear = new Date().getUTCFullYear();
@@ -3094,6 +3143,12 @@ export function CoachAthletePlanningProfileView({
                               value={displayValue(latestSkillsDraft.status)}
                             />
                           ) : null}
+                          {hasRenderableValue(latestSkillsDraft.source) ? (
+                            <DetailRow
+                              label="Source"
+                              value={displayValue(latestSkillsDraft.source)}
+                            />
+                          ) : null}
                           {hasRenderableValue(latestSkillsDraft.durationDays) ? (
                             <DetailRow
                               label="Duration Days"
@@ -3119,6 +3174,31 @@ export function CoachAthletePlanningProfileView({
                             />
                           ) : null}
                         </dl>
+                        {latestSkillsDraft.revision ? (
+                          <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            <h5 className="text-sm font-semibold text-textPrimary">
+                              Revision Summary
+                            </h5>
+                            {hasRenderableValue(latestSkillsDraft.revision.feedback) ? (
+                              <div className="space-y-1 text-sm text-textPrimary">
+                                <div className="font-medium">Coach Feedback:</div>
+                                <div className="whitespace-pre-wrap text-textSecondary">
+                                  {displayValue(latestSkillsDraft.revision.feedback)}
+                                </div>
+                              </div>
+                            ) : null}
+                            {latestSkillsDraft.revision.changeSummary.length > 0 ? (
+                              <div className="space-y-1 text-sm text-textPrimary">
+                                <div className="font-medium">Changes Applied:</div>
+                                <ul className="list-disc space-y-1 pl-5 text-textSecondary">
+                                  {latestSkillsDraft.revision.changeSummary.map((item, index) => (
+                                    <li key={`${item}-${index}`}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                         <div className="space-y-3">
                           {sortedLatestSkillsDraftDays.map((day, dayOffset) => (
                             <div
@@ -3216,6 +3296,41 @@ export function CoachAthletePlanningProfileView({
                               ))}
                             </div>
                           ))}
+                        </div>
+                        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <h5 className="text-sm font-semibold text-textPrimary">
+                            Revise Skills Plan
+                          </h5>
+                          {reviseSkillsError ? (
+                            <Alert variant="danger">{reviseSkillsError}</Alert>
+                          ) : null}
+                          {reviseSkillsSuccess ? (
+                            <Alert variant="success">{reviseSkillsSuccess}</Alert>
+                          ) : null}
+                          <label className="space-y-1 text-sm text-textPrimary">
+                            <span className="font-medium">Coach Feedback</span>
+                            <textarea
+                              rows={4}
+                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                              value={reviseSkillsFeedback}
+                              onChange={(event) => setReviseSkillsFeedback(event.target.value)}
+                              placeholder="Describe what should change in the skills plan."
+                            />
+                          </label>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={
+                              reviseSkillsLoading ||
+                              !latestSkillsDraft.trainingPlanId ||
+                              !latestSkillsDraft.trainingPlanVersionId
+                            }
+                            onClick={() => {
+                              void handleReviseSkillsPlan();
+                            }}
+                          >
+                            {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                          </Button>
                         </div>
                       </div>
                     ) : null

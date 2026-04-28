@@ -18,13 +18,6 @@ function readStringField(o: Record<string, unknown>, key: string): string {
   return "";
 }
 
-function readNonNegIntField(o: Record<string, unknown>, key: string): number | null {
-  if (!(key in o)) return null;
-  const v = o[key];
-  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-  return null;
-}
-
 function readNonNegInt(o: Record<string, unknown>, keys: string[]): number {
   for (const k of keys) {
     const v = o[k];
@@ -50,6 +43,20 @@ function readOptionalNonNegInt(
 function readBooleanField(o: Record<string, unknown>, key: string): boolean {
   const v = o[key];
   return v === true;
+}
+
+function readStringArrayField(
+  o: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = o[key];
+  if (!Array.isArray(value)) return [];
+  return value.reduce<string[]>((acc, item) => {
+    if (typeof item !== "string") return acc;
+    const trimmed = item.trim();
+    if (trimmed !== "") acc.push(trimmed);
+    return acc;
+  }, []);
 }
 
 function mergeDashboardRoot(data: unknown): Record<string, unknown> {
@@ -92,6 +99,7 @@ function formatFunctions(raw: unknown): string {
 export type CoachMeDashboardData = {
   trainingEntityName: string;
   academyCoachRole: string;
+  functions: string[];
   functionsDisplay: string;
   hasHeadCoachConfigured: boolean;
   trainingPlanReleaseMode: string;
@@ -119,6 +127,7 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
   const academyCoachRole =
     (authority ? readStringField(authority, "academyCoachRole") : "") || "—";
 
+  const functions = authority ? readStringArrayField(authority, "functions") : [];
   const functionsDisplay = authority ? formatFunctions(authority.functions) : "—";
 
   const hasHeadCoachConfiguredRaw =
@@ -143,6 +152,7 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
   return {
     trainingEntityName,
     academyCoachRole,
+    functions,
     functionsDisplay,
     hasHeadCoachConfigured: hasHeadCoachConfiguredRaw,
     trainingPlanReleaseMode,

@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/coachMe";
 import { fetchMyProfile } from "@/lib/api/profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { canCoachValidateLevel } from "@/lib/coachAuthority";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
@@ -104,9 +105,11 @@ function DetailRow({
 function CoachAssignedAthleteActions({
   athleteId,
   hasPlanningProfile,
+  canValidateLevel,
 }: {
   athleteId: string;
   hasPlanningProfile: boolean;
+  canValidateLevel: boolean;
 }) {
   const athleteIdTrimmed = athleteId.trim();
 
@@ -138,13 +141,15 @@ function CoachAssignedAthleteActions({
           View Planning Profile
         </Button>
       </Link>
-      <Link
-        href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`}
-      >
-        <Button type="button" variant="primary">
-          Validate Level
-        </Button>
-      </Link>
+      {canValidateLevel ? (
+        <Link
+          href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`}
+        >
+          <Button type="button" variant="primary">
+            Validate Level
+          </Button>
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -202,6 +207,13 @@ export function CoachDashboardView() {
   }, []);
 
   const dash = dashboard;
+  const showValidateLevel = dash
+    ? canCoachValidateLevel({
+        hasHeadCoachConfigured: dash.hasHeadCoachConfigured,
+        academyCoachRole: dash.academyCoachRole,
+        functions: dash.functions,
+      })
+    : false;
 
   return (
     <div className="w-full max-w-5xl space-y-10">
@@ -404,6 +416,7 @@ export function CoachDashboardView() {
                       <CoachAssignedAthleteActions
                         athleteId={row.athleteId}
                         hasPlanningProfile={row.hasPlanningProfile}
+                        canValidateLevel={showValidateLevel}
                       />
                     </Td>
                   </TableRow>

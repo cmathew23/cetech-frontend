@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { useAuth } from "@/hooks/useAuth";
 import { fetchMyAcademyCoaches } from "@/lib/api/academyMeCoaches";
 import {
+  createPhaseAwareGoal,
   createGoal,
   createSeasonCycle,
   createSeasonCyclePhase,
@@ -15,6 +16,7 @@ import {
   fetchSeasonCyclesForEntity,
   updateSeasonCycle,
   updateSeasonCyclePhase,
+  type GoalPriority,
   type GoalSummary,
   type SeasonCycleSummary,
   type SeasonPhaseSummary,
@@ -24,22 +26,27 @@ import {
   type CoachAthletePlanningProfileView as CoachAthletePlanningProfileData,
 } from "@/lib/api/coachAthletePlanningProfile";
 import { fetchCoachAthleteLevelValidation } from "@/lib/api/coachAthleteLevelValidation";
+import { fetchCoachMeDashboard } from "@/lib/api/coachMe";
 import {
   executeCoachAthleteTrainingPlan,
+  fetchLatestCoachAthleteDomainDraft,
   fetchCoachAthleteTrainingPlanCompleteness,
   fetchCoachAthleteTrainingPlanReadiness,
   fetchCoachAthleteTrainingPlanWorkloadAssessment,
   persistCoachAthleteTrainingPlanDraft,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanExecuteResult,
+  type CoachAthleteLatestDomainDraft,
   type CoachAthleteTrainingPlanPersistDraftResult,
   type CoachAthleteTrainingPlanReadiness,
+  type TrainingPlanGenerationDomain,
   type CoachAthleteTrainingPlanWorkloadAssessment,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { canCoachValidateLevel, normalizeCoachFunctionValue } from "@/lib/coachAuthority";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type DisplayableValue =
   | string
@@ -58,7 +65,9 @@ type GoalsSeasonSetupState = {
   seasons: SeasonCycleSummary[];
   phasesBySeasonCycleId: Record<string, SeasonPhaseSummary[]>;
   goals: GoalSummary[];
-  coachProfileId: string | null;
+  coachFunctions: string[];
+  hasHeadCoachConfigured: boolean;
+  academyCoachRole: string;
 };
 type SeasonPhaseType = "OFF_SEASON" | "PRE_SEASON" | "IN_SEASON";
 type PhaseEditorState = {
@@ -69,6 +78,59 @@ type PhaseEditorState = {
   error: string | null;
   success: string | null;
 };
+
+const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
+  "SKILLS",
+  "NUTRITION",
+  "S_AND_C",
+];
+const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
+  "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
+
+function readGenerationValidationArray(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  const directKeys = [
+    "error",
+    "errors",
+    "validationErrors",
+    "issues",
+    "violations",
+    "details",
+  ];
+
+  for (const key of directKeys) {
+    const candidate = record[key];
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  const nestedError = record.error;
+  if (nestedError && typeof nestedError === "object" && !Array.isArray(nestedError)) {
+    for (const key of directKeys) {
+      const candidate = (nestedError as Record<string, unknown>)[key];
+      if (Array.isArray(candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+function isAiGenerationValidationError(e: unknown): boolean {
+  if (!isNormalizedApiError(e)) return false;
+
+  const validationArray = readGenerationValidationArray(e.details);
+  if (validationArray && validationArray.length > 0) return true;
+
+  const message = e.message.trim();
+  return (
+    (message.startsWith("[") && message.endsWith("]")) ||
+    message.includes('[{"') ||
+    message.includes('"validationErrors"') ||
+    message.includes('"issues"')
+  );
+}
 
 function formatApiError(e: unknown, fallback: string): string {
   if (isNormalizedApiError(e)) {
@@ -111,6 +173,14 @@ function displayDate(value: string | null | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString();
+}
+
+function hasRenderableValue(value: DisplayableValue): boolean {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "string") return value.trim() !== "";
+  if (typeof value === "number") return Number.isFinite(value);
+  return true;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -207,6 +277,10 @@ function isMissingPlanningProfileError(e: unknown): boolean {
 
 function isNotFoundError(e: unknown): boolean {
   return isNormalizedApiError(e) && e.status === 404;
+}
+
+function isForbiddenError(e: unknown): boolean {
+  return isNormalizedApiError(e) && e.status === 403;
 }
 
 function formatMissingRequiredFields(values: string[]): string {
@@ -386,6 +460,23 @@ function detectCurrentPhase(
   );
 }
 
+function goalMatchesCurrentPhase(
+  goal: GoalSummary,
+  currentPhase: SeasonPhaseSummary | null,
+): boolean {
+  if (!currentPhase) return false;
+  if (goal.seasonPhaseId && currentPhase.phaseId) {
+    return goal.seasonPhaseId === currentPhase.phaseId;
+  }
+  if (!currentPhase.startDate || !currentPhase.endDate) return true;
+  const targetDate = goal.targetDate?.slice(0, 10) ?? null;
+  if (!targetDate) return true;
+  const phaseStart = dateOnly(currentPhase.startDate);
+  const phaseEnd = dateOnly(currentPhase.endDate);
+  if (!phaseStart || !phaseEnd) return true;
+  return phaseStart <= targetDate && targetDate <= phaseEnd;
+}
+
 function validatePhaseDraft(
   phase: SeasonPhaseType,
   draft: { startDate: string; endDate: string },
@@ -537,49 +628,6 @@ function canGenerateTrainingPlan(input: {
   );
 }
 
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter((item) => item !== "");
-}
-
-function parsePersistenceContext(snapshot: unknown): {
-  seasonCycleId: string;
-  startDate: string;
-  endDate: string;
-  goalIds?: string[];
-} | null {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
-  const root = snapshot as Record<string, unknown>;
-  const nested =
-    root.persistenceContext &&
-    typeof root.persistenceContext === "object" &&
-    !Array.isArray(root.persistenceContext)
-      ? (root.persistenceContext as Record<string, unknown>)
-      : null;
-  const source = nested ?? root;
-
-  const seasonCycleId =
-    typeof source.seasonCycleId === "string" ? source.seasonCycleId.trim() : "";
-  const startDate =
-    typeof source.startDate === "string" ? source.startDate.trim() : "";
-  const endDate = typeof source.endDate === "string" ? source.endDate.trim() : "";
-  const goalIds = readStringArray(source.goalIds);
-
-  if (seasonCycleId === "" || startDate === "" || endDate === "") {
-    return null;
-  }
-
-  return {
-    seasonCycleId,
-    startDate,
-    endDate,
-    ...(goalIds.length > 0 ? { goalIds } : {}),
-  };
-}
-
 function executionBlockedMessage(result: CoachAthleteTrainingPlanExecuteResult): string | null {
   if (result.executionDecision?.executed !== false) return null;
   const missingRequirements = result.completenessDecision?.missingRequirements ?? [];
@@ -603,17 +651,122 @@ function executionBlockedMessage(result: CoachAthleteTrainingPlanExecuteResult):
   return result.executionDecision.reason?.trim() || "Training plan generation was blocked.";
 }
 
+function coachFunctionToGenerationDomain(
+  value: string,
+): TrainingPlanGenerationDomain | null {
+  const normalized = normalizeCoachFunctionValue(value);
+  if (normalized === "SKILLS" || normalized === "SKILLS_COACH") return "SKILLS";
+  if (normalized === "NUTRITION" || normalized === "NUTRITION_COACH") {
+    return "NUTRITION";
+  }
+  if (
+    normalized === "S_AND_C" ||
+    normalized === "STRENGTH_AND_CONDITIONING" ||
+    normalized === "S_AND_C_COACH" ||
+    normalized === "STRENGTH_AND_CONDITIONING_COACH"
+  ) {
+    return "S_AND_C";
+  }
+  return null;
+}
+
+function deriveGenerationDomains(
+  functions: string[],
+): TrainingPlanGenerationDomain[] {
+  const domains = new Set<TrainingPlanGenerationDomain>();
+  for (const value of functions) {
+    const domain = coachFunctionToGenerationDomain(value);
+    if (domain) domains.add(domain);
+  }
+  return GENERATION_DOMAIN_ORDER.filter((domain) => domains.has(domain));
+}
+
+function resolveCoachGenerationFunctions(input: {
+  currentCoachUserId: string;
+  academyCoachFunctions: string[];
+  dashboardFunctions: string[];
+}): string[] {
+  if (
+    input.currentCoachUserId !== "" &&
+    deriveGenerationDomains(input.academyCoachFunctions).length > 0
+  ) {
+    return input.academyCoachFunctions;
+  }
+  if (deriveGenerationDomains(input.dashboardFunctions).length > 0) {
+    return input.dashboardFunctions;
+  }
+  return input.academyCoachFunctions.length > 0
+    ? input.academyCoachFunctions
+    : input.dashboardFunctions;
+}
+
+function generationButtonLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Generate Skills Plan";
+  if (domain === "NUTRITION") return "Generate Nutrition Plan";
+  return "Generate S&C Plan";
+}
+
+function currentPhaseGoalSectionTitle(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") return "Current Phase Nutrition Goals";
+  if (domain === "S_AND_C") return "Current Phase S&C Goals";
+  return "Current Phase Skills Goals";
+}
+
+function currentPhaseGoalNameLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") return "Nutrition Goal Name";
+  if (domain === "S_AND_C") return "S&C Goal Name";
+  return "Skill Goal Name";
+}
+
+function currentPhaseGoalRequirementLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") {
+    return "At least one ACTIVE nutrition goal is required for generation.";
+  }
+  if (domain === "S_AND_C") {
+    return "At least one ACTIVE S&C goal is required for generation.";
+  }
+  return "At least one ACTIVE skill goal is required for generation.";
+}
+
+function currentPhaseGoalEmptyState(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") {
+    return "No ACTIVE nutrition goals found for the detected current phase.";
+  }
+  if (domain === "S_AND_C") {
+    return "No ACTIVE S&C goals found for the detected current phase.";
+  }
+  return "No ACTIVE skill goals found for the detected current phase.";
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function deriveSharedValidationStatus(input: {
+  levelValidationStatus: string | null;
+  readinessValidationStatus: string | null;
+  profileValidatedLevel: string | null;
+}): string | null {
+  return (
+    input.levelValidationStatus ??
+    input.readinessValidationStatus ??
+    (input.profileValidatedLevel ? "CONFIRMED" : null)
+  );
+}
+
 export function CoachAthletePlanningProfileView({
   athleteId,
 }: {
   athleteId: string;
 }) {
   const router = useRouter();
-  const { accessContext, accessGateReady, user } = useAuth();
+  const { accessContext, accessGateReady } = useAuth();
   const entityId = useMemo(
     () => accessContext?.academy.trainingEntityId?.trim() ?? "",
     [accessContext],
   );
+  const currentCoachUserId = accessContext?.user.userId?.trim() ?? "";
   const athleteIdTrimmed = athleteId.trim();
 
   const [loading, setLoading] = useState(true);
@@ -636,6 +789,7 @@ export function CoachAthletePlanningProfileView({
   );
   const [workloadAssessmentResult, setWorkloadAssessmentResult] =
     useState<CoachAthleteTrainingPlanWorkloadAssessment | null>(null);
+  const workloadAssessmentAutoLoadKeyRef = useRef("");
   const [generatePlanLoading, setGeneratePlanLoading] = useState(false);
   const [generatePlanPhase, setGeneratePlanPhase] = useState<
     "idle" | "executing" | "persisting"
@@ -643,6 +797,10 @@ export function CoachAthletePlanningProfileView({
   const [generatePlanError, setGeneratePlanError] = useState<string | null>(null);
   const [generatePlanSuccess, setGeneratePlanSuccess] =
     useState<CoachAthleteTrainingPlanPersistDraftResult | null>(null);
+  const [latestSkillsDraft, setLatestSkillsDraft] =
+    useState<CoachAthleteLatestDomainDraft | null>(null);
+  const [latestSkillsDraftMissing, setLatestSkillsDraftMissing] = useState(false);
+  const [latestSkillsDraftError, setLatestSkillsDraftError] = useState<string | null>(null);
   const [setupLoading, setSetupLoading] = useState(true);
   const [seasonError, setSeasonError] = useState<string | null>(null);
   const [seasonSuccess, setSeasonSuccess] = useState<string | null>(null);
@@ -663,7 +821,9 @@ export function CoachAthletePlanningProfileView({
     seasons: [],
     phasesBySeasonCycleId: {},
     goals: [],
-    coachProfileId: null,
+    coachFunctions: [],
+    hasHeadCoachConfigured: false,
+    academyCoachRole: "",
   });
   const [selectedSeasonCycleId, setSelectedSeasonCycleId] = useState("");
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
@@ -721,9 +881,10 @@ export function CoachAthletePlanningProfileView({
     "MEDIUM",
   );
   const [goalName, setGoalName] = useState("");
+  const [goalSuccessCriteria, setGoalSuccessCriteria] = useState("");
   const [goalTargetDate, setGoalTargetDate] = useState("");
-  const [goalBaselineValue, setGoalBaselineValue] = useState("100");
-  const [goalTargetValue, setGoalTargetValue] = useState("120");
+  const [goalPriority, setGoalPriority] = useState<GoalPriority>("MEDIUM");
+  const [goalTargetValue, setGoalTargetValue] = useState("");
 
   useEffect(() => {
     if (!sportCode) return;
@@ -736,7 +897,7 @@ export function CoachAthletePlanningProfileView({
     if (seasonStartDate === "") return;
     const nextYear = Number(seasonStartDate.slice(0, 4));
     if (Number.isFinite(nextYear) && nextYear > 0) {
-      setSeasonYear(nextYear);
+      setSeasonYear((current) => (current === nextYear ? current : nextYear));
     }
   }, [seasonStartDate]);
 
@@ -840,10 +1001,11 @@ export function CoachAthletePlanningProfileView({
       const levelValidation =
         results[0].status === "fulfilled"
           ? results[0].value
-          : (pushError(
-              results[0].reason,
-              "Could not load level validation details.",
-            ),
+          : ((() => {
+              if (!isForbiddenError(results[0].reason)) {
+                pushError(results[0].reason, "Could not load level validation details.");
+              }
+            })(),
             null);
       const readiness =
         results[1].status === "fulfilled"
@@ -888,8 +1050,11 @@ export function CoachAthletePlanningProfileView({
         readiness?.appCompleteness ??
         completeness?.completenessStatus ??
         null,
-      validationStatus:
-        levelValidation?.validationStatus ?? readiness?.validationStatus ?? null,
+      validationStatus: deriveSharedValidationStatus({
+        levelValidationStatus: levelValidation?.validationStatus ?? null,
+        readinessValidationStatus: readiness?.validationStatus ?? null,
+        profileValidatedLevel: profile?.validatedLevel ?? null,
+      }),
       validatedLevel:
         levelValidation?.validatedLevel ??
         profile?.validatedLevel ??
@@ -916,7 +1081,9 @@ export function CoachAthletePlanningProfileView({
         seasons: [],
         phasesBySeasonCycleId: {},
         goals: [],
-        coachProfileId: null,
+        coachFunctions: [],
+        hasHeadCoachConfigured: false,
+        academyCoachRole: "",
       });
       setSelectedSeasonCycleId("");
       setSelectedGoalIds([]);
@@ -937,22 +1104,39 @@ export function CoachAthletePlanningProfileView({
         ...season,
         phases: season.phases ?? [],
       }));
-      const [goalsResult, coachesResult] = await Promise.allSettled([
+      const [goalsResult, dashboardResult, academyCoachesResult] = await Promise.allSettled([
         fetchGoalsForAthlete(athleteIdTrimmed),
+        fetchCoachMeDashboard(),
         fetchMyAcademyCoaches(),
       ]);
       const goals = goalsResult.status === "fulfilled" ? goalsResult.value : [];
-      const coachProfileId =
-        coachesResult.status === "fulfilled"
-          ? coachesResult.value.coaches.find((coach) => coach.coachUserId === user?.id)
-              ?.coachProfileId ?? null
-          : null;
+      const dashboardFunctions =
+        dashboardResult.status === "fulfilled" ? dashboardResult.value.functions : [];
+      const hasHeadCoachConfigured =
+        dashboardResult.status === "fulfilled"
+          ? dashboardResult.value.hasHeadCoachConfigured
+          : false;
+      const academyCoachRole =
+        dashboardResult.status === "fulfilled" ? dashboardResult.value.academyCoachRole : "";
+      const academyCoachFunctions =
+        academyCoachesResult.status === "fulfilled"
+          ? academyCoachesResult.value.coaches.find(
+              (coach) => coach.coachUserId === currentCoachUserId,
+            )?.functions ?? []
+          : [];
+      const coachFunctions = resolveCoachGenerationFunctions({
+        currentCoachUserId,
+        academyCoachFunctions,
+        dashboardFunctions,
+      });
 
       setSetupState({
         seasons,
         phasesBySeasonCycleId,
         goals,
-        coachProfileId,
+        coachFunctions,
+        hasHeadCoachConfigured,
+        academyCoachRole,
       });
 
       const today = formatDateInputValue(new Date());
@@ -985,12 +1169,12 @@ export function CoachAthletePlanningProfileView({
           .map((goal) => goal.goalId);
         return matchingGoalIds;
       });
-    } catch (e) {
+    } catch {
       setSeasonError("Failed to load seasons. Please try again.");
     } finally {
       setSetupLoading(false);
     }
-  }, [accessGateReady, athleteIdTrimmed, entityId, sportCode, user?.id]);
+  }, [accessGateReady, athleteIdTrimmed, currentCoachUserId, entityId]);
 
   useEffect(() => {
     void refreshGoalsSeasonSetup();
@@ -1028,29 +1212,35 @@ export function CoachAthletePlanningProfileView({
       .map((phase) => [phase.phase as SeasonPhaseType, phase]),
   ) as Partial<Record<SeasonPhaseType, SeasonPhaseSummary>>;
   const activePhaseForSelectedSeason = detectCurrentPhase(selectedSeasonPhases, today);
-  const activeGoals = setupState.goals.filter((goal) => goal.status === "ACTIVE");
-  const visibleActiveGoals = activeGoals.filter((goal) =>
-    selectedSeasonCycleId === "" ? true : goal.seasonCycleId === selectedSeasonCycleId,
+  const activeGoals = useMemo(
+    () => setupState.goals.filter((goal) => goal.status === "ACTIVE"),
+    [setupState.goals],
   );
-  const currentPhaseActiveGoals = visibleActiveGoals.filter((goal) => {
-    if (!activePhaseForSelectedSeason?.startDate || !activePhaseForSelectedSeason.endDate) {
-      return true;
-    }
-    const targetDate = goal.targetDate?.slice(0, 10) ?? null;
-    if (!targetDate) return true;
-    const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
-    const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
-    if (!phaseStart || !phaseEnd) return true;
-    return (
-      phaseStart <= targetDate &&
-      targetDate <= phaseEnd
-    );
-  });
-  const competitionGoals = visibleActiveGoals.filter(
-    (goal) => goal.goalType === "COMPETITION",
+  const visibleActiveGoals = useMemo(
+    () =>
+      activeGoals.filter((goal) =>
+        selectedSeasonCycleId === "" ? true : goal.seasonCycleId === selectedSeasonCycleId,
+      ),
+    [activeGoals, selectedSeasonCycleId],
   );
-  const selectedActiveGoals = currentPhaseActiveGoals.filter((goal) =>
-    selectedGoalIds.includes(goal.goalId),
+  const currentPhaseActiveGoals = useMemo(
+    () =>
+      visibleActiveGoals.filter((goal) =>
+        goalMatchesCurrentPhase(goal, activePhaseForSelectedSeason),
+      ),
+    [activePhaseForSelectedSeason, visibleActiveGoals],
+  );
+  const currentPhaseActiveGoalIds = useMemo(
+    () => currentPhaseActiveGoals.map((goal) => goal.goalId),
+    [currentPhaseActiveGoals],
+  );
+  const competitionGoals = useMemo(
+    () => visibleActiveGoals.filter((goal) => goal.goalType === "COMPETITION"),
+    [visibleActiveGoals],
+  );
+  const selectedActiveGoals = useMemo(
+    () => currentPhaseActiveGoals.filter((goal) => selectedGoalIds.includes(goal.goalId)),
+    [currentPhaseActiveGoals, selectedGoalIds],
   );
   const planEndDate = useMemo(
     () => addDaysToDateString(planStartDate, durationDays - 1),
@@ -1096,17 +1286,183 @@ export function CoachAthletePlanningProfileView({
 
   useEffect(() => {
     setSelectedGoalIds((current) => {
-      const allowedGoalIds = currentPhaseActiveGoals.map((goal) => goal.goalId);
-      const kept = current.filter((goalId) => allowedGoalIds.includes(goalId));
-      if (kept.length > 0) return kept;
-      return allowedGoalIds;
+      const kept = current.filter((goalId) => currentPhaseActiveGoalIds.includes(goalId));
+      const next = kept.length > 0 ? kept : currentPhaseActiveGoalIds;
+      return sameStringArray(current, next) ? current : next;
     });
-  }, [currentPhaseActiveGoals]);
+  }, [currentPhaseActiveGoalIds]);
 
   const seasonReady = selectedSeason !== null;
   const currentPhaseDetected = activePhaseForSelectedSeason !== null;
   const goalsReady = selectedActiveGoals.length > 0;
   const workloadComplete = workloadAssessmentResult?.workloadClassification !== null;
+  const allowedGenerationDomains = useMemo(
+    () => deriveGenerationDomains(setupState.coachFunctions),
+    [setupState.coachFunctions],
+  );
+  const currentCoachGenerationDomain = allowedGenerationDomains[0] ?? "SKILLS";
+  const sortedLatestSkillsDraftDays = useMemo(
+    () =>
+      latestSkillsDraft
+        ? [...latestSkillsDraft.days].sort(
+            (left, right) =>
+              (left.dayIndex ?? Number.MAX_SAFE_INTEGER) -
+              (right.dayIndex ?? Number.MAX_SAFE_INTEGER),
+          )
+        : [],
+    [latestSkillsDraft],
+  );
+  const shouldLoadLatestSkillsDraft = allowedGenerationDomains.includes("SKILLS");
+  const showValidateLevel = useMemo(
+    () =>
+      canCoachValidateLevel({
+        hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+        academyCoachRole: setupState.academyCoachRole,
+        functions: setupState.coachFunctions,
+      }),
+    [
+      setupState.academyCoachRole,
+      setupState.coachFunctions,
+      setupState.hasHeadCoachConfigured,
+    ],
+  );
+
+  const loadWorkloadAssessment = useCallback(
+    async (resetGenerationState: boolean) => {
+      if (
+        readinessLoading ||
+        workloadAssessmentLoading ||
+        entityId === "" ||
+        athleteIdTrimmed === "" ||
+        !canRunWorkloadAssessment({
+          appCompleteness: readinessPanel.appCompleteness,
+          validationStatus: readinessPanel.validationStatus,
+          planningEligibility: readinessPanel.planningEligibility,
+        })
+      ) {
+        return;
+      }
+
+      setWorkloadAssessmentLoading(true);
+      setWorkloadAssessmentError(null);
+      if (resetGenerationState) {
+        setGeneratePlanError(null);
+        setGeneratePlanPhase("idle");
+        setGeneratePlanSuccess(null);
+      }
+
+      try {
+        const result = await fetchCoachAthleteTrainingPlanWorkloadAssessment(
+          entityId,
+          athleteIdTrimmed,
+        );
+        setWorkloadAssessmentResult(result);
+      } catch (e) {
+        setWorkloadAssessmentResult(null);
+        setWorkloadAssessmentError(
+          formatApiError(e, "Could not run workload assessment. Please try again shortly."),
+        );
+      } finally {
+        setWorkloadAssessmentLoading(false);
+      }
+    },
+    [
+      athleteIdTrimmed,
+      entityId,
+      readinessLoading,
+      readinessPanel.appCompleteness,
+      readinessPanel.planningEligibility,
+      readinessPanel.validationStatus,
+      workloadAssessmentLoading,
+    ],
+  );
+
+  const loadLatestSkillsDraft = useCallback(async (retryOnNotFound = false) => {
+    if (entityId === "" || athleteIdTrimmed === "" || !shouldLoadLatestSkillsDraft) {
+      setLatestSkillsDraft(null);
+      setLatestSkillsDraftMissing(false);
+      setLatestSkillsDraftError(null);
+      return;
+    }
+
+    const retryDelaysMs = retryOnNotFound ? [0, 500, 1000] : [0];
+    for (const [attemptIndex, retryDelayMs] of retryDelaysMs.entries()) {
+      if (retryDelayMs > 0) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, retryDelayMs);
+        });
+      }
+      try {
+        const result = await fetchLatestCoachAthleteDomainDraft(
+          entityId,
+          athleteIdTrimmed,
+          "SKILLS",
+        );
+        setLatestSkillsDraft(result);
+        setLatestSkillsDraftMissing(false);
+        setLatestSkillsDraftError(null);
+        return;
+      } catch (e) {
+        if (isNormalizedApiError(e) && e.status === 404) {
+          if (attemptIndex < retryDelaysMs.length - 1) {
+            continue;
+          }
+          setLatestSkillsDraft(null);
+          setLatestSkillsDraftMissing(true);
+          setLatestSkillsDraftError(null);
+          return;
+        }
+        setLatestSkillsDraft(null);
+        setLatestSkillsDraftMissing(false);
+        setLatestSkillsDraftError("Unable to load draft. Please try again.");
+        return;
+      }
+    }
+  }, [athleteIdTrimmed, entityId, shouldLoadLatestSkillsDraft]);
+
+  useEffect(() => {
+    if (
+      readinessLoading ||
+      entityId === "" ||
+      athleteIdTrimmed === "" ||
+      !canRunWorkloadAssessment({
+        appCompleteness: readinessPanel.appCompleteness,
+        validationStatus: readinessPanel.validationStatus,
+        planningEligibility: readinessPanel.planningEligibility,
+      })
+    ) {
+      workloadAssessmentAutoLoadKeyRef.current = "";
+      return;
+    }
+
+    const nextKey = [
+      entityId,
+      athleteIdTrimmed,
+      readinessPanel.appCompleteness ?? "",
+      readinessPanel.validationStatus ?? "",
+      readinessPanel.planningEligibility ?? "",
+    ].join("|");
+
+    if (workloadAssessmentAutoLoadKeyRef.current === nextKey) {
+      return;
+    }
+
+    workloadAssessmentAutoLoadKeyRef.current = nextKey;
+    void loadWorkloadAssessment(false);
+  }, [
+    athleteIdTrimmed,
+    entityId,
+    loadWorkloadAssessment,
+    readinessLoading,
+    readinessPanel.appCompleteness,
+    readinessPanel.planningEligibility,
+    readinessPanel.validationStatus,
+  ]);
+
+  useEffect(() => {
+    if (!accessGateReady) return;
+    void loadLatestSkillsDraft();
+  }, [accessGateReady, loadLatestSkillsDraft]);
 
   function handleStartCreateSeason() {
     const defaultYear = new Date().getUTCFullYear();
@@ -1392,8 +1748,9 @@ export function CoachAthletePlanningProfileView({
   }
 
   async function handleCreateCompetitionGoal() {
-    if (setupState.coachProfileId === null) {
-      setCompetitionError("Coach profile ID is required to create goals.");
+    const coachUserId = currentCoachUserId;
+    if (coachUserId === "") {
+      setCompetitionError("Authenticated coach user ID is required to create goals.");
       setCompetitionSuccess(null);
       return;
     }
@@ -1421,7 +1778,7 @@ export function CoachAthletePlanningProfileView({
         athleteId: athleteIdTrimmed,
         entityId,
         seasonCycleId: selectedSeasonCycleId,
-        createdByCoachId: setupState.coachProfileId,
+        createdByCoachId: coachUserId,
         goalType: "COMPETITION",
         competitionEventId,
         startDate: `${phaseByType.IN_SEASON?.startDate ?? today}T00:00:00.000Z`,
@@ -1437,8 +1794,14 @@ export function CoachAthletePlanningProfileView({
   }
 
   async function handleCreateCurrentPhaseGoal() {
-    if (setupState.coachProfileId === null) {
-      setGoalError("Coach profile ID is required to create goals.");
+    const coachUserId = currentCoachUserId;
+    if (coachUserId === "") {
+      setGoalError("Authenticated coach user ID is required to create goals.");
+      setGoalSuccess(null);
+      return;
+    }
+    if (!activePhaseForSelectedSeason?.phaseId) {
+      setGoalError("A current phase must be detected before creating a goal.");
       setGoalSuccess(null);
       return;
     }
@@ -1447,26 +1810,36 @@ export function CoachAthletePlanningProfileView({
       setGoalSuccess(null);
       return;
     }
-    if (goalName.trim() === "" || goalTargetDate.trim() === "") {
-      setGoalError("Goal name and target date are required.");
+    if (goalName.trim() === "") {
+      setGoalError("Skill goal name is required.");
       setGoalSuccess(null);
       return;
     }
     if (
-      activePhaseForSelectedSeason?.startDate &&
+      goalTargetDate.trim() !== "" &&
+      activePhaseForSelectedSeason.startDate &&
       activePhaseForSelectedSeason.endDate &&
-      (goalTargetDate < activePhaseForSelectedSeason.startDate ||
-        goalTargetDate > activePhaseForSelectedSeason.endDate)
+      (() => {
+        const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
+        const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
+        return phaseStart && phaseEnd
+          ? goalTargetDate < phaseStart || goalTargetDate > phaseEnd
+          : false;
+      })()
     ) {
       setGoalError("Goal target date must fall inside the detected current phase.");
       setGoalSuccess(null);
       return;
     }
-    const competitionEventId = slugifyCompetitionId(goalName, goalTargetDate);
-    if (competitionEventId === "") {
-      setGoalError("Goal event ID could not be generated.");
-      setGoalSuccess(null);
-      return;
+    let parsedTargetValue: number | undefined;
+    if (goalTargetValue.trim() !== "") {
+      const numeric = Number(goalTargetValue);
+      if (!Number.isFinite(numeric)) {
+        setGoalError("Target value must be a valid number.");
+        setGoalSuccess(null);
+        return;
+      }
+      parsedTargetValue = numeric;
     }
 
     setGoalCreateLoading(true);
@@ -1474,22 +1847,28 @@ export function CoachAthletePlanningProfileView({
     setGoalSuccess(null);
 
     try {
-      await createGoal({
+      await createPhaseAwareGoal({
         athleteId: athleteIdTrimmed,
         entityId,
         seasonCycleId: selectedSeasonCycleId,
-        createdByCoachId: setupState.coachProfileId,
-        goalType: "COMPETITION",
-        competitionEventId,
-        baselineValue: Number(goalBaselineValue),
-        targetValue: Number(goalTargetValue),
-        startDate: `${
-          activePhaseForSelectedSeason?.startDate ?? today
-        }T00:00:00.000Z`,
-        targetDate: `${goalTargetDate}T00:00:00.000Z`,
+        seasonPhaseId: activePhaseForSelectedSeason.phaseId,
+        goalName,
+        successCriteria: goalSuccessCriteria,
+        goalCategory: "TRAINING",
+        createdByCoachId: coachUserId,
+        priority: goalPriority,
+        ...(parsedTargetValue !== undefined ? { targetValue: parsedTargetValue } : {}),
+        ...(goalTargetDate.trim() !== ""
+          ? { targetDate: `${goalTargetDate}T00:00:00.000Z` }
+          : {}),
       });
       await refreshGoalsSeasonSetup();
-      setGoalSuccess("Goal created successfully.");
+      setGoalSuccess("Skill goal created successfully.");
+      setGoalName("");
+      setGoalSuccessCriteria("");
+      setGoalTargetDate("");
+      setGoalTargetValue("");
+      setGoalPriority("MEDIUM");
     } catch (e) {
       setGoalError(formatApiError(e, "Could not create goal."));
     } finally {
@@ -1507,30 +1886,10 @@ export function CoachAthletePlanningProfileView({
     ) {
       return;
     }
-
-    setWorkloadAssessmentLoading(true);
-    setWorkloadAssessmentError(null);
-    setGeneratePlanError(null);
-    setGeneratePlanPhase("idle");
-    setGeneratePlanSuccess(null);
-
-    try {
-      const result = await fetchCoachAthleteTrainingPlanWorkloadAssessment(
-        entityId,
-        athleteIdTrimmed,
-      );
-      setWorkloadAssessmentResult(result);
-    } catch (e) {
-      setWorkloadAssessmentResult(null);
-      setWorkloadAssessmentError(
-        formatApiError(e, "Could not run workload assessment. Please try again shortly."),
-      );
-    } finally {
-      setWorkloadAssessmentLoading(false);
-    }
+    await loadWorkloadAssessment(true);
   }
 
-  async function handleGenerateTrainingPlan() {
+  async function handleGenerateTrainingPlan(domain: TrainingPlanGenerationDomain) {
     if (
       readinessLoading ||
       workloadAssessmentLoading ||
@@ -1586,6 +1945,7 @@ export function CoachAthletePlanningProfileView({
         {
           sportCode,
           durationDays,
+          generationDomain: domain,
         },
       );
       const blockedMessage = executionBlockedMessage(executeResult);
@@ -1625,8 +1985,23 @@ export function CoachAthletePlanningProfileView({
         },
       );
       setGeneratePlanSuccess(persistResult);
+      if (domain === "SKILLS") {
+        await loadLatestSkillsDraft(true);
+      }
     } catch (e) {
       setGeneratePlanSuccess(null);
+      if (
+        isNormalizedApiError(e) &&
+        e.code === "UNAUTHORIZED_DOMAIN_FOR_COACH_FUNCTION"
+      ) {
+        setGeneratePlanError("Coach is not authorized to generate this plan domain.");
+        return;
+      }
+      if (isAiGenerationValidationError(e)) {
+        console.error("Training plan generation validation error", e);
+        setGeneratePlanError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
+        return;
+      }
       setGeneratePlanError(
         formatApiError(e, "Could not generate training plan draft. Please try again shortly."),
       );
@@ -1656,18 +2031,20 @@ export function CoachAthletePlanningProfileView({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={missingPlanningProfile}
-            onClick={() =>
-              router.push(
-                `/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`,
-              )
-            }
-          >
-            Continue to Level Validation
-          </Button>
+          {showValidateLevel ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={missingPlanningProfile}
+              onClick={() =>
+                router.push(
+                  `/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`,
+                )
+              }
+            >
+              Continue to Level Validation
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="secondary"
@@ -1740,24 +2117,26 @@ export function CoachAthletePlanningProfileView({
                       ) : null}
                     </dl>
 
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        disabled={
-                          readinessLoading ||
-                          workloadAssessmentLoading ||
-                          !canRunWorkloadAssessment(readinessPanel)
-                        }
-                        onClick={() => {
-                          void handleRunWorkloadAssessment();
-                        }}
-                      >
-                        {workloadAssessmentLoading
-                          ? "Running Workload Assessment..."
-                          : "Run Workload Assessment"}
-                      </Button>
-                    </div>
+                    {showValidateLevel ? (
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          disabled={
+                            readinessLoading ||
+                            workloadAssessmentLoading ||
+                            !canRunWorkloadAssessment(readinessPanel)
+                          }
+                          onClick={() => {
+                            void handleRunWorkloadAssessment();
+                          }}
+                        >
+                          {workloadAssessmentLoading
+                            ? "Running Workload Assessment..."
+                            : "Run Workload Assessment"}
+                        </Button>
+                      </div>
+                    ) : null}
 
                     {workloadAssessmentError ? (
                       <Alert variant="danger">{workloadAssessmentError}</Alert>
@@ -2346,11 +2725,6 @@ export function CoachAthletePlanningProfileView({
                       {competitionSuccess ? (
                         <Alert variant="success">{competitionSuccess}</Alert>
                       ) : null}
-                      {setupState.coachProfileId === null ? (
-                        <Alert variant="warning">
-                          Coach profile ID is required to create goals.
-                        </Alert>
-                      ) : null}
                       {activePhaseForSelectedSeason?.phase === "IN_SEASON" ? (
                         <Alert variant="warning">
                           Current phase is In-season. Competition goals are recommended.
@@ -2398,7 +2772,7 @@ export function CoachAthletePlanningProfileView({
                         disabled={
                           competitionCreateLoading ||
                           selectedSeasonCycleId === "" ||
-                          setupState.coachProfileId === null
+                          currentCoachUserId === ""
                         }
                         onClick={() => {
                           void handleCreateCompetitionGoal();
@@ -2427,22 +2801,30 @@ export function CoachAthletePlanningProfileView({
                 <section className="space-y-3 rounded-lg border border-slate-200 p-4">
                   <div className="space-y-1">
                     <h3 className="text-sm font-semibold text-textPrimary">
-                      Step 4 - Current Phase Goals
+                      {currentPhaseGoalSectionTitle(currentCoachGenerationDomain)}
                     </h3>
                     <p className="text-sm text-textSecondary">
-                      At least one ACTIVE goal is required for generation.
+                      {currentPhaseGoalRequirementLabel(currentCoachGenerationDomain)}
                     </p>
                   </div>
                   {goalError ? <Alert variant="danger">{goalError}</Alert> : null}
                   {goalSuccess ? <Alert variant="success">{goalSuccess}</Alert> : null}
-                  {setupState.coachProfileId === null ? (
+                  {currentCoachUserId === "" ? (
                     <Alert variant="warning">
-                      Coach profile ID is required to create goals.
+                      Authenticated coach user ID is required to create goals.
                     </Alert>
+                  ) : null}
+                  {activePhaseForSelectedSeason ? (
+                    <DetailRow
+                      label="Detected Current Phase"
+                      value={displayValue(activePhaseForSelectedSeason.phase)}
+                    />
                   ) : null}
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Goal name / event id text</span>
+                      <span className="font-medium">
+                        {currentPhaseGoalNameLabel(currentCoachGenerationDomain)}
+                      </span>
                       <input
                         type="text"
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
@@ -2451,30 +2833,44 @@ export function CoachAthletePlanningProfileView({
                       />
                     </label>
                     <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Goal target date</span>
-                      <input
-                        type="date"
+                      <span className="font-medium">Priority</span>
+                      <select
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalTargetDate}
-                        onChange={(event) => setGoalTargetDate(event.target.value)}
+                        value={goalPriority}
+                        onChange={(event) =>
+                          setGoalPriority(event.target.value as GoalPriority)
+                        }
+                      >
+                        <option value="LOW">LOW</option>
+                        <option value="MEDIUM">MEDIUM</option>
+                        <option value="HIGH">HIGH</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-sm text-textPrimary">
+                      <span className="font-medium">Success Criteria / Measurement</span>
+                      <textarea
+                        rows={3}
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={goalSuccessCriteria}
+                        onChange={(event) => setGoalSuccessCriteria(event.target.value)}
                       />
                     </label>
                     <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Baseline Value</span>
-                      <input
-                        type="number"
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalBaselineValue}
-                        onChange={(event) => setGoalBaselineValue(event.target.value)}
-                      />
-                    </label>
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Target Value</span>
+                      <span className="font-medium">Numeric Target Value (Optional)</span>
                       <input
                         type="number"
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
                         value={goalTargetValue}
                         onChange={(event) => setGoalTargetValue(event.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-sm text-textPrimary">
+                      <span className="font-medium">Target Date</span>
+                      <input
+                        type="date"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                        value={goalTargetDate}
+                        onChange={(event) => setGoalTargetDate(event.target.value)}
                       />
                     </label>
                   </div>
@@ -2484,7 +2880,8 @@ export function CoachAthletePlanningProfileView({
                     disabled={
                       goalCreateLoading ||
                       selectedSeasonCycleId === "" ||
-                      setupState.coachProfileId === null
+                      currentCoachUserId === "" ||
+                      !activePhaseForSelectedSeason?.phaseId
                     }
                     onClick={() => {
                       void handleCreateCurrentPhaseGoal();
@@ -2515,14 +2912,16 @@ export function CoachAthletePlanningProfileView({
                             }}
                           />
                           <span>
-                            {goal.goalId} | {displayValue(goal.status)} |{" "}
-                            {displayValue(goal.targetDate)}
+                            {displayValue(goal.goalName ?? goal.goalId)} |{" "}
+                            {displayValue(goal.status)} | {displayValue(goal.priority)}
+                            {goal.successCriteria ? ` | ${displayValue(goal.successCriteria)}` : ""}
+                            {goal.targetDate ? ` | ${displayValue(goal.targetDate)}` : ""}
                           </span>
                         </label>
                       ))
                     ) : (
                       <div className="text-sm text-textSecondary">
-                        No ACTIVE goals found for the detected current phase.
+                        {currentPhaseGoalEmptyState(currentCoachGenerationDomain)}
                       </div>
                     )}
                   </div>
@@ -2658,34 +3057,208 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     </Alert>
                   ) : null}
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={
-                      readinessLoading ||
-                      workloadAssessmentLoading ||
-                      generatePlanLoading ||
-                      !seasonReady ||
-                      !goalsReady ||
-                      !currentPhaseDetected ||
-                      !planWindowInsideCurrentPhase ||
-                      !canGenerateTrainingPlan({
-                        appCompleteness: readinessPanel.appCompleteness,
-                        validationStatus: readinessPanel.validationStatus,
-                        planningEligibility: readinessPanel.planningEligibility,
-                        workloadClassificationExists: workloadComplete,
-                      })
-                    }
-                    onClick={() => {
-                      void handleGenerateTrainingPlan();
-                    }}
-                  >
-                    {generatePlanLoading
-                      ? generatePlanPhase === "persisting"
-                        ? "Saving draft..."
-                        : "Generating plan..."
-                      : "Generate Training Plan"}
-                  </Button>
+                  {shouldLoadLatestSkillsDraft ? (
+                    latestSkillsDraftError ? (
+                      <Alert variant="danger">{latestSkillsDraftError}</Alert>
+                    ) : latestSkillsDraftMissing ? (
+                      <div className="text-sm text-textSecondary">
+                        No generated skills draft found yet.
+                      </div>
+                    ) : latestSkillsDraft ? (
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                        <h4 className="text-sm font-semibold text-textPrimary">
+                          Latest Generated Skills Draft
+                        </h4>
+                        <dl className="space-y-1">
+                          {hasRenderableValue(latestSkillsDraft.trainingPlanId) ? (
+                            <DetailRow
+                              label="Training Plan ID"
+                              value={displayValue(latestSkillsDraft.trainingPlanId)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.trainingPlanVersionId) ? (
+                            <DetailRow
+                              label="Version ID"
+                              value={displayValue(latestSkillsDraft.trainingPlanVersionId)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.versionNumber) ? (
+                            <DetailRow
+                              label="Version Number"
+                              value={displayValue(latestSkillsDraft.versionNumber)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.status) ? (
+                            <DetailRow
+                              label="Status"
+                              value={displayValue(latestSkillsDraft.status)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.durationDays) ? (
+                            <DetailRow
+                              label="Duration Days"
+                              value={displayValue(latestSkillsDraft.durationDays)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.daysCreated) ? (
+                            <DetailRow
+                              label="Days Created"
+                              value={displayValue(latestSkillsDraft.daysCreated)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.sessionsCreated) ? (
+                            <DetailRow
+                              label="Sessions Created"
+                              value={displayValue(latestSkillsDraft.sessionsCreated)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(latestSkillsDraft.itemsPersisted) ? (
+                            <DetailRow
+                              label="Items Persisted"
+                              value={displayValue(latestSkillsDraft.itemsPersisted)}
+                            />
+                          ) : null}
+                        </dl>
+                        <div className="space-y-3">
+                          {sortedLatestSkillsDraftDays.map((day, dayOffset) => (
+                            <div
+                              key={`${day.dayIndex ?? dayOffset}-${day.date ?? "day"}`}
+                              className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+                            >
+                              <div className="text-sm font-semibold text-textPrimary">
+                                {`Day ${day.dayIndex ?? dayOffset + 1}`}
+                              </div>
+                              <dl className="space-y-1">
+                                {hasRenderableValue(day.date) ? (
+                                  <DetailRow label="Date" value={displayValue(day.date)} />
+                                ) : null}
+                                {hasRenderableValue(day.dayFocus) ? (
+                                  <DetailRow
+                                    label="Day Focus"
+                                    value={displayValue(day.dayFocus)}
+                                  />
+                                ) : null}
+                                {hasRenderableValue(day.notes) ? (
+                                  <DetailRow label="Notes" value={displayValue(day.notes)} />
+                                ) : null}
+                              </dl>
+                              {day.sessions.map((session, sessionOffset) => (
+                                <div
+                                  key={`${session.sessionIndex ?? sessionOffset}-${session.title ?? "session"}`}
+                                  className="space-y-2 rounded-md border border-slate-200 bg-white p-3"
+                                >
+                                  <dl className="space-y-1">
+                                    {hasRenderableValue(session.title) ? (
+                                      <DetailRow
+                                        label="Title"
+                                        value={displayValue(session.title)}
+                                      />
+                                    ) : null}
+                                    {hasRenderableValue(session.objective) ? (
+                                      <DetailRow
+                                        label="Objective"
+                                        value={displayValue(session.objective)}
+                                      />
+                                    ) : null}
+                                    {hasRenderableValue(session.plannedDurationMinutes) ? (
+                                      <DetailRow
+                                        label="Planned Duration Minutes"
+                                        value={displayValue(session.plannedDurationMinutes)}
+                                      />
+                                    ) : null}
+                                    {hasRenderableValue(session.intensity) ? (
+                                      <DetailRow
+                                        label="Intensity"
+                                        value={displayValue(session.intensity)}
+                                      />
+                                    ) : null}
+                                  </dl>
+                                  {session.items.map((item, itemOffset) => (
+                                    <div
+                                      key={`${item.label ?? item.summary ?? "item"}-${itemOffset}`}
+                                      className="space-y-1 rounded-md border border-slate-200 bg-slate-50 p-3"
+                                    >
+                                      <dl className="space-y-1">
+                                        {hasRenderableValue(item.label) ? (
+                                          <DetailRow
+                                            label="Label"
+                                            value={displayValue(item.label)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.summary) ? (
+                                          <DetailRow
+                                            label="Summary"
+                                            value={displayValue(item.summary)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.durationMinutes) ? (
+                                          <DetailRow
+                                            label="Duration Minutes"
+                                            value={displayValue(item.durationMinutes)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.reps) ? (
+                                          <DetailRow
+                                            label="Reps"
+                                            value={displayValue(item.reps)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.notes) ? (
+                                          <DetailRow
+                                            label="Notes"
+                                            value={displayValue(item.notes)}
+                                          />
+                                        ) : null}
+                                      </dl>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  ) : null}
+                  {allowedGenerationDomains.length === 0 ? (
+                    <div className="text-sm text-textSecondary">
+                      You do not currently have a generation function assigned.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {allowedGenerationDomains.map((domain) => (
+                        <Button
+                          key={domain}
+                          type="button"
+                          variant="primary"
+                          disabled={
+                            readinessLoading ||
+                            workloadAssessmentLoading ||
+                            generatePlanLoading ||
+                            !seasonReady ||
+                            !goalsReady ||
+                            !currentPhaseDetected ||
+                            !planWindowInsideCurrentPhase ||
+                            !canGenerateTrainingPlan({
+                              appCompleteness: readinessPanel.appCompleteness,
+                              validationStatus: readinessPanel.validationStatus,
+                              planningEligibility: readinessPanel.planningEligibility,
+                              workloadClassificationExists: workloadComplete,
+                            })
+                          }
+                          onClick={() => {
+                            void handleGenerateTrainingPlan(domain);
+                          }}
+                        >
+                          {generatePlanLoading
+                            ? generatePlanPhase === "persisting"
+                              ? "Saving draft..."
+                              : "Generating plan..."
+                            : generationButtonLabel(domain)}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </div>
             )}

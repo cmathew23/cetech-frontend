@@ -3,6 +3,7 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest, type NormalizedApiError } from "@/lib/apiClient";
 
 type AnyRecord = Record<string, unknown>;
+const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 120_000;
 type WorkloadAssessmentValue =
   | string
   | number
@@ -173,6 +174,8 @@ export type CoachAthleteTrainingPlanCompleteness = {
   missingRequiredFields: string[];
 };
 
+export type TrainingPlanGenerationDomain = "SKILLS" | "NUTRITION" | "S_AND_C";
+
 export type CoachAthleteTrainingPlanExecuteResult = {
   executionDecision: {
     executed: boolean | null;
@@ -197,6 +200,155 @@ export type CoachAthleteTrainingPlanPersistDraftResult = {
   itemsPersisted: number | null;
   raw: unknown;
 };
+
+export type CoachAthleteGeneratedDraftItem = {
+  label: string | null;
+  summary: string | null;
+  durationMinutes: number | null;
+  reps: string | null;
+  notes: string | null;
+};
+
+export type CoachAthleteGeneratedDraftSession = {
+  sessionIndex: number | null;
+  title: string | null;
+  objective: string | null;
+  plannedDurationMinutes: number | null;
+  intensity: string | null;
+  items: CoachAthleteGeneratedDraftItem[];
+};
+
+export type CoachAthleteGeneratedDraftDay = {
+  dayIndex: number | null;
+  date: string | null;
+  dayFocus: string | null;
+  notes: string | null;
+  sessions: CoachAthleteGeneratedDraftSession[];
+};
+
+export type CoachAthleteLatestDomainDraft = {
+  trainingPlanId: string | null;
+  trainingPlanVersionId: string | null;
+  versionNumber: number | null;
+  status: string | null;
+  durationDays: number | null;
+  daysCreated: number | null;
+  sessionsCreated: number | null;
+  itemsPersisted: number | null;
+  days: CoachAthleteGeneratedDraftDay[];
+  raw: unknown;
+};
+
+function readStringLike(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return typeof value === "boolean" ? String(value) : null;
+}
+
+function readFirstArray(records: AnyRecord[], keys: string[]): unknown[] {
+  for (const key of keys) {
+    for (const record of records) {
+      const value = record[key];
+      if (Array.isArray(value)) return value;
+    }
+  }
+  return [];
+}
+
+function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const item: CoachAthleteGeneratedDraftItem = {
+    label: readStringKey([record], ["label", "name", "title"]),
+    summary: readStringKey([record], ["summary", "description", "objective"]),
+    durationMinutes: readNumberKey([record], ["durationMinutes"]),
+    reps: readStringLike(record.reps),
+    notes: readStringKey([record], ["notes"]),
+  };
+  return item.label || item.summary || item.durationMinutes !== null || item.reps || item.notes
+    ? item
+    : null;
+}
+
+function parseGeneratedDraftSession(
+  value: unknown,
+): CoachAthleteGeneratedDraftSession | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const items = readFirstArray([record], ["items"])
+    .map(parseGeneratedDraftItem)
+    .filter((item): item is CoachAthleteGeneratedDraftItem => item !== null);
+  const session: CoachAthleteGeneratedDraftSession = {
+    sessionIndex: readNumberKey([record], ["sessionIndex", "index"]),
+    title: readStringKey([record], ["title", "label", "name"]),
+    objective: readStringKey([record], ["objective", "summary", "description"]),
+    plannedDurationMinutes: readNumberKey([record], ["plannedDurationMinutes", "durationMinutes"]),
+    intensity: readStringKey([record], ["intensity"]),
+    items,
+  };
+  return (
+    session.sessionIndex !== null ||
+    session.title ||
+    session.objective ||
+    session.plannedDurationMinutes !== null ||
+    session.intensity ||
+    session.items.length > 0
+  )
+    ? session
+    : null;
+}
+
+function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const sessions = readFirstArray([record], ["sessions"])
+    .map(parseGeneratedDraftSession)
+    .filter((session): session is CoachAthleteGeneratedDraftSession => session !== null)
+    .sort((left, right) => (left.sessionIndex ?? Number.MAX_SAFE_INTEGER) - (right.sessionIndex ?? Number.MAX_SAFE_INTEGER));
+  const day: CoachAthleteGeneratedDraftDay = {
+    dayIndex: readNumberKey([record], ["dayIndex", "dayNumber", "index"]),
+    date: readStringKey([record], ["date", "dayDate"]),
+    dayFocus: readStringKey([record], ["dayFocus"]),
+    notes: readStringKey([record], ["notes"]),
+    sessions,
+  };
+  return (
+    day.dayIndex !== null ||
+    day.date ||
+    day.dayFocus ||
+    day.notes ||
+    day.sessions.length > 0
+  )
+    ? day
+    : null;
+}
+
+function parseLatestDomainDraftPayload(data: unknown): CoachAthleteLatestDomainDraft {
+  const records = collectRecords(data);
+  const days = readFirstArray(records, ["days"])
+    .map(parseGeneratedDraftDay)
+    .filter((day): day is CoachAthleteGeneratedDraftDay => day !== null)
+    .sort((left, right) => (left.dayIndex ?? Number.MAX_SAFE_INTEGER) - (right.dayIndex ?? Number.MAX_SAFE_INTEGER));
+
+  return {
+    trainingPlanId: readStringKey(records, ["trainingPlanId"]),
+    trainingPlanVersionId: readStringKey(records, [
+      "trainingPlanVersionId",
+      "versionId",
+    ]),
+    versionNumber: readNumberKey(records, ["versionNumber"]),
+    status: readStringKey(records, ["status"]),
+    durationDays: readNumberKey(records, ["durationDays"]),
+    daysCreated: readNumberKey(records, ["daysCreated"]),
+    sessionsCreated: readNumberKey(records, ["sessionsCreated"]),
+    itemsPersisted: readNumberKey(records, ["itemsPersisted"]),
+    days,
+    raw: data,
+  };
+}
 
 function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanReadiness {
   const records = collectRecords(data);
@@ -415,10 +567,12 @@ export async function executeCoachAthleteTrainingPlan(
   payload: {
     sportCode: string;
     durationDays: 7 | 15 | 30;
+    generationDomain: TrainingPlanGenerationDomain;
   },
 ): Promise<CoachAthleteTrainingPlanExecuteResult> {
   const ids = assertIds(entityId, athleteId);
   const sportCode = payload.sportCode.trim();
+  const generationDomain = payload.generationDomain;
   if (sportCode === "") {
     throw {
       message: "sportCode is required",
@@ -430,9 +584,11 @@ export async function executeCoachAthleteTrainingPlan(
     paths.entities.athleteTrainingPlanExecute(ids.entityId, ids.athleteId),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
       body: JSON.stringify({
         sportCode,
         durationDays: payload.durationDays,
+        generationDomain,
       }),
     },
   );
@@ -466,4 +622,24 @@ export async function persistCoachAthleteTrainingPlanDraft(
     },
   );
   return parsePersistDraftPayload(adaptBackendSuccess(raw));
+}
+
+export async function fetchLatestCoachAthleteDomainDraft(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<CoachAthleteLatestDomainDraft> {
+  const ids = assertIds(entityId, athleteId);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanLatestDomainDraft(
+      ids.entityId,
+      ids.athleteId,
+      generationDomain,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+  );
+  return parseLatestDomainDraftPayload(adaptBackendSuccess(raw));
 }

@@ -202,10 +202,15 @@ export type CoachAthleteTrainingPlanPersistDraftResult = {
 };
 
 export type CoachAthleteGeneratedDraftItem = {
+  order: number | null;
+  itemType: string | null;
+  exerciseCatalogItemId: string | null;
   label: string | null;
   summary: string | null;
+  sets: string | null;
   durationMinutes: number | null;
   reps: string | null;
+  intensity: string | null;
   notes: string | null;
 };
 
@@ -269,13 +274,29 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
   const record = asRecord(value);
   if (!record) return null;
   const item: CoachAthleteGeneratedDraftItem = {
+    order: readNumberKey([record], ["order", "itemOrder", "orderIndex", "index"]),
+    itemType: readStringKey([record], ["itemType"]),
+    exerciseCatalogItemId: readStringKey([record], ["exerciseCatalogItemId"]),
     label: readStringKey([record], ["label", "name", "title"]),
     summary: readStringKey([record], ["summary", "description", "objective"]),
+    sets: readStringLike(record.sets),
     durationMinutes: readNumberKey([record], ["durationMinutes"]),
     reps: readStringLike(record.reps),
+    intensity: readStringKey([record], ["intensity"]),
     notes: readStringKey([record], ["notes"]),
   };
-  return item.label || item.summary || item.durationMinutes !== null || item.reps || item.notes
+  return (
+    item.order !== null ||
+    item.itemType ||
+    item.exerciseCatalogItemId ||
+    item.label ||
+    item.summary ||
+    item.sets ||
+    item.durationMinutes !== null ||
+    item.reps ||
+    item.intensity ||
+    item.notes
+  )
     ? item
     : null;
 }
@@ -287,7 +308,11 @@ function parseGeneratedDraftSession(
   if (!record) return null;
   const items = readFirstArray([record], ["items"])
     .map(parseGeneratedDraftItem)
-    .filter((item): item is CoachAthleteGeneratedDraftItem => item !== null);
+    .filter((item): item is CoachAthleteGeneratedDraftItem => item !== null)
+    .sort(
+      (left, right) =>
+        (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER),
+    );
   const session: CoachAthleteGeneratedDraftSession = {
     sessionIndex: readNumberKey([record], ["sessionIndex", "index"]),
     title: readStringKey([record], ["title", "label", "name"]),
@@ -339,7 +364,7 @@ function parseLatestDomainDraftRevision(
   const record = asRecord(value);
   if (!record) return null;
   const revision: CoachAthleteLatestDomainDraftRevision = {
-    feedback: readStringKey([record], ["feedback"]),
+    feedback: readStringKey([record], ["feedback", "coachFeedback"]),
     changeSummary: readStringListKey([record], ["changeSummary"]),
   };
   return revision.feedback || revision.changeSummary.length > 0 ? revision : null;
@@ -666,7 +691,11 @@ export async function fetchLatestCoachAthleteDomainDraft(
       cache: "no-store",
     },
   );
-  return parseLatestDomainDraftPayload(adaptBackendSuccess(raw));
+  const adapted = adaptBackendSuccess(raw);
+  if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+    console.debug("[latest-domain-draft raw]", adapted);
+  }
+  return parseLatestDomainDraftPayload(adapted);
 }
 
 export async function reviseCoachAthleteTrainingPlan(
@@ -700,6 +729,41 @@ export async function reviseCoachAthleteTrainingPlan(
         trainingPlanVersionId,
         generationDomain: payload.generationDomain,
         feedback,
+      }),
+    },
+  );
+  adaptBackendSuccess(raw);
+}
+
+export async function reviseCoachAthleteSandCTrainingPlan(
+  entityId: string,
+  athleteId: string,
+  payload: {
+    trainingPlanId: string;
+    versionId: string;
+    coachFeedback: string;
+  },
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const trainingPlanId = payload.trainingPlanId.trim();
+  const versionId = payload.versionId.trim();
+  const coachFeedback = payload.coachFeedback.trim();
+  if (trainingPlanId === "" || versionId === "" || coachFeedback === "") {
+    throw {
+      message: "trainingPlanId, versionId, and coachFeedback are required",
+      status: 400,
+      code: "TRAINING_PLAN_SANDC_REVISE_INPUT_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanSandcRevise(ids.entityId, ids.athleteId),
+    {
+      method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+      body: JSON.stringify({
+        trainingPlanId,
+        versionId,
+        coachFeedback,
       }),
     },
   );

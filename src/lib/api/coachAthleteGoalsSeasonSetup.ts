@@ -55,6 +55,7 @@ export type GoalSummary = {
   entityId: string | null;
   seasonCycleId: string | null;
   seasonPhaseId: string | null;
+  domain: "SKILLS" | "S_AND_C" | "NUTRITION" | null;
   status: string | null;
   goalType: string | null;
   goalName: string | null;
@@ -107,12 +108,17 @@ function parseGoal(value: unknown): GoalSummary | null {
   if (!record) return null;
   const goalId = readString(record.goalId) ?? readString(record.id) ?? null;
   if (!goalId) return null;
+  const domain = readString(record.domain);
   return {
     goalId,
     athleteId: readString(record.athleteId),
     entityId: readString(record.entityId),
     seasonCycleId: readString(record.seasonCycleId),
     seasonPhaseId: readString(record.seasonPhaseId),
+    domain:
+      domain === "SKILLS" || domain === "S_AND_C" || domain === "NUTRITION"
+        ? domain
+        : null,
     status: readString(record.status),
     goalType: readString(record.goalType),
     goalName: readString(record.goalName),
@@ -372,9 +378,11 @@ export async function createPhaseAwareGoal(input: {
   entityId: string;
   seasonCycleId: string;
   seasonPhaseId: string;
+  goalType: "PERFORMANCE";
+  domain: "SKILLS" | "S_AND_C" | "NUTRITION";
   goalName: string;
   successCriteria?: string;
-  goalCategory: string;
+  goalCategory: "TRAINING";
   createdByCoachId: string;
   priority?: GoalPriority;
   targetValue?: number;
@@ -385,8 +393,10 @@ export async function createPhaseAwareGoal(input: {
     entityId: requireNonEmpty(input.entityId, "entityId"),
     seasonCycleId: requireNonEmpty(input.seasonCycleId, "seasonCycleId"),
     seasonPhaseId: requireNonEmpty(input.seasonPhaseId, "seasonPhaseId"),
+    goalType: input.goalType,
+    domain: input.domain,
     goalName: requireNonEmpty(input.goalName, "goalName"),
-    goalCategory: requireNonEmpty(input.goalCategory, "goalCategory"),
+    goalCategory: input.goalCategory,
     createdByCoachId: requireNonEmpty(input.createdByCoachId, "createdByCoachId"),
   };
   if (typeof input.successCriteria === "string" && input.successCriteria.trim() !== "") {

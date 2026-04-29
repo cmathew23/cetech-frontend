@@ -111,7 +111,7 @@ Future **multi-role** users require routing that defers to **`accessContext`** a
 **What exists today (frontend):**
 
 - Athlete **`/athlete/profile-planning`**: create (`POST .../me`), update (`PATCH .../me` with changed-fields-only payload), read-only backend status block; DOB **`dd/mm/yyyy`** in UI, ISO datetime on submit.
-- Coach **`/coach/athletes/:athleteId/planning-profile`**: read-only view via **`GET .../entities/:entityId/athletes/:athleteId/planning-profile`**.
+- Coach **`/coach/athletes/:athleteId/planning-profile`**: read-only **planning profile** via **`GET .../entities/:entityId/athletes/:athleteId/planning-profile`**, plus coach **training plan draft** workspace (execute + persist, latest domain draft, Skills/S&C revision, revision summary when parsed `revision` is present). User-flow documentation: **`docs/ui/COACH_PLANNING_FLOW.md`**, **`docs/ui/SNC_UI.md`**, **`docs/ui/GOALS_UI.md`**.
 - Coach dashboard: **`hasPlanningProfile`** on assigned-athlete rows drives **View** vs **Not Available** (no extra list fetch per row).
 
 **Still deferred or unverified:**
@@ -119,7 +119,6 @@ Future **multi-role** users require routing that defers to **`accessContext`** a
 - **`POST .../athlete-planning-profile/me/confirm`** — path in `endpoints.ts`; **not** invoked from athlete UI.
 - **`GET .../athlete-planning-profile/me/readiness`** — path in `endpoints.ts`; **not** used by current athlete page.
 - **Coach-side write/update** to an athlete’s planning profile — **not** implemented.
-- **Training-plan generation / AI** — **not** implemented; planning profile is prerequisite data only from a product standpoint.
 - **Coach planning-profile JSON parsing** (`coachAthletePlanningProfile.ts`) tolerates multiple nested shapes; **tighten to the canonical backend contract** when finalized (reduces ambiguity vs “defensive” parsing).
 
 ---

@@ -2,11 +2,13 @@
 
 **Repository setup, dev server, E2E tests, sandbox, and testing notes:** see the root [`README.md`](../../README.md).
 
+**Coach planning workspace UI (user flows only):** [`docs/ui/COACH_PLANNING_FLOW.md`](../ui/COACH_PLANNING_FLOW.md), [`docs/ui/SNC_UI.md`](../ui/SNC_UI.md), [`docs/ui/GOALS_UI.md`](../ui/GOALS_UI.md).
+
 Latest milestone: App Context + Assignment Pipeline Stabilization completed and documented. **Athlete Planning Profile** (athlete working page at `/athlete/profile-planning`, coach read-only planning profile view, coach dashboard `hasPlanningProfile` column) is implemented — see **`docs/srs/IMPLEMENTATION_STATUS.md`** (section *Athlete Planning Profile — Athlete + coach*).
 
 ## Academy admin, onboarding, and gaps (source of truth)
 
-- **`docs/srs/IMPLEMENTATION_STATUS.md`** — System state including athlete + coach **Athlete Planning Profile** routes, APIs, and deferred items (confirm/readiness UI, training-plan generation)
+- **`docs/srs/IMPLEMENTATION_STATUS.md`** — System state including athlete + coach **Athlete Planning Profile** routes, APIs, coach **training plan draft** UI on planning profile, and deferred items (confirm/readiness UI on athlete APP)
 - **`docs/srs/03-ux/onboarding.md`** — Academy admin onboarding flow, access-context routing rules, invitation-aware behavior, deprecated shortcuts, failure UX, multi-role note  
 - **`docs/srs/03-ux/admin-dashboard.md`** — Admin dashboard gating, admin route behavior, known admin UI issues  
 - **`docs/srs/phase-2-gaps.md`** — Open issues (e.g. coach invitation visibility), access-context `null` risk, verification notes; **§9** Athlete Planning Profile remainder  

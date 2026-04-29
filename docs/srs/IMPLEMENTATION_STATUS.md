@@ -118,17 +118,17 @@ Documented below: **backend contract** and **frontend behavior** as implemented 
 - **Read-only from backend:** e.g. `derivedAge`, `derivedBmi`, `completenessStatus`, `freshnessStatus`, `planningEligibilityStatus`, `stage`, `lastConfirmedAt` — displayed from the record only; **not** client-derived.
 - **Endpoints present but not used by athlete UI today:** `paths.entities.athletePlanningProfileReadiness` and `paths.entities.athletePlanningProfileConfirm` are defined in `endpoints.ts` only — **no** readiness GET or confirm POST wiring in `AthleteProfilePlanningPageContent`.
 
-### Coach (read-only) — **implemented**
+### Coach (planning profile route) — **implemented**
 
-- **API:** `GET` `paths.entities.athletePlanningProfileByAthlete(entityId, athleteId)` → `/entities/:entityId/athletes/:athleteId/planning-profile` (`coachAthletePlanningProfile.ts`).
-- **Route:** `/coach/athletes/[athleteId]/planning-profile` (`CoachAthletePlanningProfileView`) — read-only cards, **no** edit actions.
+- **Planning profile API (read-only record):** `GET` `paths.entities.athletePlanningProfileByAthlete(entityId, athleteId)` → `/entities/:entityId/athletes/:athleteId/planning-profile` (`coachAthletePlanningProfile.ts`). The athlete planning profile form is **not** editable by the coach in the UI.
+- **Route:** `/coach/athletes/[athleteId]/planning-profile` (`CoachAthletePlanningProfileView`).
+- **In-page coach workspace (same route):** season / phase / **domain-filtered** goals, plan window, **Step 6** readiness checklist, **Skills** and **S&C** (and Nutrition when assigned) **Generate … Plan** actions, **execute + persist draft** integration, **latest domain draft** fetch and rendering, **Skills** vs **S&C** revision blocks, and **Revision Summary** when parsed `revision` is present on the latest draft. **User-flow documentation:** `docs/ui/COACH_PLANNING_FLOW.md`, `docs/ui/SNC_UI.md`, `docs/ui/GOALS_UI.md`.
 - **Coach dashboard table:** Assigned athletes from `GET /coach/me/assigned-athletes` (`coachMe.ts`). Rows include **`hasPlanningProfile: boolean`** (parsed as `true` only when JSON boolean `true`). **Planning profile** column: **`View`** link only when `hasPlanningProfile === true` **and** `athleteId` is non-empty; otherwise **`Not Available`** (non-interactive text). **No** per-row planning-profile fetch for the table.
 
 ### Deferred (not implemented in frontend)
 
-- **Coach write/update** to athlete planning profile.
-- **Training-plan generation / AI** integration (planning profile is input-only for future work).
-- **Confirm** and **readiness** flows for the athlete planning profile (paths exist; UI not wired).
+- **Coach write/update** to athlete planning profile record (APP remains athlete-owned for edits).
+- **Confirm** and **readiness** flows for the athlete planning profile **on the athlete APP page** (paths exist; athlete UI not wired).
 
 ### APP grouped-contract status snapshot (current)
 

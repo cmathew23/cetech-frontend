@@ -1,4 +1,5 @@
 import type { TrainingPlanGenerationDomain } from "@/lib/api/coachAthletePlanningReadiness";
+import { DATE_DISPLAY_UNAVAILABLE, formatDateOnly } from "@/lib/dateTime";
 
 function trimOrNull(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -16,17 +17,11 @@ export function formatGoalDate(value: string | null | undefined): string | null 
   const cleaned = trimOrNull(value);
   if (!cleaned) return null;
 
-  const date = new Date(cleaned);
-  if (Number.isNaN(date.getTime())) {
-    return cleaned.includes("T") ? cleaned.slice(0, 10) : cleaned;
-  }
-
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(date);
+  const formatted = formatDateOnly(cleaned);
+  if (formatted !== DATE_DISPLAY_UNAVAILABLE) return formatted;
+  const datePart = cleaned.includes("T") ? cleaned.slice(0, 10) : cleaned;
+  const retry = formatDateOnly(datePart);
+  return retry === DATE_DISPLAY_UNAVAILABLE ? cleaned : retry;
 }
 
 export function formatGoalStatus(value: string | null | undefined): string | null {

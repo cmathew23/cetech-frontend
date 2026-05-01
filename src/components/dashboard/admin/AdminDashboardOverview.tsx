@@ -3,6 +3,7 @@
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
+import { formatEnumeratedLabel } from "@/lib/textFormat";
 import type { PendingInvitationRow } from "@/types/academyAdmin.types";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -94,7 +95,7 @@ export function AdminDashboardOverview({
     <div className="space-y-10">
       <section className="space-y-3">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+          <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
             Summary
           </h2>
           <p className="mt-1 text-xs text-textMuted">
@@ -125,7 +126,7 @@ export function AdminDashboardOverview({
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+          <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
             Action required
           </h2>
           <p className="mt-1 text-xs text-textMuted">
@@ -162,7 +163,7 @@ export function AdminDashboardOverview({
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Recent invitations
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -199,11 +200,11 @@ export function AdminDashboardOverview({
                         statusBadgeClass(row.status),
                       )}
                     >
-                      {row.status}
+                      {formatEnumeratedLabel(row.status)}
                     </span>
                   </div>
                   <p className="text-xs text-textMuted">
-                    Role {row.role} · {row.createdAt}
+                    Role {formatEnumeratedLabel(row.role)} · {row.createdAt}
                   </p>
                 </li>
               ))

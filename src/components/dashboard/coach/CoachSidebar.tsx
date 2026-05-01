@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 
 const COACH_NAV_ITEMS = [
   { href: "/coach/dashboard", label: "Dashboard" },
+  { href: "/coach/athletes", label: "Athletes" },
   { href: "/coach/dashboard/invitations", label: "Invitations" },
 ] as const;
 

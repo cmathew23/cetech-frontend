@@ -1,14 +1,15 @@
 "use client";
 
 import { adminPaths } from "@/config/adminNav";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Heading } from "@/components/ui/Heading";
 import { Input } from "@/components/ui/Input";
 import { dashboardPanelClass } from "@/lib/auth-ui";
 import { fetchMyAcademy, patchMyAcademy, type MyAcademyProfile } from "@/lib/api/academyAdmin";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatHumanReadableOrCopy } from "@/lib/textFormat";
 import Link from "next/link";
 import {
   useCallback,
@@ -49,6 +50,15 @@ function profileToDraft(p: MyAcademyProfile): DraftFields {
     phone: p.phone,
     email: p.email,
   };
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-textSecondary">{label}</dt>
+      <dd className="mt-0.5 break-words text-textPrimary">{value}</dd>
+    </div>
+  );
 }
 
 export default function AdminAboutAcademyPage() {
@@ -149,7 +159,10 @@ export default function AdminAboutAcademyPage() {
   if (loadState === "error") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4 px-4 py-6">
-        <Heading variant="h2">About Academy</Heading>
+        <PageHeader
+          title="About Academy"
+          subtitle="View and update your academy profile."
+        />
         <Alert variant="danger">{loadError}</Alert>
         <Button type="button" variant="secondary" onClick={() => void reloadProfile()}>
           Try again
@@ -169,7 +182,10 @@ export default function AdminAboutAcademyPage() {
   if (loadState === "empty") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4 px-4 py-6">
-        <Heading variant="h2">About Academy</Heading>
+        <PageHeader
+          title="About Academy"
+          subtitle="Academy profile data from the server."
+        />
         <Alert variant="warning">
           No academy profile was returned for this account. New academy
           administrators must complete{" "}
@@ -204,33 +220,28 @@ export default function AdminAboutAcademyPage() {
     );
   }
 
-  const readOnlyFields = !isEditing;
-
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <header className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <Heading variant="h2">About Academy</Heading>
-          <p className="mt-1 text-sm text-textSecondary">
-            View and update your academy profile.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {!isEditing ? (
+      <PageHeader
+        title="About Academy"
+        subtitle="View and update your academy profile."
+        actions={
+          !isEditing ? (
             <Button
               type="button"
               variant="secondary"
               onClick={() => {
                 setSaveSuccess(null);
                 setSaveError(null);
+                setEditDraft(baselineDraft);
                 setIsEditing(true);
               }}
             >
               Edit
             </Button>
-          ) : null}
-        </div>
-      </header>
+          ) : null
+        }
+      />
 
       {saveSuccess ? (
         <Alert variant="success" role="status">
@@ -254,86 +265,101 @@ export default function AdminAboutAcademyPage() {
           </div>
         </dl>
 
-        <form
-          className="mt-6 grid max-w-xl gap-4 border-t border-border pt-6"
-          onSubmit={(e) => void handleSaveEdit(e)}
-        >
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="edit-academy-name"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Name
-            </label>
-            <Input
-              id="edit-academy-name"
-              value={editDraft.name}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setEditDraft((d) => ({ ...d, name: e.target.value }))
-              }
-              disabled={readOnlyFields || saveSubmitting}
-              readOnly={readOnlyFields}
-              autoComplete="organization"
+        {!isEditing ? (
+          <dl className="mt-6 grid max-w-xl gap-4 border-t border-border pt-6 text-sm">
+            <ReadOnlyField
+              label="Name"
+              value={formatHumanReadableOrCopy(profile.name, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="edit-academy-address"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Address
-            </label>
-            <Input
-              id="edit-academy-address"
-              value={editDraft.address}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setEditDraft((d) => ({ ...d, address: e.target.value }))
-              }
-              disabled={readOnlyFields || saveSubmitting}
-              readOnly={readOnlyFields}
-              autoComplete="street-address"
+            <ReadOnlyField
+              label="Address"
+              value={formatHumanReadableOrCopy(profile.address, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="edit-academy-phone"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Phone
-            </label>
-            <Input
-              id="edit-academy-phone"
-              type="tel"
-              value={editDraft.phone}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setEditDraft((d) => ({ ...d, phone: e.target.value }))
-              }
-              disabled={readOnlyFields || saveSubmitting}
-              readOnly={readOnlyFields}
-              autoComplete="tel"
+            <ReadOnlyField
+              label="Phone"
+              value={profile.phone.trim() !== "" ? profile.phone : "—"}
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label
-              htmlFor="edit-academy-email"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Email
-            </label>
-            <Input
-              id="edit-academy-email"
-              type="email"
-              value={editDraft.email}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setEditDraft((d) => ({ ...d, email: e.target.value }))
-              }
-              disabled={readOnlyFields || saveSubmitting}
-              readOnly={readOnlyFields}
-              autoComplete="email"
+            <ReadOnlyField
+              label="Email"
+              value={profile.email.trim() !== "" ? profile.email : "—"}
             />
-          </div>
+          </dl>
+        ) : (
+          <form
+            className="mt-6 grid max-w-xl gap-4 border-t border-border pt-6"
+            onSubmit={(e) => void handleSaveEdit(e)}
+          >
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="edit-academy-name"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Name
+              </label>
+              <Input
+                id="edit-academy-name"
+                value={editDraft.name}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setEditDraft((d) => ({ ...d, name: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="organization"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="edit-academy-address"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Address
+              </label>
+              <Input
+                id="edit-academy-address"
+                value={editDraft.address}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setEditDraft((d) => ({ ...d, address: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="street-address"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="edit-academy-phone"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Phone
+              </label>
+              <Input
+                id="edit-academy-phone"
+                type="tel"
+                value={editDraft.phone}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setEditDraft((d) => ({ ...d, phone: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="tel"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="edit-academy-email"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Email
+              </label>
+              <Input
+                id="edit-academy-email"
+                type="email"
+                value={editDraft.email}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setEditDraft((d) => ({ ...d, email: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="email"
+              />
+            </div>
 
-          {isEditing ? (
             <div className="flex flex-wrap gap-2">
               <Button
                 type="submit"
@@ -352,8 +378,8 @@ export default function AdminAboutAcademyPage() {
                 Cancel
               </Button>
             </div>
-          ) : null}
-        </form>
+          </form>
+        )}
 
         {saveError ? (
           <Alert variant="danger" className="mt-4">

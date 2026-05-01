@@ -2,10 +2,10 @@
 
 import { DeactivateMemberConfirmModal } from "@/components/dashboard/admin/DeactivateMemberConfirmModal";
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { adminPaths } from "@/config/adminNav";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Heading } from "@/components/ui/Heading";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
@@ -18,6 +18,12 @@ import {
 } from "@/components/ui/Table";
 import { dashboardPanelClass } from "@/lib/auth-ui";
 import { formatAdminPersonLabel } from "@/lib/adminPersonLabel";
+import {
+  formatEnumeratedLabel,
+  formatFunctionTokensForDisplay,
+  formatPersonNameForDisplay,
+  toTitleCaseInput,
+} from "@/lib/textFormat";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
 import {
   createAthleteCoachAssignment,
@@ -179,25 +185,31 @@ function memberNameTableCell(
 ): string {
   const uid = row.targetUserId.trim();
   const role = row.role.trim().toUpperCase();
+  let resolved = "";
   if (uid !== "") {
     if (role === "COACH") {
       const v = lookups.coachNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
-    if (role === "ATHLETE") {
+    if (resolved === "" && role === "ATHLETE") {
       const v = lookups.athleteNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
     if (
-      role === "ENTITY_ADMIN" ||
-      role === "ACADEMY_ADMIN" ||
-      role === "ADMIN"
+      resolved === "" &&
+      (role === "ENTITY_ADMIN" ||
+        role === "ACADEMY_ADMIN" ||
+        role === "ADMIN")
     ) {
       const v = lookups.profileNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
   }
-  return memberNameColumnText(row);
+  if (resolved === "") {
+    resolved = memberNameColumnText(row);
+  }
+  if (resolved === "—") return "—";
+  return formatPersonNameForDisplay(resolved);
 }
 
 function memberEmailColumnText(row: EntityMemberRow): string {
@@ -252,7 +264,9 @@ function AssignmentPartyCell({
   const n = name.trim();
   const e = email.trim();
   const roleText = role?.trim() ?? "";
-  const functionText = (functions ?? []).filter(Boolean).join(", ");
+  const fnClean = (functions ?? []).map((f) => f.trim()).filter((f) => f !== "");
+  const functionText =
+    fnClean.length > 0 ? formatFunctionTokensForDisplay(fnClean) : "";
   if (n === "" && e === "") {
     return <span className="text-textSecondary">{fallbackId}</span>;
   }
@@ -261,32 +275,41 @@ function AssignmentPartyCell({
       <div>
         <div className="font-medium text-textPrimary">{e}</div>
         {roleText !== "" ? (
-          <div className="text-xs text-textSecondary">Role: {roleText}</div>
+          <div className="text-xs text-textSecondary">
+            Role: {formatEnumeratedLabel(roleText)}
+          </div>
         ) : null}
         {functionText !== "" ? (
-          <div className="text-xs text-textSecondary">Functions: {functionText}</div>
+          <div className="text-xs text-textSecondary">
+            Functions: {functionText}
+          </div>
         ) : null}
       </div>
     );
   }
   return (
     <div>
-      <div className="font-medium text-textPrimary">{n}</div>
+      <div className="font-medium text-textPrimary">
+        {formatPersonNameForDisplay(n)}
+      </div>
       <div className="text-textSecondary">{e !== "" ? e : "—"}</div>
       {roleText !== "" ? (
-        <div className="text-xs text-textSecondary">Role: {roleText}</div>
+        <div className="text-xs text-textSecondary">
+          Role: {formatEnumeratedLabel(roleText)}
+        </div>
       ) : null}
       {functionText !== "" ? (
-        <div className="text-xs text-textSecondary">Functions: {functionText}</div>
+        <div className="text-xs text-textSecondary">
+          Functions: {functionText}
+        </div>
       ) : null}
     </div>
   );
 }
 
 function formatAssignmentCoachRole(role: AcademyCoachRole): string {
-  if (role === "HEAD_COACH") return "Head Coach";
-  if (role === "ASSISTANT_COACH") return "Assistant Coach";
-  return "";
+  if (role === null) return "";
+  return toTitleCaseInput(role);
 }
 
 /** Single-line native select option text: name · email · role · functions (roster from GET /academies/me/coaches). */
@@ -306,7 +329,7 @@ function formatCoachAssignmentDropdownLabel(
   const email = input.displayEmail.trim();
 
   const segments: string[] = [];
-  if (name !== "") segments.push(name);
+  if (name !== "") segments.push(formatPersonNameForDisplay(name));
   if (email !== "") segments.push(email);
   if (segments.length === 0) {
     segments.push(pid !== "" ? pid : "—");
@@ -318,10 +341,11 @@ function formatCoachAssignmentDropdownLabel(
 
   if (detail) {
     const roleText = detail.roleLabel.trim();
-    const fnText = detail.functions
+    const fnClean = detail.functions
       .map((f) => f.trim())
-      .filter((f) => f !== "")
-      .join(", ");
+      .filter((f) => f !== "");
+    const fnText =
+      fnClean.length > 0 ? formatFunctionTokensForDisplay(fnClean) : "";
     if (roleText !== "") segments.push(roleText);
     if (fnText !== "") segments.push(fnText);
     if (roleText === "" && fnText === "") {
@@ -336,6 +360,12 @@ const SECTION_TITLES: Record<AcademyAdminWorkspaceSection, string> = {
   members: "Members",
   invitations: "Invitations",
   assignments: "Assignments",
+};
+
+const SECTION_SUBTITLES: Record<AcademyAdminWorkspaceSection, string> = {
+  members: "View and manage entity members, roles, and status.",
+  invitations: "Send invitations and track their status.",
+  assignments: "Create and remove athlete–coach assignments.",
 };
 
 type AcademyAdminWorkspacePageProps = {
@@ -1077,8 +1107,7 @@ export function AcademyAdminWorkspacePage({
   if (showNoAcademyContext) {
     return (
       <div className="max-w-lg space-y-3">
-        <Heading variant="h2">{SECTION_TITLES[section]}</Heading>
-        <p className="text-sm text-textSecondary">{needsAcademyCopy}</p>
+        <PageHeader title={SECTION_TITLES[section]} subtitle={needsAcademyCopy} />
         <Link
           href={adminPaths.aboutAcademy}
           className="inline-flex text-sm font-medium text-primary hover:underline"
@@ -1099,15 +1128,18 @@ export function AcademyAdminWorkspacePage({
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <Heading variant="h2">{SECTION_TITLES[section]}</Heading>
-        <Link
-          href={adminPaths.dashboard}
-          className="text-sm font-medium text-primary hover:underline"
-        >
-          ← Dashboard overview
-        </Link>
-      </div>
+      <PageHeader
+        title={SECTION_TITLES[section]}
+        subtitle={SECTION_SUBTITLES[section]}
+        actions={
+          <Link
+            href={adminPaths.dashboard}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            ← Dashboard overview
+          </Link>
+        }
+      />
 
       <section className={dashboardPanelClass}>
         {section === "members" ? (
@@ -1227,8 +1259,8 @@ export function AcademyAdminWorkspacePage({
                               {memberNameTableCell(row, memberTableNameLookups)}
                             </Td>
                             <Td>{memberEmailColumnText(row)}</Td>
-                            <Td>{row.role}</Td>
-                            <Td>{row.status}</Td>
+                            <Td>{formatEnumeratedLabel(row.role)}</Td>
+                            <Td>{formatEnumeratedLabel(row.status)}</Td>
                             <Td className="text-xs">{row.joinedAt}</Td>
                             <Td className="text-right align-top">
                               {memberRowShowsDeactivate(row) ? (
@@ -1402,16 +1434,20 @@ export function AcademyAdminWorkspacePage({
                   <TableBody>
                     {visibleInvitations.map((row) => (
                       <TableRow key={row.invitationId}>
-                        <Td>{row.entityName ?? "—"}</Td>
+                        <Td>
+                          {row.entityName?.trim()
+                            ? formatPersonNameForDisplay(row.entityName.trim())
+                            : "—"}
+                        </Td>
                         <Td>{row.email}</Td>
-                        <Td>{row.role}</Td>
+                        <Td>{formatEnumeratedLabel(row.role)}</Td>
                         <Td>
                           <span
                             className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(
                               row.status,
                             )}`}
                           >
-                            {row.status}
+                            {formatEnumeratedLabel(row.status)}
                           </span>
                         </Td>
                         <Td className="text-xs">{row.createdAt}</Td>
@@ -1593,7 +1629,9 @@ export function AcademyAdminWorkspacePage({
                             {row.isPrimary ? "Primary" : "-"}
                           </Td>
                           <Td className="text-sm">
-                            {row.relationshipType || "STANDARD"}
+                            {formatEnumeratedLabel(
+                              row.relationshipType?.trim() || "STANDARD",
+                            )}
                           </Td>
                           <Td className="text-xs">{row.createdAt}</Td>
                           <Td className="text-right">

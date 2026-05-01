@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
@@ -17,7 +18,7 @@ import {
   type TrainingPlanLevelValidationView as LevelValidationData,
 } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 
 const LEGACY_LEVEL_VALIDATION_ACCESS_DENIED =
   "Only Assistant Coach or Skills Coach can confirm validated level when Head Coach is not configured";
@@ -249,24 +250,19 @@ export function CoachAthleteLevelValidationView({
 
   return (
     <div className="w-full max-w-5xl space-y-4">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-textPrimary">
-            Training plan — level validation
-          </h1>
-          <p className="text-sm text-textSecondary">
-            Review system suggestion and confirm the athlete&apos;s validated training
-            level.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => router.push("/coach/dashboard")}
-        >
-          Back to Dashboard
-        </Button>
-      </header>
+      <PageHeader
+        title="Training plan — level validation"
+        subtitle="Review system suggestion and confirm the athlete's validated training level."
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => router.push("/coach/dashboard")}
+          >
+            Back to Dashboard
+          </Button>
+        }
+      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {missingPlanningProfile ? (
@@ -354,7 +350,9 @@ export function CoachAthleteLevelValidationView({
                 <Select
                   id="validated-level"
                   value={selectedLevel}
-                  onChange={(e) => setSelectedLevel(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                    setSelectedLevel(e.target.value)
+                  }
                   disabled={saving}
                 >
                   <option value="">—</option>

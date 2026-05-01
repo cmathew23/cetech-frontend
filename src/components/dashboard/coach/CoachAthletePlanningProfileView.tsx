@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { GoalDisplayBlock } from "@/components/goals/GoalDisplayBlock";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -46,10 +47,24 @@ import {
   type CoachAthleteTrainingPlanWorkloadAssessment,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import {
+  formatDateOnly,
+  formatDateRange,
+  formatDateWithWeekday,
+  formatPlanningProfileDateDisplay,
+} from "@/lib/dateTime";
 import { canCoachValidateLevel, normalizeCoachFunctionValue } from "@/lib/coachAuthority";
+import { toTitleCaseInput } from "@/lib/textFormat";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type DisplayableValue =
   | string
@@ -171,11 +186,11 @@ function displayValue(
   return text === "" ? "—" : text;
 }
 
-function displayDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
+/** Session / slot titles and draft item labels (food, exercise names). */
+function displayLabelTitleCase(value: DisplayableValue): string {
+  const base = displayValue(value);
+  if (base === "—") return base;
+  return toTitleCaseInput(base);
 }
 
 function hasRenderableValue(value: DisplayableValue): boolean {
@@ -199,7 +214,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 function renderRevisionSummary(
   draft: CoachAthleteLatestDomainDraft | null,
-): JSX.Element | null {
+): ReactElement | null {
   if (!draft?.revision) return null;
 
   return (
@@ -740,11 +755,13 @@ function generationButtonLabel(domain: TrainingPlanGenerationDomain): string {
 }
 
 function generationDraftTitle(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") return "Latest Generated Nutrition Draft";
   if (domain === "S_AND_C") return "Latest Generated S&C Draft";
   return "Latest Generated Skills Draft";
 }
 
 function generationDraftEmptyState(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "NUTRITION") return "No Nutrition draft generated yet.";
   if (domain === "S_AND_C") return "No generated S&C draft found yet.";
   return "No generated skills draft found yet.";
 }
@@ -753,7 +770,163 @@ function generationDurationDaysForDomain(
   domain: TrainingPlanGenerationDomain,
   selectedDurationDays: 7 | 15 | 30,
 ): 7 | 15 | 30 {
-  return domain === "S_AND_C" ? 7 : selectedDurationDays;
+  return domain === "S_AND_C" || domain === "NUTRITION" ? 7 : selectedDurationDays;
+}
+
+function draftSessionTitleLabel(domain: TrainingPlanGenerationDomain | null | undefined): string {
+  return domain === "NUTRITION" ? "Meal Slot" : "Title";
+}
+
+function draftItemLabel(domain: TrainingPlanGenerationDomain | null | undefined): string {
+  return domain === "NUTRITION" ? "Meal / Food Item" : "Label";
+}
+
+function nutritionStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "BELOW_TARGET":
+      return "Below target";
+    case "WITHIN_TARGET":
+      return "Within target";
+    case "ABOVE_TARGET":
+      return "Above target";
+    case "PARTIAL":
+      return "Partial data";
+    case "UNKNOWN":
+      return "Unknown";
+    default: {
+      const s = status?.trim();
+      return s ? toTitleCaseInput(s) : "Unavailable";
+    }
+  }
+}
+
+function formatCalories(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Unavailable";
+  return `${String(value)} kcal`;
+}
+
+function formatGramValue(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Unavailable";
+  return `${String(value)} g`;
+}
+
+function formatCalorieRange(min: number | null | undefined, max: number | null | undefined): string {
+  if (
+    typeof min !== "number" ||
+    !Number.isFinite(min) ||
+    typeof max !== "number" ||
+    !Number.isFinite(max)
+  ) {
+    return "Unavailable";
+  }
+  return `${String(min)}-${String(max)} kcal`;
+}
+
+function formatGramRange(min: number | null | undefined, max: number | null | undefined): string {
+  if (
+    typeof min !== "number" ||
+    !Number.isFinite(min) ||
+    typeof max !== "number" ||
+    !Number.isFinite(max)
+  ) {
+    return "Unavailable";
+  }
+  return `${String(min)}-${String(max)} g`;
+}
+
+function formatMacroSummaryLine(
+  estimated: number | null | undefined,
+  min: number | null | undefined,
+  max: number | null | undefined,
+): string {
+  return `${formatGramValue(estimated)} / ${formatGramRange(min, max)}`;
+}
+
+function renderNutritionDaySummary(
+  day: CoachAthleteLatestDomainDraft["days"][number],
+): ReactElement | null {
+  const hasEstimate = typeof day.estimatedDailyCalories === "number";
+  const hasTargetRange =
+    typeof day.targetCalorieMin === "number" && typeof day.targetCalorieMax === "number";
+  const calorieStatusLabel = nutritionStatusLabel(day.calorieAdequacyStatus);
+  const macroStatusLabel = nutritionStatusLabel(day.macroAdequacyStatus);
+  const hasMacroData =
+    day.estimatedCarbohydrateGrams !== null ||
+    day.targetCarbohydrateMinGrams !== null ||
+    day.targetCarbohydrateMaxGrams !== null ||
+    day.estimatedProteinGrams !== null ||
+    day.targetProteinMinGrams !== null ||
+    day.targetProteinMaxGrams !== null ||
+    day.estimatedFatGrams !== null ||
+    day.targetFatMinGrams !== null ||
+    day.targetFatMaxGrams !== null ||
+    day.estimatedFiberGrams !== null ||
+    day.targetFiberMinGrams !== null ||
+    day.targetFiberMaxGrams !== null ||
+    macroStatusLabel !== "Unavailable";
+
+  if (
+    !hasEstimate &&
+    !hasTargetRange &&
+    calorieStatusLabel === "Unavailable" &&
+    !hasMacroData
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1 rounded-md border border-slate-200 bg-white p-3">
+        <div className="text-sm font-medium text-textPrimary">Daily Calorie Adequacy</div>
+        <div className="text-sm text-textSecondary">
+          {`Target calories: ${formatCalorieRange(day.targetCalorieMin, day.targetCalorieMax)}`}
+        </div>
+        <div className="text-sm text-textSecondary">
+          {`Plan estimate: ${formatCalories(day.estimatedDailyCalories)}`}
+        </div>
+        <div className="text-sm text-textSecondary">{`Status: ${calorieStatusLabel}`}</div>
+        {calorieStatusLabel === "Unknown" ? (
+          <div className="text-sm text-textSecondary">
+            Calorie target unavailable — missing athlete metrics.
+          </div>
+        ) : null}
+      </div>
+      {hasMacroData ? (
+        <div className="space-y-1 rounded-md border border-slate-200 bg-white p-3">
+          <div className="text-sm font-medium text-textPrimary">Daily Macro Summary</div>
+          <div className="text-sm text-textSecondary">
+            {`Carbs: ${formatMacroSummaryLine(
+              day.estimatedCarbohydrateGrams,
+              day.targetCarbohydrateMinGrams,
+              day.targetCarbohydrateMaxGrams,
+            )}`}
+          </div>
+          <div className="text-sm text-textSecondary">
+            {`Protein: ${formatMacroSummaryLine(
+              day.estimatedProteinGrams,
+              day.targetProteinMinGrams,
+              day.targetProteinMaxGrams,
+            )}`}
+          </div>
+          <div className="text-sm text-textSecondary">
+            {`Fat: ${formatMacroSummaryLine(
+              day.estimatedFatGrams,
+              day.targetFatMinGrams,
+              day.targetFatMaxGrams,
+            )}`}
+          </div>
+          <div className="text-sm text-textSecondary">
+            {`Fiber: ${formatMacroSummaryLine(
+              day.estimatedFiberGrams,
+              day.targetFiberMinGrams,
+              day.targetFiberMaxGrams,
+            )}`}
+          </div>
+          <div className="text-sm text-textSecondary">{`Status: ${macroStatusLabel}`}</div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function goalGenerationDomain(goal: GoalSummary): TrainingPlanGenerationDomain | null {
@@ -1386,7 +1559,8 @@ export function CoachAthletePlanningProfileView({
   const latestSupportedDraftDomain = useMemo(
     () =>
       allowedGenerationDomains.find(
-        (domain) => domain === "SKILLS" || domain === "S_AND_C",
+        (domain) =>
+          domain === "SKILLS" || domain === "S_AND_C" || domain === "NUTRITION",
       ) ?? null,
     [allowedGenerationDomains],
   );
@@ -1477,7 +1651,11 @@ export function CoachAthletePlanningProfileView({
     if (
       entityId === "" ||
       athleteIdTrimmed === "" ||
-      (generationDomain !== "SKILLS" && generationDomain !== "S_AND_C")
+      (
+        generationDomain !== "SKILLS" &&
+        generationDomain !== "S_AND_C" &&
+        generationDomain !== "NUTRITION"
+      )
     ) {
       setLatestSkillsDraft(null);
       setLatestDraftDomain(null);
@@ -2208,7 +2386,11 @@ export function CoachAthletePlanningProfileView({
         },
       );
       setGeneratePlanSuccess(persistResult);
-      if (domain === "SKILLS" || domain === "S_AND_C") {
+      if (
+        domain === "SKILLS" ||
+        domain === "S_AND_C" ||
+        domain === "NUTRITION"
+      ) {
         await loadLatestSkillsDraft(domain, true);
       }
     } catch (e) {
@@ -2244,39 +2426,35 @@ export function CoachAthletePlanningProfileView({
 
   return (
     <div className="w-full max-w-5xl space-y-4">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-textPrimary">
-            Athlete Planning Profile
-          </h1>
-          <p className="text-sm text-textSecondary">
-            Read-only planning profile for assigned athlete.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {showValidateLevel ? (
+      <PageHeader
+        title="Athlete Planning Profile"
+        subtitle="Read-only planning profile for assigned athlete."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {showValidateLevel ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={missingPlanningProfile}
+                onClick={() =>
+                  router.push(
+                    `/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`,
+                  )
+                }
+              >
+                Continue to Level Validation
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="secondary"
-              disabled={missingPlanningProfile}
-              onClick={() =>
-                router.push(
-                  `/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`,
-                )
-              }
+              onClick={() => router.push("/coach/dashboard")}
             >
-              Continue to Level Validation
+              Back to Dashboard
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => router.push("/coach/dashboard")}
-          >
-            Back to Dashboard
-          </Button>
-        </div>
-      </header>
+          </div>
+        }
+      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {missingPlanningProfile ? (
@@ -2689,11 +2867,11 @@ export function CoachAthletePlanningProfileView({
                         />
                         <DetailRow
                           label="Selected Season Start Date"
-                          value={displayDate(selectedSeason.startDate)}
+                          value={formatPlanningProfileDateDisplay(selectedSeason.startDate)}
                         />
                         <DetailRow
                           label="Selected Season End Date"
-                          value={displayDate(selectedSeason.endDate)}
+                          value={formatPlanningProfileDateDisplay(selectedSeason.endDate)}
                         />
                       </dl>
                       <div className="pt-2 text-xs text-textMuted">
@@ -2779,7 +2957,7 @@ export function CoachAthletePlanningProfileView({
                       label="Selected Season Range"
                       value={
                         selectedSeason
-                          ? `${displayDate(selectedSeason.startDate)} to ${displayDate(selectedSeason.endDate)}`
+                          ? formatDateRange(selectedSeason.startDate, selectedSeason.endDate)
                           : "Select a season first"
                       }
                     />
@@ -2787,7 +2965,7 @@ export function CoachAthletePlanningProfileView({
                       label="Detected Current Phase"
                       value={
                         activePhaseForSelectedSeason
-                          ? `${displayValue(activePhaseForSelectedSeason.phase)} (${displayValue(activePhaseForSelectedSeason.startDate)} to ${displayValue(activePhaseForSelectedSeason.endDate)})`
+                          ? `${displayValue(activePhaseForSelectedSeason.phase)} (${formatDateRange(activePhaseForSelectedSeason.startDate, activePhaseForSelectedSeason.endDate)})`
                           : "Needs setup"
                       }
                     />
@@ -3172,7 +3350,10 @@ export function CoachAthletePlanningProfileView({
                       <select
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
                         value={String(currentPlanDurationDays)}
-                        disabled={currentCoachGenerationDomain === "S_AND_C"}
+                        disabled={
+                          currentCoachGenerationDomain === "S_AND_C" ||
+                          currentCoachGenerationDomain === "NUTRITION"
+                        }
                         onChange={(event) =>
                           setDurationDays(Number(event.target.value) as 7 | 15 | 30)
                         }
@@ -3194,7 +3375,7 @@ export function CoachAthletePlanningProfileView({
                     <div className="space-y-1 text-sm text-textPrimary">
                       <span className="font-medium">Computed End Date</span>
                       <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                        {displayValue(planEndDate || null)}
+                        {formatDateOnly(planEndDate, "—")}
                       </div>
                     </div>
                   </div>
@@ -3364,11 +3545,16 @@ export function CoachAthletePlanningProfileView({
                               className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
                             >
                               <div className="text-sm font-semibold text-textPrimary">
-                                {`Day ${day.dayIndex ?? dayOffset + 1}`}
+                                {hasRenderableValue(day.date)
+                                  ? `Day ${day.dayIndex ?? dayOffset + 1} — ${formatDateWithWeekday(String(day.date))}`
+                                  : `Day ${day.dayIndex ?? dayOffset + 1}`}
                               </div>
                               <dl className="space-y-1">
                                 {hasRenderableValue(day.date) ? (
-                                  <DetailRow label="Date" value={displayValue(day.date)} />
+                                  <DetailRow
+                                    label="Date"
+                                    value={formatDateWithWeekday(String(day.date))}
+                                  />
                                 ) : null}
                                 {hasRenderableValue(day.dayFocus) ? (
                                   <DetailRow
@@ -3380,6 +3566,9 @@ export function CoachAthletePlanningProfileView({
                                   <DetailRow label="Notes" value={displayValue(day.notes)} />
                                 ) : null}
                               </dl>
+                              {latestDraftDisplayDomain === "NUTRITION"
+                                ? renderNutritionDaySummary(day)
+                                : null}
                               {day.sessions.map((session, sessionOffset) => (
                                 <div
                                   key={`${session.sessionIndex ?? sessionOffset}-${session.title ?? "session"}`}
@@ -3388,8 +3577,8 @@ export function CoachAthletePlanningProfileView({
                                   <dl className="space-y-1">
                                     {hasRenderableValue(session.title) ? (
                                       <DetailRow
-                                        label="Title"
-                                        value={displayValue(session.title)}
+                                        label={draftSessionTitleLabel(latestDraftDisplayDomain)}
+                                        value={displayLabelTitleCase(session.title)}
                                       />
                                     ) : null}
                                     {hasRenderableValue(session.objective) ? (
@@ -3419,8 +3608,8 @@ export function CoachAthletePlanningProfileView({
                                       <dl className="space-y-1">
                                         {hasRenderableValue(item.label) ? (
                                           <DetailRow
-                                            label="Label"
-                                            value={displayValue(item.label)}
+                                            label={draftItemLabel(latestDraftDisplayDomain)}
+                                            value={displayLabelTitleCase(item.label)}
                                           />
                                         ) : null}
                                         {hasRenderableValue(item.summary) ? (
@@ -3614,9 +3803,9 @@ export function CoachAthletePlanningProfileView({
               <DetailRow label="Revision" value={displayValue(profile.revision)} />
               <DetailRow
                 label="Last Confirmed At"
-                value={displayDate(profile.lastConfirmedAt)}
+                value={formatPlanningProfileDateDisplay(profile.lastConfirmedAt)}
               />
-              <DetailRow label="Updated At" value={displayDate(profile.updatedAt)} />
+              <DetailRow label="Updated At" value={formatPlanningProfileDateDisplay(profile.updatedAt)} />
             </dl>
           </DashboardCardShell>
 
@@ -3629,7 +3818,7 @@ export function CoachAthletePlanningProfileView({
 
           <DashboardCardShell title="Athlete Planning Fields">
             <dl className="space-y-2">
-              <DetailRow label="Date of Birth" value={displayDate(profile.dateOfBirth)} />
+              <DetailRow label="Date of Birth" value={formatPlanningProfileDateDisplay(profile.dateOfBirth)} />
               <DetailRow label="Sex" value={displayValue(profile.sex)} />
               <DetailRow label="Primary Sport" value={displayValue(profile.primarySport)} />
               <DetailRow
@@ -3680,7 +3869,7 @@ export function CoachAthletePlanningProfileView({
                 value={displayValue(profile.wearableProvider)}
               />
               <DetailRow label="Device Model" value={displayValue(profile.deviceModel)} />
-              <DetailRow label="Last Sync At" value={displayDate(profile.lastSyncAt)} />
+              <DetailRow label="Last Sync At" value={formatPlanningProfileDateDisplay(profile.lastSyncAt)} />
               <DetailRow
                 label="Avg Resting Heart Rate"
                 value={displayValue(profile.avgRestingHeartRate)}

@@ -1,3 +1,5 @@
+import { formatPersonNameForDisplay } from "@/lib/textFormat";
+
 /**
  * Shared person label for admin UI (members table, assignments dropdowns, athlete/coach filters).
  *
@@ -34,8 +36,9 @@ export function formatAdminPersonLabel(
   const n = displayName.trim();
   const e = email.trim();
   const f = fallbackId.trim();
-  if (n !== "" && e !== "") return `${n} (${e})`;
-  if (n !== "") return n;
+  const formattedName = n !== "" ? formatPersonNameForDisplay(n) : "";
+  if (formattedName !== "" && e !== "") return `${formattedName} (${e})`;
+  if (formattedName !== "") return formattedName;
   if (e !== "") return e;
   if (f !== "") return f;
   return "—";

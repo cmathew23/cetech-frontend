@@ -66,41 +66,10 @@ function mergeDashboardRoot(data: unknown): Record<string, unknown> {
   return { ...root, ...nested };
 }
 
-function titleCaseEnumToken(raw: string): string {
-  const token = raw.trim();
-  if (token === "") return "";
-  return token
-    .split("_")
-    .map((part) => {
-      const p = part.trim().toLowerCase();
-      if (p === "") return "";
-      return `${p[0].toUpperCase()}${p.slice(1)}`;
-    })
-    .filter((p) => p !== "")
-    .join(" ");
-}
-
-function formatFunctions(raw: unknown): string {
-  if (raw === null || raw === undefined) return "—";
-  if (typeof raw === "string") {
-    const label = titleCaseEnumToken(raw);
-    return label !== "" ? label : "—";
-  }
-  if (Array.isArray(raw)) {
-    const labels = raw
-      .filter((x): x is string => typeof x === "string")
-      .map((x) => titleCaseEnumToken(x))
-      .filter((x) => x !== "");
-    return labels.length > 0 ? labels.join(", ") : "—";
-  }
-  return "—";
-}
-
 export type CoachMeDashboardData = {
   trainingEntityName: string;
   academyCoachRole: string;
   functions: string[];
-  functionsDisplay: string;
   hasHeadCoachConfigured: boolean;
   trainingPlanReleaseMode: string;
   assignedAthleteCount: number;
@@ -128,7 +97,6 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
     (authority ? readStringField(authority, "academyCoachRole") : "") || "—";
 
   const functions = authority ? readStringArrayField(authority, "functions") : [];
-  const functionsDisplay = authority ? formatFunctions(authority.functions) : "—";
 
   const hasHeadCoachConfiguredRaw =
     releaseGate?.hasHeadCoachConfigured === true || false;
@@ -153,7 +121,6 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
     trainingEntityName,
     academyCoachRole,
     functions,
-    functionsDisplay,
     hasHeadCoachConfigured: hasHeadCoachConfiguredRaw,
     trainingPlanReleaseMode,
     assignedAthleteCount,
@@ -227,33 +194,3 @@ export async function fetchCoachAssignedAthletes(): Promise<CoachAssignedAthlete
   }, []);
 }
 
-/**
- * Human-readable label for `trainingPlanReleaseMode` values from the coach dashboard API.
- * Backend contract stays enum strings (e.g. DIRECT_RELEASE); this is display-only.
- */
-export function formatTrainingPlanReleaseModeForUi(code: string): string {
-  const c = code.trim().toUpperCase();
-  if (c === "" || c === "—") return "—";
-  switch (c) {
-    case "DIRECT_RELEASE":
-      return "Direct Release";
-    case "HEAD_COACH_REVIEW":
-      return "Head Coach Review";
-    default:
-      return titleCaseEnumToken(code) || code.trim();
-  }
-}
-
-/** Matches admin roster wording for known academy coach role enums. */
-export function formatAcademyCoachRoleForUi(role: string): string {
-  const r = role.trim().toUpperCase();
-  if (r === "" || r === "—") return "—";
-  switch (r) {
-    case "HEAD_COACH":
-      return "Head Coach";
-    case "ASSISTANT_COACH":
-      return "Assistant Coach";
-    default:
-      return role.trim();
-  }
-}

@@ -1,9 +1,9 @@
 "use client";
 
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Heading } from "@/components/ui/Heading";
 import { Select } from "@/components/ui/Select";
 import {
   Table,
@@ -27,6 +27,10 @@ import {
   type AcademyMeAthleteRow,
 } from "@/lib/api/academyMeAthletes";
 import { formatAdminPersonLabel } from "@/lib/adminPersonLabel";
+import {
+  formatEnumeratedLabel,
+  formatPersonNameForDisplay,
+} from "@/lib/textFormat";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
 import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
 import { SPORT_VALUES } from "@/lib/sports";
@@ -122,7 +126,9 @@ function AssignedCoachCellEntry(props: {
   if (n !== "" && e !== "") {
     return (
       <div className="space-y-0.5">
-        <div className="text-sm font-medium text-textPrimary">{n}</div>
+        <div className="text-sm font-medium text-textPrimary">
+          {formatPersonNameForDisplay(n)}
+        </div>
         <div className="text-xs text-textSecondary">{e}</div>
       </div>
     );
@@ -131,7 +137,11 @@ function AssignedCoachCellEntry(props: {
     return <div className="text-sm text-textSecondary">{e}</div>;
   }
   if (n !== "") {
-    return <div className="text-sm font-medium text-textPrimary">{n}</div>;
+    return (
+      <div className="text-sm font-medium text-textPrimary">
+        {formatPersonNameForDisplay(n)}
+      </div>
+    );
   }
   return <span className="text-textSecondary">—</span>;
 }
@@ -413,7 +423,10 @@ export default function AdminAthletesPage() {
   if (loadState === "error") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
-        <Heading variant="h2">Athletes</Heading>
+        <PageHeader
+          title="Athletes"
+          subtitle="Academy roster. Coach assignments are read-only here; manage them on Assignments."
+        />
         <Alert variant="danger">{loadError}</Alert>
         <Button type="button" variant="secondary" onClick={() => void loadPage()}>
           Try again
@@ -424,13 +437,10 @@ export default function AdminAthletesPage() {
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <header>
-        <Heading variant="h2">Athletes</Heading>
-        <p className="mt-1 text-sm text-textSecondary">
-          Academy roster. Coach assignments are read-only here; manage them on
-          Assignments.
-        </p>
-      </header>
+      <PageHeader
+        title="Athletes"
+        subtitle="Academy roster. Coach assignments are read-only here; manage them on Assignments."
+      />
 
       {assignmentsLoadError ? (
         <Alert variant="warning">{assignmentsLoadError}</Alert>
@@ -612,7 +622,9 @@ export default function AdminAthletesPage() {
                 return (
                   <TableRow key={row.userId}>
                     <Td className="font-medium text-textPrimary">
-                      {cellText(row.displayName)}
+                      {row.displayName.trim() !== ""
+                        ? formatPersonNameForDisplay(row.displayName)
+                        : "—"}
                     </Td>
                     <Td>{cellText(row.email)}</Td>
                     <Td>
@@ -622,14 +634,18 @@ export default function AdminAthletesPage() {
                           athleteMembershipStatusBadgeClass(statusLabel),
                         )}
                       >
-                        {statusLabel}
+                        {formatEnumeratedLabel(statusLabel)}
                       </span>
                     </Td>
                     <Td className="text-sm text-textSecondary">
-                      {cellText(row.sport)}
+                      {row.sport.trim() !== ""
+                        ? formatEnumeratedLabel(row.sport)
+                        : "—"}
                     </Td>
                     <Td className="text-sm text-textSecondary">
-                      {cellText(row.level)}
+                      {row.level.trim() !== ""
+                        ? formatEnumeratedLabel(row.level)
+                        : "—"}
                     </Td>
                     <Td className="text-sm text-textSecondary align-top">
                       {coachRows.length === 0 ? (

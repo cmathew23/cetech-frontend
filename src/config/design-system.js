@@ -15,9 +15,9 @@ export const designSystem = {
   name: "PEAKFLOW",
 
   colors: {
-    primary: "#22C55E",
-    primaryDark: "#15803D",
-    primaryLight: "#DCFCE7",
+    primary: "#F97316",
+    primaryDark: "#C2410C",
+    primaryLight: "#FFEDD5",
     bg: "#F8FAFC",
     card: "#FFFFFF",
     border: "#E5E7EB",
@@ -25,9 +25,11 @@ export const designSystem = {
     textSecondary: "#6B7280",
     textMuted: "#9CA3AF",
     success: "#22C55E",
+    successDark: "#15803D",
+    successLight: "#DCFCE7",
     warning: "#F59E0B",
     danger: "#DC2626",
-    sidebar: "#0F172A",
+    sidebar: "#0B1F2A",
   },
 
   typography: {
@@ -114,9 +116,9 @@ export const designSystem = {
     base:
       "inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
     primary:
-      "bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:ring-blue-500",
+      "bg-primary text-white shadow-sm hover:bg-primaryDark focus:ring-primary/50",
     secondary:
-      "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-100 hover:text-slate-900 focus:ring-slate-300",
+      "border border-primary/30 bg-primary/15 text-primaryDark shadow-sm hover:bg-primary/25 focus:ring-primary/35",
     success:
       "bg-green-600 text-white shadow-sm hover:bg-green-700 focus:ring-green-500",
     neutral:
@@ -128,7 +130,7 @@ export const designSystem = {
   badge: {
     base:
       "inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-medium",
-    success: "bg-primaryLight text-primaryDark",
+    success: "bg-successLight text-successDark",
     warning: "bg-warning/15 text-warning",
     danger: "bg-danger/15 text-danger",
   },
@@ -156,7 +158,7 @@ export const designSystem = {
 
   alert: {
     base: "rounded-lg border px-4 py-3 text-sm",
-    success: "border-primary/30 bg-primaryLight text-primaryDark",
+    success: "border-success/30 bg-successLight text-successDark",
     warning: "border-warning/30 bg-warning/15 text-warning",
     danger: "border-danger/30 bg-danger/15 text-danger",
   },

@@ -1,10 +1,10 @@
 "use client";
 
 import { adminPaths } from "@/config/adminNav";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Heading } from "@/components/ui/Heading";
 import { Input } from "@/components/ui/Input";
 import { dashboardPanelClass } from "@/lib/auth-ui";
 import {
@@ -14,6 +14,7 @@ import {
   type ProfileMe,
 } from "@/lib/api/profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatHumanReadableOrCopy } from "@/lib/textFormat";
 import Link from "next/link";
 import {
   useCallback,
@@ -52,6 +53,15 @@ function editableFromProfile(p: ProfileMe): PatchProfileMeInput {
   };
 }
 
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-textSecondary">{label}</dt>
+      <dd className="mt-0.5 break-words text-textPrimary">{value}</dd>
+    </div>
+  );
+}
+
 export default function AdminProfileSettingsPage() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -82,6 +92,7 @@ export default function AdminProfileSettingsPage() {
   const [saveSubmitting, setSaveSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
 
   const loadProfile = useCallback(async () => {
     setLoadState("loading");
@@ -97,6 +108,7 @@ export default function AdminProfileSettingsPage() {
       const ed = editableFromProfile(p);
       setDraft(ed);
       setBaseline({ ...ed });
+      setIsEditing(false);
       setLoadState("ready");
     } catch (e) {
       setLoadError(formatProfileError(e, "Could not load profile."));
@@ -112,6 +124,7 @@ export default function AdminProfileSettingsPage() {
     setDraft({ ...baseline });
     setSaveError(null);
     setSaveSuccess(null);
+    setIsEditing(false);
   }
 
 
@@ -130,6 +143,7 @@ export default function AdminProfileSettingsPage() {
       setDraft(ed);
       setBaseline({ ...ed });
       setSaveSuccess("Profile updated.");
+      setIsEditing(false);
     } catch (err) {
       setSaveError(
         formatProfileError(err, "Could not save profile."),
@@ -153,7 +167,10 @@ export default function AdminProfileSettingsPage() {
   if (loadState === "error") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4 px-4 py-6">
-        <Heading variant="h2">Profile Settings</Heading>
+        <PageHeader
+          title="Profile Settings"
+          subtitle="Update your personal details. Account identifiers cannot be changed here."
+        />
         <Alert variant="danger">{loadError}</Alert>
         <Button type="button" variant="secondary" onClick={() => void loadProfile()}>
           Try again
@@ -175,13 +192,26 @@ export default function AdminProfileSettingsPage() {
 
   return (
     <div className="w-full min-w-0 max-w-2xl space-y-4">
-      <header>
-        <Heading variant="h2">Profile Settings</Heading>
-        <p className="mt-1 text-sm text-textSecondary">
-          Update your personal details. Account identifiers below cannot be changed
-          here.
-        </p>
-      </header>
+      <PageHeader
+        title="Profile Settings"
+        subtitle="Update your personal details. Account identifiers below cannot be changed here."
+        actions={
+          !isEditing ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setSaveSuccess(null);
+                setSaveError(null);
+                setDraft({ ...baseline });
+                setIsEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          ) : null
+        }
+      />
 
       {saveSuccess ? (
         <Alert variant="success" role="status">
@@ -209,155 +239,188 @@ export default function AdminProfileSettingsPage() {
 
       <Card className={dashboardPanelClass}>
         <h3 className="text-base font-semibold text-textPrimary">Your details</h3>
-        {editableEmpty ? (
+        {!isEditing && editableEmpty ? (
           <p className="mt-2 text-xs text-textMuted">
             No profile fields are set yet. Add any details you want stored on your
             account.
           </p>
         ) : null}
-        <form
-          className="mt-4 grid gap-4 sm:grid-cols-2"
-          onSubmit={(e) => void handleSubmit(e)}
-        >
-          <div className="flex flex-col gap-1 sm:col-span-1">
-            <label
-              htmlFor="profile-first-name"
-              className="text-xs font-medium text-textPrimary"
-            >
-              First name
-            </label>
-            <Input
-              id="profile-first-name"
-              value={draft.firstName}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, firstName: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="given-name"
+        {!isEditing ? (
+          <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+            <ReadOnlyField
+              label="First name"
+              value={formatHumanReadableOrCopy(draft.firstName, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-1">
-            <label
-              htmlFor="profile-last-name"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Last name
-            </label>
-            <Input
-              id="profile-last-name"
-              value={draft.lastName}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, lastName: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="family-name"
+            <ReadOnlyField
+              label="Last name"
+              value={formatHumanReadableOrCopy(draft.lastName, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-2">
-            <label
-              htmlFor="profile-phone"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Phone
-            </label>
-            <Input
-              id="profile-phone"
-              type="tel"
-              value={draft.phone}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, phone: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="tel"
+            <ReadOnlyField
+              label="Phone"
+              value={draft.phone.trim() !== "" ? draft.phone : "—"}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-2">
-            <label
-              htmlFor="profile-address1"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Address line 1
-            </label>
-            <Input
-              id="profile-address1"
-              value={draft.addressLine1}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, addressLine1: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="address-line1"
+            <ReadOnlyField
+              label="Address line 1"
+              value={formatHumanReadableOrCopy(draft.addressLine1, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-1">
-            <label
-              htmlFor="profile-city"
-              className="text-xs font-medium text-textPrimary"
-            >
-              City
-            </label>
-            <Input
-              id="profile-city"
-              value={draft.city}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, city: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="address-level2"
+            <ReadOnlyField
+              label="City"
+              value={formatHumanReadableOrCopy(draft.city, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-1">
-            <label
-              htmlFor="profile-state"
-              className="text-xs font-medium text-textPrimary"
-            >
-              State
-            </label>
-            <Input
-              id="profile-state"
-              value={draft.state}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, state: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="address-level1"
+            <ReadOnlyField
+              label="State"
+              value={formatHumanReadableOrCopy(draft.state, "—")}
             />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-2">
-            <label
-              htmlFor="profile-country"
-              className="text-xs font-medium text-textPrimary"
-            >
-              Country
-            </label>
-            <Input
-              id="profile-country"
-              value={draft.country}
-              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setDraft((d) => ({ ...d, country: e.target.value }))
-              }
-              disabled={saveSubmitting}
-              autoComplete="country-name"
+            <ReadOnlyField
+              label="Country"
+              value={formatHumanReadableOrCopy(draft.country, "—")}
             />
-          </div>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button
-              type="submit"
-              variant="primary"
-              loading={saveSubmitting}
-              disabled={saveSubmitting}
-            >
-              Save
-            </Button>
-            <Button
-              type="button"
-              variant="neutral"
-              disabled={saveSubmitting}
-              onClick={handleCancel}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
+          </dl>
+        ) : (
+          <form
+            className="mt-4 grid gap-4 sm:grid-cols-2"
+            onSubmit={(e) => void handleSubmit(e)}
+          >
+            <div className="flex flex-col gap-1 sm:col-span-1">
+              <label
+                htmlFor="profile-first-name"
+                className="text-xs font-medium text-textPrimary"
+              >
+                First name
+              </label>
+              <Input
+                id="profile-first-name"
+                value={draft.firstName}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, firstName: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="given-name"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-1">
+              <label
+                htmlFor="profile-last-name"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Last name
+              </label>
+              <Input
+                id="profile-last-name"
+                value={draft.lastName}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, lastName: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="family-name"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label
+                htmlFor="profile-phone"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Phone
+              </label>
+              <Input
+                id="profile-phone"
+                type="tel"
+                value={draft.phone}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, phone: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="tel"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label
+                htmlFor="profile-address1"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Address line 1
+              </label>
+              <Input
+                id="profile-address1"
+                value={draft.addressLine1}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, addressLine1: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="address-line1"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-1">
+              <label
+                htmlFor="profile-city"
+                className="text-xs font-medium text-textPrimary"
+              >
+                City
+              </label>
+              <Input
+                id="profile-city"
+                value={draft.city}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, city: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="address-level2"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-1">
+              <label
+                htmlFor="profile-state"
+                className="text-xs font-medium text-textPrimary"
+              >
+                State
+              </label>
+              <Input
+                id="profile-state"
+                value={draft.state}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, state: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="address-level1"
+              />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label
+                htmlFor="profile-country"
+                className="text-xs font-medium text-textPrimary"
+              >
+                Country
+              </label>
+              <Input
+                id="profile-country"
+                value={draft.country}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setDraft((d) => ({ ...d, country: e.target.value }))
+                }
+                disabled={saveSubmitting}
+                autoComplete="country-name"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 sm:col-span-2">
+              <Button
+                type="submit"
+                variant="primary"
+                loading={saveSubmitting}
+                disabled={saveSubmitting}
+              >
+                Save
+              </Button>
+              <Button
+                type="button"
+                variant="neutral"
+                disabled={saveSubmitting}
+                onClick={handleCancel}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
         {saveError ? (
           <Alert variant="danger" className="mt-4">
             {saveError}

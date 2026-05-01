@@ -1,10 +1,10 @@
 "use client";
 
 import { AcademyCoachesEditModal } from "@/components/dashboard/admin/AcademyCoachesEditModal";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
-import { Heading } from "@/components/ui/Heading";
 import { Select } from "@/components/ui/Select";
 import {
   Table,
@@ -25,6 +25,12 @@ import {
 } from "@/lib/api/academyMeCoaches";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import {
+  formatEnumeratedLabel,
+  formatFunctionTokensForDisplay,
+  formatPersonNameForDisplay,
+  toTitleCaseInput,
+} from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import {
   useCallback,
@@ -69,9 +75,8 @@ function coachRowIsPendingStatus(membershipStatus: string): boolean {
 }
 
 function formatRoleDisplay(role: AcademyCoachRole): string {
-  if (role === "HEAD_COACH") return "Head Coach";
-  if (role === "ASSISTANT_COACH") return "Assistant Coach";
-  return "Unassigned";
+  if (role === null) return "Unassigned";
+  return toTitleCaseInput(role);
 }
 
 function coachMembershipStatusBadgeClass(membershipStatus: string): string {
@@ -92,8 +97,7 @@ function coachMembershipStatusBadgeClass(membershipStatus: string): string {
 }
 
 function formatFunctionsDisplay(functions: string[]): string {
-  if (functions.length === 0) return "None";
-  return functions.join(", ");
+  return formatFunctionTokensForDisplay(functions);
 }
 
 function formatCoachPageError(e: unknown, fallback: string): string {
@@ -273,7 +277,10 @@ export default function AdminCoachesPage() {
   if (loadState === "error") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
-        <Heading variant="h2">Coaches</Heading>
+        <PageHeader
+          title="Coaches"
+          subtitle="Manage coach roles and functions for your academy."
+        />
         <Alert variant="danger">{loadError}</Alert>
         <Button type="button" variant="secondary" onClick={() => void loadCoaches()}>
           Try again
@@ -284,12 +291,10 @@ export default function AdminCoachesPage() {
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <header>
-        <Heading variant="h2">Coaches</Heading>
-        <p className="mt-1 text-sm text-textSecondary">
-          Manage coach roles and functions for your academy.
-        </p>
-      </header>
+      <PageHeader
+        title="Coaches"
+        subtitle="Manage coach roles and functions for your academy."
+      />
 
       {coaches.length === 0 ? (
         <p className="rounded-xl border border-border bg-card p-6 text-sm text-textSecondary">
@@ -404,16 +409,17 @@ export default function AdminCoachesPage() {
           <TableBody>
             {visibleCoaches.map((row) => {
               const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
-              const nameCell =
-                name.trim() !== ""
-                  ? name
+              const rawName = name.trim();
+              const nameDisplay =
+                rawName !== ""
+                  ? formatPersonNameForDisplay(rawName)
                   : row.email.trim() !== ""
-                    ? row.email
+                    ? row.email.trim()
                     : "—";
               return (
                 <TableRow key={row.coachUserId}>
                   <Td className="font-medium text-textPrimary">
-                    {nameCell}
+                    {nameDisplay}
                   </Td>
                   <Td>{row.email.trim() !== "" ? row.email : "—"}</Td>
                   <Td>
@@ -423,7 +429,7 @@ export default function AdminCoachesPage() {
                         coachMembershipStatusBadgeClass(row.membershipStatus),
                       )}
                     >
-                      {row.membershipStatus}
+                      {formatEnumeratedLabel(row.membershipStatus)}
                     </span>
                   </Td>
                   <Td className="text-xs text-textMuted">{row.joinedAt}</Td>

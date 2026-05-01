@@ -1114,12 +1114,12 @@ export type MyAcademyProfile = {
 
 export type MyAcademyContext = MyAcademyProfile | null;
 
-function optionalTrimmedField(
+function optionalStringField(
   o: Record<string, unknown>,
   key: string,
 ): string {
   const v = o[key];
-  if (typeof v === "string") return v.trim();
+  if (typeof v === "string") return v;
   return "";
 }
 
@@ -1154,18 +1154,13 @@ function parseAcademyMeProfileData(data: unknown): MyAcademyProfile {
     };
   }
 
-  const name =
-    typeof o.name === "string" && o.name.trim() !== ""
-      ? o.name.trim()
-      : "Academy";
-
   return {
     academyId,
     entityId,
-    name,
-    address: optionalTrimmedField(o, "address"),
-    phone: optionalTrimmedField(o, "phone"),
-    email: optionalTrimmedField(o, "email"),
+    name: optionalStringField(o, "name"),
+    address: optionalStringField(o, "address"),
+    phone: optionalStringField(o, "phone"),
+    email: optionalStringField(o, "email"),
   };
 }
 
@@ -1202,10 +1197,10 @@ export async function patchMyAcademy(
   const raw = await apiRequest(paths.academies.me, {
     method: "PATCH",
     body: JSON.stringify({
-      name: input.name.trim(),
-      address: input.address.trim(),
-      phone: input.phone.trim(),
-      email: input.email.trim(),
+      name: input.name,
+      address: input.address,
+      phone: input.phone,
+      email: input.email,
     }),
   });
   const data = adaptBackendSuccess(raw);

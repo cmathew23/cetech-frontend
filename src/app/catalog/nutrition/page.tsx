@@ -23,6 +23,7 @@ import {
   listNutritionCatalogPage,
   mapNutritionDetailToNormalizedFood,
 } from "@/lib/api/nutritionCatalog";
+import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import type { CatalogPageMeta, NutritionCatalogItem } from "@/types/catalog.types";
 import type { NormalizedFood, NutritionMinerals } from "@/types/nutrition.types";
 import { useRouter } from "next/navigation";
@@ -401,9 +402,13 @@ export default function NutritionCatalogPage() {
                 <TableBody>
                   {items.map((row) => (
                     <TableRow key={row.id}>
-                      <Td>{row.name}</Td>
+                      <Td>{toTitleCaseInput(row.name.trim()) || "—"}</Td>
                       <Td>{row.sourceSystem ?? "-"}</Td>
-                      <Td>{row.qualityStatus ?? "-"}</Td>
+                      <Td>
+                        {row.qualityStatus?.trim()
+                          ? formatEnumeratedLabel(row.qualityStatus.trim())
+                          : "—"}
+                      </Td>
                       <Td>
                         <div className="flex flex-wrap gap-1">
                           {row.qualityFlags.length === 0 ? (
@@ -411,7 +416,7 @@ export default function NutritionCatalogPage() {
                           ) : (
                             row.qualityFlags.map((flag) => (
                               <Badge key={`${row.id}-${flag}`} variant={qualityBadgeVariant(flag)}>
-                                {flag}
+                                {formatEnumeratedLabel(flag.trim())}
                               </Badge>
                             ))
                           )}
@@ -473,7 +478,9 @@ export default function NutritionCatalogPage() {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-medium text-textPrimary">{item.food.name}</p>
+                          <p className="text-sm font-medium text-textPrimary">
+                            {toTitleCaseInput(item.food.name.trim()) || "—"}
+                          </p>
                           <p>
                             Source: {item.food.source} | ID: {item.food.sourceFoodId}
                           </p>

@@ -1,32 +1,26 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
-import { Button } from "@/components/ui/Button";
 import {
-  Table,
-  TableBody,
-  TableHead,
-  TableRow,
-  Th,
-  Td,
-} from "@/components/ui/Table";
-import {
-  fetchCoachAssignedAthletes,
   fetchCoachMeDashboard,
-  formatAcademyCoachRoleForUi,
-  formatTrainingPlanReleaseModeForUi,
-  type CoachAssignedAthleteRow,
   type CoachMeDashboardData,
 } from "@/lib/api/coachMe";
 import { fetchMyProfile } from "@/lib/api/profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
-import { canCoachValidateLevel } from "@/lib/coachAuthority";
+import {
+  formatEnumeratedLabel,
+  formatFunctionTokensForDisplay,
+  formatHumanReadableOrCopy,
+  formatPersonNameForDisplay,
+} from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
 const INVITATIONS_HREF = "/coach/dashboard/invitations";
+const ATHLETES_HREF = "/coach/athletes";
 
 const PRIMARY_ACTION_CLASS =
   "flex w-full items-center justify-between gap-4 rounded-full border border-border bg-surface px-5 py-4 shadow-sm transition hover:bg-surfaceElevated";
@@ -70,6 +64,18 @@ function formatDashboardStringField(
   return format(raw);
 }
 
+function formatDashboardFunctionField(
+  loading: boolean,
+  error: string | null,
+  raw: string[] | null | undefined,
+): string {
+  if (loading) return "…";
+  if (error) return "—";
+  const cleaned = (raw ?? []).map((value) => value.trim()).filter((value) => value !== "");
+  if (cleaned.length === 0) return "—";
+  return formatFunctionTokensForDisplay(cleaned);
+}
+
 function buildCoachSelfDisplayName(input: {
   firstName: string;
   lastName: string;
@@ -102,65 +108,12 @@ function DetailRow({
   );
 }
 
-function CoachAssignedAthleteActions({
-  athleteId,
-  hasPlanningProfile,
-  canValidateLevel,
-}: {
-  athleteId: string;
-  hasPlanningProfile: boolean;
-  canValidateLevel: boolean;
-}) {
-  const athleteIdTrimmed = athleteId.trim();
-
-  if (athleteIdTrimmed === "") {
-    return (
-      <span className="text-sm text-textMuted">Athlete route not available</span>
-    );
-  }
-
-  if (!hasPlanningProfile) {
-    return (
-      <div className="space-y-1.5">
-        <span className="inline-flex rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-textSecondary">
-          Planning Profile Pending
-        </span>
-        <p className="text-xs text-textMuted">
-          Athlete must complete APP before validation.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Link
-        href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/planning-profile`}
-      >
-        <Button type="button" variant="secondary">
-          View Planning Profile
-        </Button>
-      </Link>
-      {canValidateLevel ? (
-        <Link
-          href={`/coach/athletes/${encodeURIComponent(athleteIdTrimmed)}/level-validation`}
-        >
-          <Button type="button" variant="primary">
-            Validate Level
-          </Button>
-        </Link>
-      ) : null}
-    </div>
-  );
-}
-
 export function CoachDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<CoachMeDashboardData | null>(
     null,
   );
-  const [athletes, setAthletes] = useState<CoachAssignedAthleteRow[]>([]);
   const [coachSelfDisplayName, setCoachSelfDisplayName] = useState<
     string | null
   >(null);
@@ -173,21 +126,18 @@ export function CoachDashboardView() {
       setError(null);
       try {
         const profilePromise = fetchMyProfile().catch(() => null);
-        const [dash, rows, profile] = await Promise.all([
+        const [dash, profile] = await Promise.all([
           fetchCoachMeDashboard(),
-          fetchCoachAssignedAthletes(),
           profilePromise,
         ]);
         if (cancelled) return;
         setDashboard(dash);
-        setAthletes(rows);
         setCoachSelfDisplayName(
           profile ? buildCoachSelfDisplayName(profile) : null,
         );
       } catch (e) {
         if (cancelled) return;
         setDashboard(null);
-        setAthletes([]);
         setCoachSelfDisplayName(null);
         setError(
           formatCoachApiError(
@@ -207,26 +157,14 @@ export function CoachDashboardView() {
   }, []);
 
   const dash = dashboard;
-  const showValidateLevel = dash
-    ? canCoachValidateLevel({
-        hasHeadCoachConfigured: dash.hasHeadCoachConfigured,
-        academyCoachRole: dash.academyCoachRole,
-        functions: dash.functions,
-      })
-    : false;
-
   return (
     <div className="w-full max-w-5xl space-y-10">
-      <header className="flex w-full min-w-0 flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-textPrimary">
-            Coach Dashboard
-          </h1>
-          <p className="text-sm text-textSecondary">
-            Your academy context, release settings, and assigned athletes.
-          </p>
-          {coachSelfDisplayName ? (
-            <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <PageHeader
+        title="Coach Dashboard"
+        subtitle="Your academy context, release settings, and assigned athletes."
+        trailing={
+          coachSelfDisplayName ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-sm font-medium text-textSecondary">
                 Coach
               </span>
@@ -234,12 +172,12 @@ export function CoachDashboardView() {
                 className="text-sm font-medium text-textPrimary"
                 aria-live="polite"
               >
-                {coachSelfDisplayName}
+                {formatPersonNameForDisplay(coachSelfDisplayName)}
               </span>
             </div>
-          ) : null}
-        </div>
-      </header>
+          ) : null
+        }
+      />
 
       {error ? (
         <Alert variant="danger">{error}</Alert>
@@ -259,12 +197,23 @@ export function CoachDashboardView() {
             Open invitations →
           </span>
         </Link>
+        <Link href={ATHLETES_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-lg font-semibold text-textPrimary">Assigned athletes</p>
+            <p className="text-sm text-textSecondary">
+              Open the dedicated athletes page to view roster and actions.
+            </p>
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+            View athletes →
+          </span>
+        </Link>
       </section>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Academy
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -275,10 +224,11 @@ export function CoachDashboardView() {
             <dl className="space-y-2">
               <DetailRow
                 label="Name"
-                value={formatMetric(
+                value={formatDashboardStringField(
                   loading,
                   error,
                   dash?.trainingEntityName ?? null,
+                  (s) => formatHumanReadableOrCopy(s, "—"),
                 )}
               />
             </dl>
@@ -287,7 +237,7 @@ export function CoachDashboardView() {
 
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Coach
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -302,15 +252,15 @@ export function CoachDashboardView() {
                   loading,
                   error,
                   dash?.academyCoachRole ?? null,
-                  formatAcademyCoachRoleForUi,
+                  formatEnumeratedLabel,
                 )}
               />
               <DetailRow
                 label="Functions"
-                value={formatMetric(
+                value={formatDashboardFunctionField(
                   loading,
                   error,
-                  dash?.functionsDisplay ?? null,
+                  dash?.functions ?? null,
                 )}
               />
             </dl>
@@ -319,7 +269,7 @@ export function CoachDashboardView() {
 
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Release mode
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -342,7 +292,7 @@ export function CoachDashboardView() {
                   loading,
                   error,
                   dash?.trainingPlanReleaseMode ?? null,
-                  formatTrainingPlanReleaseModeForUi,
+                  formatEnumeratedLabel,
                 )}
               />
             </dl>
@@ -351,7 +301,7 @@ export function CoachDashboardView() {
 
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Summary
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -370,62 +320,6 @@ export function CoachDashboardView() {
         </section>
       </div>
 
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-textSecondary">
-            Assigned athletes
-          </h2>
-          <p className="mt-1 text-xs text-textMuted">
-            Athletes currently assigned to you.
-          </p>
-        </div>
-        <DashboardCardShell className="flex min-h-0 flex-col overflow-hidden p-0">
-          {loading ? (
-            <p className="p-4 text-sm text-textSecondary md:p-5">
-              Loading assigned athletes…
-            </p>
-          ) : error ? (
-            <p className="p-4 text-sm text-textSecondary md:p-5">
-              Could not load assigned athletes.
-            </p>
-          ) : athletes.length === 0 ? (
-            <p className="p-4 text-sm text-textSecondary md:p-5">
-              No assigned athletes yet.
-            </p>
-          ) : (
-            <Table className="w-full min-w-[760px] table-auto border-0 shadow-none">
-              <TableHead>
-                <TableRow variant="head">
-                  <Th>Display name</Th>
-                  <Th>Email</Th>
-                  <Th>Athlete status</Th>
-                  <Th>Membership</Th>
-                  <Th>Actions</Th>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {athletes.map((row, index) => (
-                  <TableRow key={`${row.email}-${index}`}>
-                    <Td>{row.displayName}</Td>
-                    <Td className="max-w-[12rem] truncate" title={row.email}>
-                      {row.email}
-                    </Td>
-                    <Td>{row.lifecycle}</Td>
-                    <Td>{row.membershipStatus}</Td>
-                    <Td>
-                      <CoachAssignedAthleteActions
-                        athleteId={row.athleteId}
-                        hasPlanningProfile={row.hasPlanningProfile}
-                        canValidateLevel={showValidateLevel}
-                      />
-                    </Td>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </DashboardCardShell>
-      </section>
     </div>
   );
 }

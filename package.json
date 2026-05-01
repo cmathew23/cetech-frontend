@@ -7,6 +7,7 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
+        "test": "vitest run",
         "test:e2e": "playwright test",
         "test:e2e:regression": "node scripts/check-e2e-regression-files.cjs && playwright test -c playwright.regression.config.ts",
         "playwright:reinstall": "npm uninstall @playwright/test && rm -rf \"$HOME/.cache/ms-playwright\" && npm install -D @playwright/test@^1.58.2 && playwright install"
@@ -25,6 +26,7 @@
         "eslint": "^9",
         "eslint-config-next": "16.2.1",
         "tailwindcss": "^4",
-        "typescript": "^5"
+        "typescript": "^5",
+        "vitest": "^4.1.5"
     }
 }

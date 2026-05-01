@@ -631,6 +631,13 @@ function valueAsString(value: PlanningFormValue, fieldLabel: string): string {
       code: "INVALID_FIELD_VALUE",
     } satisfies NormalizedApiError;
   }
+  if (typeof value === "object" && value !== null) {
+    throw {
+      message: `${fieldLabel} has an invalid form value`,
+      status: 400,
+      code: "INVALID_FIELD_VALUE",
+    } satisfies NormalizedApiError;
+  }
   return value;
 }
 

@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Heading } from "@/components/ui/Heading";
 import { Stack } from "@/components/ui/Stack";
 import { isNormalizedApiError, type NormalizedApiError } from "@/lib/apiClient";
+import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { getExerciseCatalogItemById } from "@/lib/api/exerciseCatalog";
 import type { ExerciseCatalogDetail } from "@/types/catalog.types";
 import { useParams, useRouter } from "next/navigation";
@@ -116,12 +117,18 @@ export default function ExerciseCatalogDetailPage() {
             {!loading && !error && detail ? (
               <Stack spacing="md">
                 <section className="rounded-lg border border-border bg-bg p-4">
-                  <h3 className="text-base font-semibold text-textPrimary">{detail.name}</h3>
+                  <h3 className="text-base font-semibold text-textPrimary">
+                    {toTitleCaseInput(detail.name.trim()) || "—"}
+                  </h3>
                   <div className="mt-2 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
                     <p className="text-textSecondary">
                       Category:{" "}
                       <span className="font-medium text-textPrimary">
-                        {detail.categoryName ?? detail.category ?? "-"}
+                        {(() => {
+                          const cat =
+                            (detail.categoryName ?? detail.category)?.trim() ?? "";
+                          return cat !== "" ? formatEnumeratedLabel(cat) : "-";
+                        })()}
                       </span>
                     </p>
                     <p className="text-textSecondary">

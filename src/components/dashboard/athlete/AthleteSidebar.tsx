@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 
 const ATHLETE_NAV_ITEMS = [
   { href: "/athlete/dashboard", label: "Dashboard" },
+  { href: "/athlete/coaches", label: "Coaches" },
   { href: "/athlete/dashboard/invitations", label: "Invitations" },
   { href: "/athlete/profile-planning", label: "Athlete Profile Planning" },
   { href: "/athlete/settings", label: "Settings" },

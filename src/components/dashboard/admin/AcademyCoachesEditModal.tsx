@@ -10,6 +10,7 @@ import type {
   AcademyCoachRole,
   AcademyCoachStructureRow,
 } from "@/lib/api/academyMeCoaches";
+import { formatPersonNameForDisplay, toTitleCaseInput } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import {
   useMemo,
@@ -76,7 +77,7 @@ function AcademyCoachesEditModalInner({
 
   const nameDisplay = useMemo(() => {
     const n = [coach.firstName, coach.lastName].filter(Boolean).join(" ");
-    return n.trim() !== "" ? n : "—";
+    return n.trim() !== "" ? formatPersonNameForDisplay(n) : "—";
   }, [coach.firstName, coach.lastName]);
 
   async function handleSubmit(e: FormEvent) {
@@ -171,7 +172,9 @@ function AcademyCoachesEditModalInner({
                         onChange={() => toggleFunction(opt.value)}
                       />
                       <span>
-                        {opt.label !== "" ? opt.label : opt.value}
+                        {toTitleCaseInput(
+                          (opt.label !== "" ? opt.label : opt.value).trim(),
+                        )}
                       </span>
                     </label>
                   </li>

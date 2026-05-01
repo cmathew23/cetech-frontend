@@ -1,16 +1,13 @@
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Input } from "@/components/ui/Input";
 
 export function AthleteDashboardHeader() {
   return (
-    <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-textPrimary">
-          Athlete Dashboard
-        </h1>
-        <p className="text-sm text-textSecondary">
-          Layout shell preview with placeholder content.
-        </p>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Athlete Dashboard"
+        subtitle="Your training overview, schedule, and academy activity."
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="w-full min-w-0 sm:w-56">
@@ -35,7 +32,7 @@ export function AthleteDashboardHeader() {
           Date
         </button>
       </div>
-    </header>
+    </div>
   );
 }
 

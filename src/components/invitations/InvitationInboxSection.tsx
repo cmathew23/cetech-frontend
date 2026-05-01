@@ -9,6 +9,10 @@ import {
   type MyPendingInvitation,
 } from "@/lib/api/invitations";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import {
+  formatEnumeratedLabel,
+  formatPersonNameForDisplay,
+} from "@/lib/textFormat";
 import { useEffect, useState } from "react";
 
 const LOADING_INVITATIONS = "Loading invitations…";
@@ -156,9 +160,17 @@ export function InvitationInboxSection({
               className="rounded-md border border-border p-3"
             >
               <div className="space-y-1 text-sm">
-                <p className="font-medium text-textPrimary">{row.entityName}</p>
-                <p className="text-textSecondary">Role: {row.role}</p>
-                <p className="text-textSecondary">Status: {row.status}</p>
+                <p className="font-medium text-textPrimary">
+                  {row.entityName.trim() !== ""
+                    ? formatPersonNameForDisplay(row.entityName.trim())
+                    : "—"}
+                </p>
+                <p className="text-textSecondary">
+                  Role: {formatEnumeratedLabel(row.role)}
+                </p>
+                <p className="text-textSecondary">
+                  Status: {formatEnumeratedLabel(row.status)}
+                </p>
                 <p className="text-textSecondary">Invited by: {row.inviter}</p>
                 <p className="text-textSecondary">Invited: {row.createdAt}</p>
               </div>

@@ -7,7 +7,12 @@ import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthl
 import { useAuth } from "@/hooks/useAuth";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatInviteDateDisplay } from "@/lib/dateTime";
 import { routeFromAccessContext } from "@/lib/accessContext";
+import {
+  formatEnumeratedLabel,
+  formatPersonNameForDisplay,
+} from "@/lib/textFormat";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -19,15 +24,6 @@ function statusBadgeClass(status: string): string {
   if (u === "REVOKED" || u === "EXPIRED")
     return "bg-zinc-100 text-zinc-700";
   return "bg-gray-100 text-gray-700";
-}
-
-function formatInviteDate(createdAt: string): string {
-  const t = createdAt.trim();
-  if (t === "") return "—";
-  const d = new Date(t);
-  return Number.isNaN(d.getTime())
-    ? t
-    : d.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
 function isPending(status: string): boolean {
@@ -134,19 +130,26 @@ export function AthleteInvitationsPageContent() {
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
             <p className="text-sm font-medium text-textPrimary">
-              {item.entityName.trim() !== "" ? item.entityName : "—"}
+              {item.entityName.trim() !== ""
+                ? formatPersonNameForDisplay(item.entityName.trim())
+                : "—"}
             </p>
             <p className="text-sm text-textSecondary">
-              Role: {item.role.trim() !== "" ? item.role : "—"}
+              Role:{" "}
+              {item.role.trim() !== ""
+                ? formatEnumeratedLabel(item.role.trim())
+                : "—"}
             </p>
             <p className="text-sm text-textSecondary">
-              Invited: {formatInviteDate(item.createdAt)}
+              Invited: {formatInviteDateDisplay(item.createdAt)}
             </p>
           </div>
           <span
             className={`inline-flex w-fit rounded-md px-2 py-1 text-xs font-medium ${statusBadgeClass(item.status)}`}
           >
-            {item.status.trim() !== "" ? item.status : "—"}
+            {item.status.trim() !== ""
+              ? formatEnumeratedLabel(item.status.trim())
+              : "—"}
           </span>
         </div>
         {isPending(item.status) ? (

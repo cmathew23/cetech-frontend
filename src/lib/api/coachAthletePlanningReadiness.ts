@@ -228,6 +228,23 @@ export type CoachAthleteGeneratedDraftDay = {
   date: string | null;
   dayFocus: string | null;
   notes: string | null;
+  estimatedDailyCalories: number | null;
+  targetCalorieMin: number | null;
+  targetCalorieMax: number | null;
+  calorieAdequacyStatus: string | null;
+  estimatedCarbohydrateGrams: number | null;
+  targetCarbohydrateMinGrams: number | null;
+  targetCarbohydrateMaxGrams: number | null;
+  estimatedProteinGrams: number | null;
+  targetProteinMinGrams: number | null;
+  targetProteinMaxGrams: number | null;
+  estimatedFatGrams: number | null;
+  targetFatMinGrams: number | null;
+  targetFatMaxGrams: number | null;
+  estimatedFiberGrams: number | null;
+  targetFiberMinGrams: number | null;
+  targetFiberMaxGrams: number | null;
+  macroAdequacyStatus: string | null;
   sessions: CoachAthleteGeneratedDraftSession[];
 };
 
@@ -345,6 +362,23 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
     date: readStringKey([record], ["date", "dayDate"]),
     dayFocus: readStringKey([record], ["dayFocus"]),
     notes: readStringKey([record], ["notes"]),
+    estimatedDailyCalories: readNumberKey([record], ["estimatedDailyCalories"]),
+    targetCalorieMin: readNumberKey([record], ["targetCalorieMin"]),
+    targetCalorieMax: readNumberKey([record], ["targetCalorieMax"]),
+    calorieAdequacyStatus: readStringKey([record], ["calorieAdequacyStatus"]),
+    estimatedCarbohydrateGrams: readNumberKey([record], ["estimatedCarbohydrateGrams"]),
+    targetCarbohydrateMinGrams: readNumberKey([record], ["targetCarbohydrateMinGrams"]),
+    targetCarbohydrateMaxGrams: readNumberKey([record], ["targetCarbohydrateMaxGrams"]),
+    estimatedProteinGrams: readNumberKey([record], ["estimatedProteinGrams"]),
+    targetProteinMinGrams: readNumberKey([record], ["targetProteinMinGrams"]),
+    targetProteinMaxGrams: readNumberKey([record], ["targetProteinMaxGrams"]),
+    estimatedFatGrams: readNumberKey([record], ["estimatedFatGrams"]),
+    targetFatMinGrams: readNumberKey([record], ["targetFatMinGrams"]),
+    targetFatMaxGrams: readNumberKey([record], ["targetFatMaxGrams"]),
+    estimatedFiberGrams: readNumberKey([record], ["estimatedFiberGrams"]),
+    targetFiberMinGrams: readNumberKey([record], ["targetFiberMinGrams"]),
+    targetFiberMaxGrams: readNumberKey([record], ["targetFiberMaxGrams"]),
+    macroAdequacyStatus: readStringKey([record], ["macroAdequacyStatus"]),
     sessions,
   };
   return (
@@ -352,6 +386,23 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
     day.date ||
     day.dayFocus ||
     day.notes ||
+    day.estimatedDailyCalories !== null ||
+    day.targetCalorieMin !== null ||
+    day.targetCalorieMax !== null ||
+    day.calorieAdequacyStatus ||
+    day.estimatedCarbohydrateGrams !== null ||
+    day.targetCarbohydrateMinGrams !== null ||
+    day.targetCarbohydrateMaxGrams !== null ||
+    day.estimatedProteinGrams !== null ||
+    day.targetProteinMinGrams !== null ||
+    day.targetProteinMaxGrams !== null ||
+    day.estimatedFatGrams !== null ||
+    day.targetFatMinGrams !== null ||
+    day.targetFatMaxGrams !== null ||
+    day.estimatedFiberGrams !== null ||
+    day.targetFiberMinGrams !== null ||
+    day.targetFiberMaxGrams !== null ||
+    day.macroAdequacyStatus ||
     day.sessions.length > 0
   )
     ? day

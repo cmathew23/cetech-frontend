@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/Table";
 import { isNormalizedApiError, type NormalizedApiError } from "@/lib/apiClient";
 import { listExerciseCatalogPage } from "@/lib/api/exerciseCatalog";
+import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import type { CatalogPageMeta, ExerciseCatalogItem } from "@/types/catalog.types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
@@ -276,8 +277,13 @@ export default function ExerciseCatalogPage() {
                 <TableBody>
                   {items.map((row) => (
                     <TableRow key={row.id}>
-                      <Td>{row.name}</Td>
-                      <Td>{row.categoryName ?? row.category ?? "-"}</Td>
+                      <Td>{toTitleCaseInput(row.name.trim()) || "—"}</Td>
+                      <Td>
+                        {(() => {
+                          const cat = (row.categoryName ?? row.category)?.trim() ?? "";
+                          return cat !== "" ? formatEnumeratedLabel(cat) : "—";
+                        })()}
+                      </Td>
                       <Td>{row.sourceSystem ?? "-"}</Td>
                       <Td className="max-w-[320px] truncate">
                         {row.descriptionText ?? row.description ?? "-"}
@@ -336,10 +342,16 @@ export default function ExerciseCatalogPage() {
                     <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                       <div>
                         <p className="text-sm font-medium text-textPrimary">
-                          {row.exercise.name}
+                          {toTitleCaseInput(row.exercise.name.trim()) || "—"}
                         </p>
                         <p className="text-xs text-textSecondary">
-                          Category: {row.exercise.categoryName ?? row.exercise.category ?? "-"}
+                          Category:{" "}
+                          {(() => {
+                            const cat =
+                              (row.exercise.categoryName ?? row.exercise.category)?.trim() ??
+                              "";
+                            return cat !== "" ? formatEnumeratedLabel(cat) : "—";
+                          })()}
                         </p>
                       </div>
                       <div className="flex items-end gap-2">

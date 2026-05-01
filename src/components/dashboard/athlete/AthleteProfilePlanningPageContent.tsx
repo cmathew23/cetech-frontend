@@ -22,13 +22,16 @@ import {
   shouldRenderField,
   validatePlanningProfileDraft,
   type PlanningAllergiesIntolerancesForm,
+  type PlanningAllergiesIntolerances,
   type PlanningFormValue,
   type PlanningFormRecord,
   type PlanningProfileFormState,
   type PlanningProfileGroupName,
   type PlanningProfileRecord,
+  type PlanningScalar,
 } from "@/lib/api/planning-profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatPlanningProfileDateDisplay } from "@/lib/dateTime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type ViewState =
@@ -226,22 +229,24 @@ function formatApiError(e: unknown, fallback: string): string {
   return fallback;
 }
 
-function displayText(
-  value: string | number | boolean | string[] | null | undefined,
-): string {
+function displayAllergiesRecord(value: PlanningAllergiesIntolerances): string {
+  if (value.noFoodAllergies) return "No food allergies declared";
+  const parts = [...value.selected];
+  const other = value.othersText?.trim();
+  if (other) parts.push(other);
+  return parts.length > 0 ? parts.join(", ") : "—";
+}
+
+function displayText(value: PlanningScalar | null | undefined): string {
   if (value === null || value === undefined) return "—";
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return displayAllergiesRecord(value);
+  }
   if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   const text = String(value).trim();
   return text === "" ? "—" : text;
-}
-
-function displayDate(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
 }
 
 function todayDateInputMax(): string {
@@ -336,7 +341,7 @@ function statusBadgeVariant(
 
 function displayFieldValue(
   field: string,
-  value: string | number | boolean | string[] | null | undefined,
+  value: PlanningScalar | undefined,
 ): string {
   if (
     field === "dateOfBirth" ||
@@ -345,7 +350,9 @@ function displayFieldValue(
     field === "updatedAt" ||
     field === "confirmedAt"
   ) {
-    return displayDate(typeof value === "string" ? value : null);
+    return formatPlanningProfileDateDisplay(
+      typeof value === "string" ? value : null,
+    );
   }
   return displayText(value);
 }
@@ -511,7 +518,9 @@ export function AthleteProfilePlanningPageContent() {
 
   const mode = state.mode;
   const record = state.record;
-  const lastUpdatedText = record?.updatedAt ? displayDate(record.updatedAt) : null;
+  const lastUpdatedText = record?.updatedAt
+    ? formatPlanningProfileDateDisplay(record.updatedAt)
+    : null;
 
   const createMode = mode === "create";
   const canEditFields = createMode || isEditingExisting;
@@ -749,7 +758,7 @@ export function AthleteProfilePlanningPageContent() {
           <div className="rounded-lg border border-border bg-surface p-3">
             <div className="space-y-3">
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Allergies
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -771,7 +780,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Intolerances
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -793,7 +802,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Special
                 </p>
                 <div className="flex flex-wrap gap-2">

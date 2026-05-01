@@ -11,6 +11,7 @@ import {
   getNutritionCatalogItemById,
   mapNutritionDetailToNormalizedFood,
 } from "@/lib/api/nutritionCatalog";
+import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import type { NutritionCatalogDetail } from "@/types/catalog.types";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -158,7 +159,9 @@ export default function NutritionCatalogDetailPage() {
             {!loading && !error && detail ? (
               <Stack spacing="md">
                 <section className="rounded-lg border border-border bg-bg p-4">
-                  <h3 className="text-base font-semibold text-textPrimary">{detail.name}</h3>
+                  <h3 className="text-base font-semibold text-textPrimary">
+                    {toTitleCaseInput(detail.name.trim()) || "—"}
+                  </h3>
                   <div className="mt-2 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
                     <p className="text-textSecondary">
                       Source:{" "}
@@ -175,7 +178,9 @@ export default function NutritionCatalogDetailPage() {
                     <p className="text-textSecondary">
                       Quality Status:{" "}
                       <span className="font-medium text-textPrimary">
-                        {detail.qualityStatus ?? "-"}
+                        {detail.qualityStatus?.trim()
+                          ? formatEnumeratedLabel(detail.qualityStatus.trim())
+                          : "-"}
                       </span>
                     </p>
                   </div>
@@ -185,7 +190,7 @@ export default function NutritionCatalogDetailPage() {
                     ) : (
                       detail.qualityFlags.map((flag) => (
                         <Badge key={flag} variant={qualityBadgeVariant(flag)}>
-                          {flag}
+                          {formatEnumeratedLabel(flag.trim())}
                         </Badge>
                       ))
                     )}

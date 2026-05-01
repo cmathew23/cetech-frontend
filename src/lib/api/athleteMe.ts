@@ -14,6 +14,8 @@ function readString(value: unknown): string {
 export type AthleteMeProfile = {
   sport: string;
   level: string;
+  /** AthleteProfile UUID when API exposes it (used for entity assignment joins). */
+  athleteProfileId: string;
 };
 
 /**
@@ -34,11 +36,19 @@ export async function fetchAthleteMeProfile(): Promise<AthleteMeProfile> {
   const sources = [root, nestedData, profile];
   let sport = "";
   let level = "";
+  let athleteProfileId = "";
   for (const source of sources) {
     if (!source) continue;
     if (sport === "") sport = readString(source.sport);
     if (level === "") level = readString(source.level);
+    if (athleteProfileId === "") {
+      const ap = asRecord(source.athleteProfile) ?? asRecord(source.profile);
+      athleteProfileId =
+        readString(source.athleteProfileId) ||
+        readString(source.athleteId) ||
+        (ap ? readString(ap.id) || readString(ap.athleteProfileId) : "");
+    }
   }
 
-  return { sport, level };
+  return { sport, level, athleteProfileId };
 }

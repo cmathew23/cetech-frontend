@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/Badge";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { FormField } from "@/components/ui/FormField";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -31,6 +32,7 @@ import {
   type PlanningScalar,
 } from "@/lib/api/planning-profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
 import { formatPlanningProfileDateDisplay } from "@/lib/dateTime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -67,6 +69,22 @@ const SEX_OPTIONS = [
   { value: "", label: "Select gender" },
   { value: "MALE", label: "Male" },
   { value: "FEMALE", label: "Female" },
+] as const;
+
+function formatAthleteLevelOptionLabel(enumValue: string): string {
+  return enumValue
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const SELF_REPORTED_LEVEL_SELECT_OPTIONS = [
+  { value: "", label: "Select self-reported level" },
+  ...ATHLETE_LEVELS.map((value) => ({
+    value,
+    label: formatAthleteLevelOptionLabel(value),
+  })),
 ] as const;
 
 const REGIONAL_CUISINE_OPTIONS = [
@@ -666,7 +684,7 @@ export function AthleteProfilePlanningPageContent() {
 
       return (
         <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <Card padding="compact" accent={false} className="bg-surface">
             <div className="flex flex-wrap gap-2">
               {REGIONAL_CUISINE_OPTIONS.map((option) => (
                 <label
@@ -684,7 +702,7 @@ export function AthleteProfilePlanningPageContent() {
                 </label>
               ))}
             </div>
-          </div>
+          </Card>
           <p className="text-xs text-textSecondary">
             {selectedSummary.length > 0
               ? `Selected: ${selectedSummary.join(", ")}`
@@ -755,7 +773,7 @@ export function AthleteProfilePlanningPageContent() {
 
       return (
         <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <Card padding="compact" accent={false} className="bg-surface">
             <div className="space-y-3">
               <div className="space-y-2">
                 <p className="text-xs font-medium tracking-wide text-textSecondary">
@@ -834,7 +852,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
             </div>
-          </div>
+          </Card>
           {hasOthers ? (
             <div className="space-y-1">
               <Input
@@ -878,6 +896,37 @@ export function AthleteProfilePlanningPageContent() {
                 {opt.label}
               </option>
             ))}
+          </Select>
+        </FormField>
+      );
+    }
+
+    if (group === "sportContext" && field === "selfReportedLevel") {
+      const rawSelected =
+        typeof value === "string" ? value.trim() : "";
+      const athleteLevelEnumSet = new Set<string>([...ATHLETE_LEVELS]);
+      const fallbackOption =
+        rawSelected !== "" && !athleteLevelEnumSet.has(rawSelected) ? (
+          <option key={rawSelected} value={rawSelected}>
+            {formatAthleteLevelOptionLabel(rawSelected)}
+          </option>
+        ) : null;
+      return (
+        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+          <Select
+            id={`${group}-${field}`}
+            value={rawSelected}
+            disabled={readOnly}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              updateField(group, field, e.target.value)
+            }
+          >
+            {SELF_REPORTED_LEVEL_SELECT_OPTIONS.map((opt) => (
+              <option key={opt.value || "__empty"} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+            {fallbackOption}
           </Select>
         </FormField>
       );
@@ -1210,10 +1259,7 @@ export function AthleteProfilePlanningPageContent() {
           {fields.length > 0 ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {fields.map((field) => {
-                if (
-                  group === "sportContext" &&
-                  (field === "selfReportedLevel" || field === "validatedLevel")
-                ) {
+                if (group === "sportContext" && field === "validatedLevel") {
                   return (
                     <div
                       key={`${group}-${field}`}
@@ -1223,11 +1269,7 @@ export function AthleteProfilePlanningPageContent() {
                         {toFieldLabel(field)}
                       </p>
                       <p className="text-sm text-textPrimary">
-                        {displayText(
-                          field === "selfReportedLevel"
-                            ? record?.selfReportedLevel
-                            : record?.validatedLevel,
-                        )}
+                        {displayText(record?.validatedLevel)}
                       </p>
                     </div>
                   );
@@ -1339,7 +1381,7 @@ export function AthleteProfilePlanningPageContent() {
             ) : (
               <Button
                 type="button"
-                variant="primary"
+                variant="secondary"
                 disabled={saveBusy}
                 onClick={handleStartEditing}
               >

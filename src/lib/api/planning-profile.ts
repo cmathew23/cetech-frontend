@@ -5,7 +5,7 @@ import {
   isNormalizedApiError,
   type NormalizedApiError,
 } from "@/lib/apiClient";
-import type { AthleteLevelValue } from "@/lib/athlete-levels";
+import { ATHLETE_LEVELS, type AthleteLevelValue } from "@/lib/athlete-levels";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -178,6 +178,7 @@ const HIDDEN_FIELDS = new Set([
   LEGACY_RANKING_LEVEL_FIELD,
 ]);
 const LOCKED_FIELDS = new Set(["primarySport", "validatedLevel"]);
+const ALLOWED_SELF_REPORTED_LEVEL_VALUES = new Set<string>(ATHLETE_LEVELS);
 const REGIONAL_CUISINE_FIELD = "regionalCuisinePreference";
 const WRITABLE_FRONTEND_FIELDS: Record<PlanningProfileGroupName, Set<string>> = {
   athleteContext: new Set([
@@ -186,7 +187,11 @@ const WRITABLE_FRONTEND_FIELDS: Record<PlanningProfileGroupName, Set<string>> = 
     ATHLETE_CONTEXT_HEIGHT_FIELD,
     ATHLETE_CONTEXT_WEIGHT_FIELD,
   ]),
-  sportContext: new Set(["primarySport", "disciplineOrEvent"]),
+  sportContext: new Set([
+    "primarySport",
+    "disciplineOrEvent",
+    "selfReportedLevel",
+  ]),
   sportPerformance: new Set([
     SPORT_PERFORMANCE_LEVEL_FIELD,
     SPORT_PERFORMANCE_RANKING_FIELD,
@@ -899,7 +904,10 @@ function convertPatchValue(
     const trimmed = trimWhenPresent(value, field);
     return trimmed === "" ? null : trimmed;
   }
-  if (group === "sportContext" && field === "disciplineOrEvent") {
+  if (
+    group === "sportContext" &&
+    (field === "disciplineOrEvent" || field === "selfReportedLevel")
+  ) {
     const trimmed = trimWhenPresent(value, field);
     return trimmed === "" ? null : trimmed;
   }
@@ -1358,6 +1366,15 @@ export function collectPlanningProfileValidationErrors(
     positive: true,
     message: "Weight must be greater than 0.",
   });
+
+  const selfReportedLevel = readValue("sportContext", "selfReportedLevel");
+  if (
+    selfReportedLevel !== ""
+    && !ALLOWED_SELF_REPORTED_LEVEL_VALUES.has(selfReportedLevel)
+  ) {
+    errors[fieldErrorKey("sportContext", "selfReportedLevel")] =
+      "Self-reported level must match a supported athlete level.";
+  }
 
   validateNumber("trainingExposure", "trainingAgeYears", {
     min: 0,

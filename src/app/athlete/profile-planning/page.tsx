@@ -1,3 +1,4 @@
+import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
 import { AthleteProfilePlanningPageContent } from "@/components/dashboard/athlete/AthleteProfilePlanningPageContent";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -10,6 +11,7 @@ export default function AthleteProfilePlanningPage() {
         <PageHeader
           title="Athlete Profile Planning"
           subtitle="View your planning profile bootstrap state from the backend."
+          trailing={<AthleteHeaderIdentityMetadata />}
         />
         <AthleteProfilePlanningPageContent />
       </div>

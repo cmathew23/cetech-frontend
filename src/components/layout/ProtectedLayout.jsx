@@ -2,7 +2,10 @@
 
 import { AccessGateLoadingState } from "@/components/access/AccessGateLoadingState";
 import { useAuth } from "@/hooks/useAuth";
+import { getToken } from "@/lib/auth";
+import { isLoggingOut } from "@/lib/logoutClient";
 import { useAuthGuard } from "@/middleware/authGuard";
+import { useEffect } from "react";
 
 /**
  * Guardrail:
@@ -11,6 +14,8 @@ import { useAuthGuard } from "@/middleware/authGuard";
  */
 function CompleteProtectedLayout({ children }) {
   const guard = useAuthGuard();
+
+  if (isLoggingOut()) return null;
 
   if (guard.loading) {
     return <AccessGateLoadingState label="Loading access..." />;
@@ -23,12 +28,23 @@ function CompleteProtectedLayout({ children }) {
 
 function AuthOnlyProtectedLayout({ children }) {
   const { user, loading } = useAuth();
+  const hasToken = Boolean(getToken());
+
+  useEffect(() => {
+    if (isLoggingOut()) return;
+    if (loading) return;
+    if (!user || !hasToken) {
+      window.location.replace("/login");
+    }
+  }, [hasToken, loading, user]);
+
+  if (isLoggingOut()) return null;
 
   if (loading) {
     return <AccessGateLoadingState label="Loading access..." minHeightClassName="min-h-screen" />;
   }
 
-  if (!user) {
+  if (!user || !hasToken) {
     return null;
   }
 

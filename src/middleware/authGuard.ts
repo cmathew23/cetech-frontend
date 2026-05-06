@@ -2,6 +2,7 @@
 
 import { getToken } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
+import { isLoggingOut } from "@/lib/logoutClient";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { shouldRedirectAcademyAdminFromAdminRoutes } from "@/lib/academy-admin-dashboard-eligibility";
 import { allowCoachInvitationInboxRoute } from "@/lib/coach-invitation-gate";
@@ -238,6 +239,7 @@ export function useAuthGuard({
   });
 
   useEffect(() => {
+    if (isLoggingOut()) return;
     if (!redirect || result.loading || !result.redirectTo) return;
     /** `replace` avoids stacking dashboard↔onboarding in history when fixing incomplete sessions. */
     router.replace(result.redirectTo);

@@ -10,6 +10,12 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 export type AppContextUser = {
   userId: string;
   roles: string[];
+  email?: string;
+  name?: string;
+  fullName?: string;
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
 };
 
 export type AppContextAcademy = {
@@ -96,7 +102,23 @@ function parseUser(raw: unknown): AppContextUser {
   const roles = Array.isArray(o.roles)
     ? o.roles.filter((x): x is string => typeof x === "string")
     : [];
-  return { userId, roles };
+  const email = typeof o.email === "string" ? o.email.trim() : "";
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  const fullName = typeof o.fullName === "string" ? o.fullName.trim() : "";
+  const displayName =
+    typeof o.displayName === "string" ? o.displayName.trim() : "";
+  const firstName = typeof o.firstName === "string" ? o.firstName.trim() : "";
+  const lastName = typeof o.lastName === "string" ? o.lastName.trim() : "";
+  return {
+    userId,
+    roles,
+    ...(email !== "" ? { email } : {}),
+    ...(name !== "" ? { name } : {}),
+    ...(fullName !== "" ? { fullName } : {}),
+    ...(displayName !== "" ? { displayName } : {}),
+    ...(firstName !== "" ? { firstName } : {}),
+    ...(lastName !== "" ? { lastName } : {}),
+  };
 }
 
 function parseAcademy(raw: unknown): AppContextAcademy {

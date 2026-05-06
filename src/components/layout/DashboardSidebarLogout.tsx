@@ -2,8 +2,9 @@
 
 import { LogoutConfirmDialog } from "@/components/ui/LogoutConfirmDialog";
 import { designSystem } from "@/config/design-system";
-import { performClientLogout } from "@/lib/logoutClient";
+import { useSharedLogout } from "@/hooks/useSharedLogout";
 import { cn } from "@/lib/utils";
+import { LogOut } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -13,6 +14,7 @@ import { useState } from "react";
 export function DashboardSidebarLogout() {
   const [open, setOpen] = useState(false);
   const { link, logout } = designSystem.layout.sidebar;
+  const logoutUser = useSharedLogout();
 
   return (
     <>
@@ -21,12 +23,13 @@ export function DashboardSidebarLogout() {
         className={cn(link, logout)}
         onClick={() => setOpen(true)}
       >
-        Logout
+        <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>Logout</span>
       </button>
       <LogoutConfirmDialog
         open={open}
         onClose={() => setOpen(false)}
-        onConfirm={() => performClientLogout()}
+        onConfirm={logoutUser}
       />
     </>
   );

@@ -3,7 +3,6 @@
 import type {
   LoginRequest,
   LoginResponse,
-  LogoutResponse,
   MeResponse,
   RegisterRequest,
   RegisterResponse,
@@ -16,6 +15,12 @@ import {
   type AccessContextPayload,
 } from "@/lib/accessContext";
 import { getToken, removeToken, setToken } from "@/lib/auth";
+import {
+  AUTH_STATE_CHANGE_EVENT,
+  clearClientLogoutState,
+  markLoggingOut,
+  requestClientLogout,
+} from "@/lib/logoutClient";
 import { apiRequest } from "@/lib/apiClient";
 import {
   isNormalizedApiError,
@@ -33,6 +38,24 @@ type LoginLikePayload = {
     accessToken?: string;
   };
 };
+
+const ACCESS_CONTEXT_STORAGE_KEY = "accessContext";
+
+function persistAccessContext(payload: AccessContextPayload | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (payload === null) {
+      window.sessionStorage.removeItem(ACCESS_CONTEXT_STORAGE_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(
+      ACCESS_CONTEXT_STORAGE_KEY,
+      JSON.stringify(payload),
+    );
+  } catch {
+    // Best-effort cache only.
+  }
+}
 
 function toNormalizedError(e: unknown): NormalizedApiError {
   if (isNormalizedApiError(e)) {
@@ -98,7 +121,15 @@ export function useAuth() {
     setUser(null);
     setRoles([]);
     setAccessContext(null);
+    persistAccessContext(null);
   }, []);
+
+  const applyLoggedOutState = useCallback(() => {
+    resetAuthState();
+    setError(null);
+    setAccessGateReady(true);
+    setLoading(false);
+  }, [resetAuthState]);
 
   const fetchMe = useCallback(async () => {
     const me = await apiRequest<MeResponse>(paths.auth.me, { method: "GET" });
@@ -130,6 +161,7 @@ export function useAuth() {
         ctx = null;
       }
       setAccessContext(ctx);
+      persistAccessContext(ctx);
       setAccessGateReady(true);
       return { ...me, accessContext: ctx };
     } catch (e) {
@@ -165,6 +197,7 @@ export function useAuth() {
         ctx = null;
       }
       setAccessContext(ctx);
+      persistAccessContext(ctx);
       setAccessGateReady(true);
       return { ...me, accessContext: ctx };
     } catch (e) {
@@ -219,6 +252,7 @@ export function useAuth() {
           ctx = null;
         }
         setAccessContext(ctx);
+        persistAccessContext(ctx);
         setAccessGateReady(true);
         return { ...me, accessContext: ctx };
       } catch (e) {
@@ -252,22 +286,14 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(async () => {
+    markLoggingOut();
     setLoading(true);
     setError(null);
-    try {
-      await apiRequest<LogoutResponse>(paths.auth.logout, {
-        method: "POST",
-      });
-    } catch (e) {
-      const normalized = toNormalizedError(e);
-      setError(normalized);
-    } finally {
-      removeToken();
-      resetAuthState();
-      setAccessGateReady(true);
-      setLoading(false);
-    }
-  }, [resetAuthState]);
+    clearClientLogoutState();
+    applyLoggedOutState();
+    void requestClientLogout();
+    window.location.replace("/login");
+  }, [applyLoggedOutState]);
 
   useEffect(() => {
     if (hasBootstrapped.current) {
@@ -277,6 +303,34 @@ export function useAuth() {
 
     void bootstrapAuth();
   }, [bootstrapAuth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncAuthState = () => {
+      if (!getToken()) {
+        applyLoggedOutState();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncAuthState();
+      }
+    };
+
+    window.addEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState);
+    window.addEventListener("storage", syncAuthState);
+    window.addEventListener("pageshow", syncAuthState);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState);
+      window.removeEventListener("storage", syncAuthState);
+      window.removeEventListener("pageshow", syncAuthState);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [applyLoggedOutState]);
 
   return {
     user,

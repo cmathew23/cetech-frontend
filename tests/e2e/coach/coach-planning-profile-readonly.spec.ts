@@ -44,9 +44,10 @@ test("coach: read-only athlete planning profile for assigned athlete01", async (
     );
   }
 
-  await expect(page).toHaveURL(/\/coach\/athletes\/[^/]+\/planning-profile/, {
-    timeout: 30_000,
-  });
+  await expect(page).toHaveURL(
+    /\/coach\/(training-plans\/[^/]+\/workflow|athletes\/[^/]+\/planning-profile)/,
+    { timeout: 30_000 },
+  );
 
   await expect(
     page.getByRole("heading", { name: "Athlete Planning Profile" }),

@@ -83,10 +83,33 @@ export const paths = {
     /** GET/POST — training plan level validation (coach review). */
     athleteTrainingPlanLevelValidation: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/level-validation`,
-    athleteTrainingPlanReadiness: (entityId: string, athleteId: string) =>
-      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/readiness`,
+    athleteTrainingPlanReadiness: (
+      entityId: string,
+      athleteId: string,
+      query?: {
+        generationDomain?: string;
+        seasonCycleId?: string | null;
+      },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/readiness`;
+      const params = new URLSearchParams();
+      if (query?.generationDomain) {
+        params.set("generationDomain", query.generationDomain);
+      }
+      if (query?.seasonCycleId) {
+        params.set("seasonCycleId", query.seasonCycleId);
+      }
+      const text = params.toString();
+      return text ? `${base}?${text}` : base;
+    },
     athleteTrainingPlanWorkloadAssessment: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/workload-assessment`,
+    athleteTrainingPlanWorkloadAssessmentLatest: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/workload-assessment/latest`,
     athleteTrainingPlanCompleteness: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/completeness`,
     athleteTrainingPlanExecute: (entityId: string, athleteId: string) =>
@@ -99,8 +122,29 @@ export const paths = {
       generationDomain: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/domain-drafts/latest?generationDomain=${encodeURIComponent(generationDomain)}`,
-    athleteTrainingPlanRevise: (entityId: string, athleteId: string) =>
-      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/revise`,
+    athleteTrainingPlanSubmitReview: (
+      entityId: string,
+      athleteId: string,
+      planId: string,
+      versionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/submit-review`,
+    athleteTrainingPlanHeadApprove: (
+      entityId: string,
+      athleteId: string,
+      planId: string,
+      versionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/head-approve`,
+    athleteTrainingPlanRelease: (
+      entityId: string,
+      athleteId: string,
+      planId: string,
+      versionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/release`,
+    athleteTrainingPlanSkillsRevise: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/skills/revise`,
     athleteTrainingPlanSandcRevise: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/sandc/revise`,
   },
@@ -144,6 +188,15 @@ export const paths = {
   coach: {
     meDashboard: "/coach/me/dashboard",
     assignedAthletes: "/coach/me/assigned-athletes",
+  },
+  trainingPlans: {
+    byId: (planId: string) => `/training-plans/${encodeURIComponent(planId)}`,
+  },
+  trainingPlanManagement: {
+    versions: (planId: string) =>
+      `/training-plan-management/${encodeURIComponent(planId)}/versions`,
+    activeDetail: (planId: string, generationDomain: string) =>
+      `/training-plan-management/${encodeURIComponent(planId)}/active/detail?generationDomain=${encodeURIComponent(generationDomain)}`,
   },
   athletes: {
     me: "/athletes/me",

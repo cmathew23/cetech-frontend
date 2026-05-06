@@ -23,11 +23,11 @@ type GoalDisplayBlockProps = {
   showDomain?: boolean;
 };
 
-function badgeVariantForStatus(status: string | null): "success" | "warning" | "danger" {
+function badgeVariantForStatus(status: string | null): "neutral" | "warning" | "danger" {
   if (!status) return "warning";
   const normalized = status.trim().toUpperCase();
   if (normalized === "ACTIVE" || normalized === "CONFIRMED" || normalized === "COMPLETED") {
-    return "success";
+    return "neutral";
   }
   if (normalized === "INACTIVE" || normalized === "PENDING") {
     return "warning";

@@ -86,7 +86,7 @@ export default function RagPage() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-[#046A38] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#035532] disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md bg-[#046A38] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#035532] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Loading..." : "Get Answer"}
             </button>

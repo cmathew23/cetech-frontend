@@ -1,19 +1,17 @@
 "use client";
 
+import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import {
   fetchCoachMeDashboard,
   type CoachMeDashboardData,
 } from "@/lib/api/coachMe";
-import { fetchMyProfile } from "@/lib/api/profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatEnumeratedLabel,
   formatFunctionTokensForDisplay,
   formatHumanReadableOrCopy,
-  formatPersonNameForDisplay,
 } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -22,8 +20,9 @@ import { useEffect, useState, type ReactNode } from "react";
 const INVITATIONS_HREF = "/coach/dashboard/invitations";
 const ATHLETES_HREF = "/coach/athletes";
 
+/** Matches Admin Dashboard primary invitation CTA styling. */
 const PRIMARY_ACTION_CLASS =
-  "flex w-full items-center justify-between gap-4 rounded-full border border-border bg-surface px-5 py-4 shadow-sm transition hover:bg-surfaceElevated";
+  "flex w-full flex-col gap-4 rounded-xl border-2 border-primary bg-primary/10 p-6 shadow-md transition-colors hover:border-primary hover:bg-primary/[0.14] focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6";
 
 function formatCoachApiError(e: unknown, fallback: string): string {
   if (isNormalizedApiError(e)) {
@@ -71,24 +70,11 @@ function formatDashboardFunctionField(
 ): string {
   if (loading) return "…";
   if (error) return "—";
-  const cleaned = (raw ?? []).map((value) => value.trim()).filter((value) => value !== "");
+  const cleaned = (raw ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
   if (cleaned.length === 0) return "—";
   return formatFunctionTokensForDisplay(cleaned);
-}
-
-function buildCoachSelfDisplayName(input: {
-  firstName: string;
-  lastName: string;
-  email: string;
-}): string | null {
-  const name = [input.firstName, input.lastName]
-    .map((s) => s.trim())
-    .filter((s) => s !== "")
-    .join(" ");
-  if (name.trim() !== "") return name.trim();
-  const email = input.email.trim();
-  if (email !== "") return email;
-  return null;
 }
 
 function DetailRow({
@@ -114,9 +100,6 @@ export function CoachDashboardView() {
   const [dashboard, setDashboard] = useState<CoachMeDashboardData | null>(
     null,
   );
-  const [coachSelfDisplayName, setCoachSelfDisplayName] = useState<
-    string | null
-  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,20 +108,12 @@ export function CoachDashboardView() {
       setLoading(true);
       setError(null);
       try {
-        const profilePromise = fetchMyProfile().catch(() => null);
-        const [dash, profile] = await Promise.all([
-          fetchCoachMeDashboard(),
-          profilePromise,
-        ]);
+        const dash = await fetchCoachMeDashboard();
         if (cancelled) return;
         setDashboard(dash);
-        setCoachSelfDisplayName(
-          profile ? buildCoachSelfDisplayName(profile) : null,
-        );
       } catch (e) {
         if (cancelled) return;
         setDashboard(null);
-        setCoachSelfDisplayName(null);
         setError(
           formatCoachApiError(
             e,
@@ -157,169 +132,193 @@ export function CoachDashboardView() {
   }, []);
 
   const dash = dashboard;
+
   return (
-    <div className="w-full max-w-5xl space-y-10">
-      <PageHeader
-        title="Coach Dashboard"
-        subtitle="Your academy context, release settings, and assigned athletes."
-        trailing={
-          coachSelfDisplayName ? (
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="text-sm font-medium text-textSecondary">
-                Coach
-              </span>
-              <span
-                className="text-sm font-medium text-textPrimary"
-                aria-live="polite"
-              >
-                {formatPersonNameForDisplay(coachSelfDisplayName)}
-              </span>
-            </div>
-          ) : null
-        }
-      />
+    <div className="w-full min-w-0 max-w-full space-y-4">
+      <div className="min-w-0">
+        <CoachDashboardHeader />
+      </div>
 
       {error ? (
         <Alert variant="danger">{error}</Alert>
       ) : null}
 
-      <section className="space-y-3">
-        <Link href={INVITATIONS_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-lg font-semibold text-textPrimary">
-              Invitations
-            </p>
-            <p className="text-sm text-textSecondary">
-              Accept or decline academy invitations in a dedicated workspace.
-            </p>
-          </div>
-          <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
-            Open invitations →
-          </span>
-        </Link>
-        <Link href={ATHLETES_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-lg font-semibold text-textPrimary">Assigned athletes</p>
-            <p className="text-sm text-textSecondary">
-              Open the dedicated athletes page to view roster and actions.
-            </p>
-          </div>
-          <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
-            View athletes →
-          </span>
-        </Link>
-      </section>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
-              Academy
-            </h2>
-            <p className="mt-1 text-xs text-textMuted">
-              Training entity linked to your coach membership.
-            </p>
-          </div>
-          <DashboardCardShell title="Training entity" className="space-y-3">
-            <dl className="space-y-2">
-              <DetailRow
-                label="Name"
-                value={formatDashboardStringField(
-                  loading,
-                  error,
-                  dash?.trainingEntityName ?? null,
-                  (s) => formatHumanReadableOrCopy(s, "—"),
-                )}
-              />
-            </dl>
-          </DashboardCardShell>
-        </section>
-
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
-              Coach
-            </h2>
-            <p className="mt-1 text-xs text-textMuted">
-              Your role and functions within the academy.
-            </p>
-          </div>
-          <DashboardCardShell title="Profile" className="space-y-3">
-            <dl className="space-y-2">
-              <DetailRow
-                label="Academy coach role"
-                value={formatDashboardStringField(
-                  loading,
-                  error,
-                  dash?.academyCoachRole ?? null,
-                  formatEnumeratedLabel,
-                )}
-              />
-              <DetailRow
-                label="Functions"
-                value={formatDashboardFunctionField(
-                  loading,
-                  error,
-                  dash?.functions ?? null,
-                )}
-              />
-            </dl>
-          </DashboardCardShell>
-        </section>
-
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
-              Release mode
-            </h2>
-            <p className="mt-1 text-xs text-textMuted">
-              How training plans are released for this academy.
-            </p>
-          </div>
-          <DashboardCardShell title="Configuration" className="space-y-3">
-            <dl className="space-y-2">
-              <DetailRow
-                label="Head coach configured"
-                value={formatMetric(
-                  loading,
-                  error,
-                  dash?.hasHeadCoachConfigured ?? null,
-                )}
-              />
-              <DetailRow
-                label="Training plan release mode"
-                value={formatDashboardStringField(
-                  loading,
-                  error,
-                  dash?.trainingPlanReleaseMode ?? null,
-                  formatEnumeratedLabel,
-                )}
-              />
-            </dl>
-          </DashboardCardShell>
-        </section>
-
+      <div className="space-y-10">
         <section className="space-y-3">
           <div>
             <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Summary
             </h2>
             <p className="mt-1 text-xs text-textMuted">
-              Roster count from the coach dashboard context.
+              Roster and release settings from your coach dashboard context.
             </p>
           </div>
-          <DashboardCardShell title="Assigned athletes" className="space-y-2">
-            <p className="text-2xl font-semibold tabular-nums text-textPrimary">
-              {formatMetric(
-                loading,
-                error,
-                dash?.assignedAthleteCount ?? null,
-              )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs font-medium tracking-wide text-textSecondary">
+                Assigned Athletes
+              </p>
+              <p className="text-2xl font-semibold tabular-nums text-textPrimary">
+                {formatMetric(
+                  loading,
+                  error,
+                  dash?.assignedAthleteCount ?? null,
+                )}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium tracking-wide text-textSecondary">
+                Academy Coach Role
+              </p>
+              <p className="min-w-0 text-lg font-semibold leading-snug text-textPrimary sm:text-2xl">
+                {formatDashboardStringField(
+                  loading,
+                  error,
+                  dash?.academyCoachRole ?? null,
+                  formatEnumeratedLabel,
+                )}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium tracking-wide text-textSecondary">
+                Function Slots
+              </p>
+              <p className="text-2xl font-semibold tabular-nums text-textPrimary">
+                {loading || error
+                  ? formatMetric(loading, error, null)
+                  : String(dash?.functions?.length ?? 0)}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
+              Action required
+            </h2>
+            <p className="mt-1 text-xs text-textMuted">
+              Jump to invitations or your assigned athletes workspace.
             </p>
+          </div>
+          <DashboardCardShell
+            accent={false}
+            title="Workspaces"
+            className="space-y-3"
+          >
+            <div className="space-y-3">
+              <Link href={INVITATIONS_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-lg font-semibold text-textPrimary">
+                    Invitations
+                  </p>
+                  <p className="text-sm text-textSecondary">
+                    Accept or decline academy invitations.
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                  Open invitations →
+                </span>
+              </Link>
+              <Link href={ATHLETES_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-lg font-semibold text-textPrimary">
+                    Assigned athletes
+                  </p>
+                  <p className="text-sm text-textSecondary">
+                    View roster and coaching actions.
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                  View athletes →
+                </span>
+              </Link>
+            </div>
           </DashboardCardShell>
         </section>
-      </div>
 
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
+              Details
+            </h2>
+            <p className="mt-1 text-xs text-textMuted">
+              Academy, profile, and configuration from your membership.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <DashboardCardShell
+              accent={false}
+              title="Training entity"
+              className="space-y-3"
+            >
+              <dl className="space-y-2">
+                <DetailRow
+                  label="Name"
+                  value={formatDashboardStringField(
+                    loading,
+                    error,
+                    dash?.trainingEntityName ?? null,
+                    (s) => formatHumanReadableOrCopy(s, "—"),
+                  )}
+                />
+              </dl>
+            </DashboardCardShell>
+
+            <DashboardCardShell
+              accent={false}
+              title="Profile"
+              className="space-y-3"
+            >
+              <dl className="space-y-2">
+                <DetailRow
+                  label="Academy coach role"
+                  value={formatDashboardStringField(
+                    loading,
+                    error,
+                    dash?.academyCoachRole ?? null,
+                    formatEnumeratedLabel,
+                  )}
+                />
+                <DetailRow
+                  label="Functions"
+                  value={formatDashboardFunctionField(
+                    loading,
+                    error,
+                    dash?.functions ?? null,
+                  )}
+                />
+              </dl>
+            </DashboardCardShell>
+
+            <DashboardCardShell
+              accent={false}
+              title="Configuration"
+              className="space-y-3 md:col-span-2 lg:col-span-1"
+            >
+              <dl className="space-y-2">
+                <DetailRow
+                  label="Head coach configured"
+                  value={formatMetric(
+                    loading,
+                    error,
+                    dash?.hasHeadCoachConfigured ?? null,
+                  )}
+                />
+                <DetailRow
+                  label="Training plan release mode"
+                  value={formatDashboardStringField(
+                    loading,
+                    error,
+                    dash?.trainingPlanReleaseMode ?? null,
+                    formatEnumeratedLabel,
+                  )}
+                />
+              </dl>
+            </DashboardCardShell>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

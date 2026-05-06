@@ -4,6 +4,10 @@
  */
 
 import { paths } from "@/config/endpoints";
+import {
+  normalizeCoachFunctionValue,
+  type CoachPlanCreationDomain,
+} from "@/lib/coachAuthority";
 import { apiRequest } from "@/lib/apiClient";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 
@@ -57,6 +61,35 @@ function readStringArrayField(
     if (trimmed !== "") acc.push(trimmed);
     return acc;
   }, []);
+}
+
+/** Only when GET assigned-athletes includes `validationStatus` (non-empty string). */
+function readAssignedAthleteValidationStatus(
+  o: Record<string, unknown>,
+): string | null {
+  if (!("validationStatus" in o)) return null;
+  const value = o.validationStatus;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function readAssignedAthletePlanDomain(
+  o: Record<string, unknown>,
+  key: string,
+): CoachPlanCreationDomain | null {
+  const value = readStringField(o, key);
+  if (value === "") return null;
+  const normalized = normalizeCoachFunctionValue(value);
+  if (normalized === "SKILLS") return "SKILLS";
+  if (normalized === "NUTRITION") return "NUTRITION";
+  if (
+    normalized === "S_AND_C" ||
+    normalized === "STRENGTH_AND_CONDITIONING"
+  ) {
+    return "S_AND_C";
+  }
+  return null;
 }
 
 function mergeDashboardRoot(data: unknown): Record<string, unknown> {
@@ -138,23 +171,45 @@ export async function fetchCoachMeDashboard(): Promise<CoachMeDashboardData> {
 
 export type CoachAssignedAthleteRow = {
   athleteId: string;
+  assignedFunctions: string[];
   hasPlanningProfile: boolean;
+  currentGenerationDomain: CoachPlanCreationDomain | null;
+  currentPlanId: string | null;
+  currentPlanStatus: string | null;
+  /** From assigned-athletes `validationStatus`; `null` when the field is omitted (do not infer). */
+  validationStatus: string | null;
   displayName: string;
   email: string;
   lifecycle: string;
   membershipStatus: string;
+  skillsPlanId: string | null;
+  planStatus: string | null;
 };
 
-function parseAssignedAthleteRow(raw: unknown): CoachAssignedAthleteRow | null {
+export function parseAssignedAthleteRow(
+  raw: unknown,
+): CoachAssignedAthleteRow | null {
   const o = asRecord(raw);
   if (!o) return null;
   const athleteId =
     readStringField(o, "athleteId") ||
     readStringField(o, "athleteUserId") ||
     readStringField(o, "userId");
+  const currentPlanId =
+    readStringField(o, "currentPlanId") || readStringField(o, "skillsPlanId") || null;
+  const currentPlanStatus =
+    readStringField(o, "currentPlanStatus") || readStringField(o, "planStatus") || null;
   return {
     athleteId,
+    assignedFunctions: readStringArrayField(o, "assignedFunctions"),
     hasPlanningProfile: readBooleanField(o, "hasPlanningProfile"),
+    currentGenerationDomain: readAssignedAthletePlanDomain(
+      o,
+      "currentGenerationDomain",
+    ),
+    currentPlanId,
+    currentPlanStatus,
+    validationStatus: readAssignedAthleteValidationStatus(o),
     displayName:
       readStringField(o, "displayName") ||
       readStringField(o, "name") ||
@@ -166,6 +221,8 @@ function parseAssignedAthleteRow(raw: unknown): CoachAssignedAthleteRow | null {
       readStringField(o, "membershipStatus") ||
       readStringField(o, "status") ||
       "—",
+    skillsPlanId: readStringField(o, "skillsPlanId") || currentPlanId,
+    planStatus: readStringField(o, "planStatus") || currentPlanStatus,
   };
 }
 

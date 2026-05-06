@@ -116,7 +116,7 @@ export default function ExerciseCatalogDetailPage() {
 
             {!loading && !error && detail ? (
               <Stack spacing="md">
-                <section className="rounded-lg border border-border bg-bg p-4">
+                <Card padding="compact" className="bg-bg">
                   <h3 className="text-base font-semibold text-textPrimary">
                     {toTitleCaseInput(detail.name.trim()) || "—"}
                   </h3>
@@ -179,9 +179,9 @@ export default function ExerciseCatalogDetailPage() {
                       </span>
                     </p>
                   ) : null}
-                </section>
+                </Card>
 
-                <section className="rounded-lg border border-border bg-bg p-4">
+                <Card padding="compact" className="bg-bg">
                   <h4 className="text-sm font-semibold text-textPrimary">Traceability</h4>
                   {traceabilityEntries.length === 0 ? (
                     <p className="mt-2 text-sm text-textSecondary">
@@ -199,7 +199,7 @@ export default function ExerciseCatalogDetailPage() {
                       ))}
                     </div>
                   )}
-                </section>
+                </Card>
               </Stack>
             ) : null}
           </Stack>

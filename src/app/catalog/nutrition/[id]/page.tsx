@@ -158,7 +158,7 @@ export default function NutritionCatalogDetailPage() {
 
             {!loading && !error && detail ? (
               <Stack spacing="md">
-                <section className="rounded-lg border border-border bg-bg p-4">
+                <Card padding="compact" className="bg-bg">
                   <h3 className="text-base font-semibold text-textPrimary">
                     {toTitleCaseInput(detail.name.trim()) || "—"}
                   </h3>
@@ -195,10 +195,10 @@ export default function NutritionCatalogDetailPage() {
                       ))
                     )}
                   </div>
-                </section>
+                </Card>
 
                 {normalized ? (
-                  <section className="rounded-lg border border-border bg-bg p-4">
+                  <Card padding="compact" className="bg-bg">
                     <h4 className="text-sm font-semibold text-textPrimary">
                       Nutrition (Per Base Serving)
                     </h4>
@@ -269,10 +269,10 @@ export default function NutritionCatalogDetailPage() {
                         </span>
                       </p>
                     </div>
-                  </section>
+                  </Card>
                 ) : null}
 
-                <section className="rounded-lg border border-border bg-bg p-4">
+                <Card padding="compact" className="bg-bg">
                   <h4 className="text-sm font-semibold text-textPrimary">Traceability</h4>
                   {traceabilityEntries.length === 0 ? (
                     <p className="mt-2 text-sm text-textSecondary">
@@ -290,7 +290,7 @@ export default function NutritionCatalogDetailPage() {
                       ))}
                     </div>
                   )}
-                </section>
+                </Card>
               </Stack>
             ) : null}
           </Stack>

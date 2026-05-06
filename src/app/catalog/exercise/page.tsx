@@ -328,86 +328,87 @@ export default function ExerciseCatalogPage() {
             </>
           ) : null}
 
-          <section className="space-y-3 rounded-lg border border-border bg-bg p-4">
+          <Card padding="compact" className="space-y-3 bg-bg">
             <Heading variant="h3">Selected Exercises (Local)</Heading>
             {selected.length === 0 ? (
               <p className="text-sm text-textSecondary">No exercises selected yet.</p>
             ) : (
               <ul className="space-y-2">
                 {selected.map((row) => (
-                  <li
-                    key={row.localId}
-                    className="rounded-lg border border-border bg-card p-3"
-                  >
-                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-textPrimary">
-                          {toTitleCaseInput(row.exercise.name.trim()) || "—"}
-                        </p>
-                        <p className="text-xs text-textSecondary">
-                          Category:{" "}
-                          {(() => {
-                            const cat =
-                              (row.exercise.categoryName ?? row.exercise.category)?.trim() ??
-                              "";
-                            return cat !== "" ? formatEnumeratedLabel(cat) : "—";
-                          })()}
-                        </p>
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <div className="flex flex-col gap-1">
-                          <label
-                            htmlFor={`duration-${row.localId}`}
-                            className="text-xs font-medium text-textPrimary"
-                          >
-                            Duration (min)
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="px-3 py-1"
-                              onClick={() => decrementDuration(row.localId)}
-                            >
-                              -
-                            </Button>
-                            <Input
-                              id={`duration-${row.localId}`}
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={String(row.durationMinutes)}
-                              onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                                updateDuration(row.localId, e.target.value)
-                              }
-                            />
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="px-3 py-1"
-                              onClick={() => incrementDuration(row.localId)}
-                            >
-                              +
-                            </Button>
-                          </div>
+                  <li key={row.localId}>
+                    <Card padding="compact">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-textPrimary">
+                            {toTitleCaseInput(row.exercise.name.trim()) || "—"}
+                          </p>
+                          <p className="text-xs text-textSecondary">
+                            Category:{" "}
+                            {(() => {
+                              const cat =
+                                (row.exercise.categoryName ?? row.exercise.category)?.trim() ??
+                                "";
+                              return cat !== "" ? formatEnumeratedLabel(cat) : "—";
+                            })()}
+                          </p>
                         </div>
-                        <Button
-                          type="button"
-                          variant="danger"
-                          onClick={() => removeExercise(row.localId)}
-                        >
-                          Remove
-                        </Button>
+                        <div className="flex items-end gap-2">
+                          <div className="flex flex-col gap-1">
+                            <label
+                              htmlFor={`duration-${row.localId}`}
+                              className="text-xs font-medium text-textPrimary"
+                            >
+                              Duration (min)
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="px-3 py-1"
+                                onClick={() => decrementDuration(row.localId)}
+                              >
+                                -
+                              </Button>
+                              <Input
+                                id={`duration-${row.localId}`}
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={String(row.durationMinutes)}
+                                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                  updateDuration(row.localId, e.target.value)
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="px-3 py-1"
+                                onClick={() => incrementDuration(row.localId)}
+                              >
+                                +
+                              </Button>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            onClick={() => removeExercise(row.localId)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       </div>
-                    </div>
+                    </Card>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="rounded-lg border border-border bg-card p-3 text-sm text-textPrimary">
-              Total selected duration: <strong>{totalDuration}</strong> minutes
-            </div>
-          </section>
+            <Card padding="compact">
+              <p className="text-sm text-textPrimary">
+                Total selected duration: <strong>{totalDuration}</strong> minutes
+              </p>
+            </Card>
+          </Card>
         </Card>
       </div>
     </DashboardGate>

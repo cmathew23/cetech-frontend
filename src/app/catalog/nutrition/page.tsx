@@ -461,7 +461,7 @@ export default function NutritionCatalogPage() {
             </>
           ) : null}
 
-          <section className="space-y-3 rounded-lg border border-border bg-bg p-4">
+          <Card padding="compact" className="space-y-3 bg-bg">
             <Heading variant="h3">Selected Nutrition Items (Local)</Heading>
             {selectedItems.length === 0 ? (
               <p className="text-sm text-textSecondary">
@@ -472,98 +472,97 @@ export default function NutritionCatalogPage() {
                 {selectedItems.map((item) => {
                   const nutrition = scaledNutrition(item.food, item.servingCount);
                   return (
-                    <li
-                      key={item.id}
-                      className="space-y-2 rounded-lg border border-border bg-card p-3 text-xs text-textSecondary"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-textPrimary">
-                            {toTitleCaseInput(item.food.name.trim()) || "—"}
-                          </p>
-                          <p>
-                            Source: {item.food.source} | ID: {item.food.sourceFoodId}
-                          </p>
-                          <p>
-                            Base serving: {baseServingLabel(item.food)}
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="danger"
-                          className="px-3 py-1 text-xs"
-                          onClick={() => removeSelectedItem(item.id)}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-
-                      <div className="flex flex-col gap-1 sm:max-w-sm">
-                        <label className="text-xs font-medium text-textPrimary">
-                          Quantity (x base serving)
-                        </label>
-                        <div className="flex items-center gap-2">
+                    <li key={item.id}>
+                      <Card padding="compact" className="space-y-2 text-xs text-textSecondary">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-textPrimary">
+                              {toTitleCaseInput(item.food.name.trim()) || "—"}
+                            </p>
+                            <p>
+                              Source: {item.food.source} | ID: {item.food.sourceFoodId}
+                            </p>
+                            <p>
+                              Base serving: {baseServingLabel(item.food)}
+                            </p>
+                          </div>
                           <Button
                             type="button"
-                            variant="secondary"
-                            className="px-3 py-1"
-                            onClick={() =>
-                              updateServingCount(item.id, item.servingCount - 0.5)
-                            }
+                            variant="danger"
+                            className="px-3 py-1 text-xs"
+                            onClick={() => removeSelectedItem(item.id)}
                           >
-                            -
-                          </Button>
-                          <Input
-                            type="number"
-                            min="0.1"
-                            step="0.1"
-                            value={String(item.servingCount)}
-                            onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                              updateServingCount(item.id, Number(e.target.value))
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="px-3 py-1"
-                            onClick={() =>
-                              updateServingCount(item.id, item.servingCount + 0.5)
-                            }
-                          >
-                            +
+                            Remove
                           </Button>
                         </div>
-                      </div>
 
-                      <p>
-                        Quantity: {nutrition.servingCount}x ({nutrition.servingAmount}{" "}
-                        {nutrition.servingUnit})
-                      </p>
-                      <p>
-                        {nutrition.calories} kcal, P {nutrition.protein}g, C {nutrition.carbs}g,
-                        F {nutrition.fat}g
-                      </p>
-                      {nutrition.fiber != null ? <p>Fiber: {nutrition.fiber}g</p> : null}
-                      {hasAnyMineral(nutrition.minerals) ? (
-                        <div>
-                          <p>Minerals:</p>
-                          {nutrition.minerals?.iron != null ? (
-                            <p>Iron: {nutrition.minerals.iron}mg</p>
-                          ) : null}
-                          {nutrition.minerals?.calcium != null ? (
-                            <p>Calcium: {nutrition.minerals.calcium}mg</p>
-                          ) : null}
-                          {nutrition.minerals?.sodium != null ? (
-                            <p>Sodium: {nutrition.minerals.sodium}mg</p>
-                          ) : null}
-                          {nutrition.minerals?.potassium != null ? (
-                            <p>Potassium: {nutrition.minerals.potassium}mg</p>
-                          ) : null}
-                          {nutrition.minerals?.magnesium != null ? (
-                            <p>Magnesium: {nutrition.minerals.magnesium}mg</p>
-                          ) : null}
+                        <div className="flex flex-col gap-1 sm:max-w-sm">
+                          <label className="text-xs font-medium text-textPrimary">
+                            Quantity (x base serving)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="px-3 py-1"
+                              onClick={() =>
+                                updateServingCount(item.id, item.servingCount - 0.5)
+                              }
+                            >
+                              -
+                            </Button>
+                            <Input
+                              type="number"
+                              min="0.1"
+                              step="0.1"
+                              value={String(item.servingCount)}
+                              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                updateServingCount(item.id, Number(e.target.value))
+                              }
+                            />
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="px-3 py-1"
+                              onClick={() =>
+                                updateServingCount(item.id, item.servingCount + 0.5)
+                              }
+                            >
+                              +
+                            </Button>
+                          </div>
                         </div>
-                      ) : null}
+
+                        <p>
+                          Quantity: {nutrition.servingCount}x ({nutrition.servingAmount}{" "}
+                          {nutrition.servingUnit})
+                        </p>
+                        <p>
+                          {nutrition.calories} kcal, P {nutrition.protein}g, C {nutrition.carbs}g,
+                          F {nutrition.fat}g
+                        </p>
+                        {nutrition.fiber != null ? <p>Fiber: {nutrition.fiber}g</p> : null}
+                        {hasAnyMineral(nutrition.minerals) ? (
+                          <div>
+                            <p>Minerals:</p>
+                            {nutrition.minerals?.iron != null ? (
+                              <p>Iron: {nutrition.minerals.iron}mg</p>
+                            ) : null}
+                            {nutrition.minerals?.calcium != null ? (
+                              <p>Calcium: {nutrition.minerals.calcium}mg</p>
+                            ) : null}
+                            {nutrition.minerals?.sodium != null ? (
+                              <p>Sodium: {nutrition.minerals.sodium}mg</p>
+                            ) : null}
+                            {nutrition.minerals?.potassium != null ? (
+                              <p>Potassium: {nutrition.minerals.potassium}mg</p>
+                            ) : null}
+                            {nutrition.minerals?.magnesium != null ? (
+                              <p>Magnesium: {nutrition.minerals.magnesium}mg</p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </Card>
                     </li>
                   );
                 })}
@@ -571,7 +570,7 @@ export default function NutritionCatalogPage() {
             )}
 
             {selectedItems.length > 0 ? (
-              <div className="rounded-lg border border-border bg-card p-3 text-xs font-medium text-textPrimary">
+              <Card padding="compact" className="text-xs font-medium text-textPrimary">
                 <p className="mb-1 text-sm">Totals</p>
                 <p>
                   {totals.calories} kcal, P {totals.protein}g, C {totals.carbs}g, F {totals.fat}g
@@ -594,9 +593,9 @@ export default function NutritionCatalogPage() {
                     ) : null}
                   </div>
                 ) : null}
-              </div>
+              </Card>
             ) : null}
-          </section>
+          </Card>
         </Card>
       </div>
     </DashboardGate>

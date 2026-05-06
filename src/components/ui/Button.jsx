@@ -33,6 +33,14 @@ export function Button({
         designSystem.button.base,
         styles[v],
         isDisabled && "cursor-not-allowed opacity-50",
+        isDisabled && "hover:!-translate-y-0",
+        isDisabled && v === "primary" && "hover:!bg-primary",
+        isDisabled && v === "secondary" && "hover:!bg-transparent",
+        isDisabled && v === "success" && "hover:!bg-green-600",
+        isDisabled && v === "neutral" && "hover:!bg-card",
+        isDisabled &&
+          (v === "danger" || v === "destructive") &&
+          "hover:!bg-danger",
         className,
       )}
       {...props}

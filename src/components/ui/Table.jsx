@@ -1,10 +1,31 @@
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 
-export function Table({ children, className = "" }) {
+/**
+ * @param {{
+ *   children: import("react").ReactNode;
+ *   className?: string;
+ *   tableClassName?: string;
+ *   minWidth?: string;
+ * }} props
+ */
+export function Table({
+  children,
+  className = "",
+  tableClassName = "",
+  minWidth = "",
+}) {
+  const normalizedMinWidth =
+    typeof minWidth === "string" && minWidth.trim() !== "" ? minWidth.trim() : null;
+
   return (
     <div className={cn(designSystem.table.container, className)}>
-      <table className={cn(designSystem.table.root)}>{children}</table>
+      <table
+        className={cn(designSystem.table.root, tableClassName)}
+        style={normalizedMinWidth ? { minWidth: normalizedMinWidth } : undefined}
+      >
+        {children}
+      </table>
     </div>
   );
 }

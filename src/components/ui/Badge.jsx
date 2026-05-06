@@ -11,6 +11,10 @@ export function Badge({
   const styles = {
     success: designSystem.badge.success,
     warning: designSystem.badge.warning,
+    neutral: designSystem.badge.neutral,
+    error: designSystem.badge.error,
+    accent: designSystem.badge.accent,
+    // backwards compatibility
     danger: designSystem.badge.danger,
   };
 

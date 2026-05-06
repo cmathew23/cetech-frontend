@@ -18,7 +18,7 @@ export const designSystem = {
     primary: "#F97316",
     primaryDark: "#C2410C",
     primaryLight: "#FFEDD5",
-    bg: "#F8FAFC",
+    bg: "#F7F4EE",
     card: "#FFFFFF",
     border: "#E5E7EB",
     textPrimary: "#111827",
@@ -33,11 +33,11 @@ export const designSystem = {
   },
 
   typography: {
-    h1: "mb-4 text-2xl font-bold text-textPrimary",
+    h1: "mb-4 text-2xl font-semibold tracking-tight text-textPrimary",
     h2: "mb-4 text-lg font-semibold text-textPrimary sm:text-xl lg:text-2xl",
-    h3: "mb-4 text-lg font-medium text-textPrimary",
-    body: "text-base text-textPrimary",
-    muted: "text-sm text-textSecondary",
+    h3: "mb-4 text-lg font-semibold text-textPrimary",
+    body: "text-base font-normal text-textPrimary",
+    muted: "text-sm font-light text-textSecondary",
   },
 
   spacing: {
@@ -83,8 +83,8 @@ export const designSystem = {
       brand: "mb-4 border-b border-white/10 pb-4",
       nav: "flex flex-col gap-2",
       link:
-        "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-sm font-medium leading-snug text-gray-300 transition-colors hover:bg-primary/15 hover:text-white",
-      linkActive: "bg-primary text-white",
+        "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium leading-snug text-gray-300 transition-all duration-200 hover:bg-primary/15 hover:text-white",
+      linkActive: "bg-primary/90 text-white shadow-sm",
       /** Logout sits after nav items; top rule separates it without pushing it to the viewport bottom. */
       logout:
         "mt-2 border-t border-white/10 pt-3 text-gray-300 hover:bg-primary/15 hover:text-white",
@@ -96,7 +96,7 @@ export const designSystem = {
       grid: "grid grid-cols-1 gap-0 lg:grid-cols-2 lg:min-h-[280px]",
       loginColumn: "flex flex-col lg:border-r lg:border-border lg:pr-6",
       ctaColumn:
-        "mt-6 flex min-h-[140px] flex-col items-center justify-center border-t border-border bg-gradient-to-br from-primary to-primaryDark px-5 py-6 text-center text-white sm:min-h-[160px] sm:px-6 sm:py-6 lg:mt-0 lg:min-h-full lg:border-t-0 lg:px-8 lg:py-8",
+        "mt-6 flex min-h-[140px] flex-col items-center justify-center border-t border-border bg-primaryDark px-5 py-6 text-center text-white sm:min-h-[160px] sm:px-6 sm:py-6 lg:mt-0 lg:min-h-full lg:border-t-0 lg:px-8 lg:py-8",
       ctaTitle:
         "mb-0 text-lg font-semibold text-white sm:text-xl lg:text-2xl",
       ctaBody: "max-w-xs text-sm text-white/90 sm:text-base",
@@ -109,50 +109,67 @@ export const designSystem = {
   },
 
   card: {
-    root: "rounded-xl border border-border bg-card p-6 shadow-sm",
+    root:
+      "relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-md transition-all duration-200 hover:-translate-y-px hover:shadow-lg",
+    padding: {
+      compact: "p-4",
+      default: "p-4 md:p-5",
+      spacious: "p-5 md:p-6",
+    },
+    header: {
+      root: "mb-4 flex items-start justify-between gap-3",
+      title: "text-base font-semibold text-textPrimary",
+      subtitle: "mt-1 text-sm font-normal text-textSecondary",
+    },
+    accent: "absolute inset-x-0 top-0 h-0.5 bg-primary/70",
   },
 
   button: {
     base:
-      "inline-flex items-center justify-center rounded-lg px-5 py-2.5 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
     primary:
-      "bg-primary text-white shadow-sm hover:bg-primaryDark focus:ring-primary/50",
+      "bg-primary text-white shadow-sm hover:bg-primaryDark hover:-translate-y-px focus:ring-primary/50",
     secondary:
-      "border border-primary/30 bg-primary/15 text-primaryDark shadow-sm hover:bg-primary/25 focus:ring-primary/35",
+      "border border-primary bg-transparent text-primary shadow-sm hover:bg-primary/10 hover:-translate-y-px focus:ring-primary/35",
     success:
-      "bg-green-600 text-white shadow-sm hover:bg-green-700 focus:ring-green-500",
+      "bg-green-600 text-white shadow-sm hover:bg-green-700 hover:-translate-y-px focus:ring-green-500",
     neutral:
-      "border border-border bg-card text-textPrimary shadow-sm hover:bg-bg focus:ring-slate-300",
-    danger: "bg-danger text-card hover:bg-danger/90",
-    destructive: "bg-danger text-card hover:bg-danger/90",
+      "border border-border bg-card text-textPrimary shadow-sm hover:bg-bg hover:-translate-y-px focus:ring-slate-300",
+    danger: "bg-danger text-card shadow-sm hover:bg-danger/90 hover:-translate-y-px",
+    destructive:
+      "bg-danger text-card shadow-sm hover:bg-danger/90 hover:-translate-y-px",
   },
 
   badge: {
     base:
-      "inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-medium",
-    success: "bg-successLight text-successDark",
-    warning: "bg-warning/15 text-warning",
+      "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium tracking-wide",
+    success: "bg-successLight/80 text-successDark",
+    warning: "bg-warning/20 text-[#9A6700]",
+    neutral: "bg-zinc-100/90 text-zinc-700",
+    error: "bg-danger/15 text-danger",
+    accent: "bg-primaryLight text-primaryDark",
     danger: "bg-danger/15 text-danger",
   },
 
   modal: {
     backdrop:
-      "fixed inset-0 z-50 flex items-center justify-center bg-textPrimary/60 p-4 backdrop-blur-sm",
+      "fixed inset-0 z-[9999] flex items-center justify-center bg-textPrimary/60 p-4 backdrop-blur-sm",
     panel:
-      "w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-md",
+      "relative w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-md",
   },
 
   table: {
     container:
-      "overflow-x-auto rounded-xl border border-border bg-card shadow-sm",
-    root: "w-full min-w-full border-collapse text-left text-sm",
+      "overflow-x-auto rounded-2xl border border-border bg-card shadow-sm",
+    root: "w-full min-w-full border-separate border-spacing-0 text-left text-sm",
     row: {
-      head: "border-b border-border bg-bg",
-      body: "border-b border-border bg-card last:border-b-0 hover:bg-bg/80",
+      head: "bg-gray-100",
+      body:
+        "transition-colors duration-150 odd:bg-card even:bg-card hover:bg-gray-50 [&:last-child_td]:border-b-0",
     },
     cell: {
-      head: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-textPrimary",
-      body: "px-4 py-3 text-textSecondary",
+      head: "border-b border-gray-200 px-4 py-3 text-left text-sm font-medium text-textPrimary",
+      body: "border-b border-gray-200 px-4 py-4 align-middle text-textSecondary",
     },
   },
 

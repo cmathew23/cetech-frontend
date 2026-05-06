@@ -1,3 +1,4 @@
+import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
 import { AthleteCoachesPageContent } from "@/components/dashboard/athlete/AthleteCoachesPageContent";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -10,6 +11,7 @@ export default function AthleteCoachesPage() {
         <PageHeader
           title="Coaches"
           subtitle="Coaches currently assigned to you."
+          trailing={<AthleteHeaderIdentityMetadata />}
         />
         <AthleteCoachesPageContent />
       </div>

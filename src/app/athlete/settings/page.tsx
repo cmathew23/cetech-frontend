@@ -1,3 +1,4 @@
+import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { AthleteSettingsPageContent } from "@/components/dashboard/athlete/AthleteSettingsPageContent";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -10,6 +11,7 @@ export default function AthleteSettingsPage() {
         <PageHeader
           title="Settings"
           subtitle="Read-only account and athlete profile details captured by the system."
+          trailing={<AthleteHeaderIdentityMetadata />}
         />
         <AthleteSettingsPageContent />
       </div>

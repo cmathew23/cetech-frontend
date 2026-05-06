@@ -13,6 +13,7 @@
         "playwright:reinstall": "npm uninstall @playwright/test && rm -rf \"$HOME/.cache/ms-playwright\" && npm install -D @playwright/test@^1.58.2 && playwright install"
     },
     "dependencies": {
+        "lucide-react": "^1.14.0",
         "next": "16.2.1",
         "react": "19.2.4",
         "react-dom": "19.2.4"

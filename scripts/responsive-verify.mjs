@@ -23,7 +23,7 @@ const pages = [
   { role: "ACADEMY_ADMIN", path: "/admin/profile-settings" },
   { role: "COACH", path: "/coach/dashboard" },
   { role: "COACH", path: "/coach/invitations" },
-  { role: "COACH", path: "/coach/athletes/ath-1/planning-profile" },
+  { role: "COACH", path: "/coach/training-plans/ath-1/workflow" },
   { role: "COACH", path: "/coach/athletes/ath-1/level-validation" },
   { role: "ATHLETE", path: "/athlete/dashboard" },
   { role: "ATHLETE", path: "/athlete/invitations" },

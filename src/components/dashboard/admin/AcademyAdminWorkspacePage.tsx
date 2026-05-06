@@ -1,24 +1,26 @@
 "use client";
 
+import { AssignmentCoachMultiSelect } from "@/components/dashboard/admin/AssignmentCoachMultiSelect";
 import { DeactivateMemberConfirmModal } from "@/components/dashboard/admin/DeactivateMemberConfirmModal";
+import { UnassignAssignmentConfirmDialog } from "@/components/dashboard/admin/UnassignAssignmentConfirmDialog";
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { adminPaths } from "@/config/adminNav";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Heading } from "@/components/ui/Heading";
+import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import {
-  Table,
-  TableBody,
-  Td,
-  Th,
-  TableHead,
-  TableRow,
-} from "@/components/ui/Table";
-import { dashboardPanelClass } from "@/lib/auth-ui";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatAdminPersonLabel } from "@/lib/adminPersonLabel";
+import {
+  formatEnumeratedLabel,
+  formatFunctionTokensForDisplay,
+  formatPersonNameForDisplay,
+  toTitleCaseInput,
+} from "@/lib/textFormat";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
+import { formatDateOrDateTime, formatDateTime } from "@/lib/dateTime";
 import {
   createAthleteCoachAssignment,
   createEntityInvitation,
@@ -96,11 +98,13 @@ function isActiveEntityMemberStatus(status: string): boolean {
 
 function memberNameForDeactivatePrompt(row: EntityMemberRow): string {
   const name = row.memberDisplayName.trim();
-  if (name !== "") return name;
+  if (name !== "") return formatPersonNameForDisplay(name);
   const email = row.memberEmailOnly.trim();
   if (email !== "") return email;
   const fallback = row.userEmail.trim();
-  if (fallback !== "" && fallback !== "—") return fallback;
+  if (fallback !== "" && fallback !== "—") {
+    return formatPersonNameForDisplay(fallback);
+  }
   return "";
 }
 
@@ -179,25 +183,31 @@ function memberNameTableCell(
 ): string {
   const uid = row.targetUserId.trim();
   const role = row.role.trim().toUpperCase();
+  let resolved = "";
   if (uid !== "") {
     if (role === "COACH") {
       const v = lookups.coachNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
-    if (role === "ATHLETE") {
+    if (resolved === "" && role === "ATHLETE") {
       const v = lookups.athleteNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
     if (
-      role === "ENTITY_ADMIN" ||
-      role === "ACADEMY_ADMIN" ||
-      role === "ADMIN"
+      resolved === "" &&
+      (role === "ENTITY_ADMIN" ||
+        role === "ACADEMY_ADMIN" ||
+        role === "ADMIN")
     ) {
       const v = lookups.profileNameByUserId[uid];
-      if (v !== undefined) return v;
+      if (v !== undefined) resolved = v;
     }
   }
-  return memberNameColumnText(row);
+  if (resolved === "") {
+    resolved = memberNameColumnText(row);
+  }
+  if (resolved === "—") return "—";
+  return formatPersonNameForDisplay(resolved);
 }
 
 function memberEmailColumnText(row: EntityMemberRow): string {
@@ -226,16 +236,6 @@ type MemberStatusFilterValue =
   | typeof MEMBER_STATUS_FILTER_ACTIVE
   | typeof MEMBER_STATUS_FILTER_REMOVED;
 
-function statusBadgeClass(status: string): string {
-  const upper = status.trim().toUpperCase();
-  if (upper === "PENDING") return "bg-amber-50 text-amber-700 ring-amber-600/20";
-  if (upper === "ACCEPTED") return "bg-emerald-50 text-emerald-700 ring-emerald-600/20";
-  if (upper === "DECLINED") return "bg-rose-50 text-rose-700 ring-rose-600/20";
-  if (upper === "REVOKED") return "bg-slate-100 text-slate-700 ring-slate-600/20";
-  if (upper === "EXPIRED") return "bg-zinc-100 text-zinc-700 ring-zinc-600/20";
-  return "bg-gray-100 text-gray-700 ring-gray-600/20";
-}
-
 function AssignmentPartyCell({
   name,
   email,
@@ -252,41 +252,41 @@ function AssignmentPartyCell({
   const n = name.trim();
   const e = email.trim();
   const roleText = role?.trim() ?? "";
-  const functionText = (functions ?? []).filter(Boolean).join(", ");
+  const fnClean = (functions ?? []).map((f) => f.trim()).filter((f) => f !== "");
+  const roleLabel = roleText !== "" ? formatEnumeratedLabel(roleText) : "";
+  const functionText =
+    fnClean.length > 0 ? formatFunctionTokensForDisplay(fnClean) : "";
+  const roleFunctionLine =
+    [roleLabel, functionText].filter((part) => part !== "").join(" • ");
   if (n === "" && e === "") {
-    return <span className="text-textSecondary">{fallbackId}</span>;
+    return <span className="text-xs text-slate-500">{fallbackId}</span>;
   }
   if (n === "") {
     return (
-      <div>
-        <div className="font-medium text-textPrimary">{e}</div>
-        {roleText !== "" ? (
-          <div className="text-xs text-textSecondary">Role: {roleText}</div>
-        ) : null}
-        {functionText !== "" ? (
-          <div className="text-xs text-textSecondary">Functions: {functionText}</div>
+      <div className="space-y-1">
+        <div className="text-sm font-semibold text-slate-900">{e}</div>
+        {roleFunctionLine !== "" ? (
+          <div className="text-xs text-slate-500">{roleFunctionLine}</div>
         ) : null}
       </div>
     );
   }
   return (
-    <div>
-      <div className="font-medium text-textPrimary">{n}</div>
-      <div className="text-textSecondary">{e !== "" ? e : "—"}</div>
-      {roleText !== "" ? (
-        <div className="text-xs text-textSecondary">Role: {roleText}</div>
-      ) : null}
-      {functionText !== "" ? (
-        <div className="text-xs text-textSecondary">Functions: {functionText}</div>
+    <div className="space-y-1">
+      <div className="text-sm font-semibold text-slate-900">
+        {formatPersonNameForDisplay(n)}
+      </div>
+      <div className="text-xs text-slate-500">{e !== "" ? e : "—"}</div>
+      {roleFunctionLine !== "" ? (
+        <div className="text-xs text-slate-500">{roleFunctionLine}</div>
       ) : null}
     </div>
   );
 }
 
 function formatAssignmentCoachRole(role: AcademyCoachRole): string {
-  if (role === "HEAD_COACH") return "Head Coach";
-  if (role === "ASSISTANT_COACH") return "Assistant Coach";
-  return "";
+  if (role === null) return "";
+  return toTitleCaseInput(role);
 }
 
 /** Single-line native select option text: name · email · role · functions (roster from GET /academies/me/coaches). */
@@ -306,7 +306,7 @@ function formatCoachAssignmentDropdownLabel(
   const email = input.displayEmail.trim();
 
   const segments: string[] = [];
-  if (name !== "") segments.push(name);
+  if (name !== "") segments.push(formatPersonNameForDisplay(name));
   if (email !== "") segments.push(email);
   if (segments.length === 0) {
     segments.push(pid !== "" ? pid : "—");
@@ -318,10 +318,11 @@ function formatCoachAssignmentDropdownLabel(
 
   if (detail) {
     const roleText = detail.roleLabel.trim();
-    const fnText = detail.functions
+    const fnClean = detail.functions
       .map((f) => f.trim())
-      .filter((f) => f !== "")
-      .join(", ");
+      .filter((f) => f !== "");
+    const fnText =
+      fnClean.length > 0 ? formatFunctionTokensForDisplay(fnClean) : "";
     if (roleText !== "") segments.push(roleText);
     if (fnText !== "") segments.push(fnText);
     if (roleText === "" && fnText === "") {
@@ -332,10 +333,62 @@ function formatCoachAssignmentDropdownLabel(
   return segments.join(" · ");
 }
 
+/** Name (or first line) + remaining metadata for multi-select row layout. */
+function formatCoachAssignmentOptionLines(
+  input: {
+    coachProfileId: string;
+    displayName: string;
+    displayEmail: string;
+  },
+  roster: {
+    byProfileId: Map<string, { roleLabel: string; functions: string[] }>;
+    byEmail: Map<string, { roleLabel: string; functions: string[] }>;
+  },
+): { primary: string; secondary: string } {
+  const pid = input.coachProfileId.trim();
+  const name = input.displayName.trim();
+  const email = input.displayEmail.trim();
+
+  const segments: string[] = [];
+  if (name !== "") segments.push(formatPersonNameForDisplay(name));
+  if (email !== "") segments.push(email);
+  if (segments.length === 0) {
+    segments.push(pid !== "" ? pid : "—");
+  }
+
+  const detail =
+    (pid !== "" ? roster.byProfileId.get(pid) : undefined) ??
+    (email !== "" ? roster.byEmail.get(email.toLowerCase()) : undefined);
+
+  if (detail) {
+    const roleText = detail.roleLabel.trim();
+    const fnClean = detail.functions
+      .map((f) => f.trim())
+      .filter((f) => f !== "");
+    const fnText =
+      fnClean.length > 0 ? formatFunctionTokensForDisplay(fnClean) : "";
+    if (roleText !== "") segments.push(roleText);
+    if (fnText !== "") segments.push(fnText);
+    if (roleText === "" && fnText === "") {
+      segments.push("Role/function not set");
+    }
+  }
+
+  const primary = segments[0] ?? "—";
+  const secondary = segments.slice(1).join(" · ");
+  return { primary, secondary };
+}
+
 const SECTION_TITLES: Record<AcademyAdminWorkspaceSection, string> = {
   members: "Members",
   invitations: "Invitations",
   assignments: "Assignments",
+};
+
+const SECTION_SUBTITLES: Record<AcademyAdminWorkspaceSection, string> = {
+  members: "View and manage entity members, roles, and status.",
+  invitations: "Send invitations and track their status.",
+  assignments: "Create and remove athlete–coach assignments.",
 };
 
 type AcademyAdminWorkspacePageProps = {
@@ -418,13 +471,20 @@ export function AcademyAdminWorkspacePage({
   );
   const [assignmentAthleteProfileId, setAssignmentAthleteProfileId] =
     useState("");
-  const [assignmentCoachProfileId, setAssignmentCoachProfileId] = useState("");
+  const [assignmentSelectedCoachIds, setAssignmentSelectedCoachIds] =
+    useState<string[]>([]);
   const [assignmentCoachFilter, setAssignmentCoachFilter] = useState<string>(
     ASSIGNMENT_COACH_FILTER_ALL,
   );
   const [removingAssignmentKey, setRemovingAssignmentKey] = useState<string | null>(
     null,
   );
+  const [unassignModalOpen, setUnassignModalOpen] = useState(false);
+  const [unassignTarget, setUnassignTarget] = useState<{
+    athleteProfileId: string;
+    coachProfileId: string;
+    athletePromptName: string;
+  } | null>(null);
   /** Filters the current section table only; cleared when switching workspace section. */
   const [workspaceListSearch, setWorkspaceListSearch] = useState("");
 
@@ -442,15 +502,23 @@ export function AcademyAdminWorkspacePage({
     !academyContextLoading && academyContextMissing && academyContextError === null;
   const hasAthleteOptions = athleteOptions.length > 0;
   const hasCoachOptions = coachOptions.length > 0;
-  const duplicatePairSelected =
-    assignmentAthleteProfileId.trim() !== "" &&
-    assignmentCoachProfileId.trim() !== "" &&
-    assignments.some(
-      (row) =>
-        row.athleteProfileId === assignmentAthleteProfileId.trim() &&
-        row.coachProfileId === assignmentCoachProfileId.trim() &&
-        row.status.trim().toUpperCase() === "ACTIVE",
-    );
+  const assignmentAthleteIdTrimmed = assignmentAthleteProfileId.trim();
+
+  const assignmentCoachesToCreate = useMemo(() => {
+    if (assignmentAthleteIdTrimmed === "") return [];
+    return assignmentSelectedCoachIds.filter((coachProfileId) => {
+      return !assignments.some(
+        (row) =>
+          row.athleteProfileId === assignmentAthleteIdTrimmed &&
+          row.coachProfileId === coachProfileId &&
+          row.status.trim().toUpperCase() === "ACTIVE",
+      );
+    });
+  }, [assignmentAthleteIdTrimmed, assignmentSelectedCoachIds, assignments]);
+
+  const someSelectedCoachesAlreadyAssigned =
+    assignmentSelectedCoachIds.length > 0 &&
+    assignmentCoachesToCreate.length < assignmentSelectedCoachIds.length;
 
   const rosterIncludesRemovedMember = useMemo(
     () =>
@@ -627,7 +695,7 @@ export function AcademyAdminWorkspacePage({
 
   useEffect(() => {
     setAssignmentAthleteProfileId("");
-    setAssignmentCoachProfileId("");
+    setAssignmentSelectedCoachIds([]);
     setAssignmentError(null);
     setAssignmentSuccess(null);
     setRevokeError(null);
@@ -976,49 +1044,93 @@ export function AcademyAdminWorkspacePage({
     e.preventDefault();
     if (!selectedEntityId || assignmentSubmitting) return;
     const athleteProfileId = assignmentAthleteProfileId.trim();
-    const coachProfileId = assignmentCoachProfileId.trim();
-    if (athleteProfileId === "" || coachProfileId === "") return;
-    const duplicatePair = assignments.some(
-      (row) =>
-        row.athleteProfileId === athleteProfileId &&
-        row.coachProfileId === coachProfileId &&
-        row.status.trim().toUpperCase() === "ACTIVE",
-    );
-    if (duplicatePair) {
-      setAssignmentError("This athlete-coach pair already has an active assignment.");
+    if (athleteProfileId === "" || assignmentSelectedCoachIds.length === 0) {
       return;
     }
+
+    const toCreate = assignmentCoachesToCreate;
+    if (toCreate.length === 0) {
+      setAssignmentError(
+        "All selected coaches already have an active assignment with this athlete.",
+      );
+      setAssignmentSuccess(null);
+      return;
+    }
+
     setAssignmentSubmitting(true);
     setAssignmentError(null);
     setAssignmentSuccess(null);
+    const errors: string[] = [];
+    let successes = 0;
     try {
-      await createAthleteCoachAssignment({
-        entityId: selectedEntityId,
-        athleteProfileId,
-        coachProfileId,
-        isPrimary: false,
-      });
+      for (const coachProfileId of toCreate) {
+        try {
+          await createAthleteCoachAssignment({
+            entityId: selectedEntityId,
+            athleteProfileId,
+            coachProfileId,
+            isPrimary: false,
+          });
+          successes += 1;
+        } catch (err) {
+          errors.push(formatAdminApiError(err, "Could not create assignment."));
+        }
+      }
+
       const rows = await fetchEntityAssignments(selectedEntityId);
       setAssignments(rows);
       setCandidatesRefreshKey((key) => key + 1);
-      setAssignmentSuccess("Assignment saved.");
-      setAssignmentCoachProfileId("");
+
+      if (errors.length === 0) {
+        setAssignmentSuccess(
+          successes === 1
+            ? "Assignment saved."
+            : `${successes} assignments saved.`,
+        );
+        setAssignmentSelectedCoachIds([]);
+      } else if (successes > 0) {
+        setAssignmentError("Some assignments could not be completed.");
+        setAssignmentSuccess(
+          `${successes} assignment${successes !== 1 ? "s" : ""} saved.`,
+        );
+        setAssignmentSelectedCoachIds([]);
+      } else {
+        setAssignmentError(
+          errors[0] ?? "Could not create assignments.",
+        );
+      }
     } catch (e) {
       setAssignmentError(
-        formatAdminApiError(e, "Could not create assignment."),
+        formatAdminApiError(e, "Could not refresh assignments."),
       );
     } finally {
       setAssignmentSubmitting(false);
     }
   }
 
-  async function handleRemoveAssignment(
+  function openUnassignAssignmentModal(row: EntityAssignmentRow) {
+    setAssignmentError(null);
+    const raw = row.athleteName.trim();
+    setUnassignTarget({
+      athleteProfileId: row.athleteProfileId,
+      coachProfileId: row.coachProfileId,
+      athletePromptName:
+        raw !== "" ? formatPersonNameForDisplay(raw) : "",
+    });
+    setUnassignModalOpen(true);
+  }
+
+  function closeUnassignAssignmentModal() {
+    if (removingAssignmentKey !== null) return;
+    setUnassignModalOpen(false);
+    setUnassignTarget(null);
+  }
+
+  async function performRemoveAssignment(
     athleteProfileId: string,
     coachProfileId: string,
   ) {
     if (!selectedEntityId || removingAssignmentKey !== null) return;
-    const ok = window.confirm("Remove this coach-athlete assignment?");
-    if (!ok) return;
     const key = `${athleteProfileId}:${coachProfileId}`;
     setRemovingAssignmentKey(key);
     setAssignmentError(null);
@@ -1031,8 +1143,10 @@ export function AcademyAdminWorkspacePage({
       );
       const rows = await fetchEntityAssignments(selectedEntityId);
       setAssignments(rows);
-      setCandidatesRefreshKey((key) => key + 1);
+      setCandidatesRefreshKey((k) => k + 1);
       setAssignmentSuccess("Assignment removed.");
+      setUnassignModalOpen(false);
+      setUnassignTarget(null);
     } catch (e) {
       setAssignmentError(
         formatAdminApiError(e, "Could not remove assignment."),
@@ -1048,10 +1162,18 @@ export function AcademyAdminWorkspacePage({
     setAssignmentSuccess(null);
   }
 
-  function onAssignmentCoachChange(value: string) {
-    setAssignmentCoachProfileId(value);
+  function toggleAssignmentCoach(coachProfileId: string, checked: boolean) {
     setAssignmentError(null);
     setAssignmentSuccess(null);
+    setAssignmentSelectedCoachIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(coachProfileId);
+      } else {
+        next.delete(coachProfileId);
+      }
+      return [...next];
+    });
   }
 
   if (
@@ -1077,8 +1199,7 @@ export function AcademyAdminWorkspacePage({
   if (showNoAcademyContext) {
     return (
       <div className="max-w-lg space-y-3">
-        <Heading variant="h2">{SECTION_TITLES[section]}</Heading>
-        <p className="text-sm text-textSecondary">{needsAcademyCopy}</p>
+        <PageHeader title={SECTION_TITLES[section]} subtitle={needsAcademyCopy} />
         <Link
           href={adminPaths.aboutAcademy}
           className="inline-flex text-sm font-medium text-primary hover:underline"
@@ -1099,17 +1220,20 @@ export function AcademyAdminWorkspacePage({
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <Heading variant="h2">{SECTION_TITLES[section]}</Heading>
-        <Link
-          href={adminPaths.dashboard}
-          className="text-sm font-medium text-primary hover:underline"
-        >
-          ← Dashboard overview
-        </Link>
-      </div>
+      <PageHeader
+        title={SECTION_TITLES[section]}
+        subtitle={SECTION_SUBTITLES[section]}
+        actions={
+          <Link
+            href={adminPaths.dashboard}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            ← Dashboard overview
+          </Link>
+        }
+      />
 
-      <section className={dashboardPanelClass}>
+      <Card className="space-y-4" accent={false}>
         {section === "members" ? (
           <div>
             {membersSuccess ? (
@@ -1208,47 +1332,76 @@ export function AcademyAdminWorkspacePage({
                 ) : visibleMembers.length === 0 ? (
                   <p className="text-sm text-textSecondary">No results found.</p>
                 ) : (
-                  <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-                    <Table className="w-full min-w-[640px] table-auto">
-                      <TableHead>
-                        <TableRow variant="head">
-                          <Th>Member Name</Th>
-                          <Th>Email</Th>
-                          <Th>Role</Th>
-                          <Th>Status</Th>
-                          <Th>Joined</Th>
-                          <Th className="text-right">Actions</Th>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                    <table className="w-full min-w-[680px] border-separate [border-spacing:0_6px] text-left">
+                      <thead className="bg-slate-50/70">
+                        <tr>
+                          <th className="px-6 py-3 text-xs font-medium tracking-wide text-slate-500">
+                            Member
+                          </th>
+                          <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                            Role
+                          </th>
+                          <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                            Joined
+                          </th>
+                          <th className="px-5 py-3 text-right text-xs font-medium tracking-wide text-slate-500">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
                         {visibleMembers.map((row) => (
-                          <TableRow key={row.membershipId}>
-                            <Td className="font-medium text-textPrimary">
-                              {memberNameTableCell(row, memberTableNameLookups)}
-                            </Td>
-                            <Td>{memberEmailColumnText(row)}</Td>
-                            <Td>{row.role}</Td>
-                            <Td>{row.status}</Td>
-                            <Td className="text-xs">{row.joinedAt}</Td>
-                            <Td className="text-right align-top">
+                          <tr key={row.membershipId} className="group align-top">
+                            <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                              <div className="space-y-1">
+                                <p className="max-w-[18rem] truncate text-sm font-semibold text-slate-900" title={memberNameTableCell(row, memberTableNameLookups)}>
+                                  {memberNameTableCell(row, memberTableNameLookups)}
+                                </p>
+                                <p className="max-w-[20rem] truncate text-xs text-slate-500" title={memberEmailColumnText(row)}>
+                                  {memberEmailColumnText(row)}
+                                </p>
+                              </div>
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                              <span className="inline-flex rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                                {formatEnumeratedLabel(row.role)}
+                              </span>
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                              <StatusBadge
+                                status={row.status}
+                                className="rounded-md px-2.5 py-1 text-xs font-medium"
+                              >
+                                {formatEnumeratedLabel(row.status)}
+                              </StatusBadge>
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-4 py-5 text-xs text-slate-500 group-hover:bg-slate-50/70">
+                              {formatDateOrDateTime(row.joinedAt)}
+                            </td>
+                            <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
                               {memberRowShowsDeactivate(row) ? (
-                                <Button
-                                  type="button"
-                                  variant="danger"
-                                  onClick={() => openDeactivateMember(row)}
-                                >
-                                  Deactivate
-                                </Button>
+                                <div className="flex items-start justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="px-4 py-2 text-xs sm:text-sm"
+                                    onClick={() => openDeactivateMember(row)}
+                                  >
+                                    Deactivate
+                                  </Button>
+                                </div>
                               ) : (
-                                <span className="text-xs text-textSecondary">
-                                  —
-                                </span>
+                                <span className="text-xs text-slate-400">—</span>
                               )}
-                            </Td>
-                          </TableRow>
+                            </td>
+                          </tr>
                         ))}
-                      </TableBody>
-                    </Table>
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </>
@@ -1279,9 +1432,11 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {invitationsLoading ? (
-              <p className="text-sm text-textSecondary">
-                {LOADING_INVITATIONS}
-              </p>
+              <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <p className="px-6 py-6 text-sm text-slate-500">
+                  {LOADING_INVITATIONS}
+                </p>
+              </div>
             ) : null}
             {!invitationsLoading &&
             !invitationsError &&
@@ -1340,6 +1495,7 @@ export function AcademyAdminWorkspacePage({
                     <Button
                       type="submit"
                       variant="primary"
+                      className="px-4 py-2 text-xs sm:text-sm"
                       loading={inviteSubmitting}
                       disabled={inviteSubmitting || inviteEmail.trim() === ""}
                     >
@@ -1377,68 +1533,86 @@ export function AcademyAdminWorkspacePage({
             !invitationsError &&
             selectedEntityId !== null &&
             invitations.length === 0 ? (
-              <p className="text-sm text-textSecondary">
-                {invitationFilter === INVITATION_FILTER_ALL
-                  ? "No invitations found."
-                  : `No ${invitationFilter.toLowerCase()} invitations found.`}
-              </p>
+              <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <p className="px-6 py-6 text-sm text-slate-500">
+                  {invitationFilter === INVITATION_FILTER_ALL
+                    ? "No invitations found."
+                    : `No ${invitationFilter.toLowerCase()} invitations found.`}
+                </p>
+              </div>
             ) : null}
             {!invitationsLoading && !invitationsError && invitations.length > 0 ? (
               visibleInvitations.length === 0 ? (
-                <p className="text-sm text-textSecondary">No results found.</p>
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <p className="px-6 py-6 text-sm text-slate-500">No results found.</p>
+                </div>
               ) : (
-              <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-                <Table className="w-full min-w-[640px] table-auto">
-                  <TableHead>
-                    <TableRow variant="head">
-                      <Th>Entity</Th>
-                      <Th>Email</Th>
-                      <Th>Role</Th>
-                      <Th>Status</Th>
-                      <Th>Sent</Th>
-                      <Th className="text-right">Actions</Th>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {visibleInvitations.map((row) => (
-                      <TableRow key={row.invitationId}>
-                        <Td>{row.entityName ?? "—"}</Td>
-                        <Td>{row.email}</Td>
-                        <Td>{row.role}</Td>
-                        <Td>
-                          <span
-                            className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(
-                              row.status,
-                            )}`}
-                          >
-                            {row.status}
-                          </span>
-                        </Td>
-                        <Td className="text-xs">{row.createdAt}</Td>
-                        <Td className="text-right">
-                          {row.status.trim().toUpperCase() === "PENDING" ? (
-                            <Button
-                              type="button"
-                              variant="danger"
-                              loading={revokingInvitationId === row.invitationId}
-                              disabled={revokingInvitationId !== null}
-                              onClick={() =>
-                                void handleRevokeInvitation(row.invitationId)
-                              }
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <table className="w-full min-w-[700px] border-separate [border-spacing:0_6px] text-left">
+                    <thead className="bg-slate-50/70">
+                      <tr>
+                        <th className="px-6 py-3 text-xs font-medium tracking-wide text-slate-500">
+                          Invitation
+                        </th>
+                        <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                          Status
+                        </th>
+                        <th className="px-5 py-3 text-right text-xs font-medium tracking-wide text-slate-500">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleInvitations.map((row) => (
+                        <tr key={row.invitationId} className="group align-top">
+                          <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                            <div className="space-y-1">
+                              <p className="max-w-[22rem] truncate text-sm font-semibold text-slate-900" title={row.email}>
+                                {row.email}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Role: {formatEnumeratedLabel(row.role)} • Sent: {formatDateTime(row.createdAt, "—")}
+                              </p>
+                              {row.entityName?.trim() ? (
+                                <p className="max-w-[22rem] truncate text-xs text-slate-500">
+                                  Entity: {formatPersonNameForDisplay(row.entityName.trim())}
+                                </p>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                            <StatusBadge
+                              status={row.status}
+                              className="rounded-md px-2.5 py-1 text-xs font-medium"
                             >
-                              Revoke
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-textSecondary">
-                              No actions
-                            </span>
-                          )}
-                        </Td>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                              {formatEnumeratedLabel(row.status)}
+                            </StatusBadge>
+                          </td>
+                          <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
+                            {row.status.trim().toUpperCase() === "PENDING" ? (
+                              <div className="flex items-start justify-end">
+                                <Button
+                                  type="button"
+                                  variant="danger"
+                                  className="px-4 py-2 text-xs sm:text-sm"
+                                  loading={revokingInvitationId === row.invitationId}
+                                  disabled={revokingInvitationId !== null}
+                                  onClick={() =>
+                                    void handleRevokeInvitation(row.invitationId)
+                                  }
+                                >
+                                  Revoke
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )
             ) : null}
           </div>
@@ -1461,6 +1635,7 @@ export function AcademyAdminWorkspacePage({
                   <Button
                     type="button"
                     variant="secondary"
+                    className="px-4 py-2 text-xs sm:text-sm"
                     disabled={rosterLoading}
                     onClick={() => setCandidatesRefreshKey((k) => k + 1)}
                   >
@@ -1522,102 +1697,121 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {assignmentsLoading ? (
-              <p className="text-sm text-textSecondary">Loading assignments...</p>
+              <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <p className="px-6 py-6 text-sm text-slate-500">Loading assignments...</p>
+              </div>
             ) : null}
             {!assignmentsLoading &&
             !assignmentsError &&
             selectedEntityId !== null &&
             assignments.length === 0 ? (
-              <p className="text-sm text-textSecondary">
-                No coach-athlete assignments yet. Memberships do not create
-                assignments automatically.
-              </p>
+              <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <p className="px-6 py-6 text-sm text-slate-500">
+                  No coach-athlete assignments yet. Memberships do not create assignments automatically.
+                </p>
+              </div>
             ) : null}
             {!assignmentsLoading &&
             !assignmentsError &&
             selectedEntityId !== null &&
             assignments.length > 0 ? (
               visibleAssignments.length === 0 ? (
-                <p className="text-sm text-textSecondary">No results found.</p>
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <p className="px-6 py-6 text-sm text-slate-500">No results found.</p>
+                </div>
               ) : (
-              <div className="overflow-auto rounded-lg border border-border bg-surface">
-                <Table className="w-full min-w-[720px] table-auto">
-                  <TableHead>
-                    <TableRow variant="head">
-                      <Th>Athlete</Th>
-                      <Th>Coach</Th>
-                      <Th>Primary</Th>
-                      <Th>Relationship</Th>
-                      <Th>Assigned</Th>
-                      <Th className="text-right">Action</Th>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {visibleAssignments.map((row) => {
-                      const rowKey = `${row.athleteProfileId}:${row.coachProfileId}`;
-                      return (
-                        <TableRow key={row.assignmentId}>
-                          <Td className="text-sm">
-                            <AssignmentPartyCell
-                              name={row.athleteName}
-                              email={row.athleteEmail}
-                              fallbackId={row.athleteProfileId}
-                            />
-                          </Td>
-                          <Td className="text-sm">
-                            <AssignmentPartyCell
-                              name={row.coachName}
-                              email={row.coachEmail}
-                              fallbackId={row.coachProfileId}
-                              role={
-                                assignmentCoachDetails.byProfileId.get(
-                                  row.coachProfileId,
-                                )?.roleLabel ??
-                                assignmentCoachDetails.byEmail.get(
-                                  row.coachEmail.trim().toLowerCase(),
-                                )?.roleLabel ??
-                                ""
-                              }
-                              functions={
-                                assignmentCoachDetails.byProfileId.get(
-                                  row.coachProfileId,
-                                )?.functions ??
-                                assignmentCoachDetails.byEmail.get(
-                                  row.coachEmail.trim().toLowerCase(),
-                                )?.functions ??
-                                []
-                              }
-                            />
-                          </Td>
-                          <Td className="text-sm">
-                            {row.isPrimary ? "Primary" : "-"}
-                          </Td>
-                          <Td className="text-sm">
-                            {row.relationshipType || "STANDARD"}
-                          </Td>
-                          <Td className="text-xs">{row.createdAt}</Td>
-                          <Td className="text-right">
-                            <Button
-                              type="button"
-                              variant="danger"
-                              loading={removingAssignmentKey === rowKey}
-                              disabled={removingAssignmentKey !== null}
-                              onClick={() =>
-                                void handleRemoveAssignment(
-                                  row.athleteProfileId,
-                                  row.coachProfileId,
-                                )
-                              }
-                            >
-                              Unassign
-                            </Button>
-                          </Td>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <table className="w-full min-w-[760px] border-separate [border-spacing:0_6px] text-left">
+                    <thead className="bg-slate-50/50">
+                      <tr>
+                        <th className="px-6 py-3 text-xs font-medium text-slate-500">Athlete</th>
+                        <th className="px-6 py-3 text-xs font-medium text-slate-500">Coach</th>
+                        <th className="px-3 py-3 text-[11px] font-medium text-slate-400">Primary</th>
+                        <th className="px-4 py-3 text-xs font-medium text-slate-500">Details</th>
+                        <th className="px-3 py-3 text-[11px] font-medium text-slate-400">Assigned</th>
+                        <th className="px-5 py-3 text-right text-xs font-medium text-slate-500">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleAssignments.map((row) => {
+                        const rowKey = `${row.athleteProfileId}:${row.coachProfileId}`;
+                        return (
+                          <tr key={row.assignmentId} className="group align-top">
+                            <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                              <AssignmentPartyCell
+                                name={row.athleteName}
+                                email={row.athleteEmail}
+                                fallbackId={row.athleteProfileId}
+                              />
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                              <AssignmentPartyCell
+                                name={row.coachName}
+                                email={row.coachEmail}
+                                fallbackId={row.coachProfileId}
+                                role={
+                                  assignmentCoachDetails.byProfileId.get(
+                                    row.coachProfileId,
+                                  )?.roleLabel ??
+                                  assignmentCoachDetails.byEmail.get(
+                                    row.coachEmail.trim().toLowerCase(),
+                                  )?.roleLabel ??
+                                  ""
+                                }
+                                functions={
+                                  assignmentCoachDetails.byProfileId.get(
+                                    row.coachProfileId,
+                                  )?.functions ??
+                                  assignmentCoachDetails.byEmail.get(
+                                    row.coachEmail.trim().toLowerCase(),
+                                  )?.functions ??
+                                  []
+                                }
+                              />
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-3 py-5 group-hover:bg-slate-50/70">
+                              {row.isPrimary ? (
+                                <span className="text-xs text-slate-500">
+                                  Primary
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                              <span className="text-xs text-slate-500">
+                                Relationship:{" "}
+                                {formatEnumeratedLabel(
+                                  row.relationshipType?.trim() || "STANDARD",
+                                )}{" "}
+                                • Assigned: {formatDateTime(row.createdAt)}
+                              </span>
+                            </td>
+                            <td className="border-y border-slate-100 bg-white px-3 py-5 text-xs text-slate-400 group-hover:bg-slate-50/70">
+                              —
+                            </td>
+                            <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
+                              <div className="flex items-start justify-end">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  className="px-4 py-2 text-xs sm:text-sm"
+                                  loading={removingAssignmentKey === rowKey}
+                                  disabled={removingAssignmentKey !== null}
+                                  onClick={() =>
+                                    openUnassignAssignmentModal(row)
+                                  }
+                                >
+                                  Unassign
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )
             ) : null}
             {rosterLoading ? (
@@ -1692,45 +1886,42 @@ export function AcademyAdminWorkspacePage({
                     </p>
                   ) : null}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="assignment-coach"
-                    className="text-xs font-medium text-textPrimary"
-                  >
-                    Coach (profile)
-                  </label>
-                  <Select
-                    id="assignment-coach"
-                    value={assignmentCoachProfileId}
+                <fieldset className="flex flex-col gap-1 border-0 p-0">
+                  <legend className="text-xs font-medium text-textPrimary">
+                    Coaches
+                  </legend>
+                  <AssignmentCoachMultiSelect
+                    id="assignment-coaches"
+                    coachOptions={coachOptions}
+                    selectedCoachProfileIds={assignmentSelectedCoachIds}
                     disabled={
                       assignmentSubmitting || coachOptions.length === 0
                     }
-                    onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                      onAssignmentCoachChange(e.target.value)
+                    getOptionLines={(opt) =>
+                      formatCoachAssignmentOptionLines(
+                        opt,
+                        assignmentCoachDetails,
+                      )
                     }
-                  >
-                    <option value="">Select coach</option>
-                    {coachOptions.map((opt) => (
-                      <option
-                        key={opt.coachProfileId}
-                        value={opt.coachProfileId}
-                      >
-                        {formatCoachAssignmentDropdownLabel(
-                          opt,
-                          assignmentCoachDetails,
-                        )}
-                      </option>
-                    ))}
-                  </Select>
+                    onToggle={toggleAssignmentCoach}
+                  />
+                  <p className="text-xs text-textSecondary">
+                    {assignmentSelectedCoachIds.length === 0
+                      ? "No coaches selected"
+                      : assignmentSelectedCoachIds.length === 1
+                        ? "1 coach selected"
+                        : `${assignmentSelectedCoachIds.length} coaches selected`}
+                  </p>
                   {!hasCoachOptions ? (
                     <p className="text-xs text-textSecondary">
                       No assignable coaches with linked profiles are available yet.
                     </p>
                   ) : null}
-                </div>
-                {duplicatePairSelected ? (
+                </fieldset>
+                {someSelectedCoachesAlreadyAssigned ? (
                   <p className="text-xs text-warning">
-                    This athlete-coach pair already exists.
+                    Some selected coaches already have an active assignment with
+                    this athlete. Those will be skipped.
                   </p>
                 ) : null}
                 <Button
@@ -1740,21 +1931,21 @@ export function AcademyAdminWorkspacePage({
                   disabled={
                     assignmentSubmitting ||
                     assignmentAthleteProfileId.trim() === "" ||
-                    assignmentCoachProfileId.trim() === "" ||
-                    duplicatePairSelected
+                    assignmentSelectedCoachIds.length === 0
                   }
                 >
-                  Assign coach to athlete
+                  {assignmentSelectedCoachIds.length <= 1
+                    ? "Assign coach to athlete"
+                    : "Assign coaches to athlete"}
                 </Button>
               </form>
             ) : null}
           </div>
         ) : null}
-      </section>
+      </Card>
 
       <DeactivateMemberConfirmModal
         open={deactivateTarget !== null}
-        memberLabel={deactivateTarget?.userEmail ?? ""}
         memberPromptName={
           deactivateTarget ? memberNameForDeactivatePrompt(deactivateTarget) : ""
         }
@@ -1762,6 +1953,24 @@ export function AcademyAdminWorkspacePage({
         error={deactivateError}
         onClose={closeDeactivateMemberModal}
         onConfirm={handleConfirmDeactivateMember}
+      />
+
+      <UnassignAssignmentConfirmDialog
+        open={unassignModalOpen}
+        onClose={closeUnassignAssignmentModal}
+        athletePromptName={unassignTarget?.athletePromptName ?? ""}
+        submitting={
+          unassignTarget !== null &&
+          removingAssignmentKey ===
+            `${unassignTarget.athleteProfileId}:${unassignTarget.coachProfileId}`
+        }
+        onConfirm={() => {
+          if (!unassignTarget) return;
+          void performRemoveAssignment(
+            unassignTarget.athleteProfileId,
+            unassignTarget.coachProfileId,
+          );
+        }}
       />
     </div>
   );

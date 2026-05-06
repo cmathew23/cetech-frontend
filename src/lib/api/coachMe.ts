@@ -4,6 +4,10 @@
  */
 
 import { paths } from "@/config/endpoints";
+import {
+  normalizeCoachFunctionValue,
+  type CoachPlanCreationDomain,
+} from "@/lib/coachAuthority";
 import { apiRequest } from "@/lib/apiClient";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 
@@ -16,13 +20,6 @@ function readStringField(o: Record<string, unknown>, key: string): string {
   const v = o[key];
   if (typeof v === "string" && v.trim() !== "") return v.trim();
   return "";
-}
-
-function readNonNegIntField(o: Record<string, unknown>, key: string): number | null {
-  if (!(key in o)) return null;
-  const v = o[key];
-  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
-  return null;
 }
 
 function readNonNegInt(o: Record<string, unknown>, keys: string[]): number {
@@ -52,6 +49,49 @@ function readBooleanField(o: Record<string, unknown>, key: string): boolean {
   return v === true;
 }
 
+function readStringArrayField(
+  o: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = o[key];
+  if (!Array.isArray(value)) return [];
+  return value.reduce<string[]>((acc, item) => {
+    if (typeof item !== "string") return acc;
+    const trimmed = item.trim();
+    if (trimmed !== "") acc.push(trimmed);
+    return acc;
+  }, []);
+}
+
+/** Only when GET assigned-athletes includes `validationStatus` (non-empty string). */
+function readAssignedAthleteValidationStatus(
+  o: Record<string, unknown>,
+): string | null {
+  if (!("validationStatus" in o)) return null;
+  const value = o.validationStatus;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function readAssignedAthletePlanDomain(
+  o: Record<string, unknown>,
+  key: string,
+): CoachPlanCreationDomain | null {
+  const value = readStringField(o, key);
+  if (value === "") return null;
+  const normalized = normalizeCoachFunctionValue(value);
+  if (normalized === "SKILLS") return "SKILLS";
+  if (normalized === "NUTRITION") return "NUTRITION";
+  if (
+    normalized === "S_AND_C" ||
+    normalized === "STRENGTH_AND_CONDITIONING"
+  ) {
+    return "S_AND_C";
+  }
+  return null;
+}
+
 function mergeDashboardRoot(data: unknown): Record<string, unknown> {
   const root = asRecord(data) ?? {};
   const nested = asRecord(root.data);
@@ -59,40 +99,10 @@ function mergeDashboardRoot(data: unknown): Record<string, unknown> {
   return { ...root, ...nested };
 }
 
-function titleCaseEnumToken(raw: string): string {
-  const token = raw.trim();
-  if (token === "") return "";
-  return token
-    .split("_")
-    .map((part) => {
-      const p = part.trim().toLowerCase();
-      if (p === "") return "";
-      return `${p[0].toUpperCase()}${p.slice(1)}`;
-    })
-    .filter((p) => p !== "")
-    .join(" ");
-}
-
-function formatFunctions(raw: unknown): string {
-  if (raw === null || raw === undefined) return "—";
-  if (typeof raw === "string") {
-    const label = titleCaseEnumToken(raw);
-    return label !== "" ? label : "—";
-  }
-  if (Array.isArray(raw)) {
-    const labels = raw
-      .filter((x): x is string => typeof x === "string")
-      .map((x) => titleCaseEnumToken(x))
-      .filter((x) => x !== "");
-    return labels.length > 0 ? labels.join(", ") : "—";
-  }
-  return "—";
-}
-
 export type CoachMeDashboardData = {
   trainingEntityName: string;
   academyCoachRole: string;
-  functionsDisplay: string;
+  functions: string[];
   hasHeadCoachConfigured: boolean;
   trainingPlanReleaseMode: string;
   assignedAthleteCount: number;
@@ -119,7 +129,7 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
   const academyCoachRole =
     (authority ? readStringField(authority, "academyCoachRole") : "") || "—";
 
-  const functionsDisplay = authority ? formatFunctions(authority.functions) : "—";
+  const functions = authority ? readStringArrayField(authority, "functions") : [];
 
   const hasHeadCoachConfiguredRaw =
     releaseGate?.hasHeadCoachConfigured === true || false;
@@ -143,7 +153,7 @@ export function parseCoachMeDashboardPayload(data: unknown): CoachMeDashboardDat
   return {
     trainingEntityName,
     academyCoachRole,
-    functionsDisplay,
+    functions,
     hasHeadCoachConfigured: hasHeadCoachConfiguredRaw,
     trainingPlanReleaseMode,
     assignedAthleteCount,
@@ -161,23 +171,45 @@ export async function fetchCoachMeDashboard(): Promise<CoachMeDashboardData> {
 
 export type CoachAssignedAthleteRow = {
   athleteId: string;
+  assignedFunctions: string[];
   hasPlanningProfile: boolean;
+  currentGenerationDomain: CoachPlanCreationDomain | null;
+  currentPlanId: string | null;
+  currentPlanStatus: string | null;
+  /** From assigned-athletes `validationStatus`; `null` when the field is omitted (do not infer). */
+  validationStatus: string | null;
   displayName: string;
   email: string;
   lifecycle: string;
   membershipStatus: string;
+  skillsPlanId: string | null;
+  planStatus: string | null;
 };
 
-function parseAssignedAthleteRow(raw: unknown): CoachAssignedAthleteRow | null {
+export function parseAssignedAthleteRow(
+  raw: unknown,
+): CoachAssignedAthleteRow | null {
   const o = asRecord(raw);
   if (!o) return null;
   const athleteId =
     readStringField(o, "athleteId") ||
     readStringField(o, "athleteUserId") ||
     readStringField(o, "userId");
+  const currentPlanId =
+    readStringField(o, "currentPlanId") || readStringField(o, "skillsPlanId") || null;
+  const currentPlanStatus =
+    readStringField(o, "currentPlanStatus") || readStringField(o, "planStatus") || null;
   return {
     athleteId,
+    assignedFunctions: readStringArrayField(o, "assignedFunctions"),
     hasPlanningProfile: readBooleanField(o, "hasPlanningProfile"),
+    currentGenerationDomain: readAssignedAthletePlanDomain(
+      o,
+      "currentGenerationDomain",
+    ),
+    currentPlanId,
+    currentPlanStatus,
+    validationStatus: readAssignedAthleteValidationStatus(o),
     displayName:
       readStringField(o, "displayName") ||
       readStringField(o, "name") ||
@@ -189,6 +221,8 @@ function parseAssignedAthleteRow(raw: unknown): CoachAssignedAthleteRow | null {
       readStringField(o, "membershipStatus") ||
       readStringField(o, "status") ||
       "—",
+    skillsPlanId: readStringField(o, "skillsPlanId") || currentPlanId,
+    planStatus: readStringField(o, "planStatus") || currentPlanStatus,
   };
 }
 
@@ -217,33 +251,3 @@ export async function fetchCoachAssignedAthletes(): Promise<CoachAssignedAthlete
   }, []);
 }
 
-/**
- * Human-readable label for `trainingPlanReleaseMode` values from the coach dashboard API.
- * Backend contract stays enum strings (e.g. DIRECT_RELEASE); this is display-only.
- */
-export function formatTrainingPlanReleaseModeForUi(code: string): string {
-  const c = code.trim().toUpperCase();
-  if (c === "" || c === "—") return "—";
-  switch (c) {
-    case "DIRECT_RELEASE":
-      return "Direct Release";
-    case "HEAD_COACH_REVIEW":
-      return "Head Coach Review";
-    default:
-      return titleCaseEnumToken(code) || code.trim();
-  }
-}
-
-/** Matches admin roster wording for known academy coach role enums. */
-export function formatAcademyCoachRoleForUi(role: string): string {
-  const r = role.trim().toUpperCase();
-  if (r === "" || r === "—") return "—";
-  switch (r) {
-    case "HEAD_COACH":
-      return "Head Coach";
-    case "ASSISTANT_COACH":
-      return "Assistant Coach";
-    default:
-      return role.trim();
-  }
-}

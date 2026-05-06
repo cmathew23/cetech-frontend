@@ -4,6 +4,7 @@ import { InvitationRequiredScreen } from "@/components/access/InvitationRequired
 import { AccessGateLoadingState } from "@/components/access/AccessGateLoadingState";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
 import { useAuth } from "@/hooks/useAuth";
+import { useSharedLogout } from "@/hooks/useSharedLogout";
 import {
   bootstrapRequiresInvitationRequiredRoute,
   routeFromAccessContext,
@@ -13,7 +14,8 @@ import { useEffect, useState } from "react";
 
 export default function InvitationRequiredPage() {
   const router = useRouter();
-  const { isAuthenticated, loading, accessContext, accessGateReady, logout } = useAuth();
+  const logout = useSharedLogout();
+  const { isAuthenticated, loading, accessContext, accessGateReady } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -33,7 +35,6 @@ export default function InvitationRequiredPage() {
     setSubmitting(true);
     try {
       await logout();
-      router.replace("/login");
     } finally {
       setSubmitting(false);
     }

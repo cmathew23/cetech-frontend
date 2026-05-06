@@ -1,7 +1,7 @@
 "use client";
 
 import { LogoutConfirmDialog } from "@/components/ui/LogoutConfirmDialog";
-import { performClientLogout } from "@/lib/logoutClient";
+import { useSharedLogout } from "@/hooks/useSharedLogout";
 import { useState } from "react";
 
 /**
@@ -9,6 +9,7 @@ import { useState } from "react";
  */
 export function DashboardLogoutButton() {
   const [open, setOpen] = useState(false);
+  const logoutUser = useSharedLogout();
 
   return (
     <>
@@ -22,7 +23,7 @@ export function DashboardLogoutButton() {
       <LogoutConfirmDialog
         open={open}
         onClose={() => setOpen(false)}
-        onConfirm={() => performClientLogout()}
+        onConfirm={logoutUser}
       />
     </>
   );

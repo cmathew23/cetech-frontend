@@ -1,9 +1,9 @@
 "use client";
 
 import { InvitationInboxSection } from "@/components/invitations/InvitationInboxSection";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
 import { routeFromAccessContext } from "@/lib/accessContext";
-import { dashboardPanelClass } from "@/lib/auth-ui";
 import { useRouter } from "next/navigation";
 
 export default function CoachDashboardInvitationsPage() {
@@ -20,17 +20,13 @@ export default function CoachDashboardInvitationsPage() {
 
   return (
     <div className="w-full max-w-4xl space-y-4">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
-          Invitations
-        </h2>
-        <p className="text-base text-gray-500">
-          Pending academy invitations. Accept or decline to continue.
-        </p>
-      </header>
+      <PageHeader
+        title="Invitations"
+        subtitle="Pending academy invitations. Accept or decline to continue."
+      />
 
       <InvitationInboxSection
-        className={dashboardPanelClass}
+        showTitle={false}
         onActionComplete={handleActionComplete}
       />
     </div>

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/Badge";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { FormField } from "@/components/ui/FormField";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -22,13 +23,17 @@ import {
   shouldRenderField,
   validatePlanningProfileDraft,
   type PlanningAllergiesIntolerancesForm,
+  type PlanningAllergiesIntolerances,
   type PlanningFormValue,
   type PlanningFormRecord,
   type PlanningProfileFormState,
   type PlanningProfileGroupName,
   type PlanningProfileRecord,
+  type PlanningScalar,
 } from "@/lib/api/planning-profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
+import { formatPlanningProfileDateDisplay } from "@/lib/dateTime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type ViewState =
@@ -64,6 +69,22 @@ const SEX_OPTIONS = [
   { value: "", label: "Select gender" },
   { value: "MALE", label: "Male" },
   { value: "FEMALE", label: "Female" },
+] as const;
+
+function formatAthleteLevelOptionLabel(enumValue: string): string {
+  return enumValue
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const SELF_REPORTED_LEVEL_SELECT_OPTIONS = [
+  { value: "", label: "Select self-reported level" },
+  ...ATHLETE_LEVELS.map((value) => ({
+    value,
+    label: formatAthleteLevelOptionLabel(value),
+  })),
 ] as const;
 
 const REGIONAL_CUISINE_OPTIONS = [
@@ -226,22 +247,24 @@ function formatApiError(e: unknown, fallback: string): string {
   return fallback;
 }
 
-function displayText(
-  value: string | number | boolean | string[] | null | undefined,
-): string {
+function displayAllergiesRecord(value: PlanningAllergiesIntolerances): string {
+  if (value.noFoodAllergies) return "No food allergies declared";
+  const parts = [...value.selected];
+  const other = value.othersText?.trim();
+  if (other) parts.push(other);
+  return parts.length > 0 ? parts.join(", ") : "—";
+}
+
+function displayText(value: PlanningScalar | null | undefined): string {
   if (value === null || value === undefined) return "—";
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return displayAllergiesRecord(value);
+  }
   if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   const text = String(value).trim();
   return text === "" ? "—" : text;
-}
-
-function displayDate(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
 }
 
 function todayDateInputMax(): string {
@@ -336,7 +359,7 @@ function statusBadgeVariant(
 
 function displayFieldValue(
   field: string,
-  value: string | number | boolean | string[] | null | undefined,
+  value: PlanningScalar | undefined,
 ): string {
   if (
     field === "dateOfBirth" ||
@@ -345,7 +368,9 @@ function displayFieldValue(
     field === "updatedAt" ||
     field === "confirmedAt"
   ) {
-    return displayDate(typeof value === "string" ? value : null);
+    return formatPlanningProfileDateDisplay(
+      typeof value === "string" ? value : null,
+    );
   }
   return displayText(value);
 }
@@ -511,7 +536,9 @@ export function AthleteProfilePlanningPageContent() {
 
   const mode = state.mode;
   const record = state.record;
-  const lastUpdatedText = record?.updatedAt ? displayDate(record.updatedAt) : null;
+  const lastUpdatedText = record?.updatedAt
+    ? formatPlanningProfileDateDisplay(record.updatedAt)
+    : null;
 
   const createMode = mode === "create";
   const canEditFields = createMode || isEditingExisting;
@@ -657,7 +684,7 @@ export function AthleteProfilePlanningPageContent() {
 
       return (
         <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <Card padding="compact" accent={false} className="bg-surface">
             <div className="flex flex-wrap gap-2">
               {REGIONAL_CUISINE_OPTIONS.map((option) => (
                 <label
@@ -675,7 +702,7 @@ export function AthleteProfilePlanningPageContent() {
                 </label>
               ))}
             </div>
-          </div>
+          </Card>
           <p className="text-xs text-textSecondary">
             {selectedSummary.length > 0
               ? `Selected: ${selectedSummary.join(", ")}`
@@ -746,10 +773,10 @@ export function AthleteProfilePlanningPageContent() {
 
       return (
         <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <Card padding="compact" accent={false} className="bg-surface">
             <div className="space-y-3">
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Allergies
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -771,7 +798,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Intolerances
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -793,7 +820,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-textSecondary">
+                <p className="text-xs font-medium tracking-wide text-textSecondary">
                   Special
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -825,7 +852,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
             </div>
-          </div>
+          </Card>
           {hasOthers ? (
             <div className="space-y-1">
               <Input
@@ -869,6 +896,37 @@ export function AthleteProfilePlanningPageContent() {
                 {opt.label}
               </option>
             ))}
+          </Select>
+        </FormField>
+      );
+    }
+
+    if (group === "sportContext" && field === "selfReportedLevel") {
+      const rawSelected =
+        typeof value === "string" ? value.trim() : "";
+      const athleteLevelEnumSet = new Set<string>([...ATHLETE_LEVELS]);
+      const fallbackOption =
+        rawSelected !== "" && !athleteLevelEnumSet.has(rawSelected) ? (
+          <option key={rawSelected} value={rawSelected}>
+            {formatAthleteLevelOptionLabel(rawSelected)}
+          </option>
+        ) : null;
+      return (
+        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+          <Select
+            id={`${group}-${field}`}
+            value={rawSelected}
+            disabled={readOnly}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              updateField(group, field, e.target.value)
+            }
+          >
+            {SELF_REPORTED_LEVEL_SELECT_OPTIONS.map((opt) => (
+              <option key={opt.value || "__empty"} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+            {fallbackOption}
           </Select>
         </FormField>
       );
@@ -1201,10 +1259,7 @@ export function AthleteProfilePlanningPageContent() {
           {fields.length > 0 ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {fields.map((field) => {
-                if (
-                  group === "sportContext" &&
-                  (field === "selfReportedLevel" || field === "validatedLevel")
-                ) {
+                if (group === "sportContext" && field === "validatedLevel") {
                   return (
                     <div
                       key={`${group}-${field}`}
@@ -1214,11 +1269,7 @@ export function AthleteProfilePlanningPageContent() {
                         {toFieldLabel(field)}
                       </p>
                       <p className="text-sm text-textPrimary">
-                        {displayText(
-                          field === "selfReportedLevel"
-                            ? record?.selfReportedLevel
-                            : record?.validatedLevel,
-                        )}
+                        {displayText(record?.validatedLevel)}
                       </p>
                     </div>
                   );
@@ -1330,7 +1381,7 @@ export function AthleteProfilePlanningPageContent() {
             ) : (
               <Button
                 type="button"
-                variant="primary"
+                variant="secondary"
                 disabled={saveBusy}
                 onClick={handleStartEditing}
               >

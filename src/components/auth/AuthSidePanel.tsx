@@ -39,7 +39,7 @@ export function AuthSidePanel({
   return (
     <aside
       className={cn(
-        "flex h-full flex-col justify-between bg-gradient-to-br from-sidebar to-sidebar/80 px-10 py-12 text-white",
+        "flex h-full flex-col justify-between bg-sidebar px-10 py-12 text-white",
         className,
       )}
     >

@@ -1,18 +1,12 @@
 "use client";
 
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Heading } from "@/components/ui/Heading";
+import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableRow,
-  Th,
-  Td,
-} from "@/components/ui/Table";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   fetchEntityAssignments,
   fetchMyAcademy,
@@ -27,12 +21,15 @@ import {
   type AcademyMeAthleteRow,
 } from "@/lib/api/academyMeAthletes";
 import { formatAdminPersonLabel } from "@/lib/adminPersonLabel";
+import {
+  formatEnumeratedLabel,
+  formatPersonNameForDisplay,
+} from "@/lib/textFormat";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
 import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
 import { SPORT_VALUES } from "@/lib/sports";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import type { EntityAssignmentRow } from "@/types/academyAdmin.types";
-import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 const ATHLETE_STATUS_FILTER_ALL = "" as const;
@@ -64,23 +61,6 @@ function athleteRowIsRemovedStatus(membershipStatus: string): boolean {
 
 function athleteRowIsPendingStatus(membershipStatus: string): boolean {
   return membershipStatusUpper(membershipStatus) === "PENDING";
-}
-
-function athleteMembershipStatusBadgeClass(membershipStatus: string): string {
-  const upper = membershipStatus.trim().toUpperCase();
-  if (upper === "PENDING")
-    return "bg-amber-50 text-amber-800 ring-amber-600/20";
-  if (upper === "ACCEPTED" || upper === "ACTIVE")
-    return "bg-emerald-50 text-emerald-800 ring-emerald-600/20";
-  if (upper === "DECLINED")
-    return "bg-rose-50 text-rose-800 ring-rose-600/20";
-  if (upper === "REVOKED")
-    return "bg-orange-50 text-orange-800 ring-orange-600/20";
-  if (upper === "EXPIRED")
-    return "bg-zinc-100 text-zinc-700 ring-zinc-600/20";
-  if (upper === "UNKNOWN" || upper === "")
-    return "bg-zinc-100 text-zinc-600 ring-zinc-600/20";
-  return "bg-gray-100 text-gray-700 ring-gray-600/20";
 }
 
 function formatAthletesPageError(e: unknown, fallback: string): string {
@@ -122,7 +102,9 @@ function AssignedCoachCellEntry(props: {
   if (n !== "" && e !== "") {
     return (
       <div className="space-y-0.5">
-        <div className="text-sm font-medium text-textPrimary">{n}</div>
+        <div className="text-sm font-medium text-textPrimary">
+          {formatPersonNameForDisplay(n)}
+        </div>
         <div className="text-xs text-textSecondary">{e}</div>
       </div>
     );
@@ -131,7 +113,11 @@ function AssignedCoachCellEntry(props: {
     return <div className="text-sm text-textSecondary">{e}</div>;
   }
   if (n !== "") {
-    return <div className="text-sm font-medium text-textPrimary">{n}</div>;
+    return (
+      <div className="text-sm font-medium text-textPrimary">
+        {formatPersonNameForDisplay(n)}
+      </div>
+    );
   }
   return <span className="text-textSecondary">—</span>;
 }
@@ -413,7 +399,10 @@ export default function AdminAthletesPage() {
   if (loadState === "error") {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
-        <Heading variant="h2">Athletes</Heading>
+        <PageHeader
+          title="Athletes"
+          subtitle="Academy roster. Coach assignments are read-only here; manage them on Assignments."
+        />
         <Alert variant="danger">{loadError}</Alert>
         <Button type="button" variant="secondary" onClick={() => void loadPage()}>
           Try again
@@ -424,24 +413,21 @@ export default function AdminAthletesPage() {
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
-      <header>
-        <Heading variant="h2">Athletes</Heading>
-        <p className="mt-1 text-sm text-textSecondary">
-          Academy roster. Coach assignments are read-only here; manage them on
-          Assignments.
-        </p>
-      </header>
+      <PageHeader
+        title="Athletes"
+        subtitle="Academy roster. Coach assignments are read-only here; manage them on Assignments."
+      />
 
       {assignmentsLoadError ? (
         <Alert variant="warning">{assignmentsLoadError}</Alert>
       ) : null}
 
       {athletes.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card p-6 text-sm text-textSecondary">
-          No athletes in academy roster.
-        </p>
+        <Card>
+          <p className="text-sm text-textSecondary">No athletes in academy roster.</p>
+        </Card>
       ) : (
-        <>
+        <Card className="space-y-4" accent={false}>
           <div className="mb-4 flex flex-col gap-3">
             <div className="max-w-md">
               <AdminTableSearchInput
@@ -588,72 +574,79 @@ export default function AdminAthletesPage() {
           ) : visibleAthletes.length === 0 ? (
             <p className="text-sm text-textSecondary">No results found.</p>
           ) : (
-            <Table className="w-full min-w-[920px] table-auto">
-            <TableHead>
-              <TableRow variant="head">
-                <Th>Athlete Name</Th>
-                <Th>Email</Th>
-                <Th>Status</Th>
-                <Th>Sport</Th>
-                <Th>Level</Th>
-                <Th>Assigned Coaches</Th>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visibleAthletes.map((row) => {
-                const statusLabel =
-                  row.membershipStatus.trim() !== ""
-                    ? row.membershipStatus
-                    : "—";
-                const coachRows = getActiveCoachAssignmentsForAthlete(
-                  row.athleteProfileId,
-                  assignments,
-                );
-                return (
-                  <TableRow key={row.userId}>
-                    <Td className="font-medium text-textPrimary">
-                      {cellText(row.displayName)}
-                    </Td>
-                    <Td>{cellText(row.email)}</Td>
-                    <Td>
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                          athleteMembershipStatusBadgeClass(statusLabel),
-                        )}
-                      >
-                        {statusLabel}
-                      </span>
-                    </Td>
-                    <Td className="text-sm text-textSecondary">
-                      {cellText(row.sport)}
-                    </Td>
-                    <Td className="text-sm text-textSecondary">
-                      {cellText(row.level)}
-                    </Td>
-                    <Td className="text-sm text-textSecondary align-top">
-                      {coachRows.length === 0 ? (
-                        "—"
-                      ) : (
-                        <ul className="list-none space-y-2">
-                          {coachRows.map((cr) => (
-                            <li key={cr.assignmentId}>
-                              <AssignedCoachCellEntry
-                                coachName={cr.coachName}
-                                coachEmail={cr.coachEmail}
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </Td>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-            </Table>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <table className="w-full min-w-[920px] border-separate [border-spacing:0_6px] text-left">
+                <thead className="bg-slate-50/70">
+                  <tr>
+                    <th className="px-6 py-3 text-xs font-medium tracking-wide text-slate-500">Athlete Name</th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">Email</th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">Status</th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">Sport</th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">Level</th>
+                    <th className="px-5 py-3 text-xs font-medium tracking-wide text-slate-500">Assigned Coaches</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleAthletes.map((row) => {
+                    const statusLabel =
+                      row.membershipStatus.trim() !== ""
+                        ? row.membershipStatus
+                        : "—";
+                    const coachRows = getActiveCoachAssignmentsForAthlete(
+                      row.athleteProfileId,
+                      assignments,
+                    );
+                    return (
+                      <tr key={row.userId} className="group align-top">
+                        <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                          <p className="max-w-[16rem] truncate text-sm font-semibold text-slate-900" title={row.displayName.trim() !== "" ? formatPersonNameForDisplay(row.displayName) : "—"}>
+                            {row.displayName.trim() !== ""
+                              ? formatPersonNameForDisplay(row.displayName)
+                              : "—"}
+                          </p>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 text-xs text-slate-500 group-hover:bg-slate-50/70">
+                          {cellText(row.email)}
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                          <StatusBadge status={statusLabel} className="rounded-md px-2.5 py-1 text-xs font-medium">
+                            {formatEnumeratedLabel(statusLabel)}
+                          </StatusBadge>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 text-sm text-slate-600 group-hover:bg-slate-50/70">
+                          {row.sport.trim() !== ""
+                            ? formatEnumeratedLabel(row.sport)
+                            : "—"}
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 text-sm text-slate-600 group-hover:bg-slate-50/70">
+                          {row.level.trim() !== ""
+                            ? formatEnumeratedLabel(row.level)
+                            : "—"}
+                        </td>
+                        <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-sm text-slate-600 group-hover:bg-slate-50/70">
+                          {coachRows.length === 0 ? (
+                            "—"
+                          ) : (
+                            <ul className="list-none space-y-2">
+                              {coachRows.map((cr) => (
+                                <li key={cr.assignmentId}>
+                                  <AssignedCoachCellEntry
+                                    coachName={cr.coachName}
+                                    coachEmail={cr.coachEmail}
+                                  />
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </>
+        </Card>
       )}
     </div>
   );

@@ -2,18 +2,18 @@
 
 import { AdminDashboardHeader } from "@/components/dashboard/admin/AdminDashboardHeader";
 import { AdminDashboardOverview } from "@/components/dashboard/admin/AdminDashboardOverview";
+import { useAdminAcademy } from "@/components/dashboard/admin/AdminAcademyProvider";
 import { adminPaths } from "@/config/adminNav";
 import { Alert } from "@/components/ui/Alert";
 import {
   fetchAcademyAthleteRosterCount,
   fetchAcademyCoachRosterCount,
   fetchEntityInvitations,
-  fetchMyAcademy,
 } from "@/lib/api/academyAdmin";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import type { PendingInvitationRow, SelectedAcademy } from "@/types/academyAdmin.types";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const LOADING_ACADEMY_CONTEXT = "Loading academy context…";
 
@@ -34,16 +34,21 @@ function formatAdminApiError(e: unknown, fallback: string): string {
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const [selectedAcademy, setSelectedAcademy] = useState<SelectedAcademy | null>(
-    null,
-  );
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const {
+    academyProfile,
+    loading: academyContextLoading,
+    error: academyContextError,
+  } = useAdminAcademy();
 
-  const [academyContextLoading, setAcademyContextLoading] = useState(true);
-  const [academyContextMissing, setAcademyContextMissing] = useState(false);
-  const [academyContextError, setAcademyContextError] = useState<string | null>(
-    null,
-  );
+  const selectedAcademy = useMemo<SelectedAcademy | null>(() => {
+    if (!academyProfile) return null;
+    return {
+      academyId: academyProfile.academyId,
+      name: academyProfile.name,
+    };
+  }, [academyProfile]);
+
+  const selectedEntityId = academyProfile?.entityId?.trim() ?? null;
 
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -57,53 +62,15 @@ export default function AdminDashboardPage() {
   >([]);
 
   const showNoAcademyContext =
-    !academyContextLoading && academyContextMissing && academyContextError === null;
+    !academyContextLoading &&
+    academyProfile === null &&
+    academyContextError === null;
 
   useEffect(() => {
     if (showNoAcademyContext) {
       router.replace("/onboarding");
     }
   }, [router, showNoAcademyContext]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function hydrateAcademyContext() {
-      setAcademyContextLoading(true);
-      setAcademyContextMissing(false);
-      setAcademyContextError(null);
-      try {
-        const ctx = await fetchMyAcademy();
-        if (cancelled) return;
-        if (ctx) {
-          setSelectedAcademy({
-            academyId: ctx.academyId,
-            name: ctx.name,
-          });
-          setSelectedEntityId(ctx.entityId);
-          setAcademyContextMissing(false);
-        } else {
-          setAcademyContextMissing(true);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setAcademyContextMissing(false);
-          setAcademyContextError(
-            formatAdminApiError(e, "Could not load academy context."),
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setAcademyContextLoading(false);
-        }
-      }
-    }
-
-    void hydrateAcademyContext();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const reloadDashboardSnapshot = useCallback(async () => {
     const aid = selectedAcademy?.academyId?.trim() ?? "";
@@ -149,7 +116,7 @@ export default function AdminDashboardPage() {
 
   if (
     academyContextLoading &&
-    selectedAcademy === null &&
+    academyProfile === null &&
     !academyContextError
   ) {
     return (
@@ -186,7 +153,7 @@ export default function AdminDashboardPage() {
   return (
     <div className="w-full min-w-0 max-w-full space-y-4">
       <div className="min-w-0">
-        <AdminDashboardHeader academyName={selectedAcademy.name} />
+        <AdminDashboardHeader />
       </div>
 
       <AdminDashboardOverview

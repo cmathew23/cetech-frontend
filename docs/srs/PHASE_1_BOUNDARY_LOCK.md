@@ -41,10 +41,10 @@
 
 - **Athlete working page** is **`/athlete/profile-planning`** (sidebar: **Athlete Profile Planning**). Single page for ongoing data entry and read-only backend status — not a separate “report only” route.
 - **Athlete writes** are self-only against **`/entities/:entityId/athlete-planning-profile/me`**: `GET` bootstrap, `POST` create, `PATCH` update. After a successful write, the UI re-anchors from the **response body** (no requirement in code to call readiness GET for refresh). **`PATCH` must send only changed editable fields**; the frontend builds the body from a baseline vs draft diff and omits unchanged keys (backend infers change severity from payload keys).
-- **Coach read** uses **`GET /entities/:entityId/athletes/:athleteId/planning-profile`** on route **`/coach/athletes/:athleteId/planning-profile`**. **No** coach-side edit/update for planning profile exists in the frontend.
+- **Coach read** uses **`GET /entities/:entityId/athletes/:athleteId/planning-profile`** on route **`/coach/athletes/:athleteId/planning-profile`**. **No** coach-side edit/update for the athlete planning profile record exists in the frontend; the same route hosts a **coach workspace** for seasons/goals and **training plan draft generation** (see **`docs/ui/COACH_PLANNING_FLOW.md`**).
 - **Coach dashboard** uses backend **`hasPlanningProfile`** on each assigned-athlete row to show **View** vs **Not Available**; the table does not prefetch planning profiles per row.
 - **`entityId`** for these calls is **`academy.trainingEntityId`** from app-context (`GET /me/app-context`), same as other entity-scoped dashboard features.
-- **Still deferred (not boundary changes — intentionally unbuilt):** athlete **confirm** UI, **readiness** GET usage in UI, **training-plan generation / AI**.
+- **Still deferred (not boundary changes — intentionally unbuilt):** athlete **confirm** UI, **readiness** GET usage in athlete APP UI. Coach-side **training plan draft** UI (execute, persist, latest draft, Skills/S&C revision) is implemented on the coach planning profile page — **`docs/ui/COACH_PLANNING_FLOW.md`**, **`docs/ui/SNC_UI.md`**.
 
 ### APP contract and ownership locks (Phase 1)
 

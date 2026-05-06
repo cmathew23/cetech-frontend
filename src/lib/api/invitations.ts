@@ -59,7 +59,7 @@ function normalizeMyPendingInvitation(raw: unknown): MyPendingInvitation | null 
       : null;
 
   const entityNameRaw =
-    firstNonEmptyString(o, ["entityName", "academyName", "name"]) ||
+    firstNonEmptyString(o, ["email", "inviteeEmail", "entityName", "academyName", "name"]) ||
     (entity ? firstNonEmptyString(entity, ["name"]) : "") ||
     (academy ? firstNonEmptyString(academy, ["name"]) : "");
 

@@ -3,20 +3,26 @@ import { cn } from "@/lib/utils";
 
 export function DashboardCardShell({
   title,
+  subtitle,
   children,
   className = "",
+  accent = false,
 }: {
   /** Omit or leave empty to render a title-less card (content only). */
   title?: string;
+  subtitle?: string;
   children: React.ReactNode;
   className?: string;
+  accent?: boolean;
 }) {
   const showTitle = (title ?? "").trim() !== "";
   return (
-    <Card className={cn("space-y-3 p-4 md:p-5", className)}>
-      {showTitle ? (
-        <h3 className="text-base font-semibold text-textPrimary">{title}</h3>
-      ) : null}
+    <Card
+      title={showTitle ? title : undefined}
+      subtitle={subtitle}
+      className={cn("space-y-3", className)}
+      accent={accent}
+    >
       {children}
     </Card>
   );

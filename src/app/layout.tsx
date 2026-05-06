@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
 import { designSystem } from "@/config/design-system";
 import { RootShell } from "@/components/layout/RootShell";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "PEAKFLOW",
@@ -20,10 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} h-full antialiased`}
-    >
+    <html lang="en" className="h-full antialiased">
       <body className={designSystem.layout.rootBody}>
         <RootShell>{children}</RootShell>
       </body>

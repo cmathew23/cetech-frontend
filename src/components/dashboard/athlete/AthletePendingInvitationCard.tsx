@@ -4,16 +4,8 @@ import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardS
 import { Button } from "@/components/ui/Button";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatInviteDateDisplay } from "@/lib/dateTime";
 import { useState } from "react";
-
-function formatInviteDate(createdAt: string): string {
-  const t = createdAt.trim();
-  if (t === "") return "—";
-  const d = new Date(t);
-  return Number.isNaN(d.getTime())
-    ? t
-    : d.toLocaleDateString(undefined, { dateStyle: "medium" });
-}
 
 function formatActionError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
@@ -34,7 +26,7 @@ export function AthletePendingInvitationCard({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <DashboardCardShell title="Pending Invitation" className="border-primary/30">
+    <DashboardCardShell title="Pending Invitation">
       <div className="space-y-2">
         {error ? (
           <p className="text-sm text-danger" role="alert">
@@ -56,7 +48,7 @@ export function AthletePendingInvitationCard({
         <p className="text-sm text-textSecondary">
           Invited:{" "}
           <span className="font-medium text-textPrimary">
-            {formatInviteDate(invitation.createdAt)}
+            {formatInviteDateDisplay(invitation.createdAt)}
           </span>
         </p>
         <div className="flex gap-2 pt-1">

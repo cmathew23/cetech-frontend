@@ -1,8 +1,10 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,7 +19,7 @@ import {
   type TrainingPlanLevelValidationView as LevelValidationData,
 } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 
 const LEGACY_LEVEL_VALIDATION_ACCESS_DENIED =
   "Only Assistant Coach or Skills Coach can confirm validated level when Head Coach is not configured";
@@ -249,24 +251,19 @@ export function CoachAthleteLevelValidationView({
 
   return (
     <div className="w-full max-w-5xl space-y-4">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-textPrimary">
-            Training plan — level validation
-          </h1>
-          <p className="text-sm text-textSecondary">
-            Review system suggestion and confirm the athlete&apos;s validated training
-            level.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => router.push("/coach/dashboard")}
-        >
-          Back to Dashboard
-        </Button>
-      </header>
+      <PageHeader
+        title="Training plan — level validation"
+        subtitle="Review system suggestion and confirm the athlete's validated training level."
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => router.push("/coach/dashboard")}
+          >
+            Back to Dashboard
+          </Button>
+        }
+      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {missingPlanningProfile ? (
@@ -281,21 +278,23 @@ export function CoachAthleteLevelValidationView({
       ) : null}
 
       {data && showOverrideHint ? (
-        <p className="rounded-md border border-border bg-card px-3 py-2 text-sm text-textPrimary shadow-sm">
-          You are overriding system recommendation
-        </p>
+        <Card accent={false} padding="compact">
+          <p className="text-sm text-textPrimary">
+            You are overriding system recommendation
+          </p>
+        </Card>
       ) : null}
 
       {data ? (
         <>
-          <DashboardCardShell title="Athlete context">
+          <DashboardCardShell accent={false} title="Athlete context">
             <dl className="space-y-2">
               <DetailRow label="Age" value={displayValue(data.age)} />
               <DetailRow label="Age Band" value={displayValue(data.ageBand)} />
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell title="Performance input">
+          <DashboardCardShell accent={false} title="Performance input">
             <dl className="space-y-2">
               <DetailRow
                 label="Highest Competition Level"
@@ -308,7 +307,7 @@ export function CoachAthleteLevelValidationView({
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell title="System suggestion">
+          <DashboardCardShell accent={false} title="System suggestion">
             <dl className="space-y-2">
               <DetailRow
                 label="Base Suggested Level"
@@ -325,7 +324,7 @@ export function CoachAthleteLevelValidationView({
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell title="Coach decision">
+          <DashboardCardShell accent={false} title="Coach decision">
             <dl className="space-y-2">
               <DetailRow
                 label="Current Validated Level"
@@ -339,7 +338,7 @@ export function CoachAthleteLevelValidationView({
           </DashboardCardShell>
 
           {data.reasons.length > 0 ? (
-            <DashboardCardShell title="Reasons">
+            <DashboardCardShell accent={false} title="Reasons">
               <ul className="list-inside list-disc space-y-1 text-sm text-textPrimary">
                 {data.reasons.map((r, i) => (
                   <li key={`${i}-${r}`}>{r}</li>
@@ -348,13 +347,15 @@ export function CoachAthleteLevelValidationView({
             </DashboardCardShell>
           ) : null}
 
-          <DashboardCardShell title="Confirm level">
+          <DashboardCardShell accent={false} title="Confirm level">
             <div className="space-y-4">
               <FormField id="validated-level" label="Select Validated Level">
                 <Select
                   id="validated-level"
                   value={selectedLevel}
-                  onChange={(e) => setSelectedLevel(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                    setSelectedLevel(e.target.value)
+                  }
                   disabled={saving}
                 >
                   <option value="">—</option>

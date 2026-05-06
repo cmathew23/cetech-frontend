@@ -21,7 +21,7 @@ export type ProfileMe = {
 function readProfileString(o: Record<string, unknown>, key: string): string {
   const v = o[key];
   if (v === null || v === undefined) return "";
-  if (typeof v === "string") return v.trim();
+  if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   return "";
 }
@@ -73,13 +73,13 @@ export async function patchMyProfile(
   const raw = await apiRequest(paths.profile.me, {
     method: "PATCH",
     body: JSON.stringify({
-      firstName: input.firstName.trim(),
-      lastName: input.lastName.trim(),
-      phone: input.phone.trim(),
-      addressLine1: input.addressLine1.trim(),
-      city: input.city.trim(),
-      state: input.state.trim(),
-      country: input.country.trim(),
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: input.phone,
+      addressLine1: input.addressLine1,
+      city: input.city,
+      state: input.state,
+      country: input.country,
     }),
   });
   const data = adaptBackendSuccess(raw);

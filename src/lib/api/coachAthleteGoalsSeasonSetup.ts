@@ -54,12 +54,21 @@ export type GoalSummary = {
   athleteId: string | null;
   entityId: string | null;
   seasonCycleId: string | null;
+  seasonPhaseId: string | null;
+  domain: "SKILLS" | "S_AND_C" | "NUTRITION" | null;
   status: string | null;
   goalType: string | null;
+  goalName: string | null;
+  successCriteria: string | null;
+  goalCategory: string | null;
+  priority: string | null;
   competitionEventId: string | null;
+  targetValue: number | null;
   startDate: string | null;
   targetDate: string | null;
 };
+
+export type GoalPriority = "LOW" | "MEDIUM" | "HIGH";
 
 function parseSeasonCycle(value: unknown): SeasonCycleSummary | null {
   const record = asRecord(value);
@@ -99,14 +108,25 @@ function parseGoal(value: unknown): GoalSummary | null {
   if (!record) return null;
   const goalId = readString(record.goalId) ?? readString(record.id) ?? null;
   if (!goalId) return null;
+  const domain = readString(record.domain);
   return {
     goalId,
     athleteId: readString(record.athleteId),
     entityId: readString(record.entityId),
     seasonCycleId: readString(record.seasonCycleId),
+    seasonPhaseId: readString(record.seasonPhaseId),
+    domain:
+      domain === "SKILLS" || domain === "S_AND_C" || domain === "NUTRITION"
+        ? domain
+        : null,
     status: readString(record.status),
     goalType: readString(record.goalType),
+    goalName: readString(record.goalName),
+    successCriteria: readString(record.successCriteria),
+    goalCategory: readString(record.goalCategory),
+    priority: readString(record.priority),
     competitionEventId: readString(record.competitionEventId),
+    targetValue: readNumber(record.targetValue),
     startDate: readString(record.startDate),
     targetDate: readString(record.targetDate),
   };
@@ -334,6 +354,60 @@ export async function createGoal(input: {
   }
   if (typeof input.baselineValue === "number") body.baselineValue = input.baselineValue;
   if (typeof input.targetValue === "number") body.targetValue = input.targetValue;
+  if (typeof input.targetDate === "string" && input.targetDate.trim() !== "") {
+    body.targetDate = input.targetDate.trim();
+  }
+
+  const raw = await apiRequest(paths.goals.root, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const parsed = parseGoal(adaptBackendSuccess(raw));
+  if (!parsed) {
+    throw {
+      message: "Goal was created, but the response did not include a goal ID.",
+      status: 500,
+      code: "GOAL_CREATE_INVALID",
+    } satisfies NormalizedApiError;
+  }
+  return parsed;
+}
+
+export async function createPhaseAwareGoal(input: {
+  athleteId: string;
+  entityId: string;
+  seasonCycleId: string;
+  seasonPhaseId: string;
+  goalType: "PERFORMANCE";
+  domain: "SKILLS" | "S_AND_C" | "NUTRITION";
+  goalName: string;
+  successCriteria?: string;
+  goalCategory: "TRAINING";
+  createdByCoachId: string;
+  priority?: GoalPriority;
+  targetValue?: number;
+  targetDate?: string;
+}): Promise<GoalSummary> {
+  const body: Record<string, unknown> = {
+    athleteId: requireNonEmpty(input.athleteId, "athleteId"),
+    entityId: requireNonEmpty(input.entityId, "entityId"),
+    seasonCycleId: requireNonEmpty(input.seasonCycleId, "seasonCycleId"),
+    seasonPhaseId: requireNonEmpty(input.seasonPhaseId, "seasonPhaseId"),
+    goalType: input.goalType,
+    domain: input.domain,
+    goalName: requireNonEmpty(input.goalName, "goalName"),
+    goalCategory: input.goalCategory,
+    createdByCoachId: requireNonEmpty(input.createdByCoachId, "createdByCoachId"),
+  };
+  if (typeof input.successCriteria === "string" && input.successCriteria.trim() !== "") {
+    body.successCriteria = input.successCriteria.trim();
+  }
+  if (typeof input.priority === "string" && input.priority.trim() !== "") {
+    body.priority = input.priority.trim();
+  }
+  if (typeof input.targetValue === "number" && Number.isFinite(input.targetValue)) {
+    body.targetValue = input.targetValue;
+  }
   if (typeof input.targetDate === "string" && input.targetDate.trim() !== "") {
     body.targetDate = input.targetDate.trim();
   }

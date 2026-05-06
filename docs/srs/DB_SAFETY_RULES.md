@@ -1,5 +1,9 @@
 # DB_SAFETY_RULES.md
 
+## Related documentation
+
+Product and UI behavior docs (including coach planning flows) live under **`docs/ui/`** and **`docs/srs/`**. They describe application behavior only and **do not** authorize or require any database mutation.
+
 ## Purpose
 
 Protect all CETECH databases (development, test, and production-like environments) from unintended data loss or mutation during development, testing, or AI-assisted workflows.

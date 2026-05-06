@@ -8,11 +8,16 @@ import { useOnboarding } from "@/hooks/useOnboarding";
 import { fetchAthleteMeProfile, type AthleteMeProfile } from "@/lib/api/athleteMe";
 import {
   fetchAthletePlanningProfileMe,
-  formatDateOfBirthForUi,
   type AthletePlanningProfileRecord,
 } from "@/lib/api/athletePlanningProfile";
+import { DATE_DISPLAY_UNAVAILABLE, formatDateOnly } from "@/lib/dateTime";
 import { fetchMyProfile, type ProfileMe } from "@/lib/api/profile";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import {
+  formatHumanReadableOrCopy,
+  formatPersonNameForDisplay,
+  toTitleCaseInput,
+} from "@/lib/textFormat";
 import { useEffect, useMemo, useState } from "react";
 
 function formatApiError(e: unknown, fallback: string): string {
@@ -49,8 +54,8 @@ function displayBoolean(value: boolean | null | undefined): string {
 
 function displayDob(value: string | null | undefined): string {
   if (!value) return "Not available yet";
-  const formatted = formatDateOfBirthForUi(value);
-  return formatted.trim() === "" ? "Not available yet" : formatted;
+  const formatted = formatDateOnly(value.trim());
+  return formatted === DATE_DISPLAY_UNAVAILABLE ? "Not available yet" : formatted;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -188,7 +193,14 @@ export function AthleteSettingsPageContent() {
           <DetailRow label="User ID" value={displayText(user?.id)} />
           <DetailRow
             label="Roles"
-            value={roles.length > 0 ? roles.join(", ") : "Not available yet"}
+            value={
+              roles.length > 0
+                ? roles
+                    .map((r) => toTitleCaseInput(r.trim()))
+                    .filter((s) => s !== "")
+                    .join(", ")
+                : "Not available yet"
+            }
           />
           <DetailRow label="Email" value={displayText(profile?.email)} />
         </dl>
@@ -202,27 +214,55 @@ export function AthleteSettingsPageContent() {
           />
           <DetailRow
             label="Training Entity Name"
-            value={displayText(accessContext?.academy.trainingEntityName)}
+            value={formatHumanReadableOrCopy(
+              accessContext?.academy.trainingEntityName,
+              "Not available yet",
+            )}
           />
           <DetailRow
             label="Onboarding Status"
-            value={displayText(onboardingStatus ?? undefined)}
+            value={formatHumanReadableOrCopy(
+              onboardingStatus ?? undefined,
+              "Not available yet",
+            )}
           />
-          <DetailRow label="Next Step" value={displayText(nextStep ?? undefined)} />
+          <DetailRow
+            label="Next Step"
+            value={formatHumanReadableOrCopy(nextStep ?? undefined, "Not available yet")}
+          />
         </dl>
       </DashboardCardShell>
 
       <DashboardCardShell title="Registration / Profile Data">
         <dl className="space-y-2">
-          <DetailRow label="Name" value={displayText(fullName)} />
+          <DetailRow
+            label="Name"
+            value={
+              fullName.trim() !== ""
+                ? formatPersonNameForDisplay(fullName)
+                : "Not available yet"
+            }
+          />
           <DetailRow label="Date of Birth" value={displayDob(planningProfile?.dateOfBirth)} />
           <DetailRow label="Age" value={displayNumber(planningProfile?.derivedAge)} />
-          <DetailRow label="Sex" value={displayText(planningProfile?.sex)} />
-          <DetailRow label="Sport" value={displayText(sport)} />
-          <DetailRow label="Reported Athlete Level" value={displayText(athleteLevel)} />
+          <DetailRow
+            label="Sex"
+            value={formatHumanReadableOrCopy(planningProfile?.sex, "Not available yet")}
+          />
+          <DetailRow
+            label="Sport"
+            value={formatHumanReadableOrCopy(sport, "Not available yet")}
+          />
+          <DetailRow
+            label="Reported Athlete Level"
+            value={formatHumanReadableOrCopy(athleteLevel, "Not available yet")}
+          />
           <DetailRow
             label="Coach Validated Level"
-            value={displayText(planningProfile?.validatedLevel)}
+            value={formatHumanReadableOrCopy(
+              planningProfile?.validatedLevel,
+              "Not available yet",
+            )}
           />
           <p className="pl-0 text-xs text-textMuted sm:pl-[14.75rem]">
             Used for training plan readiness and workload assessment

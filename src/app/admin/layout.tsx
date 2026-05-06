@@ -1,5 +1,6 @@
 "use client";
 
+import { AdminAcademyProvider } from "@/components/dashboard/admin/AdminAcademyProvider";
 import { AdminSidebar } from "@/components/dashboard/admin/AdminSidebar";
 import { DashboardGate } from "@/components/layout/DashboardGate";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -12,7 +13,9 @@ export default function AdminLayout({
 }) {
   return (
     <DashboardGate>
-      <DashboardLayout sidebar={<AdminSidebar />}>{children}</DashboardLayout>
+      <AdminAcademyProvider>
+        <DashboardLayout sidebar={<AdminSidebar />}>{children}</DashboardLayout>
+      </AdminAcademyProvider>
     </DashboardGate>
   );
 }

@@ -2,6 +2,12 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 **Architecture, SRS, and UX docs:** see [`docs/srs/README.md`](docs/srs/README.md) (onboarding, admin dashboard, gaps, auth-flow notes, milestones).
 
+**Coach-facing UI flows (planning profile, Skills / S&C generation and revision, goals):**
+
+- [`docs/ui/COACH_PLANNING_FLOW.md`](docs/ui/COACH_PLANNING_FLOW.md)
+- [`docs/ui/SNC_UI.md`](docs/ui/SNC_UI.md)
+- [`docs/ui/GOALS_UI.md`](docs/ui/GOALS_UI.md)
+
 ## Getting Started
 
 First, run the development server:

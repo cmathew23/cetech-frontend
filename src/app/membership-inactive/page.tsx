@@ -3,6 +3,7 @@
 import { AuthButton } from "@/components/auth/AuthButton";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { useAuth } from "@/hooks/useAuth";
+import { useSharedLogout } from "@/hooks/useSharedLogout";
 import {
   bootstrapRedirectsToMembershipInactive,
   bootstrapRequiresOnboardingResolution,
@@ -12,12 +13,12 @@ import { useEffect } from "react";
 
 export default function MembershipInactivePage() {
   const router = useRouter();
+  const logout = useSharedLogout();
   const {
     isAuthenticated,
     loading,
     accessContext,
     accessGateReady,
-    logout,
   } = useAuth();
 
   useEffect(() => {
@@ -41,7 +42,6 @@ export default function MembershipInactivePage() {
 
   async function handleLogout() {
     await logout();
-    router.replace("/login");
   }
 
   if (loading || !accessGateReady) {

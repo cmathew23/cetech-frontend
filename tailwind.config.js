@@ -6,10 +6,13 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)", "Inter", "system-ui", "sans-serif"],
+      },
       colors: {
-        primary: "#22C55E",
-        primaryDark: "#15803D",
-        primaryLight: "#DCFCE7",
+        primary: "#F97316",
+        primaryDark: "#C2410C",
+        primaryLight: "#FFEDD5",
         bg: "#F8FAFC",
         card: "#FFFFFF",
         border: "#E5E7EB",
@@ -17,9 +20,11 @@ module.exports = {
         textSecondary: "#6B7280",
         textMuted: "#9CA3AF",
         success: "#22C55E",
+        successDark: "#15803D",
+        successLight: "#DCFCE7",
         warning: "#F59E0B",
         danger: "#DC2626",
-        sidebar: "#0F172A",
+        sidebar: "#0B1F2A",
       },
       borderRadius: {
         lg: "10px",

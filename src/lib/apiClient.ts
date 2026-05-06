@@ -181,7 +181,7 @@ export async function apiRequest<T = unknown>(
   if (res.status === 401) {
     removeToken();
     if (shouldRedirectToLoginOn401()) {
-      window.location.href = "/login";
+      window.location.replace("/login");
     }
     throw normalizeFailure(
       401,

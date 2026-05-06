@@ -1,6 +1,12 @@
+@import url("https://api.fontshare.com/v2/css?f[]=general-sans@300,400,500,600,700&display=swap");
 @import "tailwindcss";
 @config "../../tailwind.config.js";
 
+:root {
+  --font-sans: "General Sans", "Inter", system-ui, sans-serif;
+}
+
 body {
-  @apply bg-bg text-textPrimary antialiased;
+  @apply bg-bg text-textPrimary antialiased font-normal;
+  font-family: var(--font-sans);
 }

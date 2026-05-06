@@ -5,6 +5,7 @@
 export type SelectedAcademy = {
   academyId: string;
   name: string;
+  adminName?: string;
 };
 
 export type EntityMemberRow = {

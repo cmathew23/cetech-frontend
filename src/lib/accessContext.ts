@@ -1,5 +1,5 @@
 /**
- * GET /me/app-context — bootstrap payload (user, academy, invitation, access, coachSummary).
+ * GET /me/app-context — bootstrap payload (user, academy, invitation, access, coachSummary, assignedCoaches).
  * Parse only fields returned by the backend; use `access.canAccessDashboard` + `access.reasonCode` for gating.
  */
 
@@ -10,6 +10,12 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 export type AppContextUser = {
   userId: string;
   roles: string[];
+  email?: string;
+  name?: string;
+  fullName?: string;
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
 };
 
 export type AppContextAcademy = {
@@ -47,6 +53,19 @@ export type AppContextCoachSummary = {
   assignedAthleteCount: number;
 };
 
+/** Coach row from `assignedCoaches` on GET /me/app-context (athlete-facing). */
+export type AppContextAssignedCoach = {
+  coachId: string;
+  coachName: string;
+  coachRole: string;
+  coachFunction: string;
+  email: string;
+  phone: string | null;
+  trainingEntityId: string;
+  trainingEntityName: string;
+  status: string;
+};
+
 /** Normalized GET /me/app-context `data` object (after `{ success, data }` unwrap). */
 export type AccessContextPayload = {
   user: AppContextUser;
@@ -55,6 +74,7 @@ export type AccessContextPayload = {
   invitation: AppContextInvitation;
   access: AppContextAccess;
   coachSummary: AppContextCoachSummary;
+  assignedCoaches: AppContextAssignedCoach[];
 };
 
 function normalizedDashboardType(
@@ -82,7 +102,23 @@ function parseUser(raw: unknown): AppContextUser {
   const roles = Array.isArray(o.roles)
     ? o.roles.filter((x): x is string => typeof x === "string")
     : [];
-  return { userId, roles };
+  const email = typeof o.email === "string" ? o.email.trim() : "";
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  const fullName = typeof o.fullName === "string" ? o.fullName.trim() : "";
+  const displayName =
+    typeof o.displayName === "string" ? o.displayName.trim() : "";
+  const firstName = typeof o.firstName === "string" ? o.firstName.trim() : "";
+  const lastName = typeof o.lastName === "string" ? o.lastName.trim() : "";
+  return {
+    userId,
+    roles,
+    ...(email !== "" ? { email } : {}),
+    ...(name !== "" ? { name } : {}),
+    ...(fullName !== "" ? { fullName } : {}),
+    ...(displayName !== "" ? { displayName } : {}),
+    ...(firstName !== "" ? { firstName } : {}),
+    ...(lastName !== "" ? { lastName } : {}),
+  };
 }
 
 function parseAcademy(raw: unknown): AppContextAcademy {
@@ -150,6 +186,63 @@ function parseCoachSummary(raw: unknown): AppContextCoachSummary {
     assignedAthleteCount:
       typeof n === "number" && Number.isFinite(n) ? Math.max(0, n) : 0,
   };
+}
+
+function readOptionalPhone(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t === "" ? null : t;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function parseAssignedCoachRow(raw: unknown): AppContextAssignedCoach | null {
+  const o = asRecord(raw);
+  if (!o) return null;
+  const coachId = typeof o.coachId === "string" ? o.coachId.trim() : "";
+  const coachName = typeof o.coachName === "string" ? o.coachName.trim() : "";
+  const coachRole = typeof o.coachRole === "string" ? o.coachRole.trim() : "";
+  const coachFunction =
+    typeof o.coachFunction === "string" ? o.coachFunction.trim() : "";
+  const email = typeof o.email === "string" ? o.email.trim() : "";
+  const phone = readOptionalPhone(o.phone);
+  const trainingEntityId =
+    typeof o.trainingEntityId === "string" ? o.trainingEntityId.trim() : "";
+  const trainingEntityName =
+    typeof o.trainingEntityName === "string" ? o.trainingEntityName.trim() : "";
+  const status = typeof o.status === "string" ? o.status.trim() : "";
+  if (
+    coachId === "" &&
+    coachName === "" &&
+    email === "" &&
+    trainingEntityId === ""
+  ) {
+    return null;
+  }
+  return {
+    coachId,
+    coachName,
+    coachRole,
+    coachFunction,
+    email,
+    phone,
+    trainingEntityId,
+    trainingEntityName,
+    status,
+  };
+}
+
+function parseAssignedCoaches(raw: unknown): AppContextAssignedCoach[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.reduce<AppContextAssignedCoach[]>((acc, item) => {
+    const row = parseAssignedCoachRow(item);
+    if (row !== null) acc.push(row);
+    return acc;
+  }, []);
 }
 
 /**
@@ -338,6 +431,7 @@ export function parseAccessContextPayload(data: unknown): AccessContextPayload {
         reasonCode: "",
       },
       coachSummary: { assignedAthleteCount: 0 },
+      assignedCoaches: [],
     };
   }
 
@@ -356,6 +450,7 @@ export function parseAccessContextPayload(data: unknown): AccessContextPayload {
     invitation: parseInvitation(o.invitation),
     access: parseAccess(o.access),
     coachSummary: parseCoachSummary(o.coachSummary),
+    assignedCoaches: parseAssignedCoaches(o.assignedCoaches),
   };
 }
 

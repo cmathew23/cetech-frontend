@@ -71,6 +71,18 @@ export type AthletePlanningProfilePatchInput = Partial<{
   bodyCompositionParameters: PlanningProfileFormState["bodyCompositionParameters"];
 }>;
 
+function readOptionalFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function toLegacyRecord(groupedRecord: PlanningProfileRecord): AthletePlanningProfileRecord {
   const flat = flattenPlanningProfileRecord(groupedRecord);
   return {
@@ -155,7 +167,8 @@ function toLegacyRecord(groupedRecord: PlanningProfileRecord): AthletePlanningPr
     wearableDataQuality:
       typeof flat.wearableDataQuality === "string" ? flat.wearableDataQuality : null,
     derivedAge:
-      typeof flat.derivedAge === "number" ? flat.derivedAge : null,
+      readOptionalFiniteNumber(flat.derivedAge) ??
+      readOptionalFiniteNumber(flat.age),
     derivedBmi:
       typeof flat.derivedBmi === "number" ? flat.derivedBmi : null,
     completenessStatus:

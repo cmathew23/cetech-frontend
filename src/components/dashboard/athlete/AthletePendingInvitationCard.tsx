@@ -26,7 +26,7 @@ export function AthletePendingInvitationCard({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <DashboardCardShell title="Pending Invitation" className="border-primary/30">
+    <DashboardCardShell title="Pending Invitation">
       <div className="space-y-2">
         {error ? (
           <p className="text-sm text-danger" role="alert">

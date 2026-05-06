@@ -1,16 +1,13 @@
 "use client";
 
 import { Button } from "@/components/ui/Button";
-import { Heading } from "@/components/ui/Heading";
 import { Alert } from "@/components/ui/Alert";
-import { designSystem } from "@/config/design-system";
-import { cn } from "@/lib/utils";
+import { Modal } from "@/components/ui/Modal";
+import { UserRoundX } from "lucide-react";
 
 export type DeactivateMemberConfirmModalProps = {
   open: boolean;
-  /** Shown in the subtitle for context (e.g. email or display). */
-  memberLabel: string;
-  /** Display name if available, else email — used in the confirmation question line only. */
+  /** Display name, email, or best label for the confirmation line (pre-formatted by caller). */
   memberPromptName: string;
   submitting: boolean;
   error: string | null;
@@ -19,11 +16,10 @@ export type DeactivateMemberConfirmModalProps = {
 };
 
 /**
- * Confirms entity membership deactivation (not account deletion).
+ * Confirms entity membership deactivation (same modal shell as logout / unassign).
  */
 export function DeactivateMemberConfirmModal({
   open,
-  memberLabel,
   memberPromptName,
   submitting,
   error,
@@ -32,61 +28,58 @@ export function DeactivateMemberConfirmModal({
 }: DeactivateMemberConfirmModalProps) {
   if (!open) return null;
 
-  const { backdrop, panel } = designSystem.modal;
+  const label = memberPromptName.trim();
+  const who = label !== "" ? label : "this member";
+
+  async function handleConfirm() {
+    if (submitting) return;
+    await onConfirm();
+  }
 
   return (
-    <div
-      className={cn(backdrop, "z-[60]")}
-      role="presentation"
-      onClick={() => {
-        if (!submitting) onClose();
-      }}
+    <Modal
+      className="w-full max-w-[520px] overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
+      aria-labelledby="deactivate-member-title"
+      aria-describedby="deactivate-member-desc"
     >
-      <div
-        className={cn(panel, "max-w-lg")}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="deactivate-member-title"
-        onClick={(ev) => ev.stopPropagation()}
-      >
-        <Heading variant="h3" id="deactivate-member-title">
-          Deactivate member
-        </Heading>
-        {memberLabel.trim() !== "" ? (
-          <p className="mt-1 text-sm text-textSecondary">{memberLabel.trim()}</p>
-        ) : null}
-
-        <p className="mt-4 text-sm text-textPrimary">
-          Do you want to deactivate{" "}
-          {memberPromptName.trim() !== "" ? memberPromptName.trim() : "this member"}?
-        </p>
-
-        <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-textPrimary">
-          <li>
-            They will be removed from this academy for this entity (membership
-            becomes inactive/removed).
-          </li>
-          <li>Their user account will not be deleted.</li>
-          <li>
-            Active coach–athlete assignments tied to this academy may be removed
-            or ended.
-          </li>
-        </ul>
-        <p className="mt-3 text-xs text-textSecondary">
-          Historical records are not erased; this only changes current
-          membership and related active assignments in this entity.
-        </p>
+      <div className="flex flex-col items-center px-7 py-7 sm:px-8 sm:py-8">
+        <UserRoundX
+          className="mb-4 h-10 w-10 shrink-0 text-danger"
+          aria-hidden="true"
+        />
+        <h2
+          id="deactivate-member-title"
+          className="mb-3 text-center text-2xl font-semibold tracking-tight text-textPrimary sm:text-[1.625rem]"
+        >
+          Deactivate Member
+        </h2>
+        <div
+          id="deactivate-member-desc"
+          className="mb-6 w-full max-w-[26rem] space-y-3 text-center"
+        >
+          <p className="text-base leading-relaxed text-textSecondary">
+            Are you sure you want to deactivate {who}?
+          </p>
+          <p className="text-sm leading-relaxed text-textSecondary">
+            This will remove their active membership from this academy. Their user
+            account and historical records will remain unchanged.
+          </p>
+          <p className="text-sm leading-relaxed text-textSecondary">
+            Any active coach-athlete assignments linked to this academy may also be
+            ended.
+          </p>
+        </div>
 
         {error ? (
-          <Alert variant="danger" className="mt-4">
+          <Alert variant="danger" className="mb-4 w-full max-w-[26rem]">
             {error}
           </Alert>
         ) : null}
 
-        <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <div className="flex w-full flex-wrap justify-end gap-3 sm:gap-4">
           <Button
             type="button"
-            variant="neutral"
+            variant="secondary"
             disabled={submitting}
             onClick={onClose}
           >
@@ -97,12 +90,12 @@ export function DeactivateMemberConfirmModal({
             variant="danger"
             loading={submitting}
             disabled={submitting}
-            onClick={() => void onConfirm()}
+            onClick={() => void handleConfirm()}
           >
             Deactivate
           </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

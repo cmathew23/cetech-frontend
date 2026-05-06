@@ -1110,6 +1110,24 @@ export type MyAcademyProfile = {
   address: string;
   phone: string;
   email: string;
+  user?: {
+    name?: string;
+    fullName?: string;
+    displayName?: string;
+    email?: string;
+  };
+  currentUser?: {
+    name?: string;
+    fullName?: string;
+    displayName?: string;
+    email?: string;
+  };
+  profile?: {
+    name?: string;
+    fullName?: string;
+    displayName?: string;
+    email?: string;
+  };
 };
 
 export type MyAcademyContext = MyAcademyProfile | null;
@@ -1121,6 +1139,29 @@ function optionalStringField(
   const v = o[key];
   if (typeof v === "string") return v;
   return "";
+}
+
+function optionalIdentity(raw: unknown): {
+  name?: string;
+  fullName?: string;
+  displayName?: string;
+  email?: string;
+} | null {
+  const o = asRecord(raw);
+  if (!o) return null;
+  const name = optionalStringField(o, "name").trim();
+  const fullName = optionalStringField(o, "fullName").trim();
+  const displayName = optionalStringField(o, "displayName").trim();
+  const email = optionalStringField(o, "email").trim();
+  if (name === "" && fullName === "" && displayName === "" && email === "") {
+    return null;
+  }
+  return {
+    ...(name !== "" ? { name } : {}),
+    ...(fullName !== "" ? { fullName } : {}),
+    ...(displayName !== "" ? { displayName } : {}),
+    ...(email !== "" ? { email } : {}),
+  };
 }
 
 /**
@@ -1154,6 +1195,10 @@ function parseAcademyMeProfileData(data: unknown): MyAcademyProfile {
     };
   }
 
+  const user = optionalIdentity(o.user);
+  const currentUser = optionalIdentity(o.currentUser);
+  const profile = optionalIdentity(o.profile);
+
   return {
     academyId,
     entityId,
@@ -1161,6 +1206,9 @@ function parseAcademyMeProfileData(data: unknown): MyAcademyProfile {
     address: optionalStringField(o, "address"),
     phone: optionalStringField(o, "phone"),
     email: optionalStringField(o, "email"),
+    ...(user ? { user } : {}),
+    ...(currentUser ? { currentUser } : {}),
+    ...(profile ? { profile } : {}),
   };
 }
 

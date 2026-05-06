@@ -1,30 +1,17 @@
 "use client";
 
-import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAuth } from "@/hooks/useAuth";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatInviteDateDisplay } from "@/lib/dateTime";
 import { routeFromAccessContext } from "@/lib/accessContext";
-import {
-  formatEnumeratedLabel,
-  formatPersonNameForDisplay,
-} from "@/lib/textFormat";
+import { formatEnumeratedLabel } from "@/lib/textFormat";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-
-function statusBadgeClass(status: string): string {
-  const u = status.trim().toUpperCase();
-  if (u === "PENDING") return "bg-warning/15 text-warning";
-  if (u === "ACCEPTED") return "bg-primaryLight text-primaryDark";
-  if (u === "DECLINED") return "bg-danger/15 text-danger";
-  if (u === "REVOKED" || u === "EXPIRED")
-    return "bg-zinc-100 text-zinc-700";
-  return "bg-gray-100 text-gray-700";
-}
 
 function isPending(status: string): boolean {
   return status.trim().toUpperCase() === "PENDING";
@@ -36,6 +23,16 @@ function formatActionError(e: unknown): string {
   return "Something went wrong.";
 }
 
+function invitationStatusTone(
+  status: string,
+): "success" | "warning" | "neutral" | "error" | "accent" {
+  const s = status.trim().toUpperCase();
+  if (s === "ACCEPTED" || s === "ACTIVE") return "success";
+  if (s === "PENDING" || s === "INVITED") return "warning";
+  if (s === "DECLINED" || s === "REJECTED" || s === "EXPIRED") return "error";
+  return "neutral";
+}
+
 async function afterSuccessAlertPaint() {
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => {
@@ -43,6 +40,11 @@ async function afterSuccessAlertPaint() {
     });
   });
 }
+
+const EMPTY_MESSAGE = "No pending invitations.";
+
+const CARD_SURFACE =
+  "overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]";
 
 export function AthleteInvitationsPageContent() {
   const router = useRouter();
@@ -73,16 +75,6 @@ export function AthleteInvitationsPageContent() {
       }),
     [invitations],
   );
-
-  const pendingRows = useMemo(
-    () => sorted.filter((item) => isPending(item.status)),
-    [sorted],
-  );
-  const otherRows = useMemo(
-    () => sorted.filter((item) => !isPending(item.status)),
-    [sorted],
-  );
-  const hasPending = pendingRows.length > 0;
 
   async function runAccept(id: string, navigateAfter: boolean) {
     setActionError(null);
@@ -122,121 +114,130 @@ export function AthleteInvitationsPageContent() {
   }
 
   function renderRow(item: MyEntityInvitationRow) {
+    const entityLabel =
+      item.entityName.trim() !== "" ? item.entityName.trim() : "—";
+    const roleLabel =
+      item.role.trim() !== "" ? formatEnumeratedLabel(item.role.trim()) : "—";
+    const sentDisplay = formatInviteDateDisplay(item.createdAt);
+
     return (
-      <article
-        key={item.id}
-        className="rounded-lg border border-border bg-bg p-3 md:p-4"
-      >
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <tr key={item.id} className="group align-top">
+        <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
           <div className="space-y-1">
-            <p className="text-sm font-medium text-textPrimary">
-              {item.entityName.trim() !== ""
-                ? formatPersonNameForDisplay(item.entityName.trim())
-                : "—"}
+            <p
+              className="max-w-[22rem] truncate text-sm font-semibold text-slate-900"
+              title={entityLabel}
+            >
+              {entityLabel}
             </p>
-            <p className="text-sm text-textSecondary">
-              Role:{" "}
-              {item.role.trim() !== ""
-                ? formatEnumeratedLabel(item.role.trim())
-                : "—"}
-            </p>
-            <p className="text-sm text-textSecondary">
-              Invited: {formatInviteDateDisplay(item.createdAt)}
+            <p className="text-xs text-slate-500">
+              Role: {roleLabel} • Sent: {sentDisplay}
             </p>
           </div>
-          <span
-            className={`inline-flex w-fit rounded-md px-2 py-1 text-xs font-medium ${statusBadgeClass(item.status)}`}
+        </td>
+        <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+          <StatusBadge
+            status={item.status}
+            variant={invitationStatusTone(item.status)}
+            className="rounded-md px-2.5 py-1 text-xs font-medium"
           >
             {item.status.trim() !== ""
               ? formatEnumeratedLabel(item.status.trim())
               : "—"}
-          </span>
-        </div>
-        {isPending(item.status) ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="primary"
-              loading={busyKey === `${item.id}:accept`}
-              disabled={busyKey !== null}
-              onClick={() => void runAccept(item.id, true)}
-            >
-              Accept
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              loading={busyKey === `${item.id}:decline`}
-              disabled={busyKey !== null}
-              onClick={() => void runDecline(item.id)}
-            >
-              Decline
-            </Button>
-          </div>
-        ) : null}
-      </article>
+          </StatusBadge>
+        </td>
+        <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
+          {isPending(item.status) ? (
+            <div className="flex flex-wrap items-start justify-end gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                className="px-4 py-2 text-xs sm:text-sm"
+                loading={busyKey === `${item.id}:accept`}
+                disabled={busyKey !== null}
+                onClick={() => void runAccept(item.id, true)}
+              >
+                Accept
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="px-4 py-2 text-xs sm:text-sm"
+                loading={busyKey === `${item.id}:decline`}
+                disabled={busyKey !== null}
+                onClick={() => void runDecline(item.id)}
+              >
+                Decline
+              </Button>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400">—</span>
+          )}
+        </td>
+      </tr>
     );
   }
 
   if (loading) {
     return (
-      <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
-        Loading invitations…
+      <div className={CARD_SURFACE}>
+        <p className="px-6 py-6 text-sm text-slate-500">Loading invitations…</p>
       </div>
     );
   }
 
   if (loadError) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <Alert variant="danger">{loadError}</Alert>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => void refreshInvitations()}
-        >
-          Try again
-        </Button>
+        <div className={CARD_SURFACE}>
+          <div className="px-6 py-6">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void refreshInvitations()}
+            >
+              Try again
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {actionSuccess ? (
         <Alert variant="success" role="status">
           {actionSuccess}
         </Alert>
       ) : null}
 
-      {actionError ? (
-        <DashboardCardShell title="Could not update invitation">
-          <p className="text-sm text-danger">{actionError}</p>
-        </DashboardCardShell>
-      ) : null}
+      {actionError ? <Alert variant="danger">{actionError}</Alert> : null}
 
       {sorted.length === 0 ? (
-        <div className="rounded-lg border border-border bg-bg px-4 py-12 text-center">
-          <p className="text-sm text-textSecondary">
-            There are no invitations currently.
-          </p>
+        <div className={CARD_SURFACE}>
+          <p className="px-6 py-6 text-sm text-slate-500">{EMPTY_MESSAGE}</p>
         </div>
       ) : (
-        <>
-          {hasPending ? (
-            <DashboardCardShell
-              title="Pending Invitations"
-              className="border-warning/35 bg-warning/5"
-            >
-              <div className="space-y-3">{pendingRows.map(renderRow)}</div>
-            </DashboardCardShell>
-          ) : null}
-          {otherRows.length > 0 ? (
-            <DashboardCardShell title="Invitations">
-              <div className="space-y-3">{otherRows.map(renderRow)}</div>
-            </DashboardCardShell>
-          ) : null}
-        </>
+        <div className={CARD_SURFACE}>
+          <table className="w-full min-w-[700px] border-separate [border-spacing:0_6px] text-left">
+            <thead className="bg-slate-50/70">
+              <tr>
+                <th className="px-6 py-3 text-xs font-medium tracking-wide text-slate-500">
+                  Invitation
+                </th>
+                <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                  Status
+                </th>
+                <th className="px-5 py-3 text-right text-xs font-medium tracking-wide text-slate-500">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>{sorted.map(renderRow)}</tbody>
+          </table>
+        </div>
       )}
     </div>
   );

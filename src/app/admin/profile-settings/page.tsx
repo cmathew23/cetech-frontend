@@ -219,7 +219,7 @@ export default function AdminProfileSettingsPage() {
         </Alert>
       ) : null}
 
-      <Card className={dashboardPanelClass}>
+      <Card className={dashboardPanelClass} accent={false}>
         <h3 className="text-base font-semibold text-textPrimary">Account</h3>
         <dl className="mt-3 space-y-3 text-sm">
           <div>
@@ -237,7 +237,7 @@ export default function AdminProfileSettingsPage() {
         </dl>
       </Card>
 
-      <Card className={dashboardPanelClass}>
+      <Card className={dashboardPanelClass} accent={false}>
         <h3 className="text-base font-semibold text-textPrimary">Your details</h3>
         {!isEditing && editableEmpty ? (
           <p className="mt-2 text-xs text-textMuted">

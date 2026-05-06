@@ -4,7 +4,6 @@ import { InvitationInboxSection } from "@/components/invitations/InvitationInbox
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
 import { routeFromAccessContext } from "@/lib/accessContext";
-import { dashboardPanelClass } from "@/lib/auth-ui";
 import { useRouter } from "next/navigation";
 
 export default function CoachDashboardInvitationsPage() {
@@ -27,7 +26,7 @@ export default function CoachDashboardInvitationsPage() {
       />
 
       <InvitationInboxSection
-        className={dashboardPanelClass}
+        showTitle={false}
         onActionComplete={handleActionComplete}
       />
     </div>

@@ -4,16 +4,10 @@ import { AcademyCoachesEditModal } from "@/components/dashboard/admin/AcademyCoa
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
 import { Select } from "@/components/ui/Select";
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableRow,
-  Th,
-  Td,
-} from "@/components/ui/Table";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   fetchAcademyCoachFunctionCatalog,
   fetchMyAcademyCoaches,
@@ -24,6 +18,7 @@ import {
   type AcademyCoachStructureRow,
 } from "@/lib/api/academyMeCoaches";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
+import { formatDateTime } from "@/lib/dateTime";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatEnumeratedLabel,
@@ -31,7 +26,6 @@ import {
   formatPersonNameForDisplay,
   toTitleCaseInput,
 } from "@/lib/textFormat";
-import { cn } from "@/lib/utils";
 import {
   useCallback,
   useEffect,
@@ -77,23 +71,6 @@ function coachRowIsPendingStatus(membershipStatus: string): boolean {
 function formatRoleDisplay(role: AcademyCoachRole): string {
   if (role === null) return "Unassigned";
   return toTitleCaseInput(role);
-}
-
-function coachMembershipStatusBadgeClass(membershipStatus: string): string {
-  const upper = membershipStatus.trim().toUpperCase();
-  if (upper === "PENDING")
-    return "bg-amber-50 text-amber-800 ring-amber-600/20";
-  if (upper === "ACCEPTED" || upper === "ACTIVE")
-    return "bg-emerald-50 text-emerald-800 ring-emerald-600/20";
-  if (upper === "DECLINED")
-    return "bg-rose-50 text-rose-800 ring-rose-600/20";
-  if (upper === "REVOKED")
-    return "bg-orange-50 text-orange-800 ring-orange-600/20";
-  if (upper === "EXPIRED")
-    return "bg-zinc-100 text-zinc-700 ring-zinc-600/20";
-  if (upper === "UNKNOWN")
-    return "bg-zinc-100 text-zinc-600 ring-zinc-600/20";
-  return "bg-gray-100 text-gray-700 ring-gray-600/20";
 }
 
 function formatFunctionsDisplay(functions: string[]): string {
@@ -268,8 +245,8 @@ export default function AdminCoachesPage() {
 
   if (loadState === "loading") {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-sm text-textSecondary">
-        Loading coaches…
+      <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <p className="px-6 py-6 text-sm text-slate-500">Loading coaches…</p>
       </div>
     );
   }
@@ -297,11 +274,11 @@ export default function AdminCoachesPage() {
       />
 
       {coaches.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card p-6 text-sm text-textSecondary">
-          No coaches in academy.
-        </p>
+        <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+          <p className="px-6 py-6 text-sm text-slate-500">No coaches in academy.</p>
+        </div>
       ) : (
-        <>
+        <Card className="space-y-4" accent={false}>
           <div className="mb-4 flex flex-col gap-3">
             <div className="max-w-md">
               <AdminTableSearchInput
@@ -388,74 +365,107 @@ export default function AdminCoachesPage() {
           </div>
 
           {coachesAfterSelectFilters.length === 0 ? (
-            <p className="text-sm text-textSecondary">
-              No coaches match the selected filters.
-            </p>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <p className="px-6 py-6 text-sm text-slate-500">
+                No coaches match the selected filters.
+              </p>
+            </div>
           ) : visibleCoaches.length === 0 ? (
-            <p className="text-sm text-textSecondary">No results found.</p>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <p className="px-6 py-6 text-sm text-slate-500">No results found.</p>
+            </div>
           ) : (
-            <Table className="w-full min-w-[760px] table-auto">
-          <TableHead>
-            <TableRow variant="head">
-              <Th>Name</Th>
-              <Th>Email</Th>
-              <Th>Status</Th>
-              <Th>Joined</Th>
-              <Th>Role</Th>
-              <Th>Functions</Th>
-              <Th className="text-right">Actions</Th>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {visibleCoaches.map((row) => {
-              const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
-              const rawName = name.trim();
-              const nameDisplay =
-                rawName !== ""
-                  ? formatPersonNameForDisplay(rawName)
-                  : row.email.trim() !== ""
-                    ? row.email.trim()
-                    : "—";
-              return (
-                <TableRow key={row.coachUserId}>
-                  <Td className="font-medium text-textPrimary">
-                    {nameDisplay}
-                  </Td>
-                  <Td>{row.email.trim() !== "" ? row.email : "—"}</Td>
-                  <Td>
-                    <span
-                      className={cn(
-                        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                        coachMembershipStatusBadgeClass(row.membershipStatus),
-                      )}
-                    >
-                      {formatEnumeratedLabel(row.membershipStatus)}
-                    </span>
-                  </Td>
-                  <Td className="text-xs text-textMuted">{row.joinedAt}</Td>
-                  <Td>{formatRoleDisplay(row.role)}</Td>
-                  <Td className="max-w-[200px] break-words text-textSecondary">
-                    {formatFunctionsDisplay(row.functions)}
-                  </Td>
-                  <Td className="text-right">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setSaveError(null);
-                        setEditing(row);
-                      }}
-                    >
-                      Edit
-                    </Button>
-                  </Td>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+              <table className="w-full min-w-[760px] border-separate [border-spacing:0_6px] text-left">
+                <thead className="bg-slate-50/70">
+                  <tr>
+                    <th className="px-6 py-3 text-xs font-medium tracking-wide text-slate-500">
+                      Coach
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                      Role
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                      Function
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium tracking-wide text-slate-500">
+                      Joined
+                    </th>
+                    <th className="px-5 py-3 text-right text-xs font-medium tracking-wide text-slate-500">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleCoaches.map((row) => {
+                    const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
+                    const rawName = name.trim();
+                    const nameDisplay =
+                      rawName !== ""
+                        ? formatPersonNameForDisplay(rawName)
+                        : row.email.trim() !== ""
+                          ? row.email.trim()
+                          : "—";
+                    const roleDisplay = formatRoleDisplay(row.role);
+                    const functionDisplayRaw = formatFunctionsDisplay(row.functions);
+                    const functionDisplay =
+                      functionDisplayRaw === "None" ? "—" : functionDisplayRaw;
+                    return (
+                      <tr key={row.coachUserId} className="group align-top">
+                        <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
+                          <div className="space-y-1">
+                            <p className="max-w-[18rem] truncate text-sm font-semibold text-slate-900" title={nameDisplay}>
+                              {nameDisplay}
+                            </p>
+                            <p className="max-w-[20rem] truncate text-xs text-slate-500" title={row.email.trim() !== "" ? row.email : "—"}>
+                              {row.email.trim() !== "" ? row.email : "—"}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                          <span className="inline-flex rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            {roleDisplay}
+                          </span>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                          <span className="inline-flex max-w-[16rem] rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            {functionDisplay}
+                          </span>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
+                          <StatusBadge status={row.membershipStatus} className="rounded-md px-2.5 py-1 text-xs font-medium">
+                            {formatEnumeratedLabel(row.membershipStatus)}
+                          </StatusBadge>
+                        </td>
+                        <td className="border-y border-slate-100 bg-white px-4 py-5 text-xs text-slate-500 group-hover:bg-slate-50/70">
+                          {formatDateTime(row.joinedAt, "—")}
+                        </td>
+                        <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
+                          <div className="flex items-start justify-end">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="px-4 py-2 text-xs sm:text-sm"
+                              onClick={() => {
+                                setSaveError(null);
+                                setEditing(row);
+                              }}
+                            >
+                              Edit
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </>
+        </Card>
       )}
 
       <AcademyCoachesEditModal

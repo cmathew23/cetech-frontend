@@ -249,7 +249,7 @@ export default function AdminAboutAcademyPage() {
         </Alert>
       ) : null}
 
-      <Card className={dashboardPanelClass}>
+      <Card className={dashboardPanelClass} accent={false}>
         <dl className="grid max-w-2xl gap-4 text-sm sm:grid-cols-1">
           <div>
             <dt className="text-xs font-medium text-textSecondary">Academy ID</dt>

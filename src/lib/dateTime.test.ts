@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DATE_DISPLAY_UNAVAILABLE,
   formatDateOnly,
+  formatDateOrDateTime,
   formatDateRange,
   formatDateTime,
   formatDateWithWeekday,
   formatPlanningProfileDateDisplay,
   getLocalWeekday,
+  parseTimestampMsForSort,
 } from "@/lib/dateTime";
 
 describe("formatDateOnly", () => {
@@ -35,6 +37,38 @@ describe("formatDateRange", () => {
     expect(formatDateRange("2026-02-16", "2026-06-30")).toBe(
       "16/02/2026 to 30/06/2026",
     );
+  });
+});
+
+describe("formatDateOrDateTime", () => {
+  it("uses date-only for YYYY-MM-DD", () => {
+    expect(formatDateOrDateTime("2026-02-16")).toBe("16/02/2026");
+  });
+
+  it("uses date-time for ISO instant strings", () => {
+    const prevTz = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      const out = formatDateOrDateTime("2026-04-30T17:30:00.000Z");
+      expect(out).toMatch(/^30\/04\/2026,/);
+      expect(out.toLowerCase()).toContain("pm");
+    } finally {
+      process.env.TZ = prevTz;
+    }
+  });
+});
+
+describe("parseTimestampMsForSort", () => {
+  it("returns NaN for empty or placeholder", () => {
+    expect(Number.isNaN(parseTimestampMsForSort(""))).toBe(true);
+    expect(Number.isNaN(parseTimestampMsForSort("—"))).toBe(true);
+  });
+
+  it("orders newer timestamps larger than older", () => {
+    expect(
+      parseTimestampMsForSort("2026-04-30T12:00:00.000Z") >
+        parseTimestampMsForSort("2026-04-29T12:00:00.000Z"),
+    ).toBe(true);
   });
 });
 

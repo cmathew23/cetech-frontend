@@ -105,6 +105,35 @@ export function formatDateRange(
   return `${formatDateOnly(start, fallback)} to ${formatDateOnly(end, fallback)}`;
 }
 
+/**
+ * Plain calendar `YYYY-MM-DD` → {@link formatDateOnly}; any string with time / `Z` →
+ * {@link formatDateTime} in local time. Use when the API may return either shape (e.g. joined-at).
+ */
+export function formatDateOrDateTime(
+  value: string | Date | null | undefined,
+  fallback: string = DATE_DISPLAY_UNAVAILABLE,
+): string {
+  if (value === null || value === undefined) return fallback;
+  if (value instanceof Date) {
+    return formatDateTime(value, fallback);
+  }
+  const t = String(value).trim();
+  if (t === "") return fallback;
+  if (DATE_ONLY.test(t)) return formatDateOnly(t, fallback);
+  return formatDateTime(t, fallback);
+}
+
+/**
+ * Milliseconds since epoch for sorting API timestamps newest-first.
+ * Empty, em-dash placeholder, or unparseable → `NaN` (typically sort last).
+ */
+export function parseTimestampMsForSort(value: string): number {
+  const t = value.trim();
+  if (t === "" || t === "—") return NaN;
+  const d = parseToLocalDate(t);
+  return d ? d.getTime() : NaN;
+}
+
 /** Weekday name from local date (English). */
 export function getLocalWeekday(
   value: string | Date | null | undefined,
@@ -131,13 +160,13 @@ export function formatPlanningProfileDateDisplay(
   return formatDateOnly(String(value).trim(), emptyFallback);
 }
 
-/** Invitation `createdAt`: DD/MM/YYYY local; raw string if unparseable. */
+/** Invitation `createdAt`: DD/MM/YYYY, h:mm AM/PM local; "—" if empty/invalid. */
 export function formatInviteDateDisplay(
   createdAt: string,
   emptyMark = "—",
 ): string {
   const t = createdAt.trim();
   if (t === "") return emptyMark;
-  const formatted = formatDateOnly(t);
-  return formatted === DATE_DISPLAY_UNAVAILABLE ? t : formatted;
+  const formatted = formatDateTime(t, emptyMark);
+  return formatted;
 }

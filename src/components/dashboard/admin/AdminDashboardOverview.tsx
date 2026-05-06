@@ -2,27 +2,17 @@
 
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
+import {
+  formatDateTime,
+  parseTimestampMsForSort,
+} from "@/lib/dateTime";
 import { formatEnumeratedLabel } from "@/lib/textFormat";
 import type { PendingInvitationRow } from "@/types/academyAdmin.types";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-
-function statusBadgeClass(status: string): string {
-  const upper = status.trim().toUpperCase();
-  if (upper === "PENDING")
-    return "bg-amber-50 text-amber-800 ring-amber-600/20";
-  if (upper === "ACCEPTED")
-    return "bg-emerald-50 text-emerald-800 ring-emerald-600/20";
-  if (upper === "DECLINED")
-    return "bg-rose-50 text-rose-800 ring-rose-600/20";
-  if (upper === "REVOKED")
-    return "bg-orange-50 text-orange-800 ring-orange-600/20";
-  if (upper === "EXPIRED")
-    return "bg-zinc-100 text-zinc-700 ring-zinc-600/20";
-  return "bg-gray-100 text-gray-700 ring-gray-600/20";
-}
 
 function formatMetric(
   loading: boolean,
@@ -39,11 +29,14 @@ function sortInvitationsRecent(
   rows: PendingInvitationRow[],
 ): PendingInvitationRow[] {
   return [...rows].sort((a, b) => {
-    const ae = a.createdAt.trim();
-    const be = b.createdAt.trim();
-    if (ae === "" || ae === "—") return 1;
-    if (be === "" || be === "—") return -1;
-    return be.localeCompare(ae);
+    const ta = parseTimestampMsForSort(a.createdAt);
+    const tb = parseTimestampMsForSort(b.createdAt);
+    const aBad = !Number.isFinite(ta);
+    const bBad = !Number.isFinite(tb);
+    if (aBad && bBad) return 0;
+    if (aBad) return 1;
+    if (bBad) return -1;
+    return tb - ta;
   });
 }
 
@@ -103,21 +96,30 @@ export function AdminDashboardOverview({
           </p>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <DashboardCardShell title="Total Athletes" className="space-y-2">
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide text-textSecondary">
+              Total Athletes
+            </p>
             <p className="text-2xl font-semibold tabular-nums text-textPrimary">
               {formatMetric(kpiLoading, kpiError, athleteCount)}
             </p>
-          </DashboardCardShell>
-          <DashboardCardShell title="Total Coaches" className="space-y-2">
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide text-textSecondary">
+              Total Coaches
+            </p>
             <p className="text-2xl font-semibold tabular-nums text-textPrimary">
               {formatMetric(kpiLoading, kpiError, coachCount)}
             </p>
-          </DashboardCardShell>
-          <DashboardCardShell title="Pending Invitations" className="space-y-2">
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium tracking-wide text-textSecondary">
+              Pending Invitations
+            </p>
             <p className="text-2xl font-semibold tabular-nums text-textPrimary">
               {formatMetric(kpiLoading, kpiError, pendingInvitationCount)}
             </p>
-          </DashboardCardShell>
+          </div>
         </div>
         {kpiError ? (
           <p className="text-sm text-danger">{kpiError}</p>
@@ -133,43 +135,35 @@ export function AdminDashboardOverview({
             Review and send follow-up from the invitations workspace.
           </p>
         </div>
-        <Link href={invitationsHref} className={cn(PRIMARY_ACTION_CLASS)}>
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-lg font-semibold text-textPrimary">
-              Pending invitations
-            </p>
-            {kpiLoading ? (
-              <p className="text-sm text-textSecondary">Loading…</p>
-            ) : kpiError ? (
-              <p className="text-sm text-textSecondary">Could not load count.</p>
-            ) : (
-              <p className="text-sm text-textSecondary">
-                <span className="text-3xl font-semibold tabular-nums text-textPrimary">
-                  {pendingInvitationCount ?? "—"}
-                </span>
-                <span className="ml-2">
-                  pending
-                  {pendingInvitationCount === 1 ? " invite" : " invites"}
-                </span>
-              </p>
-            )}
-          </div>
-          <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
-            Open invitations →
-          </span>
-        </Link>
+        <DashboardCardShell title="Pending Invitations" className="space-y-2" accent={false}>
+          <Link href={invitationsHref} className={cn(PRIMARY_ACTION_CLASS)}>
+            <div className="min-w-0 flex-1 space-y-1">
+              {kpiLoading ? (
+                <p className="text-sm text-textSecondary">Loading…</p>
+              ) : kpiError ? (
+                <p className="text-sm text-textSecondary">Could not load count.</p>
+              ) : (
+                <p className="text-sm text-textSecondary">
+                  <span className="text-3xl font-semibold tabular-nums text-textPrimary">
+                    {pendingInvitationCount ?? "—"}
+                  </span>
+                  <span className="ml-2">
+                    pending
+                    {pendingInvitationCount === 1 ? " invite" : " invites"}
+                  </span>
+                </p>
+              )}
+            </div>
+            <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+              Open invitations →
+            </span>
+          </Link>
+        </DashboardCardShell>
       </section>
 
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
-              Recent invitations
-            </h2>
-            <p className="mt-1 text-xs text-textMuted">
-              Latest five by sent date; search filters this list only.
-            </p>
-          </div>
+          <div />
           <AdminTableSearchInput
             id="admin-dashboard-recent-invitations-search"
             value={recentSearchQuery}
@@ -178,7 +172,12 @@ export function AdminDashboardOverview({
             disabled={kpiLoading || !hasAnyInvitations}
           />
         </div>
-        <DashboardCardShell className="flex min-h-0 flex-col">
+        <DashboardCardShell
+          title="Recent Invitations"
+          subtitle="Latest five by sent date; search filters this list only."
+          className="flex min-h-0 flex-col"
+          accent={false}
+        >
           <ul className="space-y-3">
             {recentInvitations.length === 0 ? (
               <li className="text-sm text-textSecondary">
@@ -194,17 +193,13 @@ export function AdminDashboardOverview({
                     <span className="text-sm font-medium text-textPrimary">
                       {row.email}
                     </span>
-                    <span
-                      className={cn(
-                        "inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                        statusBadgeClass(row.status),
-                      )}
-                    >
+                    <StatusBadge status={row.status}>
                       {formatEnumeratedLabel(row.status)}
-                    </span>
+                    </StatusBadge>
                   </div>
                   <p className="text-xs text-textMuted">
-                    Role {formatEnumeratedLabel(row.role)} · {row.createdAt}
+                    Role {formatEnumeratedLabel(row.role)} ·{" "}
+                    {formatDateTime(row.createdAt)}
                   </p>
                 </li>
               ))

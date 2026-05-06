@@ -1,7 +1,15 @@
 "use client";
 
+import { AdminHeaderIdentityMetadata } from "@/components/dashboard/admin/AdminHeaderIdentityMetadata";
+import { CoachHeaderIdentityMetadata } from "@/components/dashboard/coach/CoachHeaderIdentityMetadata";
+import { resolveDashboardHeaderIcon } from "@/config/dashboardNav";
 import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { createElement, type ReactNode } from "react";
+
+/** Canonical left accent for all dashboard PageHeaders (`border-l-4 border-l-primary`). */
+const PAGE_HEADER_ACCENT_COLUMN_CLASS =
+  "page-header-accent min-w-0 flex-1 border-l-4 border-l-primary pl-4 sm:pl-5";
 
 export type PageHeaderProps = {
   title: string;
@@ -24,6 +32,11 @@ export function PageHeader({
   actions,
   className,
 }: PageHeaderProps) {
+  const pathname = usePathname();
+  const HeaderIcon = resolveDashboardHeaderIcon(pathname);
+  const isAdminRoute = pathname?.startsWith("/admin") ?? false;
+  const isCoachRoute = pathname?.startsWith("/coach") ?? false;
+
   return (
     <header
       className={cn(
@@ -32,17 +45,29 @@ export function PageHeader({
       )}
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between md:gap-6">
-        <div className="min-w-0 flex-1 border-l-4 border-l-primary pl-4 sm:pl-5">
-          <h1 className="text-2xl font-bold tracking-tight text-textPrimary sm:text-3xl">
-            {title}
-          </h1>
+        <div className={PAGE_HEADER_ACCENT_COLUMN_CLASS}>
+          <div className="flex items-center gap-2.5">
+            {HeaderIcon ? (
+              createElement(HeaderIcon, {
+                className: "page-header-icon h-5 w-5 text-primary/80",
+                "aria-hidden": true,
+              })
+            ) : null}
+            <h1 className="text-2xl font-semibold tracking-tight text-textPrimary sm:text-3xl">
+              {title}
+            </h1>
+          </div>
           {subtitle ? (
-            <p className="mt-1 max-w-3xl text-sm leading-relaxed text-textSecondary sm:text-base">
+            <p className="mt-1 max-w-3xl text-sm font-normal leading-relaxed text-textSecondary sm:text-base">
               {subtitle}
             </p>
           ) : null}
-          {trailing ? (
-            <div className="mt-3 min-w-0">{trailing}</div>
+          {isAdminRoute || isCoachRoute || trailing ? (
+            <div className="mt-3 min-w-0 space-y-3">
+              {isAdminRoute ? <AdminHeaderIdentityMetadata /> : null}
+              {isCoachRoute ? <CoachHeaderIdentityMetadata /> : null}
+              {trailing ?? null}
+            </div>
           ) : null}
         </div>
         {actions ? (

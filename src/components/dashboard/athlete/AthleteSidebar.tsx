@@ -2,18 +2,11 @@
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
+import { athleteSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const ATHLETE_NAV_ITEMS = [
-  { href: "/athlete/dashboard", label: "Dashboard" },
-  { href: "/athlete/coaches", label: "Coaches" },
-  { href: "/athlete/dashboard/invitations", label: "Invitations" },
-  { href: "/athlete/profile-planning", label: "Athlete Profile Planning" },
-  { href: "/athlete/settings", label: "Settings" },
-] as const;
 
 export function AthleteSidebar() {
   const pathname = usePathname();
@@ -26,12 +19,16 @@ export function AthleteSidebar() {
     <DashboardSidebarFrame
       navAriaLabel="Athlete sidebar"
       brand={
-        <p className="text-sm font-semibold tracking-wide text-white/90">
-          PEAKFLOW AMS
-        </p>
+        <>
+          <p className="text-sm font-semibold tracking-wide text-white/90">
+            PEAKFLOW AMS
+          </p>
+          <p className="mt-1 text-xs text-gray-400">Athlete</p>
+        </>
       }
     >
-      {ATHLETE_NAV_ITEMS.map((item) => {
+      {athleteSidebarNavItems.map((item) => {
+        const Icon = item.icon;
         const invitationRoute = "/athlete/dashboard/invitations";
         const gatedOff =
           athleteNavLocked && item.href !== invitationRoute;
@@ -54,6 +51,7 @@ export function AthleteSidebar() {
                 title="Accept an academy invitation to unlock this section."
               >
                 <span className="inline-flex min-w-0 flex-1 items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="truncate">{item.label}</span>
                 </span>
               </span>
@@ -64,6 +62,7 @@ export function AthleteSidebar() {
                 aria-current={active ? "page" : undefined}
               >
                 <span className="inline-flex min-w-0 flex-1 items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="truncate">{item.label}</span>
                   {item.href === invitationRoute &&
                   isGateReady &&

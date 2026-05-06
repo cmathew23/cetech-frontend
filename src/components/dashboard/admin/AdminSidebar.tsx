@@ -1,6 +1,6 @@
 "use client";
 
-import { adminPaths } from "@/config/adminNav";
+import { adminSidebarNavItems } from "@/config/dashboardNav";
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
@@ -16,47 +16,6 @@ export type AdminSidebarSection =
   | "coaches"
   | "athletes"
   | "settings";
-
-type NavItem = {
-  id: AdminSidebarSection;
-  label: string;
-  href: string;
-};
-
-const NAV_ITEMS: NavItem[] = [
-  { id: "overview", label: "Dashboard", href: adminPaths.dashboard },
-  {
-    id: "aboutAcademy",
-    label: "About Academy",
-    href: adminPaths.aboutAcademy,
-  },
-  { id: "members", label: "Members", href: adminPaths.members },
-  {
-    id: "invitations",
-    label: "Invitations",
-    href: adminPaths.invitations,
-  },
-  {
-    id: "assignments",
-    label: "Assignments",
-    href: adminPaths.assignments,
-  },
-  {
-    id: "coaches",
-    label: "Coaches",
-    href: adminPaths.coaches,
-  },
-  {
-    id: "athletes",
-    label: "Athletes",
-    href: adminPaths.athletes,
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    href: adminPaths.profileSettings,
-  },
-];
 
 export function AdminSidebar() {
   const pathname = usePathname();
@@ -74,8 +33,9 @@ export function AdminSidebar() {
         </>
       }
     >
-      {NAV_ITEMS.map((item) => {
+      {adminSidebarNavItems.map((item) => {
         const isActive = pathname === item.href;
+        const Icon = item.icon;
         return (
           <Link
             key={item.id}
@@ -83,7 +43,8 @@ export function AdminSidebar() {
             className={cn(link, isActive && linkActive)}
             aria-current={isActive ? "page" : undefined}
           >
-            {item.label}
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{item.label}</span>
           </Link>
         );
       })}

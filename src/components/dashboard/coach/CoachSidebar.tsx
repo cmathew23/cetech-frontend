@@ -1,16 +1,11 @@
 "use client";
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
+import { coachSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const COACH_NAV_ITEMS = [
-  { href: "/coach/dashboard", label: "Dashboard" },
-  { href: "/coach/athletes", label: "Athletes" },
-  { href: "/coach/dashboard/invitations", label: "Invitations" },
-] as const;
 
 export function CoachSidebar() {
   const pathname = usePathname();
@@ -28,11 +23,12 @@ export function CoachSidebar() {
         </>
       }
     >
-      {COACH_NAV_ITEMS.map((item) => {
+      {coachSidebarNavItems.map((item) => {
         const active =
           item.href === "/coach/dashboard"
             ? pathname === item.href
             : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+        const Icon = item.icon;
         return (
           <Link
             key={item.href}
@@ -40,7 +36,8 @@ export function CoachSidebar() {
             className={cn(link, active && linkActive)}
             aria-current={active ? "page" : undefined}
           >
-            {item.label}
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{item.label}</span>
           </Link>
         );
       })}

@@ -49,6 +49,7 @@ import {
   releaseTrainingPlanVersionToAthlete,
   reviseCoachAthleteSandCTrainingPlan,
   reviseCoachAthleteSkillsTrainingPlan,
+  reviseNutritionPlan,
   submitTrainingPlanVersionForReview,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanExecuteResult,
@@ -1510,7 +1511,7 @@ function persistedPlanReviseButtonLabel(
   domain: TrainingPlanGenerationDomain | string | null | undefined,
 ): string {
   const normalized = typeof domain === "string" ? domain.trim().toUpperCase() : domain;
-  if (normalized === "NUTRITION") return "Revise Nutrition Plan - Coming Soon";
+  if (normalized === "NUTRITION") return "Revise Nutrition Plan";
   if (normalized === "S_AND_C") return "Revise S&C Plan";
   return "Revise Skills Plan";
 }
@@ -1866,6 +1867,10 @@ export function CoachAthletePlanningProfileView({
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
   const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
   const [reviseSkillsSuccess, setReviseSkillsSuccess] = useState<string | null>(null);
+  const [reviseNutritionFeedback, setReviseNutritionFeedback] = useState("");
+  const [reviseNutritionLoading, setReviseNutritionLoading] = useState(false);
+  const [reviseNutritionError, setReviseNutritionError] = useState<string | null>(null);
+  const [reviseNutritionSuccess, setReviseNutritionSuccess] = useState<string | null>(null);
   const [reviseSandCFeedback, setReviseSandCFeedback] = useState("");
   const [reviseSandCLoading, setReviseSandCLoading] = useState(false);
   const [reviseSandCError, setReviseSandCError] = useState<string | null>(null);
@@ -2741,6 +2746,62 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.version?.id,
     requestedPlanId,
   ]);
+  const nutritionReviseIds = useMemo(() => {
+    const persistedPlanIdRaw = persistedSkillsPlanDetail?.plan?.id ?? null;
+    const persistedPlanId =
+      typeof persistedPlanIdRaw === "string"
+        ? persistedPlanIdRaw.trim()
+        : persistedPlanIdRaw !== null && persistedPlanIdRaw !== undefined
+          ? String(persistedPlanIdRaw).trim()
+          : "";
+    const persistedVersionIdRaw = persistedSkillsPlanDetail?.version?.id ?? null;
+    const persistedVersionId =
+      typeof persistedVersionIdRaw === "string"
+        ? persistedVersionIdRaw.trim()
+        : persistedVersionIdRaw !== null && persistedVersionIdRaw !== undefined
+          ? String(persistedVersionIdRaw).trim()
+          : "";
+    const isViewingPersistedNutrition =
+      requestedPlanId !== null &&
+      persistedPlanDisplayDomain === "NUTRITION" &&
+      persistedPlanId !== "" &&
+      requestedPlanId.trim() === persistedPlanId;
+
+    if (isViewingPersistedNutrition && persistedVersionId !== "") {
+      return {
+        trainingPlanId: persistedPlanId,
+        versionId: persistedVersionId,
+      };
+    }
+
+    const draftPlanId = latestSkillsDraft?.trainingPlanId?.trim() ?? "";
+    const draftVersionId = latestSkillsDraft?.trainingPlanVersionId?.trim() ?? "";
+    if (
+      latestDraftDisplayDomain === "NUTRITION" &&
+      draftPlanId !== "" &&
+      draftVersionId !== ""
+    ) {
+      return { trainingPlanId: draftPlanId, versionId: draftVersionId };
+    }
+
+    if (
+      persistedPlanDisplayDomain === "NUTRITION" &&
+      persistedPlanId !== "" &&
+      persistedVersionId !== ""
+    ) {
+      return { trainingPlanId: persistedPlanId, versionId: persistedVersionId };
+    }
+
+    return null;
+  }, [
+    latestDraftDisplayDomain,
+    latestSkillsDraft?.trainingPlanId,
+    latestSkillsDraft?.trainingPlanVersionId,
+    persistedPlanDisplayDomain,
+    persistedSkillsPlanDetail?.plan?.id,
+    persistedSkillsPlanDetail?.version?.id,
+    requestedPlanId,
+  ]);
   const showValidateLevel = useMemo(
     () =>
       canCoachValidateLevel({
@@ -3466,6 +3527,91 @@ export function CoachAthletePlanningProfileView({
       );
     } finally {
       setGovernedPlanActionLoading(null);
+    }
+  }
+
+  async function handleReviseNutritionPlan() {
+    if (
+      reviseNutritionLoading ||
+      entityId === "" ||
+      athleteIdTrimmed === "" ||
+      !nutritionReviseIds
+    ) {
+      return;
+    }
+
+    const coachFeedback = reviseNutritionFeedback.trim();
+    if (coachFeedback === "") {
+      setReviseNutritionError("Enter revision feedback first.");
+      setReviseNutritionSuccess(null);
+      return;
+    }
+
+    const trainingPlanIdForReload = nutritionReviseIds.trainingPlanId.trim();
+
+    setReviseNutritionLoading(true);
+    setReviseNutritionError(null);
+    setReviseNutritionSuccess(null);
+    try {
+      await reviseNutritionPlan(entityId, athleteIdTrimmed, {
+        trainingPlanId: nutritionReviseIds.trainingPlanId,
+        versionId: nutritionReviseIds.versionId,
+        coachFeedback,
+      });
+      await loadLatestSkillsDraft("NUTRITION", true);
+      if (
+        requestedPlanId !== null &&
+        trainingPlanIdForReload !== "" &&
+        requestedPlanId.trim() === trainingPlanIdForReload
+      ) {
+        try {
+          const detail = await refreshPersistedPlanDetail(
+            requestedPlanId,
+            "NUTRITION",
+          );
+          if (detail === null) return;
+        } catch (refreshError) {
+          setPersistedSkillsPlanError(
+            formatApiError(refreshError, "Unable to refresh saved plan. Please try again."),
+          );
+        }
+      }
+      setReviseNutritionFeedback("");
+      setReviseNutritionSuccess("Revised nutrition plan version generated.");
+    } catch (e) {
+      console.error("Nutrition training plan revision failed", e);
+      if (isAiGenerationValidationError(e)) {
+        setReviseNutritionError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
+      } else if (isNormalizedApiError(e)) {
+        const message =
+          e.message.trim() !== ""
+            ? e.message.trim()
+            : "Unable to revise plan. Please try again.";
+        const errorCode = e.code?.trim();
+        setReviseNutritionError(
+          errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
+        );
+      } else {
+        const errorRecord =
+          typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
+        const message =
+          (typeof errorRecord?.message === "string" && errorRecord.message.trim() !== ""
+            ? errorRecord.message.trim()
+            : null) ?? "Unable to revise plan. Please try again.";
+        const errorCode =
+          (typeof errorRecord?.errorCode === "string" && errorRecord.errorCode.trim() !== ""
+            ? errorRecord.errorCode.trim()
+            : null) ??
+          (typeof errorRecord?.code === "string" && errorRecord.code.trim() !== ""
+            ? errorRecord.code.trim()
+            : null);
+        setReviseNutritionError(
+          errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
+        );
+      }
+      setReviseNutritionSuccess(null);
+    } finally {
+      setReviseNutritionLoading(false);
     }
   }
 
@@ -5452,6 +5598,38 @@ export function CoachAthletePlanningProfileView({
                               {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
                             </Button>
                           </div>
+                        ) : persistedPlanDisplayDomain === "NUTRITION" ? (
+                          <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            <h5 className="text-sm font-semibold text-textPrimary">
+                              Revise Nutrition Plan
+                            </h5>
+                            {reviseNutritionError ? (
+                              <Alert variant="danger">{reviseNutritionError}</Alert>
+                            ) : null}
+                            {reviseNutritionSuccess ? (
+                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                            ) : null}
+                            <label className="space-y-1 text-sm text-textPrimary">
+                              <span className="font-medium">Coach Feedback</span>
+                              <textarea
+                                rows={4}
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                                value={reviseNutritionFeedback}
+                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
+                                placeholder="Describe what should change in the nutrition plan."
+                              />
+                            </label>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={reviseNutritionLoading || !nutritionReviseIds}
+                              onClick={() => {
+                                void handleReviseNutritionPlan();
+                              }}
+                            >
+                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                            </Button>
+                          </div>
                         ) : null}
                       </div>
                     ) : null
@@ -5677,6 +5855,38 @@ export function CoachAthletePlanningProfileView({
                               {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
                             </Button>
                           </div>
+                        ) : latestDraftDisplayDomain === "NUTRITION" ? (
+                          <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            <h5 className="text-sm font-semibold text-textPrimary">
+                              Revise Nutrition Plan
+                            </h5>
+                            {reviseNutritionError ? (
+                              <Alert variant="danger">{reviseNutritionError}</Alert>
+                            ) : null}
+                            {reviseNutritionSuccess ? (
+                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                            ) : null}
+                            <label className="space-y-1 text-sm text-textPrimary">
+                              <span className="font-medium">Coach Feedback</span>
+                              <textarea
+                                rows={4}
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                                value={reviseNutritionFeedback}
+                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
+                                placeholder="Describe what should change in the nutrition plan."
+                              />
+                            </label>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={reviseNutritionLoading || !nutritionReviseIds}
+                              onClick={() => {
+                                void handleReviseNutritionPlan();
+                              }}
+                            >
+                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                            </Button>
+                          </div>
                         ) : latestDraftDisplayDomain === "S_AND_C" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                             <h5 className="text-sm font-semibold text-textPrimary">
@@ -5718,7 +5928,7 @@ export function CoachAthletePlanningProfileView({
                     ) : null
                   ) : null}
                   {requestedPlanId !== null ? (
-                    persistedPlanDisplayDomain !== "SKILLS" ? (
+                    persistedPlanDisplayDomain === "S_AND_C" ? (
                       <div className="flex flex-wrap gap-2">
                         <Button type="button" variant="secondary" disabled>
                           {persistedPlanReviseButtonLabel(persistedPlanDisplayDomain)}

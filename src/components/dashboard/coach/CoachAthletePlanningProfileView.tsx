@@ -46,6 +46,7 @@ import {
   fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest,
   headApproveTrainingPlanVersion,
   persistCoachAthleteTrainingPlanDraft,
+  requestTrainingPlanRevision,
   releaseTrainingPlanVersionToAthlete,
   reviseCoachAthleteSandCTrainingPlan,
   reviseCoachAthleteSkillsTrainingPlan,
@@ -858,7 +859,8 @@ function governedPlanActionButtonLabel(
   action: GovernedTrainingPlanWorkflowAction,
 ): string {
   if (action === "SUBMIT_REVIEW") return "Submit Review";
-  if (action === "HEAD_APPROVE") return "Head Approve";
+  if (action === "HEAD_APPROVE") return "Approve Plan";
+  if (action === "REQUEST_REVISION") return "Request Revision";
   return "Release to Athlete";
 }
 
@@ -867,6 +869,7 @@ function governedPlanActionSuccessMessage(
 ): string {
   if (action === "SUBMIT_REVIEW") return "Training plan submitted for review.";
   if (action === "HEAD_APPROVE") return "Training plan approved.";
+  if (action === "REQUEST_REVISION") return "Revision requested successfully.";
   return "Training plan released to athlete.";
 }
 
@@ -878,6 +881,9 @@ function governedPlanActionErrorFallback(
   }
   if (action === "HEAD_APPROVE") {
     return "Unable to approve the training plan.";
+  }
+  if (action === "REQUEST_REVISION") {
+    return "Unable to request revision for the training plan.";
   }
   return "Unable to release the training plan to the athlete.";
 }
@@ -1863,6 +1869,10 @@ export function CoachAthletePlanningProfileView({
   const [governedPlanActionError, setGovernedPlanActionError] = useState<string | null>(null);
   const [governedPlanActionSuccess, setGovernedPlanActionSuccess] =
     useState<string | null>(null);
+  const [governedPlanActionSuccessFeedback, setGovernedPlanActionSuccessFeedback] =
+    useState<string | null>(null);
+  const [showRequestRevisionForm, setShowRequestRevisionForm] = useState(false);
+  const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
   const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
   const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
@@ -3486,9 +3496,18 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
+    const revisionFeedback = requestRevisionFeedback.trim();
+    if (action === "REQUEST_REVISION" && revisionFeedback === "") {
+      setGovernedPlanActionError("Enter Head Coach notes before requesting revision.");
+      setGovernedPlanActionSuccess(null);
+      setGovernedPlanActionSuccessFeedback(null);
+      return;
+    }
+
     setGovernedPlanActionLoading(action);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanActionSuccessFeedback(null);
 
     try {
       if (action === "SUBMIT_REVIEW") {
@@ -3507,6 +3526,18 @@ export function CoachAthletePlanningProfileView({
           persistedGovernedPlanContext.versionId,
           persistedGovernedPlanContext.generationDomain,
         );
+      } else if (action === "REQUEST_REVISION") {
+        const result = await requestTrainingPlanRevision(
+          entityId,
+          athleteIdTrimmed,
+          persistedGovernedPlanContext.planId,
+          persistedGovernedPlanContext.versionId,
+          persistedGovernedPlanContext.generationDomain,
+          revisionFeedback,
+        );
+        setRequestRevisionFeedback("");
+        setShowRequestRevisionForm(false);
+        setGovernedPlanActionSuccessFeedback(result.coachFeedback);
       } else {
         await releaseTrainingPlanVersionToAthlete(
           entityId,
@@ -3515,6 +3546,10 @@ export function CoachAthletePlanningProfileView({
           persistedGovernedPlanContext.versionId,
           persistedGovernedPlanContext.generationDomain,
         );
+      }
+      if (action === "REQUEST_REVISION") {
+        await loadLatestSkillsDraft(persistedGovernedPlanContext.generationDomain, true);
+        await refreshProfileAndReadinessAfterLevelValidation();
       }
       await refreshPersistedPlanDetail(
         persistedGovernedPlanContext.planId,
@@ -5363,6 +5398,21 @@ export function CoachAthletePlanningProfileView({
                                   {governedPlanActionButtonLabel("HEAD_APPROVE")}
                                 </Button>
                               ) : null}
+                              {persistedGovernedAllowedActions.has("REQUEST_REVISION") ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={governedPlanActionLoading !== null}
+                                  onClick={() => {
+                                    setShowRequestRevisionForm((current) => !current);
+                                    setGovernedPlanActionError(null);
+                                    setGovernedPlanActionSuccess(null);
+                                    setGovernedPlanActionSuccessFeedback(null);
+                                  }}
+                                >
+                                  {governedPlanActionButtonLabel("REQUEST_REVISION")}
+                                </Button>
+                              ) : null}
                               {persistedGovernedAllowedActions.has("RELEASE") ? (
                                 <Button
                                   type="button"
@@ -5377,12 +5427,62 @@ export function CoachAthletePlanningProfileView({
                                 </Button>
                               ) : null}
                             </div>
+                            {persistedGovernedAllowedActions.has("REQUEST_REVISION")
+                              && showRequestRevisionForm ? (
+                                <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                                  <h6 className="text-sm font-semibold text-textPrimary">
+                                    Request Revision
+                                  </h6>
+                                  <label className="space-y-1 text-sm text-textPrimary">
+                                    <span className="font-medium">Head Coach Notes</span>
+                                    <textarea
+                                      rows={4}
+                                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                                      value={requestRevisionFeedback}
+                                      onChange={(event) =>
+                                        setRequestRevisionFeedback(event.target.value)}
+                                      placeholder="Describe what should change before this plan can be approved."
+                                    />
+                                  </label>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                                      disabled={governedPlanActionLoading !== null}
+                                      onClick={() => {
+                                        void handlePersistedGovernedPlanAction("REQUEST_REVISION");
+                                      }}
+                                    >
+                                      Send Request Revision
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="neutral"
+                                      disabled={governedPlanActionLoading !== null}
+                                      onClick={() => {
+                                        setShowRequestRevisionForm(false);
+                                        setRequestRevisionFeedback("");
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
                             {governedPlanActionError ? (
                               <Alert variant="danger">{governedPlanActionError}</Alert>
                             ) : null}
                             {governedPlanActionSuccess ? (
                               <WorkflowNeutralNotice>
-                                {governedPlanActionSuccess}
+                                <div className="space-y-2">
+                                  <div>{governedPlanActionSuccess}</div>
+                                  {governedPlanActionSuccessFeedback ? (
+                                    <div className="text-sm text-textSecondary">
+                                      Head Coach Notes: {governedPlanActionSuccessFeedback}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </WorkflowNeutralNotice>
                             ) : null}
                           </div>

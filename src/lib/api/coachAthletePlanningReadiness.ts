@@ -452,6 +452,13 @@ export type TrainingPlanRevisePayload = {
   coachFeedback: string;
 };
 
+export type TrainingPlanRequestRevisionResult = {
+  coachFeedback: string | null;
+  warnings: string[];
+  authority: unknown;
+  raw: unknown;
+};
+
 function readStringLike(value: unknown): string | null {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -1007,6 +1014,26 @@ function parseAthleteWeeklyPlanJournalPayload(data: unknown): AthleteWeeklyPlanJ
   };
 }
 
+function parseTrainingPlanRequestRevisionPayload(
+  data: unknown,
+): TrainingPlanRequestRevisionResult {
+  const records = collectRecords(data);
+  const requestRevisionRecord = records
+    .map((record) => asRecord(record.requestRevision))
+    .find((record) => record !== null) ?? null;
+  return {
+    coachFeedback: requestRevisionRecord
+      ? readStringKey([requestRevisionRecord], ["coachFeedback", "feedback"])
+      : null,
+    warnings: readStringListKey(records, ["warnings"]),
+    authority:
+      records.find((record) => "authority" in record)?.authority ??
+      asRecord(data)?.authority ??
+      null,
+    raw: data,
+  };
+}
+
 function assertRevisePayload(
   payload: TrainingPlanRevisePayload,
   code: string,
@@ -1491,7 +1518,7 @@ export async function requestTrainingPlanRevision(
   versionId: string,
   generationDomain: TrainingPlanGenerationDomain,
   coachFeedback: string,
-): Promise<void> {
+): Promise<TrainingPlanRequestRevisionResult> {
   const ids = assertIds(entityId, athleteId);
   const trainingPlanId = assertPlanId(planId);
   const trainingPlanVersionId = assertVersionId(versionId);
@@ -1519,7 +1546,7 @@ export async function requestTrainingPlanRevision(
       }),
     },
   );
-  adaptBackendSuccess(raw);
+  return parseTrainingPlanRequestRevisionPayload(adaptBackendSuccess(raw));
 }
 
 export async function releaseTrainingPlanToAthlete(

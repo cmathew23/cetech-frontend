@@ -163,9 +163,17 @@ describe("parseReadinessPayload", () => {
   });
 
   it("requests revision with generationDomain and coachFeedback", async () => {
-    apiRequestMock.mockResolvedValue({ message: "ok", data: { accepted: true } });
+    apiRequestMock.mockResolvedValue({
+      message: "ok",
+      data: {
+        requestRevision: {
+          coachFeedback: "Tighten the drill progression",
+        },
+        warnings: ["regenerated"],
+      },
+    });
 
-    await requestTrainingPlanRevision(
+    const result = await requestTrainingPlanRevision(
       "entity-1",
       "athlete-1",
       "plan-1",
@@ -184,6 +192,10 @@ describe("parseReadinessPayload", () => {
         }),
       },
     );
+    expect(result).toMatchObject({
+      coachFeedback: "Tighten the drill progression",
+      warnings: ["regenerated"],
+    });
   });
 
   it("uses the dedicated nutrition revise endpoint", async () => {

@@ -136,6 +136,13 @@ export const paths = {
       versionId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/head-approve`,
+    athleteTrainingPlanRequestRevision: (
+      entityId: string,
+      athleteId: string,
+      planId: string,
+      versionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/request-revision`,
     athleteTrainingPlanRelease: (
       entityId: string,
       athleteId: string,
@@ -145,8 +152,12 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/release`,
     athleteTrainingPlanSkillsRevise: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/skills/revise`,
+    athleteTrainingPlanNutritionRevise: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/nutrition/revise`,
     athleteTrainingPlanSandcRevise: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/sandc/revise`,
+    athleteWeeklyPlanJournal: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/weekly-plan-journal`,
   },
   academies: {
     root: "/academies",
@@ -195,8 +206,10 @@ export const paths = {
   trainingPlanManagement: {
     versions: (planId: string) =>
       `/training-plan-management/${encodeURIComponent(planId)}/versions`,
-    activeDetail: (planId: string, generationDomain: string) =>
-      `/training-plan-management/${encodeURIComponent(planId)}/active/detail?generationDomain=${encodeURIComponent(generationDomain)}`,
+    activeDetail: (planId: string, generationDomain?: string) => {
+      void generationDomain;
+      return `/training-plan-management/${encodeURIComponent(planId)}/active/detail`;
+    },
   },
   athletes: {
     me: "/athletes/me",

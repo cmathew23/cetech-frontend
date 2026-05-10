@@ -3729,9 +3729,22 @@ export function CoachAthletePlanningProfileView({
         success: null,
       },
     }));
+    const refreshSeasonCycleId = existing.seasonCycleId ?? selectedSeasonCycleId;
+    if (refreshSeasonCycleId == null) {
+      setPhaseEditorState((current) => ({
+        ...current,
+        [phase]: {
+          ...current[phase],
+          loading: false,
+          error: "Season cycle id is unavailable.",
+          success: null,
+        },
+      }));
+      return;
+    }
     try {
       await updateSeasonCyclePhase(existing.phaseId, payload);
-      await refreshSelectedSeasonPhases(existing.seasonCycleId ?? selectedSeasonCycleId);
+      await refreshSelectedSeasonPhases(refreshSeasonCycleId);
       setPhaseEditorState((current) => ({
         ...current,
         [phase]: {

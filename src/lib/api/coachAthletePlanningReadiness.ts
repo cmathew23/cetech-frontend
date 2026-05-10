@@ -5,6 +5,7 @@ import {
   isNormalizedApiError,
   type NormalizedApiError,
 } from "@/lib/apiClient";
+import type { GenerationDomain } from "@/lib/coachAuthority";
 
 type AnyRecord = Record<string, unknown>;
 const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 120_000;
@@ -232,7 +233,12 @@ export type CoachAthleteTrainingPlanCompleteness = {
   missingRequiredFields: string[];
 };
 
-export type TrainingPlanGenerationDomain = "SKILLS" | "NUTRITION" | "S_AND_C";
+export type TrainingPlanGenerationDomain = GenerationDomain;
+export type TrainingPlanStatus =
+  | "AI_GENERATED"
+  | "ASSISTANT_COACH_APPROVED"
+  | "HEAD_COACH_APPROVED"
+  | "ACTIVE";
 
 export type CoachAthleteTrainingPlanExecuteResult = {
   executionDecision: {
@@ -366,7 +372,10 @@ export type CoachPersistedTrainingPlanVersion = {
 export type GovernedTrainingPlanWorkflowAction =
   | "SUBMIT_REVIEW"
   | "HEAD_APPROVE"
+  | "REQUEST_REVISION"
   | "RELEASE";
+
+export type WeeklyJournalDomainStatus = "RELEASED" | "NOT_RELEASED";
 
 export type CoachPersistedTrainingPlanDetailSection = {
   key: string;
@@ -411,6 +420,36 @@ export type CoachPersistedTrainingPlanActiveDetail = {
   version: CoachPersistedTrainingPlanVersion;
   days: CoachPersistedTrainingPlanDetailDay[];
   raw: unknown;
+};
+
+export type AthleteWeeklyPlanJournalDomainEntry = {
+  status: WeeklyJournalDomainStatus;
+  planId: string | null;
+  versionId: string | null;
+};
+
+export type AthleteWeeklyPlanJournalDay = {
+  date: string;
+  dayNumber: number;
+  skills: unknown[];
+  nutrition: unknown[];
+  sandc: unknown[];
+};
+
+export type AthleteWeeklyPlanJournal = {
+  athleteId: string;
+  entityId: string;
+  weekStartDate: string;
+  weekEndDate: string;
+  domains: Record<TrainingPlanGenerationDomain, AthleteWeeklyPlanJournalDomainEntry>;
+  days: AthleteWeeklyPlanJournalDay[];
+  raw: unknown;
+};
+
+export type TrainingPlanRevisePayload = {
+  trainingPlanId: string;
+  versionId: string;
+  coachFeedback: string;
 };
 
 function readStringLike(value: unknown): string | null {
@@ -653,6 +692,9 @@ function normalizeGovernedTrainingPlanWorkflowAction(
   if (normalized === "HEAD_APPROVE") {
     return "HEAD_APPROVE";
   }
+  if (normalized === "REQUEST_REVISION" || normalized === "REQUEST_REVIEW_REVISION") {
+    return "REQUEST_REVISION";
+  }
   if (normalized === "RELEASE" || normalized === "RELEASE_TO_ATHLETE") {
     return "RELEASE";
   }
@@ -691,6 +733,13 @@ function parseGovernedTrainingPlanWorkflowActions(
     }
     if (record.canHeadApprove === true || record.headApproveAllowed === true) {
       out.add("HEAD_APPROVE");
+    }
+    if (
+      record.canRequestRevision === true ||
+      record.requestRevisionAllowed === true ||
+      record.canHeadCoachRequestRevision === true
+    ) {
+      out.add("REQUEST_REVISION");
     }
     if (
       record.canRelease === true ||
@@ -902,6 +951,77 @@ function parsePersistedTrainingPlanActiveDetailPayload(
       : [],
     raw: data,
   };
+}
+
+function normalizeWeeklyJournalDomainStatus(
+  value: unknown,
+): WeeklyJournalDomainStatus {
+  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return normalized === "RELEASED" ? "RELEASED" : "NOT_RELEASED";
+}
+
+function parseWeeklyJournalDomainEntry(value: unknown): AthleteWeeklyPlanJournalDomainEntry {
+  const record = asRecord(value) ?? {};
+  return {
+    status: normalizeWeeklyJournalDomainStatus(record.status),
+    planId: readStringLike(record.planId),
+    versionId: readStringLike(record.versionId),
+  };
+}
+
+function parseWeeklyJournalDay(value: unknown): AthleteWeeklyPlanJournalDay | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const date = readStringLike(record.date);
+  const dayNumber = readNumberKey([record], ["dayNumber"]);
+  if (date === null || dayNumber === null) return null;
+  return {
+    date,
+    dayNumber,
+    skills: Array.isArray(record.skills) ? record.skills : [],
+    nutrition: Array.isArray(record.nutrition) ? record.nutrition : [],
+    sandc: Array.isArray(record.sandc) ? record.sandc : [],
+  };
+}
+
+function parseAthleteWeeklyPlanJournalPayload(data: unknown): AthleteWeeklyPlanJournal {
+  const root = asRecord(data) ?? {};
+  const record = asRecord(root.data) ?? root;
+  const domainsRecord = asRecord(record.domains) ?? {};
+  return {
+    athleteId: readStringLike(record.athleteId) ?? "",
+    entityId: readStringLike(record.entityId) ?? "",
+    weekStartDate: readStringLike(record.weekStartDate) ?? "",
+    weekEndDate: readStringLike(record.weekEndDate) ?? "",
+    domains: {
+      SKILLS: parseWeeklyJournalDomainEntry(domainsRecord.SKILLS),
+      NUTRITION: parseWeeklyJournalDomainEntry(domainsRecord.NUTRITION),
+      S_AND_C: parseWeeklyJournalDomainEntry(domainsRecord.S_AND_C),
+    },
+    days: Array.isArray(record.days)
+      ? record.days
+          .map(parseWeeklyJournalDay)
+          .filter((day): day is AthleteWeeklyPlanJournalDay => day !== null)
+      : [],
+    raw: data,
+  };
+}
+
+function assertRevisePayload(
+  payload: TrainingPlanRevisePayload,
+  code: string,
+): TrainingPlanRevisePayload {
+  const trainingPlanId = payload.trainingPlanId.trim();
+  const versionId = payload.versionId.trim();
+  const coachFeedback = payload.coachFeedback.trim();
+  if (trainingPlanId === "" || versionId === "" || coachFeedback === "") {
+    throw {
+      message: "trainingPlanId, versionId, and coachFeedback are required",
+      status: 400,
+      code,
+    } satisfies NormalizedApiError;
+  }
+  return { trainingPlanId, versionId, coachFeedback };
 }
 
 export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanReadiness {
@@ -1220,7 +1340,7 @@ export async function persistCoachAthleteTrainingPlanDraft(
   return parsePersistDraftPayload(adaptBackendSuccess(raw));
 }
 
-export async function fetchLatestCoachAthleteDomainDraft(
+export async function fetchLatestDomainDraft(
   entityId: string,
   athleteId: string,
   generationDomain: TrainingPlanGenerationDomain,
@@ -1237,11 +1357,18 @@ export async function fetchLatestCoachAthleteDomainDraft(
       cache: "no-store",
     },
   );
-  const adapted = adaptBackendSuccess(raw);
   if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-    console.debug("[latest-domain-draft raw]", adapted);
+    console.debug("[latest-domain-draft raw]", raw);
   }
-  return parseLatestDomainDraftPayload(adapted);
+  return parseLatestDomainDraftPayload(raw);
+}
+
+export async function fetchLatestCoachAthleteDomainDraft(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<CoachAthleteLatestDomainDraft> {
+  return fetchLatestDomainDraft(entityId, athleteId, generationDomain);
 }
 
 export async function fetchPersistedTrainingPlanById(
@@ -1268,26 +1395,24 @@ export async function fetchPersistedTrainingPlanVersions(
 
 export async function fetchPersistedTrainingPlanActiveDetail(
   planId: string,
-  generationDomain: TrainingPlanGenerationDomain,
+  generationDomain?: TrainingPlanGenerationDomain,
 ): Promise<CoachPersistedTrainingPlanActiveDetail> {
   const id = assertPlanId(planId);
-  const domain = assertGenerationDomain(generationDomain);
-  const raw = await apiRequest(paths.trainingPlanManagement.activeDetail(id, domain), {
+  const raw = await apiRequest(paths.trainingPlanManagement.activeDetail(id, generationDomain), {
     method: "GET",
     cache: "no-store",
   });
-  const adapted = adaptBackendSuccess(raw);
   if (typeof window !== "undefined") {
-    console.debug("persistedActiveDetailRaw", adapted);
+    console.debug("persistedActiveDetailRaw", raw);
   }
-  const normalized = parsePersistedTrainingPlanActiveDetailPayload(adapted, id);
+  const normalized = parsePersistedTrainingPlanActiveDetailPayload(raw, id);
   if (typeof window !== "undefined") {
     console.debug("normalizedPersistedPlan", normalized);
   }
   return normalized;
 }
 
-export async function submitTrainingPlanVersionForReview(
+export async function submitTrainingPlanReview(
   entityId: string,
   athleteId: string,
   planId: string,
@@ -1313,7 +1438,17 @@ export async function submitTrainingPlanVersionForReview(
   adaptBackendSuccess(raw);
 }
 
-export async function headApproveTrainingPlanVersion(
+export async function submitTrainingPlanVersionForReview(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await submitTrainingPlanReview(entityId, athleteId, planId, versionId, generationDomain);
+}
+
+export async function headApproveTrainingPlan(
   entityId: string,
   athleteId: string,
   planId: string,
@@ -1339,7 +1474,55 @@ export async function headApproveTrainingPlanVersion(
   adaptBackendSuccess(raw);
 }
 
-export async function releaseTrainingPlanVersionToAthlete(
+export async function headApproveTrainingPlanVersion(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await headApproveTrainingPlan(entityId, athleteId, planId, versionId, generationDomain);
+}
+
+export async function requestTrainingPlanRevision(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+  coachFeedback: string,
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const trainingPlanId = assertPlanId(planId);
+  const trainingPlanVersionId = assertVersionId(versionId);
+  const domain = assertGenerationDomain(generationDomain);
+  const feedback = coachFeedback.trim();
+  if (feedback === "") {
+    throw {
+      message: "coachFeedback is required",
+      status: 400,
+      code: "TRAINING_PLAN_REQUEST_REVISION_FEEDBACK_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanRequestRevision(
+      ids.entityId,
+      ids.athleteId,
+      trainingPlanId,
+      trainingPlanVersionId,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify({
+        generationDomain: domain,
+        coachFeedback: feedback,
+      }),
+    },
+  );
+  adaptBackendSuccess(raw);
+}
+
+export async function releaseTrainingPlanToAthlete(
   entityId: string,
   athleteId: string,
   planId: string,
@@ -1365,72 +1548,106 @@ export async function releaseTrainingPlanVersionToAthlete(
   adaptBackendSuccess(raw);
 }
 
-export async function reviseCoachAthleteSkillsTrainingPlan(
+export async function releaseTrainingPlanVersionToAthlete(
   entityId: string,
   athleteId: string,
-  payload: {
-    trainingPlanId: string;
-    versionId: string;
-    coachFeedback: string;
-  },
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await releaseTrainingPlanToAthlete(entityId, athleteId, planId, versionId, generationDomain);
+}
+
+export async function reviseSkillsPlan(
+  entityId: string,
+  athleteId: string,
+  payload: TrainingPlanRevisePayload,
 ): Promise<void> {
   const ids = assertIds(entityId, athleteId);
-  const trainingPlanId = payload.trainingPlanId.trim();
-  const versionId = payload.versionId.trim();
-  const coachFeedback = payload.coachFeedback.trim();
-  if (trainingPlanId === "" || versionId === "" || coachFeedback === "") {
-    throw {
-      message: "trainingPlanId, versionId, and coachFeedback are required",
-      status: 400,
-      code: "TRAINING_PLAN_SKILLS_REVISE_INPUT_REQUIRED",
-    } satisfies NormalizedApiError;
-  }
+  const normalizedPayload = assertRevisePayload(
+    payload,
+    "TRAINING_PLAN_SKILLS_REVISE_INPUT_REQUIRED",
+  );
   const raw = await apiRequest(
     paths.entities.athleteTrainingPlanSkillsRevise(ids.entityId, ids.athleteId),
     {
       method: "POST",
       timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
-      body: JSON.stringify({
-        trainingPlanId,
-        versionId,
-        coachFeedback,
-      }),
+      body: JSON.stringify(normalizedPayload),
     },
   );
-  adaptBackendSuccess(raw);
+  void raw;
 }
 
-export async function reviseCoachAthleteSandCTrainingPlan(
+export async function reviseCoachAthleteSkillsTrainingPlan(
   entityId: string,
   athleteId: string,
-  payload: {
-    trainingPlanId: string;
-    versionId: string;
-    coachFeedback: string;
-  },
+  payload: TrainingPlanRevisePayload,
+): Promise<void> {
+  await reviseSkillsPlan(entityId, athleteId, payload);
+}
+
+export async function reviseNutritionPlan(
+  entityId: string,
+  athleteId: string,
+  payload: TrainingPlanRevisePayload,
 ): Promise<void> {
   const ids = assertIds(entityId, athleteId);
-  const trainingPlanId = payload.trainingPlanId.trim();
-  const versionId = payload.versionId.trim();
-  const coachFeedback = payload.coachFeedback.trim();
-  if (trainingPlanId === "" || versionId === "" || coachFeedback === "") {
-    throw {
-      message: "trainingPlanId, versionId, and coachFeedback are required",
-      status: 400,
-      code: "TRAINING_PLAN_SANDC_REVISE_INPUT_REQUIRED",
-    } satisfies NormalizedApiError;
-  }
+  const normalizedPayload = assertRevisePayload(
+    payload,
+    "TRAINING_PLAN_NUTRITION_REVISE_INPUT_REQUIRED",
+  );
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanNutritionRevise(ids.entityId, ids.athleteId),
+    {
+      method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+      body: JSON.stringify(normalizedPayload),
+    },
+  );
+  void raw;
+}
+
+export async function reviseSandcPlan(
+  entityId: string,
+  athleteId: string,
+  payload: TrainingPlanRevisePayload,
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const normalizedPayload = assertRevisePayload(
+    payload,
+    "TRAINING_PLAN_SANDC_REVISE_INPUT_REQUIRED",
+  );
   const raw = await apiRequest(
     paths.entities.athleteTrainingPlanSandcRevise(ids.entityId, ids.athleteId),
     {
       method: "POST",
       timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
-      body: JSON.stringify({
-        trainingPlanId,
-        versionId,
-        coachFeedback,
-      }),
+      body: JSON.stringify(normalizedPayload),
     },
   );
-  adaptBackendSuccess(raw);
+  void raw;
+}
+
+export async function reviseCoachAthleteSandCTrainingPlan(
+  entityId: string,
+  athleteId: string,
+  payload: TrainingPlanRevisePayload,
+): Promise<void> {
+  await reviseSandcPlan(entityId, athleteId, payload);
+}
+
+export async function fetchAthleteWeeklyPlanJournal(
+  entityId: string,
+  athleteId: string,
+): Promise<AthleteWeeklyPlanJournal> {
+  const ids = assertIds(entityId, athleteId);
+  const raw = await apiRequest(
+    paths.entities.athleteWeeklyPlanJournal(ids.entityId, ids.athleteId),
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+  );
+  return parseAthleteWeeklyPlanJournalPayload(raw);
 }

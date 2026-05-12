@@ -17,6 +17,18 @@ function readString(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/** First non-empty trimmed string wins (used to resolve generation `sportCode` from APP variants). */
+function firstTrimmedString(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const trimmed = candidate.trim();
+    if (trimmed !== "") return trimmed;
+  }
+  return null;
+}
+
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -92,6 +104,8 @@ export type CoachAthletePlanningProfileView = {
   sportContext: {
     primarySport: string | null;
   };
+  /** Canonical sport code for training-plan generation (from APP / planning profile payload). */
+  sportCode: string | null;
   dateOfBirth: string | null;
   sex: string | null;
   primarySport: string | null;
@@ -167,13 +181,27 @@ function parseCoachAthletePlanningProfile(
     ...readStringList(root?.missingRequiredFields),
   ].filter((value, index, arr) => arr.indexOf(value) === index);
 
+  const primarySportRaw = readString(sportContext.primarySport);
+  const resolvedSportCode = firstTrimmedString(
+    readString(sportContext.sportCode),
+    readString(p.sportCode),
+    readString(p.primarySport),
+    readString(athleteContext.sportCode),
+    readString(athleteContext.sport),
+    readString(derivedPlanningInputs.sportCode),
+    readString(derivedPlanningInputs.primarySport),
+    primarySportRaw,
+  );
+  const displayPrimarySport = primarySportRaw ?? resolvedSportCode;
+
   return {
     sportContext: {
-      primarySport: readString(sportContext.primarySport),
+      primarySport: displayPrimarySport,
     },
+    sportCode: resolvedSportCode,
     dateOfBirth: readString(athleteContext.dateOfBirth),
     sex: readString(athleteContext.sex),
-    primarySport: readString(sportContext.primarySport),
+    primarySport: displayPrimarySport,
     disciplineOrEvent: readString(sportContext.disciplineOrEvent),
     highestCompetitionLevelReachedPast12Months: readString(
       sportPerformance.highestCompetitionLevelReachedPast12Months,

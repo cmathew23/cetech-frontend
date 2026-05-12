@@ -1,3 +1,9 @@
+export type GenerationDomain = "SKILLS" | "NUTRITION" | "S_AND_C";
+export type CoachFunction =
+  | "SKILLS_COACH"
+  | "NUTRITION_COACH"
+  | "STRENGTH_AND_CONDITIONING_COACH";
+
 export function normalizeCoachFunctionValue(value: string): string {
   return value
     .trim()
@@ -7,7 +13,9 @@ export function normalizeCoachFunctionValue(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-export function currentCoachHasSkillsFunction(functions: string[]): boolean {
+export function currentCoachHasSkillsFunction(
+  functions: ReadonlyArray<CoachFunction | string>,
+): boolean {
   return functions.some((value) => {
     const normalized = normalizeCoachFunctionValue(value);
     return normalized === "SKILLS" || normalized === "SKILLS_COACH";
@@ -21,7 +29,7 @@ export function currentCoachIsHeadCoach(role: string | null | undefined): boolea
 export function canCoachValidateLevel(input: {
   hasHeadCoachConfigured: boolean;
   academyCoachRole: string | null | undefined;
-  functions: string[];
+  functions: ReadonlyArray<CoachFunction | string>;
 }): boolean {
   return input.hasHeadCoachConfigured
     ? currentCoachIsHeadCoach(input.academyCoachRole)
@@ -29,7 +37,7 @@ export function canCoachValidateLevel(input: {
 }
 
 /** Single plan-creation track derived from coach authority.functions (same domain order as planning profile generation). */
-export type CoachPlanCreationDomain = "SKILLS" | "NUTRITION" | "S_AND_C";
+export type CoachPlanCreationDomain = GenerationDomain;
 
 const PLAN_DOMAIN_ORDER: CoachPlanCreationDomain[] = [
   "SKILLS",
@@ -37,7 +45,9 @@ const PLAN_DOMAIN_ORDER: CoachPlanCreationDomain[] = [
   "S_AND_C",
 ];
 
-function coachFunctionToPlanDomain(value: string): CoachPlanCreationDomain | null {
+export function coachFunctionToPlanDomain(
+  value: CoachFunction | string,
+): CoachPlanCreationDomain | null {
   const normalized = normalizeCoachFunctionValue(value);
   if (normalized === "SKILLS" || normalized === "SKILLS_COACH") return "SKILLS";
   if (normalized === "NUTRITION" || normalized === "NUTRITION_COACH") {
@@ -55,7 +65,7 @@ function coachFunctionToPlanDomain(value: string): CoachPlanCreationDomain | nul
 }
 
 export function derivePrimaryCoachPlanDomain(
-  functions: string[],
+  functions: ReadonlyArray<CoachFunction | string>,
 ): CoachPlanCreationDomain | null {
   const domains = new Set<CoachPlanCreationDomain>();
   for (const value of functions) {
@@ -74,4 +84,12 @@ export function coachPlanCreationButtonLabel(
   if (domain === "SKILLS") return "Create Skills Plan";
   if (domain === "NUTRITION") return "Create Nutrition Plan";
   return "Create S&C Plan";
+}
+
+export function generationDomainToCoachFunction(
+  domain: GenerationDomain,
+): CoachFunction {
+  if (domain === "SKILLS") return "SKILLS_COACH";
+  if (domain === "NUTRITION") return "NUTRITION_COACH";
+  return "STRENGTH_AND_CONDITIONING_COACH";
 }

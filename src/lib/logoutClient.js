@@ -67,10 +67,15 @@ function notifyAuthStateChanged() {
 
 export function clearClientLogoutState() {
   if (typeof window === "undefined") return;
+  clearClientAuthStorageState();
+  notifyAuthStateChanged();
+}
+
+export function clearClientAuthStorageState() {
+  if (typeof window === "undefined") return;
   removeToken();
   clearAppScopedStorage(window.localStorage, LOGOUT_LOCAL_STORAGE_KEYS);
   clearAppScopedStorage(window.sessionStorage, LOGOUT_SESSION_STORAGE_KEYS);
-  notifyAuthStateChanged();
 }
 
 /**

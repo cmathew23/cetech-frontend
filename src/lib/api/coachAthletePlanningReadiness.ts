@@ -9,6 +9,10 @@ import type { GenerationDomain } from "@/lib/coachAuthority";
 
 type AnyRecord = Record<string, unknown>;
 const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 120_000;
+/** Persist-draft POST can carry large planner payloads; keep below generic client default. */
+const TRAINING_PLAN_PERSIST_DRAFT_TIMEOUT_MS = 60_000;
+/** Latest-domain-draft GET can return large day/session graphs. */
+const TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS = 60_000;
 type WorkloadAssessmentValue =
   | string
   | number
@@ -192,6 +196,8 @@ export type CoachAthleteTrainingPlanReadiness = {
   canGenerate: boolean | null;
   blockers: string[];
   missingRequiredFields: string[];
+  /** When backend echoes athlete sport context for generation requests */
+  sportCode: string | null;
 };
 
 export type CoachAthleteTrainingPlanWorkloadAssessment = {
@@ -215,6 +221,25 @@ export type CoachAthleteTrainingPlanWorkloadAssessment = {
   explanation: string | null;
   additionalDetails: Record<string, WorkloadAssessmentValue>;
   rawPayloadText: string | null;
+};
+
+export type CoachAthleteUpstreamPlanningContext = {
+  upstreamPlanningContextLocked: boolean;
+  seasonCycleId: string | null;
+  goalIds: string[];
+  startDate: string | null;
+  endDate: string | null;
+  phase: string | null;
+  workloadSummary: {
+    weeklyTrainingHours: number | null;
+    recommendedMinHours: number | null;
+    recommendedMaxHours: number | null;
+    status: string | null;
+    sportCode: string | null;
+    validatedLevel: string | null;
+  };
+  blockers: string[];
+  raw: unknown;
 };
 
 function safeJsonPreview(value: unknown): string | null {
@@ -332,6 +357,22 @@ export type CoachAthleteLatestDomainDraft = {
   raw: unknown;
 };
 
+/** When persist-draft times out client-side but the draft exists, map latest draft → persist result shape. */
+export function persistDraftResultFromLatestDomainDraft(
+  draft: CoachAthleteLatestDomainDraft,
+): CoachAthleteTrainingPlanPersistDraftResult {
+  return {
+    trainingPlanId: draft.trainingPlanId,
+    trainingPlanVersionId: draft.trainingPlanVersionId,
+    versionNumber: draft.versionNumber,
+    status: draft.status,
+    daysCreated: draft.daysCreated,
+    sessionsCreated: draft.sessionsCreated,
+    itemsPersisted: draft.itemsPersisted,
+    raw: draft.raw,
+  };
+}
+
 export type CoachPersistedTrainingPlanGoal = {
   goalId: string | null;
   goalName: string | null;
@@ -443,6 +484,17 @@ export type AthleteWeeklyPlanJournal = {
   weekEndDate: string;
   domains: Record<TrainingPlanGenerationDomain, AthleteWeeklyPlanJournalDomainEntry>;
   days: AthleteWeeklyPlanJournalDay[];
+  raw: unknown;
+};
+
+export type AthleteTodayPlan = {
+  athleteId: string;
+  entityId: string;
+  date: string;
+  domains: Record<TrainingPlanGenerationDomain, AthleteWeeklyPlanJournalDomainEntry>;
+  skills: unknown[];
+  nutrition: unknown[];
+  sandc: unknown[];
   raw: unknown;
 };
 
@@ -1014,6 +1066,32 @@ function parseAthleteWeeklyPlanJournalPayload(data: unknown): AthleteWeeklyPlanJ
   };
 }
 
+function parseAthleteTodayPlanPayload(data: unknown): AthleteTodayPlan {
+  const root = asRecord(data) ?? {};
+  const record = asRecord(root.data) ?? root;
+  const domainsRecord = asRecord(record.domains) ?? {};
+  const dayRecord =
+    asRecord(record.day) ??
+    asRecord(record.today) ??
+    asRecord(record.todayPlan) ??
+    record;
+
+  return {
+    athleteId: readStringLike(record.athleteId) ?? "",
+    entityId: readStringLike(record.entityId) ?? "",
+    date: readStringLike(dayRecord.date) ?? readStringLike(record.date) ?? "",
+    domains: {
+      SKILLS: parseWeeklyJournalDomainEntry(domainsRecord.SKILLS),
+      NUTRITION: parseWeeklyJournalDomainEntry(domainsRecord.NUTRITION),
+      S_AND_C: parseWeeklyJournalDomainEntry(domainsRecord.S_AND_C),
+    },
+    skills: Array.isArray(dayRecord.skills) ? dayRecord.skills : [],
+    nutrition: Array.isArray(dayRecord.nutrition) ? dayRecord.nutrition : [],
+    sandc: Array.isArray(dayRecord.sandc) ? dayRecord.sandc : [],
+    raw: data,
+  };
+}
+
 function parseTrainingPlanRequestRevisionPayload(
   data: unknown,
 ): TrainingPlanRequestRevisionResult {
@@ -1071,6 +1149,87 @@ export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanRe
     canGenerate: readBooleanKey(records, ["canGenerate"]),
     blockers: readBlockerListKey(records, ["blockers"]),
     missingRequiredFields: readStringListKey(records, ["missingRequiredFields"]),
+    sportCode: readStringKey(records, [
+      "sportCode",
+      "athleteSportCode",
+      "primarySport",
+      "disciplineSportCode",
+    ]),
+  };
+}
+
+export function parseUpstreamPlanningContextPayload(
+  data: unknown,
+): CoachAthleteUpstreamPlanningContext {
+  const records = collectRecords(data);
+  const root = asRecord(data) ?? {};
+  const nested = asRecord(root.data);
+  const record = nested ?? root;
+  const workloadRecord =
+    asRecord(record.workloadSummary) ??
+    asRecord(record.workload) ??
+    asRecord(record.workloadAssessment) ??
+    records
+      .map((candidate) => asRecord(candidate.workloadSummary))
+      .find((candidate) => candidate !== null) ??
+    null;
+
+  return {
+    upstreamPlanningContextLocked:
+      readBooleanKey(records, [
+        "upstreamPlanningContextLocked",
+        "planningContextLocked",
+        "locked",
+      ]) ?? false,
+    seasonCycleId: readStringKey(records, [
+      "seasonCycleId",
+      "selectedSeasonCycleId",
+      "seasonId",
+    ]),
+    goalIds: readStringListKey(records, [
+      "goalIds",
+      "selectedGoalIds",
+      "trainingGoalIds",
+    ]),
+    startDate: readStringKey(records, [
+      "startDate",
+      "planStartDate",
+      "trainingPlanStartDate",
+    ]),
+    endDate: readStringKey(records, [
+      "endDate",
+      "planEndDate",
+      "trainingPlanEndDate",
+    ]),
+    phase: readStringKey(records, ["phase", "currentPhase", "phaseType"]),
+    workloadSummary: {
+      weeklyTrainingHours: readNumberKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["weeklyTrainingHours", "currentWeeklyTrainingHours"],
+      ),
+      recommendedMinHours: readNumberKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["recommendedMinHours", "recommendedMinimumHours"],
+      ),
+      recommendedMaxHours: readNumberKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["recommendedMaxHours", "recommendedMaximumHours"],
+      ),
+      status: readStringKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["status", "trainingLoadStatus", "workloadStatus"],
+      ),
+      sportCode: readStringKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["sportCode", "athleteSportCode"],
+      ),
+      validatedLevel: readStringKey(
+        workloadRecord ? [workloadRecord] : records,
+        ["validatedLevel"],
+      ),
+    },
+    blockers: readBlockerListKey(records, ["blockers", "missingRequirements"]),
+    raw: data,
   };
 }
 
@@ -1193,7 +1352,7 @@ function parseExecutePayload(data: unknown): CoachAthleteTrainingPlanExecuteResu
     completenessDecision: completenessDecisionRecord
       ? {
           canGenerate: readBooleanKey([completenessDecisionRecord], ["canGenerate"]),
-          missingRequirements: readStringListKey(
+          missingRequirements: readBlockerListKey(
             [completenessDecisionRecord],
             ["missingRequirements"],
           ),
@@ -1225,14 +1384,17 @@ export async function fetchCoachAthleteTrainingPlanReadiness(
   options?: {
     generationDomain?: TrainingPlanGenerationDomain;
     seasonCycleId?: string | null;
+    sportCode?: string | null;
   },
 ): Promise<CoachAthleteTrainingPlanReadiness> {
   const ids = assertIds(entityId, athleteId);
   const seasonCycleId = options?.seasonCycleId?.trim() || null;
+  const sportCode = options?.sportCode?.trim() || null;
   const raw = await apiRequest(
     paths.entities.athleteTrainingPlanReadiness(ids.entityId, ids.athleteId, {
       generationDomain: options?.generationDomain,
       seasonCycleId,
+      sportCode,
     }),
     {
       method: "GET",
@@ -1240,6 +1402,24 @@ export async function fetchCoachAthleteTrainingPlanReadiness(
     },
   );
   return parseReadinessPayload(adaptBackendSuccess(raw));
+}
+
+export async function fetchCoachAthleteUpstreamPlanningContext(
+  entityId: string,
+  athleteId: string,
+): Promise<CoachAthleteUpstreamPlanningContext> {
+  const ids = assertIds(entityId, athleteId);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanUpstreamPlanningContext(
+      ids.entityId,
+      ids.athleteId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+  );
+  return parseUpstreamPlanningContextPayload(adaptBackendSuccess(raw));
 }
 
 export async function fetchCoachAthleteTrainingPlanWorkloadAssessment(
@@ -1292,10 +1472,14 @@ export async function fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest(
 export async function fetchCoachAthleteTrainingPlanCompleteness(
   entityId: string,
   athleteId: string,
+  options?: { sportCode?: string | null },
 ): Promise<CoachAthleteTrainingPlanCompleteness> {
   const ids = assertIds(entityId, athleteId);
+  const sportCode = options?.sportCode?.trim() || null;
   const raw = await apiRequest(
-    paths.entities.athleteTrainingPlanCompleteness(ids.entityId, ids.athleteId),
+    paths.entities.athleteTrainingPlanCompleteness(ids.entityId, ids.athleteId, {
+      sportCode,
+    }),
     {
       method: "GET",
       cache: "no-store",
@@ -1357,6 +1541,7 @@ export async function persistCoachAthleteTrainingPlanDraft(
     paths.entities.athleteTrainingPlanPersistDraft(ids.entityId, ids.athleteId),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_PERSIST_DRAFT_TIMEOUT_MS,
       body: JSON.stringify({
         generatedPlannerCandidate: payload.generatedPlannerCandidate,
         generationContextSnapshot: payload.generationContextSnapshot,
@@ -1371,6 +1556,7 @@ export async function fetchLatestDomainDraft(
   entityId: string,
   athleteId: string,
   generationDomain: TrainingPlanGenerationDomain,
+  options?: { timeoutMs?: number },
 ): Promise<CoachAthleteLatestDomainDraft> {
   const ids = assertIds(entityId, athleteId);
   const raw = await apiRequest(
@@ -1382,6 +1568,7 @@ export async function fetchLatestDomainDraft(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: options?.timeoutMs ?? TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS,
     },
   );
   if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
@@ -1394,8 +1581,9 @@ export async function fetchLatestCoachAthleteDomainDraft(
   entityId: string,
   athleteId: string,
   generationDomain: TrainingPlanGenerationDomain,
+  options?: { timeoutMs?: number },
 ): Promise<CoachAthleteLatestDomainDraft> {
-  return fetchLatestDomainDraft(entityId, athleteId, generationDomain);
+  return fetchLatestDomainDraft(entityId, athleteId, generationDomain, options);
 }
 
 export async function fetchPersistedTrainingPlanById(
@@ -1422,10 +1610,11 @@ export async function fetchPersistedTrainingPlanVersions(
 
 export async function fetchPersistedTrainingPlanActiveDetail(
   planId: string,
-  generationDomain?: TrainingPlanGenerationDomain,
+  generationDomain: TrainingPlanGenerationDomain,
 ): Promise<CoachPersistedTrainingPlanActiveDetail> {
   const id = assertPlanId(planId);
-  const raw = await apiRequest(paths.trainingPlanManagement.activeDetail(id, generationDomain), {
+  const domain = assertGenerationDomain(generationDomain);
+  const raw = await apiRequest(paths.trainingPlanManagement.activeDetail(id, domain), {
     method: "GET",
     cache: "no-store",
   });
@@ -1669,12 +1858,29 @@ export async function fetchAthleteWeeklyPlanJournal(
   athleteId: string,
 ): Promise<AthleteWeeklyPlanJournal> {
   const ids = assertIds(entityId, athleteId);
-  const raw = await apiRequest(
-    paths.entities.athleteWeeklyPlanJournal(ids.entityId, ids.athleteId),
-    {
-      method: "GET",
-      cache: "no-store",
-    },
-  );
+  const url = paths.entities.athleteWeeklyPlanJournal(ids.entityId, ids.athleteId);
+  if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+    console.debug("[athlete-weekly-plan-journal request]", url);
+  }
+  const raw = await apiRequest(url, {
+    method: "GET",
+    cache: "no-store",
+  });
   return parseAthleteWeeklyPlanJournalPayload(raw);
+}
+
+export async function fetchAthleteTodayPlan(
+  entityId: string,
+  athleteId: string,
+): Promise<AthleteTodayPlan> {
+  const ids = assertIds(entityId, athleteId);
+  const url = paths.entities.athleteTodayPlan(ids.entityId, ids.athleteId);
+  if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+    console.debug("[athlete-today-plan request]", url);
+  }
+  const raw = await apiRequest(url, {
+    method: "GET",
+    cache: "no-store",
+  });
+  return parseAthleteTodayPlanPayload(raw);
 }

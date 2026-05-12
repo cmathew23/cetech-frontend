@@ -89,6 +89,7 @@ export const paths = {
       query?: {
         generationDomain?: string;
         seasonCycleId?: string | null;
+        sportCode?: string | null;
       },
     ) => {
       const base =
@@ -100,6 +101,10 @@ export const paths = {
       if (query?.seasonCycleId) {
         params.set("seasonCycleId", query.seasonCycleId);
       }
+      const sportCode = query?.sportCode?.trim() ?? "";
+      if (sportCode !== "") {
+        params.set("sportCode", sportCode);
+      }
       const text = params.toString();
       return text ? `${base}?${text}` : base;
     },
@@ -110,8 +115,24 @@ export const paths = {
       athleteId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/workload-assessment/latest`,
-    athleteTrainingPlanCompleteness: (entityId: string, athleteId: string) =>
-      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/completeness`,
+    athleteTrainingPlanUpstreamPlanningContext: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/upstream-planning-context`,
+    athleteTrainingPlanCompleteness: (
+      entityId: string,
+      athleteId: string,
+      query?: { sportCode?: string | null },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/completeness`;
+      const sportCode = query?.sportCode?.trim() ?? "";
+      if (sportCode === "") return base;
+      const params = new URLSearchParams();
+      params.set("sportCode", sportCode);
+      return `${base}?${params.toString()}`;
+    },
     athleteTrainingPlanExecute: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/execute`,
     athleteTrainingPlanPersistDraft: (entityId: string, athleteId: string) =>
@@ -158,6 +179,8 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/sandc/revise`,
     athleteWeeklyPlanJournal: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/weekly-plan-journal`,
+    athleteTodayPlan: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/today-plan`,
   },
   academies: {
     root: "/academies",
@@ -207,8 +230,10 @@ export const paths = {
     versions: (planId: string) =>
       `/training-plan-management/${encodeURIComponent(planId)}/versions`,
     activeDetail: (planId: string, generationDomain?: string) => {
-      void generationDomain;
-      return `/training-plan-management/${encodeURIComponent(planId)}/active/detail`;
+      const base = `/training-plan-management/${encodeURIComponent(planId)}/active/detail`;
+      const domain = generationDomain?.trim() ?? "";
+      if (domain === "") return base;
+      return `${base}?generationDomain=${encodeURIComponent(domain)}`;
     },
   },
   athletes: {

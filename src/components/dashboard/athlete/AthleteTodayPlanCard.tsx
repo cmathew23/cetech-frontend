@@ -4,18 +4,18 @@ import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardS
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { useAuth } from "@/hooks/useAuth";
+import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
-  fetchAthleteWeeklyPlanJournal,
-  type AthleteWeeklyPlanJournal,
+  fetchAthleteTodayPlan,
+  type AthleteTodayPlan,
 } from "@/lib/api/coachAthletePlanningReadiness";
-import { formatDateWithWeekday, parseToLocalDate } from "@/lib/dateTime";
+import { formatDateWithWeekday } from "@/lib/dateTime";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type ViewState =
   | { phase: "loading" }
-  | { phase: "ready"; journal: AthleteWeeklyPlanJournal }
+  | { phase: "ready"; todayPlan: AthleteTodayPlan }
   | { phase: "error"; message: string };
 
 const DOMAIN_SUMMARY = [
@@ -73,24 +73,10 @@ function summarizeTodayItem(item: unknown): string | null {
   return null;
 }
 
-function isSameLocalCalendarDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
-}
-
 export function AthleteTodayPlanCard() {
-  const { accessGateReady, accessContext, user } = useAuth();
-  const entityId = useMemo(
-    () => accessContext?.academy.trainingEntityId?.trim() ?? "",
-    [accessContext?.academy.trainingEntityId],
-  );
-  const athleteId = useMemo(
-    () => accessContext?.user.userId?.trim() ?? user?.id?.trim() ?? "",
-    [accessContext?.user.userId, user?.id],
-  );
+  const planningIds = useAthletePlanningIdentifiers();
+  const entityId = planningIds.ids?.entityId ?? "";
+  const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -100,13 +86,14 @@ export function AthleteTodayPlanCard() {
   }, []);
 
   useEffect(() => {
-    if (!accessGateReady || entityId === "" || athleteId === "") return;
+    if (planningIds.phase === "loading") return;
+    if (planningIds.phase === "not_ready") return;
     let cancelled = false;
     void (async () => {
       try {
-        const journal = await fetchAthleteWeeklyPlanJournal(entityId, athleteId);
+        const todayPlan = await fetchAthleteTodayPlan(entityId, athleteId);
         if (!cancelled) {
-          setState({ phase: "ready", journal });
+          setState({ phase: "ready", todayPlan });
         }
       } catch (e) {
         if (cancelled) return;
@@ -120,28 +107,24 @@ export function AthleteTodayPlanCard() {
     return () => {
       cancelled = true;
     };
-  }, [accessGateReady, athleteId, entityId, reloadKey]);
+  }, [athleteId, entityId, planningIds.phase, reloadKey]);
 
-  const isLoading = !accessGateReady || state.phase === "loading";
-  const journal = state.phase === "ready" ? state.journal : null;
-  const allDomainsNotReleased = journal
-    ? DOMAIN_SUMMARY.every((domain) => journal.domains[domain.key].status === "NOT_RELEASED")
+  const isLoading = planningIds.phase === "loading" ||
+    (planningIds.phase === "ready" && state.phase === "loading");
+  const todayPlan = state.phase === "ready" ? state.todayPlan : null;
+  const allDomainsNotReleased = todayPlan
+    ? DOMAIN_SUMMARY.every((domain) => todayPlan.domains[domain.key].status === "NOT_RELEASED")
     : false;
-  const todayDay = useMemo(() => {
-    if (!journal) return null;
-    const today = new Date();
-    return (
-      journal.days.find((day) => {
-        const parsed = parseToLocalDate(day.date);
-        return parsed ? isSameLocalCalendarDay(parsed, today) : false;
-      }) ?? null
-    );
-  }, [journal]);
+  const hasAnyTodayItems = todayPlan
+    ? todayPlan.skills.length > 0 ||
+      todayPlan.nutrition.length > 0 ||
+      todayPlan.sandc.length > 0
+    : false;
 
   return (
     <DashboardCardShell
       title="Today’s Plan"
-      subtitle={todayDay ? formatDateWithWeekday(todayDay.date) : undefined}
+      subtitle={todayPlan?.date ? formatDateWithWeekday(todayPlan.date) : undefined}
       className="min-h-[280px]"
     >
       <div className="space-y-3">
@@ -149,9 +132,9 @@ export function AthleteTodayPlanCard() {
           <div className="flex min-h-[160px] items-center justify-center text-sm text-textSecondary">
             Loading today’s plan…
           </div>
-        ) : entityId === "" || athleteId === "" ? (
+        ) : planningIds.phase === "not_ready" ? (
           <Alert variant="warning">
-            Your athlete context is not available yet. Please try again shortly.
+            Athlete profile not ready
           </Alert>
         ) : state.phase === "error" ? (
           <div className="space-y-3">
@@ -166,17 +149,17 @@ export function AthleteTodayPlanCard() {
           <p className="text-sm text-textSecondary">
             Your weekly plan has not been released yet.
           </p>
-        ) : todayDay === null ? (
+        ) : todayPlan === null || !hasAnyTodayItems ? (
           <p className="text-sm text-textSecondary">No plan released for today.</p>
         ) : (
           <div className="space-y-3">
             {DOMAIN_SUMMARY.map((domain) => {
               const items =
                 domain.key === "SKILLS"
-                  ? todayDay.skills
+                  ? todayPlan.skills
                   : domain.key === "NUTRITION"
-                    ? todayDay.nutrition
-                    : todayDay.sandc;
+                    ? todayPlan.nutrition
+                    : todayPlan.sandc;
               const preview = items
                 .map((item) => summarizeTodayItem(item))
                 .filter((value): value is string => typeof value === "string" && value !== "")

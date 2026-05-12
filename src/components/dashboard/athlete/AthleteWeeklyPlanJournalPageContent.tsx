@@ -7,14 +7,14 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { useAuth } from "@/hooks/useAuth";
+import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchAthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournal,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import { formatDateOnly } from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type ViewState =
   | { phase: "loading" }
@@ -249,15 +249,9 @@ function domainBadge(status: "RELEASED" | "NOT_RELEASED") {
 }
 
 export function AthleteWeeklyPlanJournalPageContent() {
-  const { accessGateReady, accessContext, user } = useAuth();
-  const entityId = useMemo(
-    () => accessContext?.academy.trainingEntityId?.trim() ?? "",
-    [accessContext?.academy.trainingEntityId],
-  );
-  const athleteId = useMemo(
-    () => accessContext?.user.userId?.trim() ?? user?.id?.trim() ?? "",
-    [accessContext?.user.userId, user?.id],
-  );
+  const planningIds = useAthletePlanningIdentifiers();
+  const entityId = planningIds.ids?.entityId ?? "";
+  const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -267,7 +261,8 @@ export function AthleteWeeklyPlanJournalPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!accessGateReady || entityId === "" || athleteId === "") return;
+    if (planningIds.phase === "loading") return;
+    if (planningIds.phase === "not_ready") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -286,9 +281,10 @@ export function AthleteWeeklyPlanJournalPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [accessGateReady, athleteId, entityId, reloadKey]);
+  }, [athleteId, entityId, planningIds.phase, reloadKey]);
 
-  const isLoading = !accessGateReady || state.phase === "loading";
+  const isLoading = planningIds.phase === "loading" ||
+    (planningIds.phase === "ready" && state.phase === "loading");
   const journal = state.phase === "ready" ? state.journal : null;
   const weekSubtitle = journal
     ? `${formatDateOnly(journal.weekStartDate)} - ${formatDateOnly(journal.weekEndDate)}`
@@ -310,10 +306,10 @@ export function AthleteWeeklyPlanJournalPageContent() {
             Loading weekly plan journal…
           </div>
         </DashboardCardShell>
-      ) : entityId === "" || athleteId === "" ? (
+      ) : planningIds.phase === "not_ready" ? (
         <DashboardCardShell title="Weekly Plan Journal">
           <Alert variant="warning">
-            Your athlete context is not available yet. Please try again shortly.
+            Athlete profile not ready
           </Alert>
         </DashboardCardShell>
       ) : state.phase === "error" ? (
@@ -330,7 +326,8 @@ export function AthleteWeeklyPlanJournalPageContent() {
       ) : (
         <>
           {(() => {
-            const readyJournal = state.journal;
+            const readyJournal = journal;
+            if (readyJournal === null) return null;
             return (
               <>
           <DashboardCardShell title="Current Week" subtitle={weekSubtitle}>

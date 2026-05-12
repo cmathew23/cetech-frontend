@@ -9,12 +9,21 @@ vi.mock("@/lib/apiClient", () => ({
   isNormalizedApiError: () => false,
 }));
 
+import { paths } from "@/config/endpoints";
 import {
+  executeCoachAthleteTrainingPlan,
+  fetchAthleteTodayPlan,
   fetchAthleteWeeklyPlanJournal,
+  fetchCoachAthleteTrainingPlanCompleteness,
+  fetchCoachAthleteUpstreamPlanningContext,
+  fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
   headApproveTrainingPlanVersion,
   fetchCoachAthleteTrainingPlanReadiness,
+  parseUpstreamPlanningContextPayload,
   parseReadinessPayload,
+  persistCoachAthleteTrainingPlanDraft,
+  persistDraftResultFromLatestDomainDraft,
   requestTrainingPlanRevision,
   reviseNutritionPlan,
   releaseTrainingPlanVersionToAthlete,
@@ -61,6 +70,14 @@ describe("parseReadinessPayload", () => {
     ).toEqual(["seasonDefined", "upstreamGenerationDecisionPassed"]);
   });
 
+  it("parses sportCode echoed on readiness payloads", () => {
+    expect(
+      parseReadinessPayload({
+        data: { readinessStatus: "READY", sportCode: "TENNIS" },
+      }).sportCode,
+    ).toBe("TENNIS");
+  });
+
   it("preserves exact blocker payloads when no text key matches", () => {
     expect(
       parseReadinessPayload({
@@ -100,6 +117,160 @@ describe("parseReadinessPayload", () => {
         cache: "no-store",
       },
     );
+  });
+
+  it("includes sportCode in readiness requests when provided", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        readinessStatus: "READY",
+        canGenerate: true,
+        blockers: [],
+      },
+    });
+
+    await fetchCoachAthleteTrainingPlanReadiness("entity-1", "athlete-1", {
+      generationDomain: "SKILLS",
+      sportCode: "GOLF",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/readiness?generationDomain=SKILLS&sportCode=GOLF",
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+  });
+
+  it("includes sportCode in completeness requests when provided", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        completenessStatus: "COMPLETE",
+        missingRequiredFields: [],
+      },
+    });
+
+    await fetchCoachAthleteTrainingPlanCompleteness("entity-1", "athlete-1", {
+      sportCode: "GOLF",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/completeness?sportCode=GOLF",
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+  });
+
+  it("parses locked upstream planning context payloads", () => {
+    expect(
+      parseUpstreamPlanningContextPayload({
+        data: {
+          upstreamPlanningContextLocked: true,
+          planningContext: {
+            seasonCycleId: "season-1",
+            goalIds: ["goal-1", "goal-2"],
+            startDate: "2026-05-11",
+            endDate: "2026-05-17",
+            phase: "PRE_SEASON",
+          },
+          workloadSummary: {
+            weeklyTrainingHours: 8,
+            recommendedMinHours: 6,
+            recommendedMaxHours: 10,
+            status: "READY",
+            sportCode: "TENNIS",
+            validatedLevel: "INTERMEDIATE",
+          },
+        },
+      }),
+    ).toMatchObject({
+      upstreamPlanningContextLocked: true,
+      seasonCycleId: "season-1",
+      goalIds: ["goal-1", "goal-2"],
+      startDate: "2026-05-11",
+      endDate: "2026-05-17",
+      phase: "PRE_SEASON",
+      workloadSummary: {
+        weeklyTrainingHours: 8,
+        recommendedMinHours: 6,
+        recommendedMaxHours: 10,
+        status: "READY",
+      },
+    });
+  });
+
+  it("fetches upstream planning context from the dedicated endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        upstreamPlanningContextLocked: true,
+        seasonCycleId: "season-1",
+        goalIds: ["goal-1"],
+        startDate: "2026-05-11",
+        endDate: "2026-05-17",
+      },
+    });
+
+    const result = await fetchCoachAthleteUpstreamPlanningContext(
+      "entity-1",
+      "athlete-1",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/upstream-planning-context",
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+    expect(result.upstreamPlanningContextLocked).toBe(true);
+    expect(result.seasonCycleId).toBe("season-1");
+  });
+
+  it("parses structured execute missingRequirements payloads", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        executionDecision: {
+          executed: false,
+          reason: "blocked-by-backend",
+        },
+        completenessDecision: {
+          canGenerate: false,
+          missingRequirements: [
+            { reason: "upstreamGenerationDecisionPassed" },
+            { message: "seasonDefined" },
+          ],
+        },
+      },
+    });
+
+    const result = await executeCoachAthleteTrainingPlan("entity-1", "athlete-1", {
+      sportCode: "SOCCER",
+      durationDays: 7,
+      generationDomain: "SKILLS",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/execute",
+      {
+        method: "POST",
+        timeoutMs: 120000,
+        body: JSON.stringify({
+          sportCode: "SOCCER",
+          durationDays: 7,
+          generationDomain: "SKILLS",
+        }),
+      },
+    );
+    expect(result.completenessDecision).toEqual({
+      canGenerate: false,
+      missingRequirements: ["upstreamGenerationDecisionPassed", "seasonDefined"],
+    });
   });
 
   it("submits a training plan version for review with generationDomain", async () => {
@@ -224,7 +395,7 @@ describe("parseReadinessPayload", () => {
     );
   });
 
-  it("fetches persisted active detail without a generationDomain query", async () => {
+  it("fetches persisted active detail with generationDomain query", async () => {
     apiRequestMock.mockResolvedValue({
       message: "ok",
       data: {
@@ -246,7 +417,7 @@ describe("parseReadinessPayload", () => {
     const result = await fetchPersistedTrainingPlanActiveDetail("plan-1", "SKILLS");
 
     expect(apiRequestMock).toHaveBeenCalledWith(
-      "/training-plan-management/plan-1/active/detail",
+      "/training-plan-management/plan-1/active/detail?generationDomain=SKILLS",
       {
         method: "GET",
         cache: "no-store",
@@ -254,6 +425,33 @@ describe("parseReadinessPayload", () => {
     );
     expect(result.plan.id).toBe("plan-1");
     expect(result.version.id).toBe("version-1");
+  });
+
+  it("includes generationDomain for NUTRITION active/detail", async () => {
+    apiRequestMock.mockResolvedValue({
+      message: "ok",
+      data: {
+        plan: { id: "plan-n", athleteId: "athlete-1", entityId: "entity-1", status: "ACTIVE" },
+        version: { id: "version-n", trainingPlanId: "plan-n", status: "ACTIVE" },
+        days: [],
+      },
+    });
+
+    await fetchPersistedTrainingPlanActiveDetail("plan-n", "NUTRITION");
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/training-plan-management/plan-n/active/detail?generationDomain=NUTRITION",
+      expect.objectContaining({ method: "GET", cache: "no-store" }),
+    );
+  });
+
+  it("paths.trainingPlanManagement.activeDetail includes generationDomain query", () => {
+    expect(paths.trainingPlanManagement.activeDetail("plan-1", "SKILLS")).toBe(
+      "/training-plan-management/plan-1/active/detail?generationDomain=SKILLS",
+    );
+    expect(paths.trainingPlanManagement.activeDetail("plan/x", "S_AND_C")).toBe(
+      "/training-plan-management/plan%2Fx/active/detail?generationDomain=S_AND_C",
+    );
   });
 
   it("parses the wrapped weekly journal payload", async () => {
@@ -294,6 +492,115 @@ describe("parseReadinessPayload", () => {
     expect(result.days[0]).toMatchObject({
       date: "2026-05-04",
       dayNumber: 1,
+    });
+  });
+
+  it("fetches today plan and treats empty 200 payloads as an empty plan", async () => {
+    apiRequestMock.mockResolvedValue({
+      message: "ok",
+      data: {},
+    });
+
+    const result = await fetchAthleteTodayPlan("entity-1", "athlete-1");
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/today-plan",
+      {
+        method: "GET",
+        cache: "no-store",
+      },
+    );
+    expect(result.domains.SKILLS.status).toBe("NOT_RELEASED");
+    expect(result.domains.NUTRITION.status).toBe("NOT_RELEASED");
+    expect(result.domains.S_AND_C.status).toBe("NOT_RELEASED");
+    expect(result.skills).toEqual([]);
+    expect(result.nutrition).toEqual([]);
+    expect(result.sandc).toEqual([]);
+  });
+});
+
+describe("training plan generation timeouts and helpers", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("persist-draft uses 60s client timeout", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        trainingPlanId: "tp-1",
+        trainingPlanVersionId: "tv-1",
+        versionNumber: 1,
+        status: "DRAFT",
+        daysCreated: 7,
+        sessionsCreated: 5,
+        itemsPersisted: 10,
+      },
+    });
+
+    await persistCoachAthleteTrainingPlanDraft("entity-1", "athlete-1", {
+      generatedPlannerCandidate: { x: 1 },
+      generationContextSnapshot: { y: 2 },
+      persistenceContext: {
+        seasonCycleId: "s1",
+        startDate: "2026-01-01",
+        endDate: "2026-01-07",
+      },
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/persist-draft",
+      expect.objectContaining({
+        method: "POST",
+        timeoutMs: 60_000,
+      }),
+    );
+  });
+
+  it("latest-domain-draft GET uses extended client timeout by default", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "tp-1",
+      trainingPlanVersionId: "tv-1",
+      days: [],
+    });
+
+    await fetchLatestCoachAthleteDomainDraft("entity-1", "athlete-1", "SKILLS");
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/domain-drafts/latest?generationDomain=SKILLS",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 60_000,
+      }),
+    );
+  });
+
+  it("maps latest draft fields to persist-draft result shape", () => {
+    expect(
+      persistDraftResultFromLatestDomainDraft({
+        trainingPlanId: "p1",
+        trainingPlanVersionId: "v1",
+        versionNumber: 2,
+        status: "AI_GENERATED",
+        source: "AI",
+        revision: null,
+        durationDays: 7,
+        daysCreated: 7,
+        sessionsCreated: 5,
+        itemsPersisted: 12,
+        days: [],
+        raw: { ok: true },
+      }),
+    ).toEqual({
+      trainingPlanId: "p1",
+      trainingPlanVersionId: "v1",
+      versionNumber: 2,
+      status: "AI_GENERATED",
+      daysCreated: 7,
+      sessionsCreated: 5,
+      itemsPersisted: 12,
+      raw: { ok: true },
     });
   });
 });

@@ -17,6 +17,7 @@ import {
 import { getToken, removeToken, setToken } from "@/lib/auth";
 import {
   AUTH_STATE_CHANGE_EVENT,
+  clearClientAuthStorageState,
   clearClientLogoutState,
   markLoggingOut,
   requestClientLogout,
@@ -243,6 +244,9 @@ export function useAuth() {
           throw err;
         }
 
+        clearClientAuthStorageState();
+        setAccessContext(null);
+        persistAccessContext(null);
         setToken(token);
         const me = await fetchMe();
         let ctx: AccessContextPayload | null = null;

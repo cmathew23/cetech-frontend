@@ -18,13 +18,7 @@ export type AthleteMeProfile = {
   athleteProfileId: string;
 };
 
-/**
- * Athlete self profile truth source for onboarding-selected sport/level.
- * Contract source: GET /athletes/me.
- */
-export async function fetchAthleteMeProfile(): Promise<AthleteMeProfile> {
-  const raw = await apiRequest(paths.athletes.me, { method: "GET" });
-  const data = adaptBackendSuccess(raw);
+export function parseAthleteMeProfilePayload(data: unknown): AthleteMeProfile {
   const root = asRecord(data);
   const nestedData = asRecord(root?.data);
   const profile =
@@ -46,9 +40,19 @@ export async function fetchAthleteMeProfile(): Promise<AthleteMeProfile> {
       athleteProfileId =
         readString(source.athleteProfileId) ||
         readString(source.athleteId) ||
+        readString(source.id) ||
         (ap ? readString(ap.id) || readString(ap.athleteProfileId) : "");
     }
   }
 
   return { sport, level, athleteProfileId };
+}
+
+/**
+ * Athlete self profile truth source for onboarding-selected sport/level.
+ * Contract source: GET /athletes/me.
+ */
+export async function fetchAthleteMeProfile(): Promise<AthleteMeProfile> {
+  const raw = await apiRequest(paths.athletes.me, { method: "GET" });
+  return parseAthleteMeProfilePayload(adaptBackendSuccess(raw));
 }

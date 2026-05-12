@@ -53,6 +53,15 @@ export type AppContextCoachSummary = {
   assignedAthleteCount: number;
 };
 
+export type AppContextAthleteProfileContext = {
+  /** AthleteProfile.id; this is the athleteId expected by entity-scoped planning endpoints. */
+  athleteProfileId: string;
+  trainingEntityId: string | null;
+  trainingEntityName: string | null;
+  membershipId: string;
+  membershipStatus: string;
+};
+
 /** Coach row from `assignedCoaches` on GET /me/app-context (athlete-facing). */
 export type AppContextAssignedCoach = {
   coachId: string;
@@ -74,6 +83,7 @@ export type AccessContextPayload = {
   invitation: AppContextInvitation;
   access: AppContextAccess;
   coachSummary: AppContextCoachSummary;
+  athleteProfile: AppContextAthleteProfileContext | null;
   assignedCoaches: AppContextAssignedCoach[];
 };
 
@@ -185,6 +195,110 @@ function parseCoachSummary(raw: unknown): AppContextCoachSummary {
   return {
     assignedAthleteCount:
       typeof n === "number" && Number.isFinite(n) ? Math.max(0, n) : 0,
+  };
+}
+
+function readFirstNonEmptyString(
+  records: Array<Record<string, unknown> | null>,
+  keys: string[],
+): string {
+  for (const record of records) {
+    if (!record) continue;
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (trimmed !== "") return trimmed;
+    }
+  }
+  return "";
+}
+
+function nestedProfileRecord(record: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!record) return null;
+  return (
+    asRecord(record.athleteProfile) ??
+    asRecord(record.athlete) ??
+    asRecord(record.profile)
+  );
+}
+
+function parseAthleteProfileContext(
+  root: Record<string, unknown>,
+): AppContextAthleteProfileContext | null {
+  const directProfile =
+    asRecord(root.athleteProfile) ??
+    asRecord(root.athlete) ??
+    asRecord(root.profile) ??
+    nestedProfileRecord(asRecord(root.user));
+  const activeMembership =
+    asRecord(root.activeAthleteMembership) ??
+    asRecord(root.athleteMembership) ??
+    asRecord(root.activeMembership) ??
+    asRecord(root.membership);
+  const activeMembershipProfile = nestedProfileRecord(activeMembership);
+
+  const memberships = Array.isArray(root.memberships)
+    ? root.memberships.map(asRecord).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const athleteMembership = memberships.find((row) => {
+    const role = readFirstNonEmptyString([row], ["role", "membershipRole"]).toUpperCase();
+    const status = readFirstNonEmptyString([row], ["status", "membershipStatus"]).toUpperCase();
+    return role === "ATHLETE" && (status === "" || status === "ACTIVE" || status === "ACCEPTED");
+  }) ?? null;
+  const athleteMembershipProfile = nestedProfileRecord(athleteMembership);
+
+  const profileSources = [
+    directProfile,
+    activeMembershipProfile,
+    athleteMembershipProfile,
+  ];
+  const membershipSources = [activeMembership, athleteMembership];
+  const athleteProfileId =
+    readFirstNonEmptyString(profileSources, [
+      "athleteProfileId",
+      "athleteId",
+      "profileId",
+      "id",
+    ]) ||
+    readFirstNonEmptyString(membershipSources, [
+      "athleteProfileId",
+      "athleteId",
+    ]);
+
+  const trainingEntityId =
+    readFirstNonEmptyString([...profileSources, ...membershipSources], [
+      "trainingEntityId",
+      "entityId",
+    ]) || null;
+  const trainingEntityName =
+    readFirstNonEmptyString([...profileSources, ...membershipSources], [
+      "trainingEntityName",
+      "entityName",
+    ]) || null;
+  const membershipId = readFirstNonEmptyString(membershipSources, [
+    "membershipId",
+  ]);
+  const membershipStatus = readFirstNonEmptyString(membershipSources, [
+    "membershipStatus",
+    "status",
+  ]);
+
+  if (
+    athleteProfileId === "" &&
+    trainingEntityId === null &&
+    membershipId === "" &&
+    membershipStatus === ""
+  ) {
+    return null;
+  }
+
+  return {
+    athleteProfileId,
+    trainingEntityId,
+    trainingEntityName,
+    membershipId,
+    membershipStatus,
   };
 }
 
@@ -431,6 +545,7 @@ export function parseAccessContextPayload(data: unknown): AccessContextPayload {
         reasonCode: "",
       },
       coachSummary: { assignedAthleteCount: 0 },
+      athleteProfile: null,
       assignedCoaches: [],
     };
   }
@@ -450,6 +565,7 @@ export function parseAccessContextPayload(data: unknown): AccessContextPayload {
     invitation: parseInvitation(o.invitation),
     access: parseAccess(o.access),
     coachSummary: parseCoachSummary(o.coachSummary),
+    athleteProfile: parseAthleteProfileContext(o),
     assignedCoaches: parseAssignedCoaches(o.assignedCoaches),
   };
 }

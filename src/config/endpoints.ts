@@ -120,6 +120,11 @@ export const paths = {
       athleteId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/upstream-planning-context`,
+    athleteTrainingPlanPlanningContextLock: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/planning-context/lock`,
     athleteTrainingPlanCompleteness: (
       entityId: string,
       athleteId: string,

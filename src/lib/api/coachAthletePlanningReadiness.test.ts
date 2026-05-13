@@ -18,15 +18,20 @@ import {
   fetchCoachAthleteUpstreamPlanningContext,
   fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
+  headApprove,
   headApproveTrainingPlanVersion,
+  lockCoachAthletePlanningContext,
   fetchCoachAthleteTrainingPlanReadiness,
   parseUpstreamPlanningContextPayload,
   parseReadinessPayload,
   persistCoachAthleteTrainingPlanDraft,
   persistDraftResultFromLatestDomainDraft,
+  release,
   requestTrainingPlanRevision,
+  requestRevision,
   reviseNutritionPlan,
   releaseTrainingPlanVersionToAthlete,
+  submitReview,
   submitTrainingPlanVersionForReview,
 } from "@/lib/api/coachAthletePlanningReadiness";
 
@@ -170,6 +175,11 @@ describe("parseReadinessPayload", () => {
       parseUpstreamPlanningContextPayload({
         data: {
           upstreamPlanningContextLocked: true,
+          planningContextLocked: true,
+          planWindow: {
+            startDate: "2026-05-11",
+            endDate: "2026-05-17",
+          },
           planningContext: {
             seasonCycleId: "season-1",
             goalIds: ["goal-1", "goal-2"],
@@ -188,7 +198,12 @@ describe("parseReadinessPayload", () => {
         },
       }),
     ).toMatchObject({
+      planningContextLocked: true,
       upstreamPlanningContextLocked: true,
+      planWindow: {
+        startDate: "2026-05-11",
+        endDate: "2026-05-17",
+      },
       seasonCycleId: "season-1",
       goalIds: ["goal-1", "goal-2"],
       startDate: "2026-05-11",
@@ -229,6 +244,45 @@ describe("parseReadinessPayload", () => {
     );
     expect(result.upstreamPlanningContextLocked).toBe(true);
     expect(result.seasonCycleId).toBe("season-1");
+  });
+
+  it("locks planning context with planWindow dates", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        planningContextLocked: true,
+        upstreamPlanningContextLocked: true,
+        planWindow: {
+          startDate: "2026-05-11",
+          endDate: "2026-05-17",
+        },
+      },
+    });
+
+    const result = await lockCoachAthletePlanningContext("entity-1", "athlete-1", {
+      planWindow: {
+        startDate: "2026-05-11",
+        endDate: "2026-05-17",
+      },
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/planning-context/lock",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          planWindow: {
+            startDate: "2026-05-11",
+            endDate: "2026-05-17",
+          },
+        }),
+      },
+    );
+    expect(result.planningContextLocked).toBe(true);
+    expect(result.planWindow).toEqual({
+      startDate: "2026-05-11",
+      endDate: "2026-05-17",
+    });
   });
 
   it("parses structured execute missingRequirements payloads", async () => {
@@ -276,6 +330,26 @@ describe("parseReadinessPayload", () => {
   it("submits a training plan version for review with generationDomain", async () => {
     apiRequestMock.mockResolvedValue({ success: true });
 
+    await submitReview(
+      "entity-1",
+      "athlete-1",
+      "plan-1",
+      "version-1",
+      "SKILLS",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/submit-review",
+      {
+        method: "POST",
+        body: JSON.stringify({ generationDomain: "SKILLS" }),
+      },
+    );
+  });
+
+  it("keeps the legacy submit-review wrapper on the same endpoint", async () => {
+    apiRequestMock.mockResolvedValue({ success: true });
+
     await submitTrainingPlanVersionForReview(
       "entity-1",
       "athlete-1",
@@ -296,6 +370,26 @@ describe("parseReadinessPayload", () => {
   it("head-approves a training plan version with generationDomain", async () => {
     apiRequestMock.mockResolvedValue({ success: true });
 
+    await headApprove(
+      "entity-1",
+      "athlete-1",
+      "plan-1",
+      "version-1",
+      "NUTRITION",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/head-approve",
+      {
+        method: "POST",
+        body: JSON.stringify({ generationDomain: "NUTRITION" }),
+      },
+    );
+  });
+
+  it("keeps the legacy head-approve wrapper on the same endpoint", async () => {
+    apiRequestMock.mockResolvedValue({ success: true });
+
     await headApproveTrainingPlanVersion(
       "entity-1",
       "athlete-1",
@@ -314,6 +408,26 @@ describe("parseReadinessPayload", () => {
   });
 
   it("releases a training plan version with generationDomain", async () => {
+    apiRequestMock.mockResolvedValue({ success: true });
+
+    await release(
+      "entity-1",
+      "athlete-1",
+      "plan-1",
+      "version-1",
+      "S_AND_C",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/release",
+      {
+        method: "POST",
+        body: JSON.stringify({ generationDomain: "S_AND_C" }),
+      },
+    );
+  });
+
+  it("keeps the legacy release wrapper on the same endpoint", async () => {
     apiRequestMock.mockResolvedValue({ success: true });
 
     await releaseTrainingPlanVersionToAthlete(
@@ -344,7 +458,7 @@ describe("parseReadinessPayload", () => {
       },
     });
 
-    const result = await requestTrainingPlanRevision(
+    const result = await requestRevision(
       "entity-1",
       "athlete-1",
       "plan-1",
@@ -367,6 +481,37 @@ describe("parseReadinessPayload", () => {
       coachFeedback: "Tighten the drill progression",
       warnings: ["regenerated"],
     });
+  });
+
+  it("keeps the legacy request-revision wrapper on the same endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        requestRevision: {
+          coachFeedback: "Tighten the drill progression",
+        },
+      },
+    });
+
+    await requestTrainingPlanRevision(
+      "entity-1",
+      "athlete-1",
+      "plan-1",
+      "version-1",
+      "SKILLS",
+      "Tighten the drill progression",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/request-revision",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          generationDomain: "SKILLS",
+          coachFeedback: "Tighten the drill progression",
+        }),
+      },
+    );
   });
 
   it("uses the dedicated nutrition revise endpoint", async () => {
@@ -410,6 +555,10 @@ describe("parseReadinessPayload", () => {
           trainingPlanId: "plan-1",
           status: "ACTIVE",
         },
+        generationDomain: "SKILLS",
+        allowedActions: ["SUBMIT_REVIEW", "HEAD_APPROVE", "REQUEST_REVISION", "RELEASE"],
+        releaseMode: "HEAD_COACH_RELEASE",
+        selectedVersionRule: "ACTIVE_VERSION",
         days: [],
       },
     });
@@ -425,6 +574,15 @@ describe("parseReadinessPayload", () => {
     );
     expect(result.plan.id).toBe("plan-1");
     expect(result.version.id).toBe("version-1");
+    expect(result.generationDomain).toBe("SKILLS");
+    expect(result.allowedActions).toEqual([
+      "SUBMIT_REVIEW",
+      "HEAD_APPROVE",
+      "REQUEST_REVISION",
+      "RELEASE",
+    ]);
+    expect(result.releaseMode).toBe("HEAD_COACH_RELEASE");
+    expect(result.selectedVersionRule).toBe("ACTIVE_VERSION");
   });
 
   it("includes generationDomain for NUTRITION active/detail", async () => {

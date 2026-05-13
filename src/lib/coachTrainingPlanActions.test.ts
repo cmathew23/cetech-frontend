@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveTrainingPlanAction } from "@/lib/coachTrainingPlanActions";
+import {
+  resolveTrainingPlanAction,
+  WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
+} from "@/lib/coachTrainingPlanActions";
 
 describe("resolveTrainingPlanAction", () => {
   it("shows Edit Skills Plan for a skills coach with a persisted plan", () => {
@@ -84,6 +87,100 @@ describe("resolveTrainingPlanAction", () => {
     expect(action.buttonLabel).toBe("Create Nutrition Plan");
     expect(action.planStatusLabel).toBeNull();
     expect(action.href).toBe("/coach/training-plans/athlete102/workflow");
+    expect(action.disabled).toBe(false);
+  });
+
+  it.each([
+    ["SKILLS", "Create Skills Plan"],
+    ["NUTRITION", "Create Nutrition Plan"],
+    ["S_AND_C", "Create S&C Plan"],
+  ] as const)(
+    "disables %s create action while Head Coach planning context is unlocked",
+    (domain, buttonLabel) => {
+      const action = resolveTrainingPlanAction({
+        athleteId: "athlete-locked",
+        assignedFunctions: [domain],
+        currentGenerationDomain: null,
+        currentPlanId: null,
+        currentPlanStatus: null,
+        fallbackDomain: null,
+        hasPlanningProfile: true,
+        hasHeadCoachConfigured: true,
+        isHeadCoachPlanningContextOwner: false,
+        planningContextLocked: false,
+      });
+
+      expect(action.buttonLabel).toBe(buttonLabel);
+      expect(action.disabled).toBe(true);
+      expect(action.href).toBeNull();
+      expect(action.helperBelowButton).toBe(
+        WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
+      );
+    },
+  );
+
+  it.each([
+    ["SKILLS", "Create Skills Plan"],
+    ["NUTRITION", "Create Nutrition Plan"],
+    ["S_AND_C", "Create S&C Plan"],
+  ] as const)(
+    "enables %s create action after Head Coach planning context is locked",
+    (domain, buttonLabel) => {
+      const action = resolveTrainingPlanAction({
+        athleteId: "athlete-unlocked",
+        assignedFunctions: [domain],
+        currentGenerationDomain: null,
+        currentPlanId: null,
+        currentPlanStatus: null,
+        fallbackDomain: null,
+        hasPlanningProfile: true,
+        hasHeadCoachConfigured: true,
+        isHeadCoachPlanningContextOwner: false,
+        planningContextLocked: true,
+      });
+
+      expect(action.buttonLabel).toBe(buttonLabel);
+      expect(action.disabled).toBe(false);
+      expect(action.href).toBe("/coach/training-plans/athlete-unlocked/workflow");
+      expect(action.helperBelowButton).toBeNull();
+    },
+  );
+
+  it("preserves Skills Coach fallback when no Head Coach is configured", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-no-head",
+      assignedFunctions: ["SKILLS"],
+      currentGenerationDomain: null,
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: null,
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: false,
+      isHeadCoachPlanningContextOwner: false,
+      planningContextLocked: false,
+    });
+
+    expect(action.buttonLabel).toBe("Create Skills Plan");
+    expect(action.disabled).toBe(false);
+    expect(action.href).toBe("/coach/training-plans/athlete-no-head/workflow");
+    expect(action.helperBelowButton).toBeNull();
+  });
+
+  it("opens the planning workflow for a Head Coach without a generation function", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete103",
+      assignedFunctions: [],
+      currentGenerationDomain: null,
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: null,
+      hasPlanningProfile: true,
+      isHeadCoachPlanningContextOwner: true,
+    });
+
+    expect(action.buttonLabel).toBe("Open Planning Workflow");
+    expect(action.helperBelowButton).toBeNull();
+    expect(action.href).toBe("/coach/training-plans/athlete103/workflow");
     expect(action.disabled).toBe(false);
   });
 });

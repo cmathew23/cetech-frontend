@@ -7,6 +7,7 @@ import { CoachAthleteLevelValidationModal } from "@/components/dashboard/coach/C
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
 import { useAuth } from "@/hooks/useAuth";
 import {
   CalendarDays,
@@ -45,15 +46,16 @@ import {
   fetchCoachAthleteTrainingPlanReadiness,
   fetchCoachAthleteTrainingPlanWorkloadAssessment,
   fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest,
-  headApproveTrainingPlanVersion,
+  headApprove,
+  lockCoachAthletePlanningContext,
   persistCoachAthleteTrainingPlanDraft,
   persistDraftResultFromLatestDomainDraft,
-  requestTrainingPlanRevision,
-  releaseTrainingPlanVersionToAthlete,
+  release,
+  requestRevision,
   reviseCoachAthleteSandCTrainingPlan,
   reviseCoachAthleteSkillsTrainingPlan,
   reviseNutritionPlan,
-  submitTrainingPlanVersionForReview,
+  submitReview,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanExecuteResult,
   type CoachAthleteLatestDomainDraft,
@@ -84,6 +86,7 @@ import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelV
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   type MutableRefObject,
+  type FormEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
@@ -976,8 +979,8 @@ function normalizeTrainingPlanGenerationDomain(
 function governedPlanActionButtonLabel(
   action: GovernedTrainingPlanWorkflowAction,
 ): string {
-  if (action === "SUBMIT_REVIEW") return "Submit Review";
-  if (action === "HEAD_APPROVE") return "Approve Plan";
+  if (action === "SUBMIT_REVIEW") return "Submit for Head Coach Review";
+  if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
   return "Release to Athlete";
 }
@@ -985,10 +988,10 @@ function governedPlanActionButtonLabel(
 function governedPlanActionSuccessMessage(
   action: GovernedTrainingPlanWorkflowAction,
 ): string {
-  if (action === "SUBMIT_REVIEW") return "Training plan submitted for review.";
-  if (action === "HEAD_APPROVE") return "Training plan approved.";
-  if (action === "REQUEST_REVISION") return "Revision requested successfully.";
-  return "Training plan released to athlete.";
+  if (action === "SUBMIT_REVIEW") return "Plan submitted for Head Coach review.";
+  if (action === "HEAD_APPROVE") return "Plan approved.";
+  if (action === "REQUEST_REVISION") return "Revision requested.";
+  return "Plan released to athlete.";
 }
 
 function governedPlanActionErrorFallback(
@@ -1626,9 +1629,9 @@ function resolveCoachGenerationFunctions(input: {
 }
 
 function generationButtonLabel(domain: TrainingPlanGenerationDomain): string {
-  if (domain === "SKILLS") return "Generate Skills Plan";
-  if (domain === "NUTRITION") return "Generate Nutrition Plan";
-  return "Generate S&C Plan";
+  if (domain === "SKILLS") return "Create Skills Plan";
+  if (domain === "NUTRITION") return "Create Nutrition Plan";
+  return "Create S&C Plan";
 }
 
 function persistedPlanReviseButtonLabel(
@@ -2067,6 +2070,11 @@ export function CoachAthletePlanningProfileView({
   const [upstreamPlanningContextLoading, setUpstreamPlanningContextLoading] = useState(false);
   const [upstreamPlanningContextError, setUpstreamPlanningContextError] =
     useState<string | null>(null);
+  const [planningContextLockLoading, setPlanningContextLockLoading] = useState(false);
+  const [planningContextLockError, setPlanningContextLockError] = useState<string | null>(null);
+  const [planningContextLockSuccess, setPlanningContextLockSuccess] = useState<string | null>(
+    null,
+  );
   const [persistedSkillsPlanLoading, setPersistedSkillsPlanLoading] = useState(false);
   const [persistedSkillsPlanError, setPersistedSkillsPlanError] = useState<string | null>(
     null,
@@ -2090,7 +2098,7 @@ export function CoachAthletePlanningProfileView({
     useState<string | null>(null);
   const [governedPlanActionSuccessFeedback, setGovernedPlanActionSuccessFeedback] =
     useState<string | null>(null);
-  const [showRequestRevisionForm, setShowRequestRevisionForm] = useState(false);
+  const [requestRevisionModalOpen, setRequestRevisionModalOpen] = useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
   const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
@@ -2755,33 +2763,50 @@ export function CoachAthletePlanningProfileView({
     () => deriveGenerationDomains(setupState.coachFunctions),
     [setupState.coachFunctions],
   );
-  /**
-   * Single-domain Nutrition or S&C coaches consume upstream planning read-only; they do not own
-   * workload / season / plan-dates steps.
-   */
-  const isDownstreamDomainCoach = useMemo(
+  const isHeadCoachPlanningContextOwner = useMemo(
     () =>
-      allowedGenerationDomains.length === 1 &&
-      (allowedGenerationDomains[0] === "NUTRITION" ||
-        allowedGenerationDomains[0] === "S_AND_C"),
-    [allowedGenerationDomains],
+      setupState.hasHeadCoachConfigured &&
+      currentCoachIsHeadCoach(setupState.academyCoachRole),
+    [setupState.academyCoachRole, setupState.hasHeadCoachConfigured],
   );
   /**
-   * Planning owner: Head Coach when the academy head-coach gate is on; otherwise any coach with a
-   * Skills function. Downstream-only coaches are never owners.
+   * Coaches with a Head Coach configured consume locked planning context read-only unless they are
+   * the Head Coach. Without a Head Coach, keep the existing Nutrition/S&C read-only behavior.
+   */
+  const isDownstreamDomainCoach = useMemo(
+    () => {
+      if (
+        setupState.hasHeadCoachConfigured &&
+        !isHeadCoachPlanningContextOwner &&
+        allowedGenerationDomains.length > 0
+      ) {
+        return true;
+      }
+      return (
+        allowedGenerationDomains.length === 1 &&
+        (allowedGenerationDomains[0] === "NUTRITION" ||
+          allowedGenerationDomains[0] === "S_AND_C")
+      );
+    },
+    [
+      allowedGenerationDomains,
+      isHeadCoachPlanningContextOwner,
+      setupState.hasHeadCoachConfigured,
+    ],
+  );
+  /**
+   * Planning owner: Head Coach when the academy Head Coach gate is on; otherwise the existing
+   * Skills Coach fallback owns planning context.
    */
   const isPlanningOwnerCoach = useMemo(() => {
     if (isDownstreamDomainCoach) return false;
     if (setupState.hasHeadCoachConfigured) {
-      return (
-        currentCoachIsHeadCoach(setupState.academyCoachRole) ||
-        currentCoachHasSkillsFunction(setupState.coachFunctions)
-      );
+      return isHeadCoachPlanningContextOwner;
     }
     return currentCoachHasSkillsFunction(setupState.coachFunctions);
   }, [
+    isHeadCoachPlanningContextOwner,
     isDownstreamDomainCoach,
-    setupState.academyCoachRole,
     setupState.coachFunctions,
     setupState.hasHeadCoachConfigured,
   ]);
@@ -3218,22 +3243,33 @@ export function CoachAthletePlanningProfileView({
   );
 
   const everyPlanWindowInsidePhaseForGeneration = useMemo(
-    () =>
-      allowedGenerationDomains.length > 0 &&
-      allowedGenerationDomains.every((domain) =>
-        isPlanWindowInsidePhase(
-          activePhaseForSelectedSeason,
-          planStartDate,
-          addDaysToDateString(
+    () => {
+      const domainsForWindow =
+        allowedGenerationDomains.length > 0
+          ? allowedGenerationDomains
+          : isHeadCoachPlanningContextOwner
+            ? [effectiveCoachGenerationDomain]
+            : [];
+      return (
+        domainsForWindow.length > 0 &&
+        domainsForWindow.every((domain) =>
+          isPlanWindowInsidePhase(
+            activePhaseForSelectedSeason,
             planStartDate,
-            generationDurationDaysForDomain(domain, durationDays) - 1,
+            addDaysToDateString(
+              planStartDate,
+              generationDurationDaysForDomain(domain, durationDays) - 1,
+            ),
           ),
-        ),
-      ),
+        )
+      );
+    },
     [
       activePhaseForSelectedSeason,
       allowedGenerationDomains,
       durationDays,
+      effectiveCoachGenerationDomain,
+      isHeadCoachPlanningContextOwner,
       planStartDate,
     ],
   );
@@ -3259,10 +3295,44 @@ export function CoachAthletePlanningProfileView({
     ],
   );
 
+  const planningContextLocked =
+    setupState.hasHeadCoachConfigured
+      ? upstreamPlanningContext?.planningContextLocked === true
+      : true;
+  const requiresPlanningContextLockForGeneration =
+    setupState.hasHeadCoachConfigured &&
+    !isHeadCoachPlanningContextOwner &&
+    allowedGenerationDomains.length > 0;
   const UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE =
-    "Upstream planning context is not locked yet. Please ask the Skills Coach / planning owner to complete planning setup.";
+    "Waiting for Head Coach to lock planning context.";
 
   const generatePlanLocalErrorsByDomain = useMemo(() => {
+    if (requiresPlanningContextLockForGeneration) {
+      if (upstreamPlanningContextLoading) {
+        return Object.fromEntries(
+          allowedGenerationDomains.map((domain) => [
+            domain,
+            "Loading upstream planning context.",
+          ]),
+        ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
+      }
+      if (upstreamPlanningContextError !== null) {
+        return Object.fromEntries(
+          allowedGenerationDomains.map((domain) => [
+            domain,
+            upstreamPlanningContextError,
+          ]),
+        ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
+      }
+      if (!planningContextLocked) {
+        return Object.fromEntries(
+          allowedGenerationDomains.map((domain) => [
+            domain,
+            UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE,
+          ]),
+        ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
+      }
+    }
     if (isDownstreamDomainCoach && allowedGenerationDomains.length === 1) {
       const only = allowedGenerationDomains[0];
       if (upstreamPlanningContextLoading) {
@@ -3275,15 +3345,19 @@ export function CoachAthletePlanningProfileView({
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
-      if (upstreamPlanningContext?.upstreamPlanningContextLocked !== true) {
+      if (
+        setupState.hasHeadCoachConfigured &&
+        upstreamPlanningContext?.planningContextLocked !== true
+      ) {
         return { [only]: UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE } as Partial<
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
       if (
-        !upstreamPlanningContext.seasonCycleId ||
-        !upstreamPlanningContext.startDate ||
-        !upstreamPlanningContext.endDate
+        setupState.hasHeadCoachConfigured &&
+        (!upstreamPlanningContext?.seasonCycleId ||
+          !upstreamPlanningContext.startDate ||
+          !upstreamPlanningContext.endDate)
       ) {
         return {
           [only]:
@@ -3335,10 +3409,13 @@ export function CoachAthletePlanningProfileView({
     durationDays,
     entityId,
     isDownstreamDomainCoach,
+    planningContextLocked,
     planStartDate,
+    requiresPlanningContextLockForGeneration,
     selectedActiveGoals.length,
     selectedSeason,
     selectedSeasonCycleId,
+    setupState.hasHeadCoachConfigured,
     upstreamPlanningContext,
     upstreamPlanningContextError,
     upstreamPlanningContextLoading,
@@ -3350,15 +3427,15 @@ export function CoachAthletePlanningProfileView({
       upstreamPlanningContextLoading ||
       workloadAssessmentLoading ||
       generatePlanLoading ||
-      (isDownstreamDomainCoach
-        ? upstreamPlanningContext?.upstreamPlanningContextLocked !== true
+      (requiresPlanningContextLockForGeneration
+        ? !planningContextLocked
         : !generationReadinessFromApis),
     [
       generatePlanLoading,
       generationReadinessFromApis,
-      isDownstreamDomainCoach,
+      planningContextLocked,
       readinessLoading,
-      upstreamPlanningContext?.upstreamPlanningContextLocked,
+      requiresPlanningContextLockForGeneration,
       upstreamPlanningContextLoading,
       workloadAssessmentLoading,
     ],
@@ -3612,6 +3689,9 @@ export function CoachAthletePlanningProfileView({
     setUpstreamPlanningContext(null);
     setUpstreamPlanningContextLoading(false);
     setUpstreamPlanningContextError(null);
+    setPlanningContextLockLoading(false);
+    setPlanningContextLockError(null);
+    setPlanningContextLockSuccess(null);
     setSelectedSeasonCycleId(null);
     setSelectedGoalIds([]);
     setWorkloadAssessmentResult(null);
@@ -3658,11 +3738,20 @@ export function CoachAthletePlanningProfileView({
     setGeneratePlanSuccessDomain(null);
     setGeneratePlanError(null);
     setGeneratePlanRecoveryMessage(null);
+    setPlanningContextLockError(null);
+    setPlanningContextLockSuccess(null);
   }, [athleteIdTrimmed, currentCoachGenerationDomain, entityId]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!accessGateReady || !isDownstreamDomainCoach || entityId === "" || athleteIdTrimmed === "") {
+    const shouldLoadUpstreamPlanningContext =
+      setupState.hasHeadCoachConfigured || isDownstreamDomainCoach;
+    if (
+      !accessGateReady ||
+      !shouldLoadUpstreamPlanningContext ||
+      entityId === "" ||
+      athleteIdTrimmed === ""
+    ) {
       setUpstreamPlanningContext(null);
       setUpstreamPlanningContextLoading(false);
       setUpstreamPlanningContextError(null);
@@ -3698,7 +3787,13 @@ export function CoachAthletePlanningProfileView({
     return () => {
       cancelled = true;
     };
-  }, [accessGateReady, athleteIdTrimmed, entityId, isDownstreamDomainCoach]);
+  }, [
+    accessGateReady,
+    athleteIdTrimmed,
+    entityId,
+    isDownstreamDomainCoach,
+    setupState.hasHeadCoachConfigured,
+  ]);
 
   useEffect(() => {
     setPlanDatesConfirmedForCurrentAthlete(false);
@@ -4382,10 +4477,9 @@ export function CoachAthletePlanningProfileView({
     if (governedPlanActionLoading !== null || persistedGovernedPlanContext === null) {
       return;
     }
-
-    const revisionFeedback = requestRevisionFeedback.trim();
-    if (action === "REQUEST_REVISION" && revisionFeedback === "") {
-      setGovernedPlanActionError("Enter Head Coach notes before requesting revision.");
+    if (action === "REQUEST_REVISION") {
+      setRequestRevisionModalOpen(true);
+      setGovernedPlanActionError(null);
       setGovernedPlanActionSuccess(null);
       setGovernedPlanActionSuccessFeedback(null);
       return;
@@ -4400,7 +4494,7 @@ export function CoachAthletePlanningProfileView({
 
     try {
       if (action === "SUBMIT_REVIEW") {
-        await submitTrainingPlanVersionForReview(
+        await submitReview(
           entityId,
           athleteIdTrimmed,
           persistedGovernedPlanContext.planId,
@@ -4408,37 +4502,21 @@ export function CoachAthletePlanningProfileView({
           persistedGovernedPlanContext.generationDomain,
         );
       } else if (action === "HEAD_APPROVE") {
-        await headApproveTrainingPlanVersion(
+        await headApprove(
           entityId,
           athleteIdTrimmed,
           persistedGovernedPlanContext.planId,
           persistedGovernedPlanContext.versionId,
           persistedGovernedPlanContext.generationDomain,
         );
-      } else if (action === "REQUEST_REVISION") {
-        const result = await requestTrainingPlanRevision(
-          entityId,
-          athleteIdTrimmed,
-          persistedGovernedPlanContext.planId,
-          persistedGovernedPlanContext.versionId,
-          persistedGovernedPlanContext.generationDomain,
-          revisionFeedback,
-        );
-        setRequestRevisionFeedback("");
-        setShowRequestRevisionForm(false);
-        setGovernedPlanActionSuccessFeedback(result.coachFeedback);
       } else {
-        await releaseTrainingPlanVersionToAthlete(
+        await release(
           entityId,
           athleteIdTrimmed,
           persistedGovernedPlanContext.planId,
           persistedGovernedPlanContext.versionId,
           persistedGovernedPlanContext.generationDomain,
         );
-      }
-      if (action === "REQUEST_REVISION") {
-        await loadLatestSkillsDraft(persistedGovernedPlanContext.generationDomain, true);
-        await refreshProfileAndReadinessAfterLevelValidation();
       }
       await refreshPersistedPlanDetail(
         persistedGovernedPlanContext.planId,
@@ -4455,10 +4533,174 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  async function handleRequestRevisionSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (governedPlanActionLoading !== null || persistedGovernedPlanContext === null) {
+      return;
+    }
+
+    const coachFeedback = requestRevisionFeedback.trim();
+    if (coachFeedback === "") {
+      setGovernedPlanActionError("Revision feedback is required.");
+      setGovernedPlanActionSuccess(null);
+      setGovernedPlanActionSuccessFeedback(null);
+      return;
+    }
+
+    setGovernedPlanActionLoading("REQUEST_REVISION");
+    setGovernedPlanActionError(null);
+    setGovernedPlanActionSuccess(null);
+    setGovernedPlanActionSuccessFeedback(null);
+
+    const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
+
+    try {
+      await requestRevision(
+        entityId,
+        athleteIdTrimmed,
+        persistedGovernedPlanContext.planId,
+        persistedGovernedPlanContext.versionId,
+        persistedGovernedPlanContext.generationDomain,
+        coachFeedback,
+      );
+      await refreshPersistedPlanDetail(
+        persistedGovernedPlanContext.planId,
+        persistedGovernedPlanContext.generationDomain,
+        { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
+      );
+      setRequestRevisionFeedback("");
+      setRequestRevisionModalOpen(false);
+      setGovernedPlanActionSuccess(governedPlanActionSuccessMessage("REQUEST_REVISION"));
+    } catch (e) {
+      setGovernedPlanActionError(
+        formatApiError(e, governedPlanActionErrorFallback("REQUEST_REVISION")),
+      );
+    } finally {
+      setGovernedPlanActionLoading(null);
+    }
+  }
+
+  async function handleLockPlanningContext() {
+    if (
+      planningContextLockLoading ||
+      !isHeadCoachPlanningContextOwner ||
+      entityId === "" ||
+      athleteIdTrimmed === ""
+    ) {
+      return;
+    }
+    if (!planDatesWindowComplete) {
+      setPlanningContextLockError(
+        "Plan start and end dates must be valid before locking planning context.",
+      );
+      setPlanningContextLockSuccess(null);
+      return;
+    }
+
+    setPlanningContextLockLoading(true);
+    setPlanningContextLockError(null);
+    setPlanningContextLockSuccess(null);
+    try {
+      await lockCoachAthletePlanningContext(entityId, athleteIdTrimmed, {
+        planWindow: {
+          startDate: planStartDate,
+          endDate: planEndDate,
+        },
+      });
+      const refreshed = await fetchCoachAthleteUpstreamPlanningContext(
+        entityId,
+        athleteIdTrimmed,
+      );
+      setUpstreamPlanningContext(refreshed);
+      setUpstreamPlanningContextError(null);
+      setPlanningContextLockSuccess("Planning context locked and shared with coaches.");
+    } catch (e) {
+      setPlanningContextLockError(
+        formatApiError(e, "Could not lock planning context. Please try again shortly."),
+      );
+      setPlanningContextLockSuccess(null);
+    } finally {
+      setPlanningContextLockLoading(false);
+    }
+  }
+
+  function renderHeadCoachPlanningContextLockAction() {
+    if (!isHeadCoachPlanningContextOwner) return null;
+    const upstreamBlockers = upstreamPlanningContext?.blockers ?? [];
+    const locked = upstreamPlanningContext?.planningContextLocked === true;
+    return (
+      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="space-y-1">
+          <h4 className="text-sm font-semibold text-textPrimary">
+            Head Coach Planning Context Lock
+          </h4>
+          <p className="text-sm text-textSecondary">
+            Lock the confirmed plan window and share APP, level, workload, season, goal, and date
+            context with assigned domain coaches.
+          </p>
+        </div>
+        {upstreamPlanningContextLoading ? (
+          <div className="text-sm text-textSecondary">Checking planning context lock…</div>
+        ) : null}
+        {upstreamPlanningContextError ? (
+          <Alert variant="danger">{upstreamPlanningContextError}</Alert>
+        ) : null}
+        {upstreamBlockers.length > 0 ? (
+          <Alert variant="warning">
+            <div className="space-y-2">
+              <div className="font-medium">Planning context blockers</div>
+              <ul className="list-inside list-disc space-y-1">
+                {upstreamBlockers.map((blocker) => (
+                  <li key={blocker} className="whitespace-pre-wrap break-words">
+                    {blocker}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Alert>
+        ) : null}
+        {planningContextLockError ? (
+          <Alert variant="danger">{planningContextLockError}</Alert>
+        ) : null}
+        {planningContextLockSuccess ? (
+          <WorkflowNeutralNotice>{planningContextLockSuccess}</WorkflowNeutralNotice>
+        ) : null}
+        <dl className="space-y-1">
+          <DetailRow
+            label="Planning context locked"
+            value={locked ? "Yes" : "No"}
+          />
+          <DetailRow
+            label="Plan window"
+            value={formatDateRange(planStartDate, planEndDate)}
+          />
+        </dl>
+        <Button
+          type="button"
+          variant="primary"
+          loading={planningContextLockLoading}
+          disabled={
+            planningContextLockLoading ||
+            upstreamPlanningContextLoading ||
+            locked ||
+            !planDatesWindowComplete
+          }
+          onClick={() => {
+            void handleLockPlanningContext();
+          }}
+        >
+          {locked ? "Planning Context Locked" : "Lock & Share Context with Coaches"}
+        </Button>
+      </div>
+    );
+  }
+
   function renderDownstreamUpstreamPlanningReadOnlySection() {
     const seasonLabel =
       selectedSeason !== null ? formatSeasonOptionLabel(selectedSeason) : "—";
-    const locked = upstreamPlanningContext?.upstreamPlanningContextLocked === true;
+    const locked = setupState.hasHeadCoachConfigured
+      ? upstreamPlanningContext?.planningContextLocked === true
+      : upstreamPlanningContext?.upstreamPlanningContextLocked === true;
     return (
       <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
         <div className="space-y-1">
@@ -4467,7 +4709,7 @@ export function CoachAthletePlanningProfileView({
           </h3>
           <p className="text-sm text-textSecondary">
             Workload assessment, season and goals, and plan dates are owned by the Skills Coach or
-            Head Coach. Review what is available for this athlete; use Generate for your assigned
+            Head Coach. Review what is available for this athlete; use Create Plan for your assigned
             domain only.
           </p>
         </div>
@@ -4477,7 +4719,10 @@ export function CoachAthletePlanningProfileView({
         {upstreamPlanningContextError ? (
           <Alert variant="danger">{upstreamPlanningContextError}</Alert>
         ) : null}
-        {!upstreamPlanningContextLoading && !upstreamPlanningContextError && !locked ? (
+        {!upstreamPlanningContextLoading &&
+        !upstreamPlanningContextError &&
+        setupState.hasHeadCoachConfigured &&
+        !locked ? (
           <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
         ) : null}
         <dl className="space-y-2">
@@ -4490,11 +4735,11 @@ export function CoachAthletePlanningProfileView({
             value={isPlanningOwnerCoach ? "Yes" : "No"}
           />
           <DetailRow
-            label="Downstream domain coach (read-only upstream)"
+            label="Assistant/domain coach (read-only upstream)"
             value={isDownstreamDomainCoach ? "Yes" : "No"}
           />
           <DetailRow
-            label="Upstream planning context locked"
+            label="Planning context locked"
             value={locked ? "Yes" : "No"}
           />
           <DetailRow label="APP completeness" value={displayValue(readinessPanel.appCompleteness)} />
@@ -4670,12 +4915,7 @@ export function CoachAthletePlanningProfileView({
               type="button"
               variant="secondary"
               disabled={governedPlanActionLoading !== null}
-              onClick={() => {
-                setShowRequestRevisionForm((current) => !current);
-                setGovernedPlanActionError(null);
-                setGovernedPlanActionSuccess(null);
-                setGovernedPlanActionSuccessFeedback(null);
-              }}
+              onClick={() => void handlePersistedGovernedPlanAction("REQUEST_REVISION")}
             >
               {governedPlanActionButtonLabel("REQUEST_REVISION")}
             </Button>
@@ -4692,46 +4932,9 @@ export function CoachAthletePlanningProfileView({
             </Button>
           ) : null}
         </div>
-        {persistedGovernedAllowedActions.has("REQUEST_REVISION") && showRequestRevisionForm ? (
-          <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
-            <h6 className="text-sm font-semibold text-textPrimary">Request Revision</h6>
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Head Coach Notes</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={requestRevisionFeedback}
-                onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                placeholder="Describe what should change before this plan can be approved."
-              />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                disabled={governedPlanActionLoading !== null}
-                onClick={() => {
-                  void handlePersistedGovernedPlanAction("REQUEST_REVISION");
-                }}
-              >
-                Send Request Revision
-              </Button>
-              <Button
-                type="button"
-                variant="neutral"
-                disabled={governedPlanActionLoading !== null}
-                onClick={() => {
-                  setShowRequestRevisionForm(false);
-                  setRequestRevisionFeedback("");
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
+        {governedPlanActionError && !requestRevisionModalOpen ? (
+          <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
-        {governedPlanActionError ? <Alert variant="danger">{governedPlanActionError}</Alert> : null}
         {governedPlanActionSuccess ? (
           <WorkflowNeutralNotice>
             <div className="space-y-2">
@@ -5381,21 +5584,30 @@ export function CoachAthletePlanningProfileView({
 
       setGeneratePlanPhase("persisting");
       persistPhaseEntered = true;
+      const upstreamSeasonCycleId = upstreamPlanningContext?.seasonCycleId?.trim() ?? "";
+      const upstreamStartDate = upstreamPlanningContext?.startDate?.trim() ?? "";
+      const upstreamEndDate = upstreamPlanningContext?.endDate?.trim() ?? "";
+      const lockedUpstreamPersistenceContext: TrainingPlanPersistenceContext | null =
+        upstreamPlanningContext &&
+        (setupState.hasHeadCoachConfigured
+          ? upstreamPlanningContext.planningContextLocked === true
+          : upstreamPlanningContext.upstreamPlanningContextLocked === true) &&
+        upstreamSeasonCycleId !== "" &&
+        upstreamStartDate !== "" &&
+        upstreamEndDate !== ""
+          ? {
+              seasonCycleId: upstreamSeasonCycleId,
+              startDate: upstreamStartDate,
+              endDate: upstreamEndDate,
+              ...(upstreamPlanningContext.goalIds.length > 0
+                ? { goalIds: upstreamPlanningContext.goalIds }
+                : {}),
+            }
+          : null;
       const persistenceContext: TrainingPlanPersistenceContext | null =
         isDownstreamDomainCoach
-          ? upstreamPlanningContext?.upstreamPlanningContextLocked === true &&
-            upstreamPlanningContext.seasonCycleId &&
-            upstreamPlanningContext.startDate &&
-            upstreamPlanningContext.endDate
-            ? {
-                seasonCycleId: upstreamPlanningContext.seasonCycleId,
-                startDate: upstreamPlanningContext.startDate,
-                endDate: upstreamPlanningContext.endDate,
-                ...(upstreamPlanningContext.goalIds.length > 0
-                  ? { goalIds: upstreamPlanningContext.goalIds }
-                  : {}),
-              }
-            : extractPersistenceContextFromSnapshot(executeResult.generationContextSnapshot)
+          ? lockedUpstreamPersistenceContext ??
+            extractPersistenceContextFromSnapshot(executeResult.generationContextSnapshot)
           : {
               seasonCycleId: seasonCycleId!,
               startDate: planStartDate,
@@ -6404,6 +6616,7 @@ export function CoachAthletePlanningProfileView({
                     setSelectedWorkflowTab("generate");
                   }}
                 />
+                  {renderHeadCoachPlanningContextLockAction()}
                 </section>
               )
             ) : null}
@@ -6430,9 +6643,10 @@ export function CoachAthletePlanningProfileView({
                     </p>
                   </div>
                   {isDownstreamDomainCoach &&
+                  setupState.hasHeadCoachConfigured &&
                   !upstreamPlanningContextLoading &&
                   !upstreamPlanningContextError &&
-                  upstreamPlanningContext?.upstreamPlanningContextLocked !== true ? (
+                  upstreamPlanningContext?.planningContextLocked !== true ? (
                     <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
                   ) : null}
                   {isDownstreamDomainCoach ? (
@@ -7185,14 +7399,23 @@ export function CoachAthletePlanningProfileView({
                         </Button>
                       </div>
                     ) : null
+                  ) : allowedGenerationDomains.length === 0 && isHeadCoachPlanningContextOwner ? (
+                    <div className="space-y-3">
+                      {renderHeadCoachPlanningContextLockAction()}
+                      <div className="text-sm text-textSecondary">
+                        Head Coach planning context can be locked and shared without assigning a
+                        generation function to the Head Coach.
+                      </div>
+                    </div>
                   ) : allowedGenerationDomains.length === 0 ? (
                     <div className="text-sm text-textSecondary">
                       You do not currently have a generation function assigned.
                     </div>
                   ) : isDownstreamDomainCoach &&
-                    upstreamPlanningContext?.upstreamPlanningContextLocked !== true ? (
+                    setupState.hasHeadCoachConfigured &&
+                    upstreamPlanningContext?.planningContextLocked !== true ? (
                     <div className="text-sm text-textSecondary">
-                      Domain generation is unavailable until upstream planning context is locked.
+                      {UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -7393,6 +7616,71 @@ export function CoachAthletePlanningProfileView({
             levelValidationSnapshot={readinessSources.levelValidation}
             onAfterSaveConfirmed={refreshProfileAndReadinessAfterLevelValidation}
           />
+          {requestRevisionModalOpen ? (
+            <Modal
+              className="w-full max-w-lg overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
+              aria-labelledby="request-revision-modal-title"
+            >
+              <form
+                className="flex flex-col gap-4 px-6 py-6 sm:px-7 sm:py-7"
+                onSubmit={(event) => void handleRequestRevisionSubmit(event)}
+              >
+                <div className="space-y-1">
+                  <h2
+                    id="request-revision-modal-title"
+                    className="text-lg font-semibold text-textPrimary"
+                  >
+                    Request Revision
+                  </h2>
+                  <p className="text-sm text-textSecondary">
+                    Explain what the coach should change before resubmitting.
+                  </p>
+                </div>
+
+                {governedPlanActionError ? (
+                  <Alert variant="danger">{governedPlanActionError}</Alert>
+                ) : null}
+
+                <label className="space-y-1 text-sm text-textPrimary">
+                  <span className="font-medium">Revision feedback</span>
+                  <textarea
+                    rows={5}
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={requestRevisionFeedback}
+                    onChange={(event) => setRequestRevisionFeedback(event.target.value)}
+                    placeholder="Describe the required changes."
+                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                  />
+                </label>
+
+                <div className="flex flex-wrap justify-end gap-3 pt-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                    onClick={() => {
+                      setRequestRevisionModalOpen(false);
+                      setRequestRevisionFeedback("");
+                      setGovernedPlanActionError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                    disabled={
+                      governedPlanActionLoading === "REQUEST_REVISION" ||
+                      requestRevisionFeedback.trim() === ""
+                    }
+                  >
+                    Request Revision
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          ) : null}
         </>
       ) : null}
     </div>

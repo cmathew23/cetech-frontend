@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
+  currentCoachIsHeadCoach,
   derivePrimaryCoachPlanDomain,
   type CoachPlanCreationDomain,
 } from "@/lib/coachAuthority";
@@ -16,7 +17,9 @@ import {
   fetchCoachMeDashboard,
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
+import { fetchCoachAthleteUpstreamPlanningContext } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { useAuth } from "@/hooks/useAuth";
 import {
   deriveTrainingPlanReadiness,
   type TrainingPlanReadiness,
@@ -61,10 +64,16 @@ function TrainingPlanAthleteRow({
   row,
   domain,
   readiness,
+  hasHeadCoachConfigured,
+  isHeadCoachPlanningContextOwner,
+  planningContextLocked,
 }: {
   row: CoachAssignedAthleteRow;
   domain: CoachPlanCreationDomain | null;
   readiness: TrainingPlanReadiness;
+  hasHeadCoachConfigured: boolean;
+  isHeadCoachPlanningContextOwner: boolean;
+  planningContextLocked: boolean | null;
 }) {
   const displayName =
     row.displayName.trim() !== ""
@@ -78,6 +87,9 @@ function TrainingPlanAthleteRow({
     currentPlanStatus: row.currentPlanStatus,
     fallbackDomain: domain,
     hasPlanningProfile: row.hasPlanningProfile,
+    hasHeadCoachConfigured,
+    isHeadCoachPlanningContextOwner,
+    planningContextLocked,
   });
 
   return (
@@ -143,16 +155,27 @@ function TrainingPlanAthleteRow({
 }
 
 export function CoachTrainingPlansPageContent() {
+  const { accessContext, accessGateReady } = useAuth();
+  const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [athletes, setAthletes] = useState<CoachAssignedAthleteRow[]>([]);
   const [planDomain, setPlanDomain] = useState<CoachPlanCreationDomain | null>(
     null,
   );
+  const [hasHeadCoachConfigured, setHasHeadCoachConfigured] = useState(false);
+  const [isHeadCoachPlanningContextOwner, setIsHeadCoachPlanningContextOwner] =
+    useState(false);
+  const [planningContextLockedByAthleteId, setPlanningContextLockedByAthleteId] =
+    useState<Record<string, boolean | null>>({});
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      if (!accessGateReady) {
+        setLoading(true);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
@@ -161,12 +184,38 @@ export function CoachTrainingPlansPageContent() {
           fetchCoachAssignedAthletes(),
         ]);
         if (cancelled) return;
+        const headCoachConfigured = dash.hasHeadCoachConfigured === true;
+        const headCoachUser = headCoachConfigured && currentCoachIsHeadCoach(dash.academyCoachRole);
+        const lockMap: Record<string, boolean | null> = {};
+        if (headCoachConfigured && !headCoachUser && entityId !== "") {
+          const contextResults = await Promise.allSettled(
+            rows.map(async (row) => {
+              const context = await fetchCoachAthleteUpstreamPlanningContext(
+                entityId,
+                row.athleteId,
+              );
+              return [row.athleteId, context.planningContextLocked] as const;
+            }),
+          );
+          for (const result of contextResults) {
+            if (result.status === "fulfilled") {
+              lockMap[result.value[0]] = result.value[1];
+            }
+          }
+        }
+        if (cancelled) return;
         setAthletes(rows);
         setPlanDomain(derivePrimaryCoachPlanDomain(dash.functions ?? []));
+        setHasHeadCoachConfigured(headCoachConfigured);
+        setIsHeadCoachPlanningContextOwner(headCoachUser);
+        setPlanningContextLockedByAthleteId(lockMap);
       } catch (e) {
         if (cancelled) return;
         setAthletes([]);
         setPlanDomain(null);
+        setHasHeadCoachConfigured(false);
+        setIsHeadCoachPlanningContextOwner(false);
+        setPlanningContextLockedByAthleteId({});
         setError(
           formatCoachApiError(
             e,
@@ -181,7 +230,7 @@ export function CoachTrainingPlansPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessGateReady, entityId]);
 
   return (
     <div className="w-full max-w-5xl space-y-6">
@@ -213,6 +262,11 @@ export function CoachTrainingPlansPageContent() {
                     row={row}
                     domain={planDomain}
                     readiness={deriveTrainingPlanReadiness(row)}
+                    hasHeadCoachConfigured={hasHeadCoachConfigured}
+                    isHeadCoachPlanningContextOwner={isHeadCoachPlanningContextOwner}
+                    planningContextLocked={
+                      planningContextLockedByAthleteId[row.athleteId] ?? null
+                    }
                   />
                 </div>
               ))}

@@ -4,6 +4,9 @@ import {
   type CoachPlanCreationDomain,
 } from "@/lib/coachAuthority";
 
+export const WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE =
+  "Waiting for Head Coach to lock planning context.";
+
 type ResolvedButtonState =
   | "route_unavailable"
   | "plan_creation_unavailable"
@@ -61,6 +64,9 @@ export function resolveTrainingPlanAction(input: {
   currentPlanStatus: string | null;
   fallbackDomain: CoachPlanCreationDomain | null;
   hasPlanningProfile: boolean;
+  hasHeadCoachConfigured?: boolean;
+  isHeadCoachPlanningContextOwner?: boolean;
+  planningContextLocked?: boolean | null;
 }): {
   buttonLabel: string;
   disabled: boolean;
@@ -105,6 +111,24 @@ export function resolveTrainingPlanAction(input: {
     };
   }
 
+  if (
+    normalizedPlanId === "" &&
+    input.hasHeadCoachConfigured === true &&
+    input.isHeadCoachPlanningContextOwner !== true &&
+    input.planningContextLocked !== true &&
+    resolvedDomain !== null
+  ) {
+    return {
+      buttonLabel: coachPlanCreationButtonLabel(resolvedDomain),
+      disabled: true,
+      helperBelowButton: WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
+      href: null,
+      planStatusLabel: null,
+      resolvedButtonState: "plan_creation_unavailable",
+      resolvedDomain,
+    };
+  }
+
   if (normalizedPlanId !== "") {
     return {
       buttonLabel: editPlanButtonLabel(resolvedDomain),
@@ -118,6 +142,17 @@ export function resolveTrainingPlanAction(input: {
   }
 
   if (resolvedDomain === null) {
+    if (input.isHeadCoachPlanningContextOwner === true) {
+      return {
+        buttonLabel: "Open Planning Workflow",
+        disabled: false,
+        helperBelowButton: null,
+        href: planningProfileHrefForAthlete(athleteIdTrimmed),
+        planStatusLabel: null,
+        resolvedButtonState: "create_plan",
+        resolvedDomain,
+      };
+    }
     return {
       buttonLabel: "Plan creation unavailable",
       disabled: true,

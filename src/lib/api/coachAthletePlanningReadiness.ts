@@ -224,7 +224,12 @@ export type CoachAthleteTrainingPlanWorkloadAssessment = {
 };
 
 export type CoachAthleteUpstreamPlanningContext = {
+  planningContextLocked: boolean;
   upstreamPlanningContextLocked: boolean;
+  planWindow: {
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
   seasonCycleId: string | null;
   goalIds: string[];
   startDate: string | null;
@@ -457,6 +462,7 @@ export type CoachPersistedTrainingPlanActiveDetail = {
   selectedVersionRule: string | null;
   generationDomain: string | null;
   allowedActions: GovernedTrainingPlanWorkflowAction[];
+  releaseMode: string | null;
   plan: CoachPersistedTrainingPlan;
   version: CoachPersistedTrainingPlanVersion;
   days: CoachPersistedTrainingPlanDetailDay[];
@@ -502,6 +508,13 @@ export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
   coachFeedback: string;
+};
+
+export type PlanningContextLockPayload = {
+  planWindow: {
+    startDate: string;
+    endDate: string;
+  };
 };
 
 export type TrainingPlanRequestRevisionResult = {
@@ -760,55 +773,16 @@ function normalizeGovernedTrainingPlanWorkflowAction(
   return null;
 }
 
-function parseGovernedTrainingPlanWorkflowActions(
-  data: unknown,
+function parseGovernedTrainingPlanWorkflowActionList(
+  value: unknown,
 ): GovernedTrainingPlanWorkflowAction[] {
+  if (!Array.isArray(value)) return [];
   const out = new Set<GovernedTrainingPlanWorkflowAction>();
-  const records = collectRecords(data);
-
-  function addAction(value: string): void {
-    const normalized = normalizeGovernedTrainingPlanWorkflowAction(value);
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const normalized = normalizeGovernedTrainingPlanWorkflowAction(item);
     if (normalized) out.add(normalized);
   }
-
-  for (const record of records) {
-    for (const key of ["allowedActions", "availableActions", "actions"]) {
-      const value = record[key];
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (typeof item === "string") addAction(item);
-        }
-        continue;
-      }
-      const nested = asRecord(value);
-      if (!nested) continue;
-      for (const [nestedKey, nestedValue] of Object.entries(nested)) {
-        if (nestedValue === true) addAction(nestedKey);
-      }
-    }
-
-    if (record.canSubmitReview === true || record.submitReviewAllowed === true) {
-      out.add("SUBMIT_REVIEW");
-    }
-    if (record.canHeadApprove === true || record.headApproveAllowed === true) {
-      out.add("HEAD_APPROVE");
-    }
-    if (
-      record.canRequestRevision === true ||
-      record.requestRevisionAllowed === true ||
-      record.canHeadCoachRequestRevision === true
-    ) {
-      out.add("REQUEST_REVISION");
-    }
-    if (
-      record.canRelease === true ||
-      record.releaseAllowed === true ||
-      record.canReleaseToAthlete === true
-    ) {
-      out.add("RELEASE");
-    }
-  }
-
   return Array.from(out);
 }
 
@@ -997,7 +971,8 @@ function parsePersistedTrainingPlanActiveDetailPayload(
   return {
     selectedVersionRule: readStringKey([record], ["selectedVersionRule"]),
     generationDomain: readStringKey([record], ["generationDomain"]),
-    allowedActions: parseGovernedTrainingPlanWorkflowActions(data),
+    allowedActions: parseGovernedTrainingPlanWorkflowActionList(record.allowedActions),
+    releaseMode: readStringKey([record], ["releaseMode"]),
     plan,
     version: {
       ...version,
@@ -1165,6 +1140,33 @@ export function parseUpstreamPlanningContextPayload(
   const root = asRecord(data) ?? {};
   const nested = asRecord(root.data);
   const record = nested ?? root;
+  const planWindowRecord =
+    asRecord(record.planWindow) ??
+    records
+      .map((candidate) => asRecord(candidate.planWindow))
+      .find((candidate) => candidate !== null) ??
+    null;
+  const planWindowStartDate = readStringKey(
+    planWindowRecord ? [planWindowRecord] : [],
+    ["startDate", "planStartDate", "trainingPlanStartDate"],
+  );
+  const planWindowEndDate = readStringKey(
+    planWindowRecord ? [planWindowRecord] : [],
+    ["endDate", "planEndDate", "trainingPlanEndDate"],
+  );
+  const planningContextLocked =
+    readBooleanKey(records, ["planningContextLocked"]) ??
+    readBooleanKey(records, [
+      "upstreamPlanningContextLocked",
+      "locked",
+    ]) ??
+    false;
+  const upstreamPlanningContextLocked =
+    readBooleanKey(records, [
+      "upstreamPlanningContextLocked",
+      "planningContextLocked",
+      "locked",
+    ]) ?? false;
   const workloadRecord =
     asRecord(record.workloadSummary) ??
     asRecord(record.workload) ??
@@ -1175,12 +1177,12 @@ export function parseUpstreamPlanningContextPayload(
     null;
 
   return {
-    upstreamPlanningContextLocked:
-      readBooleanKey(records, [
-        "upstreamPlanningContextLocked",
-        "planningContextLocked",
-        "locked",
-      ]) ?? false,
+    planningContextLocked,
+    upstreamPlanningContextLocked,
+    planWindow:
+      planWindowStartDate !== null || planWindowEndDate !== null
+        ? { startDate: planWindowStartDate, endDate: planWindowEndDate }
+        : null,
     seasonCycleId: readStringKey(records, [
       "seasonCycleId",
       "selectedSeasonCycleId",
@@ -1191,16 +1193,20 @@ export function parseUpstreamPlanningContextPayload(
       "selectedGoalIds",
       "trainingGoalIds",
     ]),
-    startDate: readStringKey(records, [
-      "startDate",
-      "planStartDate",
-      "trainingPlanStartDate",
-    ]),
-    endDate: readStringKey(records, [
-      "endDate",
-      "planEndDate",
-      "trainingPlanEndDate",
-    ]),
+    startDate:
+      planWindowStartDate ??
+      readStringKey(records, [
+        "startDate",
+        "planStartDate",
+        "trainingPlanStartDate",
+      ]),
+    endDate:
+      planWindowEndDate ??
+      readStringKey(records, [
+        "endDate",
+        "planEndDate",
+        "trainingPlanEndDate",
+      ]),
     phase: readStringKey(records, ["phase", "currentPhase", "phaseType"]),
     workloadSummary: {
       weeklyTrainingHours: readNumberKey(
@@ -1417,6 +1423,36 @@ export async function fetchCoachAthleteUpstreamPlanningContext(
     {
       method: "GET",
       cache: "no-store",
+    },
+  );
+  return parseUpstreamPlanningContextPayload(adaptBackendSuccess(raw));
+}
+
+export async function lockCoachAthletePlanningContext(
+  entityId: string,
+  athleteId: string,
+  payload: PlanningContextLockPayload,
+): Promise<CoachAthleteUpstreamPlanningContext> {
+  const ids = assertIds(entityId, athleteId);
+  const startDate = payload.planWindow.startDate.trim();
+  const endDate = payload.planWindow.endDate.trim();
+  if (startDate === "" || endDate === "") {
+    throw {
+      message: "planWindow.startDate and planWindow.endDate are required",
+      status: 400,
+      code: "PLANNING_CONTEXT_LOCK_PLAN_WINDOW_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanPlanningContextLock(
+      ids.entityId,
+      ids.athleteId,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify({
+        planWindow: { startDate, endDate },
+      }),
     },
   );
   return parseUpstreamPlanningContextPayload(adaptBackendSuccess(raw));
@@ -1654,6 +1690,16 @@ export async function submitTrainingPlanReview(
   adaptBackendSuccess(raw);
 }
 
+export async function submitReview(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await submitTrainingPlanReview(entityId, athleteId, planId, versionId, generationDomain);
+}
+
 export async function submitTrainingPlanVersionForReview(
   entityId: string,
   athleteId: string,
@@ -1688,6 +1734,16 @@ export async function headApproveTrainingPlan(
     },
   );
   adaptBackendSuccess(raw);
+}
+
+export async function headApprove(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await headApproveTrainingPlan(entityId, athleteId, planId, versionId, generationDomain);
 }
 
 export async function headApproveTrainingPlanVersion(
@@ -1738,6 +1794,24 @@ export async function requestTrainingPlanRevision(
   return parseTrainingPlanRequestRevisionPayload(adaptBackendSuccess(raw));
 }
 
+export async function requestRevision(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+  coachFeedback: string,
+): Promise<TrainingPlanRequestRevisionResult> {
+  return requestTrainingPlanRevision(
+    entityId,
+    athleteId,
+    planId,
+    versionId,
+    generationDomain,
+    coachFeedback,
+  );
+}
+
 export async function releaseTrainingPlanToAthlete(
   entityId: string,
   athleteId: string,
@@ -1762,6 +1836,16 @@ export async function releaseTrainingPlanToAthlete(
     },
   );
   adaptBackendSuccess(raw);
+}
+
+export async function release(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await releaseTrainingPlanToAthlete(entityId, athleteId, planId, versionId, generationDomain);
 }
 
 export async function releaseTrainingPlanVersionToAthlete(

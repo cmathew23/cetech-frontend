@@ -218,6 +218,124 @@ describe("parseReadinessPayload", () => {
     });
   });
 
+  it("parses enriched locked planning context fields", () => {
+    expect(
+      parseUpstreamPlanningContextPayload({
+        data: {
+          planningContextLocked: true,
+          upstreamPlanningContextLocked: true,
+          planWindow: {
+            startDate: "2026-05-11",
+            endDate: "2026-05-17",
+          },
+          season: {
+            phaseName: "Pre Season",
+            phaseCode: "PRE_SEASON",
+            seasonCycleId: "season-1",
+          },
+          goals: [
+            {
+              goalId: "goal-1",
+              goalName: "Improve first serve consistency",
+              successCriteria: "Hit 7 of 10 serves into target zone",
+            },
+          ],
+          planningContext: {
+            seasonCycleId: "season-1",
+            goalIds: ["goal-1"],
+            lockedGoalIds: ["goal-1"],
+            validatedLevel: "ADVANCED",
+            season: {
+              phaseName: "Pre Season",
+              phaseCode: "PRE_SEASON",
+              seasonCycleId: "season-1",
+            },
+            workload: {
+              weeklyTrainingHours: 9,
+              sport: "GOLF",
+              ageBand: "JUNIOR",
+              trainingLoadStatus: "OPTIMAL",
+              recommendedRange: {
+                minHours: 10,
+                maxHours: 16,
+                label: "10 - 16 hrs/week",
+              },
+              classificationStatus: "WITHIN_RANGE",
+              restrictionSummary: "Maintain current volume",
+              summary: "Workload is appropriate for the athlete's level.",
+            },
+            goals: [
+              {
+                goalId: "goal-1",
+                goalName: "Improve first serve consistency",
+                successCriteria: "Hit 7 of 10 serves into target zone",
+              },
+            ],
+          },
+        },
+      }),
+    ).toMatchObject({
+      seasonCycleId: "season-1",
+      goalIds: ["goal-1"],
+      season: {
+        phaseName: "Pre Season",
+        phaseCode: "PRE_SEASON",
+        seasonCycleId: "season-1",
+      },
+      workload: {
+        weeklyTrainingHours: 9,
+          sport: "GOLF",
+          ageBand: "JUNIOR",
+          trainingLoadStatus: "OPTIMAL",
+          recommendedRange: {
+            minHours: 10,
+            maxHours: 16,
+            label: "10 - 16 hrs/week",
+          },
+        classificationStatus: "WITHIN_RANGE",
+        restrictionSummary: "Maintain current volume",
+        summary: "Workload is appropriate for the athlete's level.",
+      },
+      goals: [
+        {
+          goalId: "goal-1",
+          goalName: "Improve first serve consistency",
+          successCriteria: "Hit 7 of 10 serves into target zone",
+        },
+      ],
+      planningContext: {
+        seasonCycleId: "season-1",
+        goalIds: ["goal-1"],
+        lockedGoalIds: ["goal-1"],
+        validatedLevel: "ADVANCED",
+        season: {
+          phaseName: "Pre Season",
+          phaseCode: "PRE_SEASON",
+        },
+        workload: {
+          weeklyTrainingHours: 9,
+          sport: "GOLF",
+          ageBand: "JUNIOR",
+          trainingLoadStatus: "OPTIMAL",
+          recommendedRange: {
+            minHours: 10,
+            maxHours: 16,
+            label: "10 - 16 hrs/week",
+          },
+          classificationStatus: "WITHIN_RANGE",
+          restrictionSummary: "Maintain current volume",
+        },
+        goals: [
+          {
+            goalId: "goal-1",
+            goalName: "Improve first serve consistency",
+            successCriteria: "Hit 7 of 10 serves into target zone",
+          },
+        ],
+      },
+    });
+  });
+
   it("fetches upstream planning context from the dedicated endpoint", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,
@@ -570,6 +688,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 60000,
       },
     );
     expect(result.plan.id).toBe("plan-1");
@@ -732,6 +851,63 @@ describe("training plan generation timeouts and helpers", () => {
         timeoutMs: 60_000,
       }),
     );
+  });
+
+  it("parses nutrition composition fields on latest domain draft items", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-nutrition-1",
+        trainingPlanVersionId: "version-nutrition-1",
+        versionNumber: 1,
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [
+                  {
+                    nutritionCatalogItemId: "nutrition-item-1",
+                    label: "Greek Yogurt",
+                    serving: "1 cup",
+                    quantity: 1,
+                    unit: "cup",
+                    calories: 150,
+                    protein: 15,
+                    carbs: 8,
+                    fat: 2,
+                    timing: "Pre-training",
+                    notes: "Pair with berries",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "NUTRITION",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      nutritionCatalogItemId: "nutrition-item-1",
+      label: "Greek Yogurt",
+      serving: "1 cup",
+      quantity: 1,
+      unit: "cup",
+      calories: 150,
+      protein: 15,
+      carbs: 8,
+      fat: 2,
+      timing: "Pre-training",
+      notes: "Pair with berries",
+    });
   });
 
   it("maps latest draft fields to persist-draft result shape", () => {

@@ -5,7 +5,6 @@
  */
 
 import { paths } from "@/config/endpoints";
-import { primaryPersonNameFromMemberFields } from "@/lib/adminPersonLabel";
 import { apiRequest } from "@/lib/apiClient";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { parseCoachPersonName } from "@/lib/api/academyMeCoaches";
@@ -674,10 +673,12 @@ function adaptAcademyAthleteOption(raw: unknown): AthleteAssignmentOption | null
     user,
     athleteProfileId,
   );
+  const missingHeadCoachAssignment = o.missingHeadCoachAssignment === true;
   return {
     athleteProfileId,
     displayName,
     displayEmail,
+    missingHeadCoachAssignment,
   };
 }
 
@@ -717,31 +718,6 @@ function adaptAcademyCoachOption(raw: unknown): CoachAssignmentOption | null {
     displayEmail,
   };
 }
-
-function entityMemberRowPrimaryPersonName(
-  o: Record<string, unknown>,
-  user: Record<string, unknown> | null,
-): string {
-  const topD = readFirstNonEmptyString(o, ["displayName", "display_name"]);
-  const topFn = readFirstNonEmptyString(o, ["firstName", "first_name"]);
-  const topLn = readFirstNonEmptyString(o, ["lastName", "last_name"]);
-  const fromTop = primaryPersonNameFromMemberFields({
-    displayName: topD,
-    firstName: topFn,
-    lastName: topLn,
-  });
-  if (fromTop !== "") return fromTop;
-  if (user === null) return "";
-  const uD = readFirstNonEmptyString(user, ["displayName", "display_name"]);
-  const uFn = readFirstNonEmptyString(user, ["firstName", "first_name"]);
-  const uLn = readFirstNonEmptyString(user, ["lastName", "last_name"]);
-  return primaryPersonNameFromMemberFields({
-    displayName: uD,
-    firstName: uFn,
-    lastName: uLn,
-  });
-}
-
 
 function assignmentOptionLabelSortKey(a: {
   displayName: string;
@@ -820,10 +796,12 @@ function adaptCandidateAthleteOption(raw: unknown): AthleteAssignmentOption | nu
   const athleteProfileId = readFirstNonEmptyString(o, ["athleteId"]);
   if (athleteProfileId === "") return null;
   const displayEmail = readFirstNonEmptyString(o, ["email"]);
+  const missingHeadCoachAssignment = o.missingHeadCoachAssignment === true;
   return {
     athleteProfileId,
     displayName: candidateDisplayName(o, athleteProfileId),
     displayEmail,
+    missingHeadCoachAssignment,
   };
 }
 
@@ -885,6 +863,15 @@ export async function fetchEntityAssignmentCandidates(
         value: coach.coachProfileId,
         label: coach.displayName,
         email: coach.displayEmail,
+      })),
+    );
+    console.debug(
+      "[ASSIGNMENT_REFRESH] fetched athletes:",
+      result.athletes.map((athlete) => ({
+        value: athlete.athleteProfileId,
+        label: athlete.displayName,
+        email: athlete.displayEmail,
+        missingHeadCoachAssignment: athlete.missingHeadCoachAssignment,
       })),
     );
   }
@@ -986,6 +973,7 @@ function normalizeEntityAssignmentRow(raw: unknown): EntityAssignmentRow | null 
     typeof o.coachName === "string" ? o.coachName.trim() : "";
   const coachEmail =
     typeof o.coachEmail === "string" ? o.coachEmail.trim() : "";
+  const missingHeadCoachAssignment = o.missingHeadCoachAssignment === true;
 
   return {
     assignmentId,
@@ -1000,6 +988,7 @@ function normalizeEntityAssignmentRow(raw: unknown): EntityAssignmentRow | null 
     isPrimary,
     createdAt,
     status,
+    missingHeadCoachAssignment,
   };
 }
 

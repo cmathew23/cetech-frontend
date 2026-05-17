@@ -38,6 +38,8 @@ export type AthleteAssignmentOption = {
   /** First + last from profile or row; empty if only email is known. */
   displayName: string;
   displayEmail: string;
+  /** True when athlete belongs to a Head-Coach-present academy but has no Head Coach assigned. */
+  missingHeadCoachAssignment: boolean;
 };
 
 /** Dropdown option: CoachProfile.id from `user.coach` on membership rows. */
@@ -60,4 +62,6 @@ export type EntityAssignmentRow = {
   isPrimary: boolean;
   createdAt: string;
   status: string;
+  /** True when athlete belongs to a Head-Coach-present academy but has no Head Coach assigned. */
+  missingHeadCoachAssignment: boolean;
 };

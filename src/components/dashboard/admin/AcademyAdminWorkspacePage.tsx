@@ -1738,11 +1738,18 @@ export function AcademyAdminWorkspacePage({
                         return (
                           <tr key={row.assignmentId} className="group align-top">
                             <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
-                              <AssignmentPartyCell
-                                name={row.athleteName}
-                                email={row.athleteEmail}
-                                fallbackId={row.athleteProfileId}
-                              />
+                              <div className="space-y-1">
+                                <AssignmentPartyCell
+                                  name={row.athleteName}
+                                  email={row.athleteEmail}
+                                  fallbackId={row.athleteProfileId}
+                                />
+                                {row.missingHeadCoachAssignment ? (
+                                  <span className="inline-flex rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                    Missing Head Coach
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="border-y border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
                               <AssignmentPartyCell
@@ -1877,6 +1884,7 @@ export function AcademyAdminWorkspacePage({
                           opt.displayEmail,
                           opt.athleteProfileId,
                         )}
+                        {opt.missingHeadCoachAssignment ? " ⚠ Missing Head Coach" : ""}
                       </option>
                     ))}
                   </Select>

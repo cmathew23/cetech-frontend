@@ -46,20 +46,35 @@ export function planningProfileHrefForAthlete(
 
 export function resolveCoachPlanDomain(input: {
   assignedFunctions: string[];
-  currentGenerationDomain: CoachPlanCreationDomain | null;
+  /**
+   * Domain of the athlete row's aggregated `currentPlanId`/`currentPlanStatus` (from assigned-athletes),
+   * not necessarily the viewer's coaching domain — do **not** use this as the viewer's coach domain unless
+   * no authority-derived domain exists.
+   */
+  athletePlanGenerationDomain: CoachPlanCreationDomain | null;
   fallbackDomain: CoachPlanCreationDomain | null;
+  /** When true, retains broad plan-row hints (review workflow). Domain assistants omit athlete plan domain bleed. */
+  isHeadCoachPlanningContextOwner?: boolean;
 }): CoachPlanCreationDomain | null {
-  return (
-    input.currentGenerationDomain ??
-    derivePrimaryCoachPlanDomain(input.assignedFunctions) ??
-    input.fallbackDomain
-  );
+  const authorityDomain =
+    input.fallbackDomain ?? derivePrimaryCoachPlanDomain(input.assignedFunctions);
+
+  if (input.isHeadCoachPlanningContextOwner === true) {
+    return authorityDomain ?? input.athletePlanGenerationDomain;
+  }
+
+  if (authorityDomain !== null) {
+    return authorityDomain;
+  }
+
+  return input.athletePlanGenerationDomain;
 }
 
 export function resolveTrainingPlanAction(input: {
   athleteId: string;
   assignedFunctions: string[];
-  currentGenerationDomain: CoachPlanCreationDomain | null;
+  /** Domain tying `currentPlanId` / `currentPlanStatus` on this athlete row — from assigned-athletes only. */
+  athletePlanGenerationDomain: CoachPlanCreationDomain | null;
   currentPlanId: string | null;
   currentPlanStatus: string | null;
   fallbackDomain: CoachPlanCreationDomain | null;
@@ -79,10 +94,18 @@ export function resolveTrainingPlanAction(input: {
   const athleteIdTrimmed = input.athleteId.trim();
   const resolvedDomain = resolveCoachPlanDomain({
     assignedFunctions: input.assignedFunctions,
-    currentGenerationDomain: input.currentGenerationDomain,
+    athletePlanGenerationDomain: input.athletePlanGenerationDomain,
     fallbackDomain: input.fallbackDomain,
+    isHeadCoachPlanningContextOwner: input.isHeadCoachPlanningContextOwner === true,
   });
   const normalizedPlanId = input.currentPlanId?.trim() ?? "";
+  const planAlignedForCoachWorkspace =
+    input.isHeadCoachPlanningContextOwner === true ||
+    resolvedDomain === null ||
+    input.athletePlanGenerationDomain === null ||
+    input.athletePlanGenerationDomain === resolvedDomain;
+  const effectivePlanId =
+    normalizedPlanId !== "" && planAlignedForCoachWorkspace ? normalizedPlanId : "";
 
   if (athleteIdTrimmed === "") {
     return {
@@ -112,7 +135,7 @@ export function resolveTrainingPlanAction(input: {
   }
 
   if (
-    normalizedPlanId === "" &&
+    effectivePlanId === "" &&
     input.hasHeadCoachConfigured === true &&
     input.isHeadCoachPlanningContextOwner !== true &&
     input.planningContextLocked !== true &&
@@ -129,12 +152,12 @@ export function resolveTrainingPlanAction(input: {
     };
   }
 
-  if (normalizedPlanId !== "") {
+  if (effectivePlanId !== "") {
     return {
       buttonLabel: editPlanButtonLabel(resolvedDomain),
       disabled: false,
       helperBelowButton: null,
-      href: planningProfileHrefForAthlete(athleteIdTrimmed, normalizedPlanId),
+      href: planningProfileHrefForAthlete(athleteIdTrimmed, effectivePlanId),
       planStatusLabel: planStatusLabel(input.currentPlanStatus),
       resolvedButtonState: "edit_plan",
       resolvedDomain,

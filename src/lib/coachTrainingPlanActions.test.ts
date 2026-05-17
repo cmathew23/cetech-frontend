@@ -10,7 +10,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete101",
       assignedFunctions: ["SKILLS"],
-      currentGenerationDomain: "SKILLS",
+      athletePlanGenerationDomain: "SKILLS",
       currentPlanId: "plan-skills-101",
       currentPlanStatus: "ACTIVE",
       fallbackDomain: "SKILLS",
@@ -29,7 +29,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete101",
       assignedFunctions: ["NUTRITION"],
-      currentGenerationDomain: "NUTRITION",
+      athletePlanGenerationDomain: "NUTRITION",
       currentPlanId: "plan-nutrition-101",
       currentPlanStatus: "DRAFT",
       fallbackDomain: "NUTRITION",
@@ -45,7 +45,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete101",
       assignedFunctions: ["S_AND_C"],
-      currentGenerationDomain: "S_AND_C",
+      athletePlanGenerationDomain: "S_AND_C",
       currentPlanId: "plan-snc-101",
       currentPlanStatus: "PUBLISHED",
       fallbackDomain: "S_AND_C",
@@ -61,7 +61,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "sharan",
       assignedFunctions: ["SKILLS"],
-      currentGenerationDomain: null,
+      athletePlanGenerationDomain: null,
       currentPlanId: null,
       currentPlanStatus: null,
       fallbackDomain: "SKILLS",
@@ -77,7 +77,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete102",
       assignedFunctions: ["NUTRITION"],
-      currentGenerationDomain: null,
+      athletePlanGenerationDomain: null,
       currentPlanId: null,
       currentPlanStatus: null,
       fallbackDomain: "NUTRITION",
@@ -100,7 +100,7 @@ describe("resolveTrainingPlanAction", () => {
       const action = resolveTrainingPlanAction({
         athleteId: "athlete-locked",
         assignedFunctions: [domain],
-        currentGenerationDomain: null,
+        athletePlanGenerationDomain: null,
         currentPlanId: null,
         currentPlanStatus: null,
         fallbackDomain: null,
@@ -129,7 +129,7 @@ describe("resolveTrainingPlanAction", () => {
       const action = resolveTrainingPlanAction({
         athleteId: "athlete-unlocked",
         assignedFunctions: [domain],
-        currentGenerationDomain: null,
+        athletePlanGenerationDomain: null,
         currentPlanId: null,
         currentPlanStatus: null,
         fallbackDomain: null,
@@ -150,7 +150,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete-no-head",
       assignedFunctions: ["SKILLS"],
-      currentGenerationDomain: null,
+      athletePlanGenerationDomain: null,
       currentPlanId: null,
       currentPlanStatus: null,
       fallbackDomain: null,
@@ -170,7 +170,7 @@ describe("resolveTrainingPlanAction", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete103",
       assignedFunctions: [],
-      currentGenerationDomain: null,
+      athletePlanGenerationDomain: null,
       currentPlanId: null,
       currentPlanStatus: null,
       fallbackDomain: null,
@@ -181,6 +181,24 @@ describe("resolveTrainingPlanAction", () => {
     expect(action.buttonLabel).toBe("Open Planning Workflow");
     expect(action.helperBelowButton).toBeNull();
     expect(action.href).toBe("/coach/training-plans/athlete103/workflow");
+    expect(action.disabled).toBe(false);
+  });
+
+  it("domain coach ignores another domain plan on row (Skills plan, Nutrition viewer)", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-mix",
+      assignedFunctions: ["NUTRITION"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills-1",
+      currentPlanStatus: "ACTIVE",
+      fallbackDomain: "NUTRITION",
+      hasPlanningProfile: true,
+    });
+
+    expect(action.buttonLabel).toBe("Create Nutrition Plan");
+    expect(action.planStatusLabel).toBeNull();
+    expect(action.href).toBe("/coach/training-plans/athlete-mix/workflow");
+    expect(action.href?.includes("planId")).toBe(false);
     expect(action.disabled).toBe(false);
   });
 });

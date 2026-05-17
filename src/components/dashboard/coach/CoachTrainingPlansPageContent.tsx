@@ -82,7 +82,7 @@ function TrainingPlanAthleteRow({
   const action = resolveTrainingPlanAction({
     athleteId: row.athleteId,
     assignedFunctions: row.assignedFunctions,
-    currentGenerationDomain: row.currentGenerationDomain,
+    athletePlanGenerationDomain: row.currentGenerationDomain,
     currentPlanId: row.currentPlanId,
     currentPlanStatus: row.currentPlanStatus,
     fallbackDomain: domain,
@@ -261,7 +261,10 @@ export function CoachTrainingPlansPageContent() {
                   <TrainingPlanAthleteRow
                     row={row}
                     domain={planDomain}
-                    readiness={deriveTrainingPlanReadiness(row)}
+                    readiness={deriveTrainingPlanReadiness(row, {
+                      fallbackCoachPlanDomain: planDomain,
+                      isHeadCoachPlanningContextOwner,
+                    })}
                     hasHeadCoachConfigured={hasHeadCoachConfigured}
                     isHeadCoachPlanningContextOwner={isHeadCoachPlanningContextOwner}
                     planningContextLocked={

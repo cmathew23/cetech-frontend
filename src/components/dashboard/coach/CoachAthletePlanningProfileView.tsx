@@ -1186,10 +1186,28 @@ function normalizeTrainingPlanGenerationDomain(
   return null;
 }
 
+type GovernedPlanActionButtonLabelOpts = {
+  /**
+   * Use Case #1: Head Coach owns SKILLS generation — SUBMIT_REVIEW advances readiness,
+   * not submission "to Head Coach".
+   */
+  headCoachSkillsSubmitReview?: boolean;
+  /** Assistant coaches: distinguish first submit vs resubmit after revision. */
+  submitReviewIsResubmit?: boolean;
+};
+
 function governedPlanActionButtonLabel(
   action: GovernedTrainingPlanWorkflowAction,
+  opts?: GovernedPlanActionButtonLabelOpts,
 ): string {
-  if (action === "SUBMIT_REVIEW") return "Submit for Head Coach Review";
+  if (action === "SUBMIT_REVIEW") {
+    if (opts?.headCoachSkillsSubmitReview) {
+      return "Mark Skills Plan Ready";
+    }
+    return opts?.submitReviewIsResubmit
+      ? "Resubmit for Head Coach Review"
+      : "Submit for Head Coach Review";
+  }
   if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
   return "Release to Athlete";
@@ -6760,7 +6778,13 @@ export function CoachAthletePlanningProfileView({
               disabled={governedPlanActionLoading !== null}
               onClick={() => void handlePersistedGovernedPlanAction("SUBMIT_REVIEW")}
             >
-              {governedPlanActionButtonLabel("SUBMIT_REVIEW")}
+              {governedPlanActionButtonLabel("SUBMIT_REVIEW", {
+                headCoachSkillsSubmitReview:
+                  isHeadCoachPlanningContextOwner &&
+                  resolvedWorkflowGenerationDomain === "SKILLS",
+                submitReviewIsResubmit:
+                  assistantDomainWorkflowStatus === "revision_requested",
+              })}
             </Button>
           ) : null}
           {persistedGovernedAllowedActions.has("HEAD_APPROVE") ? (

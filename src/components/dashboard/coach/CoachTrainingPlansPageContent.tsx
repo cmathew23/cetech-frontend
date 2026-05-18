@@ -9,9 +9,7 @@ import {
   derivePrimaryCoachPlanDomain,
   type CoachPlanCreationDomain,
 } from "@/lib/coachAuthority";
-import {
-  resolveTrainingPlanAction,
-} from "@/lib/coachTrainingPlanActions";
+import { resolveTrainingPlanAction } from "@/lib/coachTrainingPlanActions";
 import {
   fetchCoachAssignedAthletes,
   fetchCoachMeDashboard,
@@ -90,6 +88,8 @@ function TrainingPlanAthleteRow({
     hasHeadCoachConfigured,
     isHeadCoachPlanningContextOwner,
     planningContextLocked,
+    canGeneratePlan: row.canGeneratePlan,
+    canGenerateCurrentDomainPlan: row.canGenerateCurrentDomainPlan,
   });
 
   return (

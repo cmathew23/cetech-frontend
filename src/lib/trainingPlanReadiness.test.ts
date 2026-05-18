@@ -13,6 +13,8 @@ function minimalRow(
     currentGenerationDomain: null,
     currentPlanId: null,
     currentPlanStatus: null,
+    canGeneratePlan: null,
+    canGenerateCurrentDomainPlan: null,
     validationStatus: null,
     displayName: "X",
     email: "x@example.com",

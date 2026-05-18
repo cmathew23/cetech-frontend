@@ -1,11 +1,50 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
   resolveTrainingPlanAction,
   WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
 } from "@/lib/coachTrainingPlanActions";
 
 describe("resolveTrainingPlanAction", () => {
+  it("disables domain create action when backend sets canGenerateCurrentDomainPlan=false", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["SKILLS_COACH"],
+      athletePlanGenerationDomain: null,
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      canGeneratePlan: true,
+      canGenerateCurrentDomainPlan: false,
+    });
+
+    expect(action.buttonLabel).toBe("Create Skills Plan");
+    expect(action.href).toBeNull();
+    expect(action.disabled).toBe(true);
+    expect(action.helperBelowButton).toBe(PLAN_GENERATION_NOT_ASSIGNED_MESSAGE);
+    expect(action.resolvedButtonState).toBe("plan_creation_unavailable");
+  });
+
+  it("does not block Edit Plan when canGenerateCurrentDomainPlan is false but a plan exists", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills",
+      currentPlanStatus: "ACTIVE",
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      canGeneratePlan: false,
+      canGenerateCurrentDomainPlan: false,
+    });
+
+    expect(action.buttonLabel).toBe("Edit Skills Plan");
+    expect(action.disabled).toBe(false);
+    expect(action.href).toContain("plan-skills");
+    expect(action.resolvedButtonState).toBe("edit_plan");
+  });
   it("shows Edit Skills Plan for a skills coach with a persisted plan", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete101",

@@ -87,7 +87,12 @@ import {
   currentCoachIsHeadCoach,
   normalizeCoachFunctionValue,
 } from "@/lib/coachAuthority";
-import { planningProfileHrefForAthlete } from "@/lib/coachTrainingPlanActions";
+import {
+  planningProfileHrefForAthlete,
+  PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
+  isPlanGenerationBlockedByOwnership,
+  type PlanGenerationOwnershipFlags,
+} from "@/lib/coachTrainingPlanActions";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -2421,6 +2426,10 @@ export function CoachAthletePlanningProfileView({
     NUTRITION: "",
     S_AND_C: "",
   });
+  /** Invalidates async domain-summary → active/detail hydration when athlete/domain changes. */
+  const assistantDomainSummaryHydrationGenRef = useRef(0);
+  const [assistantDomainSummaryHydrationPending, setAssistantDomainSummaryHydrationPending] =
+    useState(false);
   const [persistedSkillsPlanLoading, setPersistedSkillsPlanLoading] = useState(false);
   const [persistedSkillsPlanError, setPersistedSkillsPlanError] = useState<string | null>(
     null,
@@ -2505,6 +2514,10 @@ export function CoachAthletePlanningProfileView({
     () => deriveGenerationDomains(setupState.coachFunctions)[0] ?? "SKILLS",
     [setupState.coachFunctions],
   );
+  const [planGenerationOwnershipByDomain, setPlanGenerationOwnershipByDomain] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, PlanGenerationOwnershipFlags>>
+  >({});
+  const [planOwnershipLoading, setPlanOwnershipLoading] = useState(false);
   const [selectedSeasonCycleId, setSelectedSeasonCycleId] = useState<string | null>(null);
   const [seasonCreateFormExplicit, setSeasonCreateFormExplicit] = useState(false);
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
@@ -3126,6 +3139,79 @@ export function CoachAthletePlanningProfileView({
     void refreshGoalsSeasonSetup();
   }, [refreshGoalsSeasonSetup]);
 
+  useEffect(() => {
+    if (!accessGateReady || entityId === "" || athleteIdTrimmed === "") {
+      setPlanGenerationOwnershipByDomain({});
+      setPlanOwnershipLoading(false);
+      return;
+    }
+    const domains = [...allowedGenerationDomains];
+    if (domains.length === 0) {
+      setPlanGenerationOwnershipByDomain({});
+      setPlanOwnershipLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPlanOwnershipLoading(true);
+
+    void (async () => {
+      try {
+        const settled = await Promise.all(
+          domains.map(async (domain) => {
+            try {
+              const r = await fetchCoachAthleteTrainingPlanReadiness(
+                entityId,
+                athleteIdTrimmed,
+                {
+                  generationDomain: domain,
+                  seasonCycleId: selectedSeasonCycleId,
+                  sportCode: athleteSportCode,
+                },
+              );
+              return {
+                domain,
+                flags: {
+                  canGeneratePlan: r.canGeneratePlan,
+                  canGenerateCurrentDomainPlan: r.canGenerateCurrentDomainPlan,
+                } satisfies PlanGenerationOwnershipFlags,
+              };
+            } catch {
+              return {
+                domain,
+                flags: {
+                  canGeneratePlan: null,
+                  canGenerateCurrentDomainPlan: null,
+                } satisfies PlanGenerationOwnershipFlags,
+              };
+            }
+          }),
+        );
+        if (cancelled) return;
+        const next: Partial<
+          Record<TrainingPlanGenerationDomain, PlanGenerationOwnershipFlags>
+        > = {};
+        for (const item of settled) {
+          next[item.domain] = item.flags;
+        }
+        setPlanGenerationOwnershipByDomain(next);
+      } finally {
+        if (!cancelled) setPlanOwnershipLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessGateReady,
+    allowedGenerationDomains,
+    athleteIdTrimmed,
+    athleteSportCode,
+    entityId,
+    selectedSeasonCycleId,
+  ]);
+
   const selectedSeason = setupState.seasons.find(
     (season) => season.seasonCycleId === selectedSeasonCycleId,
   ) ?? null;
@@ -3517,8 +3603,10 @@ export function CoachAthletePlanningProfileView({
     if (latestSkillsDraftRequestState === "idle" || latestSkillsDraftRequestState === "loading") {
       return true;
     }
+    if (assistantDomainSummaryHydrationPending) return true;
     return false;
   }, [
+    assistantDomainSummaryHydrationPending,
     latestSkillsDraftRequestState,
     shouldRenderAssistantDomainWorkspace,
     upstreamPlanningContextLoading,
@@ -3972,34 +4060,59 @@ export function CoachAthletePlanningProfileView({
     "Waiting for Head Coach to lock planning context.";
 
   const generatePlanLocalErrorsByDomain = useMemo(() => {
+    const ownershipErrorForDomain = (
+      domain: TrainingPlanGenerationDomain,
+    ): string | null => {
+      if (planOwnershipLoading) {
+        return "Loading plan generation permissions.";
+      }
+      const flags = planGenerationOwnershipByDomain[domain];
+      const normalized: PlanGenerationOwnershipFlags = {
+        canGeneratePlan: flags?.canGeneratePlan ?? null,
+        canGenerateCurrentDomainPlan: flags?.canGenerateCurrentDomainPlan ?? null,
+      };
+      return isPlanGenerationBlockedByOwnership(normalized)
+        ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
+        : null;
+    };
+
     if (requiresPlanningContextLockForGeneration) {
       if (upstreamPlanningContextLoading) {
         return Object.fromEntries(
-          allowedGenerationDomains.map((domain) => [
-            domain,
-            "Loading upstream planning context.",
-          ]),
+          allowedGenerationDomains.map((domain) => {
+            const blocked = ownershipErrorForDomain(domain);
+            return [
+              domain,
+              blocked ?? "Loading upstream planning context.",
+            ] as const;
+          }),
         ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
       }
       if (upstreamPlanningContextError !== null) {
         return Object.fromEntries(
-          allowedGenerationDomains.map((domain) => [
-            domain,
-            upstreamPlanningContextError,
-          ]),
+          allowedGenerationDomains.map((domain) => {
+            const blocked = ownershipErrorForDomain(domain);
+            return [domain, blocked ?? upstreamPlanningContextError] as const;
+          }),
         ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
       }
       if (!planningContextLocked) {
         return Object.fromEntries(
-          allowedGenerationDomains.map((domain) => [
-            domain,
-            UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE,
-          ]),
+          allowedGenerationDomains.map((domain) => {
+            const blocked = ownershipErrorForDomain(domain);
+            return [domain, blocked ?? UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE] as const;
+          }),
         ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
       }
     }
     if (isDownstreamDomainCoach && allowedGenerationDomains.length === 1) {
       const only = allowedGenerationDomains[0];
+      const ownBlock = ownershipErrorForDomain(only);
+      if (ownBlock !== null) {
+        return { [only]: ownBlock } as Partial<
+          Record<TrainingPlanGenerationDomain, string | null>
+        >;
+      }
       if (upstreamPlanningContextLoading) {
         return { [only]: "Loading upstream planning context." } as Partial<
           Record<TrainingPlanGenerationDomain, string | null>
@@ -4044,6 +4157,10 @@ export function CoachAthletePlanningProfileView({
     }
     return Object.fromEntries(
       allowedGenerationDomains.map((domain) => {
+        const ownBlock = ownershipErrorForDomain(domain);
+        if (ownBlock !== null) {
+          return [domain, ownBlock] as const;
+        }
         const effectiveDurationDays = generationDurationDaysForDomain(domain, durationDays);
         const effectivePlanEndDate = addDaysToDateString(
           planStartDate,
@@ -4063,7 +4180,7 @@ export function CoachAthletePlanningProfileView({
             planStartDate,
             planEndDate: effectivePlanEndDate,
           }),
-        ];
+        ] as const;
       }),
     ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
   }, [
@@ -4078,6 +4195,8 @@ export function CoachAthletePlanningProfileView({
     durationDays,
     entityId,
     isDownstreamDomainCoach,
+    planGenerationOwnershipByDomain,
+    planOwnershipLoading,
     planningContextLocked,
     planStartDate,
     requiresPlanningContextLockForGeneration,
@@ -4344,6 +4463,8 @@ export function CoachAthletePlanningProfileView({
     prevUrlPlanForPersistedSyncRef.current = undefined;
     coachDomainStateResetRef.current = null;
     step6WorkflowFetchGenRef.current += 1;
+    assistantDomainSummaryHydrationGenRef.current += 1;
+    setAssistantDomainSummaryHydrationPending(false);
     workflowStep6FetchFailedForKeyRef.current = null;
     setStep6WorkflowInternalError(null);
     setStep6WorkflowInternalLoading(false);
@@ -4399,6 +4520,8 @@ export function CoachAthletePlanningProfileView({
 
     coachDomainStateResetRef.current = scopedKey;
     latestSkillsDraftRequestGenRef.current += 1;
+    assistantDomainSummaryHydrationGenRef.current += 1;
+    setAssistantDomainSummaryHydrationPending(false);
     step6WorkflowFetchGenRef.current += 1;
     workflowStep6FetchFailedForKeyRef.current = null;
     setStep6WorkflowInternalError(null);
@@ -5013,6 +5136,87 @@ export function CoachAthletePlanningProfileView({
     loadLatestSkillsDraft,
     requestedPlanId,
     shouldForceAssistantDomainWorkspace,
+  ]);
+
+  /**
+   * Assistant/domain coaches intentionally skip URL-driven persisted/detail sync
+   * (`syncPersistedPlanFromUrl`). Dashboard/list ACTIVE state comes from domain summary + detail,
+   * while this workspace previously relied only on `latest-domain-draft` — which is absent once a
+   * plan is released — producing a false "Not Created". Hydrate the same summary → active/detail
+   * path for the coach's current generation domain (SKILLS / NUTRITION / S_AND_C).
+   */
+  useEffect(() => {
+    if (!accessGateReady) return;
+    if (!shouldRenderAssistantDomainWorkspace) {
+      setAssistantDomainSummaryHydrationPending(false);
+      return;
+    }
+    if (entityId === "" || athleteIdTrimmed === "") return;
+    if (currentCoachGenerationDomain === null) return;
+
+    assistantDomainSummaryHydrationGenRef.current += 1;
+    const gen = assistantDomainSummaryHydrationGenRef.current;
+    let cancelled = false;
+    setAssistantDomainSummaryHydrationPending(true);
+
+    void (async () => {
+      try {
+        const domains = await fetchDomainPlanSummary(entityId, athleteIdTrimmed);
+        if (cancelled || assistantDomainSummaryHydrationGenRef.current !== gen) return;
+
+        const summary = domains[currentCoachGenerationDomain];
+        const planId = summary.trainingPlanId?.trim() ?? "";
+        if (planId === "") {
+          return;
+        }
+
+        knownDomainPlanIdsRef.current[currentCoachGenerationDomain] = planId;
+
+        try {
+          const detail = await fetchPersistedTrainingPlanActiveDetail(
+            planId,
+            currentCoachGenerationDomain,
+          );
+          if (cancelled || assistantDomainSummaryHydrationGenRef.current !== gen) return;
+
+          const owner = detail.plan.athleteId?.trim() ?? "";
+          if (owner !== "" && owner !== athleteIdTrimmed) return;
+
+          setPersistedSkillsPlanDetail(detail);
+          setPersistedVerifiedDomain(currentCoachGenerationDomain);
+          setPersistedSkillsPlanError(null);
+        } catch (e) {
+          if (cancelled || assistantDomainSummaryHydrationGenRef.current !== gen) return;
+          if (!(isNormalizedApiError(e) && e.status === 404)) {
+            setPersistedSkillsPlanError(
+              formatApiError(
+                e,
+                `Could not load ${trainingPlanDomainLabel(currentCoachGenerationDomain)}.`,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (cancelled || assistantDomainSummaryHydrationGenRef.current !== gen) return;
+        setPersistedSkillsPlanError(
+          formatApiError(e, "Could not load domain plan summary for this athlete."),
+        );
+      } finally {
+        if (!cancelled && assistantDomainSummaryHydrationGenRef.current === gen) {
+          setAssistantDomainSummaryHydrationPending(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessGateReady,
+    athleteIdTrimmed,
+    currentCoachGenerationDomain,
+    entityId,
+    shouldRenderAssistantDomainWorkspace,
   ]);
 
   useEffect(() => {

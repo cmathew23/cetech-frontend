@@ -196,6 +196,9 @@ export type CoachAthleteTrainingPlanReadiness = {
   appCompleteness: string | null;
   isReady: boolean | null;
   canGenerate: boolean | null;
+  /** Backend ownership / gate for this readiness request scope. */
+  canGeneratePlan: boolean | null;
+  canGenerateCurrentDomainPlan: boolean | null;
   blockers: string[];
   missingRequiredFields: string[];
   /** When backend echoes athlete sport context for generation requests */
@@ -1241,6 +1244,10 @@ export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanRe
     ]),
     isReady: readBooleanKey(records, ["isReady", "ready"]),
     canGenerate: readBooleanKey(records, ["canGenerate"]),
+    canGeneratePlan: readBooleanKey(records, ["canGeneratePlan"]),
+    canGenerateCurrentDomainPlan: readBooleanKey(records, [
+      "canGenerateCurrentDomainPlan",
+    ]),
     blockers: readBlockerListKey(records, ["blockers"]),
     missingRequiredFields: readStringListKey(records, ["missingRequiredFields"]),
     sportCode: readStringKey(records, [

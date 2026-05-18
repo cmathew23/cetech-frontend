@@ -49,6 +49,18 @@ function readBooleanField(o: Record<string, unknown>, key: string): boolean {
   return v === true;
 }
 
+/** Explicit true/false from API; omit key → null (no frontend ownership gate). */
+function readAssignedAthleteOptionalBoolean(
+  o: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  if (!(key in o)) return null;
+  const v = o[key];
+  if (v === true) return true;
+  if (v === false) return false;
+  return null;
+}
+
 function readStringArrayField(
   o: Record<string, unknown>,
   key: string,
@@ -176,6 +188,12 @@ export type CoachAssignedAthleteRow = {
   currentGenerationDomain: CoachPlanCreationDomain | null;
   currentPlanId: string | null;
   currentPlanStatus: string | null;
+  /**
+   * Backend plan-generation ownership for this athlete row (coach-specific).
+   * `null` when the API omits the field — do not infer.
+   */
+  canGeneratePlan: boolean | null;
+  canGenerateCurrentDomainPlan: boolean | null;
   /** From assigned-athletes `validationStatus`; `null` when the field is omitted (do not infer). */
   validationStatus: string | null;
   displayName: string;
@@ -209,6 +227,11 @@ export function parseAssignedAthleteRow(
     ),
     currentPlanId,
     currentPlanStatus,
+    canGeneratePlan: readAssignedAthleteOptionalBoolean(o, "canGeneratePlan"),
+    canGenerateCurrentDomainPlan: readAssignedAthleteOptionalBoolean(
+      o,
+      "canGenerateCurrentDomainPlan",
+    ),
     validationStatus: readAssignedAthleteValidationStatus(o),
     displayName:
       readStringField(o, "displayName") ||

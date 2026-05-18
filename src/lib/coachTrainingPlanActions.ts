@@ -7,6 +7,33 @@ import {
 export const WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE =
   "Waiting for Head Coach to lock planning context.";
 
+/** Shown when backend marks this coach as not the designated generator for this athlete/domain. */
+export const PLAN_GENERATION_NOT_ASSIGNED_MESSAGE =
+  "Plan generation isn't assigned to you for this athlete in this domain.";
+
+export type PlanGenerationOwnershipFlags = {
+  canGeneratePlan: boolean | null;
+  canGenerateCurrentDomainPlan: boolean | null;
+};
+
+/**
+ * When API omits both fields (null), do not add a frontend ownership gate.
+ * When canGenerateCurrentDomainPlan is explicitly false, block create.
+ * When only canGeneratePlan is explicitly false and domain-level flag is unset, block create for a resolved domain.
+ */
+export function isPlanGenerationBlockedByOwnership(
+  flags: PlanGenerationOwnershipFlags,
+): boolean {
+  if (flags.canGenerateCurrentDomainPlan === false) return true;
+  if (
+    flags.canGenerateCurrentDomainPlan === null &&
+    flags.canGeneratePlan === false
+  ) {
+    return true;
+  }
+  return false;
+}
+
 type ResolvedButtonState =
   | "route_unavailable"
   | "plan_creation_unavailable"
@@ -82,6 +109,9 @@ export function resolveTrainingPlanAction(input: {
   hasHeadCoachConfigured?: boolean;
   isHeadCoachPlanningContextOwner?: boolean;
   planningContextLocked?: boolean | null;
+  /** Backend ownership; null/absent means no ownership-based UI gate. */
+  canGeneratePlan?: boolean | null;
+  canGenerateCurrentDomainPlan?: boolean | null;
 }): {
   buttonLabel: string;
   disabled: boolean;
@@ -130,6 +160,26 @@ export function resolveTrainingPlanAction(input: {
       href: null,
       planStatusLabel: null,
       resolvedButtonState: "app_required",
+      resolvedDomain,
+    };
+  }
+
+  const ownershipFlags: PlanGenerationOwnershipFlags = {
+    canGeneratePlan: input.canGeneratePlan ?? null,
+    canGenerateCurrentDomainPlan: input.canGenerateCurrentDomainPlan ?? null,
+  };
+  if (
+    effectivePlanId === "" &&
+    resolvedDomain !== null &&
+    isPlanGenerationBlockedByOwnership(ownershipFlags)
+  ) {
+    return {
+      buttonLabel: coachPlanCreationButtonLabel(resolvedDomain),
+      disabled: true,
+      helperBelowButton: PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
+      href: null,
+      planStatusLabel: null,
+      resolvedButtonState: "plan_creation_unavailable",
       resolvedDomain,
     };
   }

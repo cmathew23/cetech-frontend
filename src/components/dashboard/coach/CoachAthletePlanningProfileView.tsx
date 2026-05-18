@@ -3197,7 +3197,7 @@ export function CoachAthletePlanningProfileView({
     !isHeadCoachPlanningContextOwner &&
     currentCoachGenerationDomain !== null;
   const hasSubmittedDomainPlans = useMemo(() => {
-    if (!headCoachReviewMode) return false;
+    if (!isHeadCoachPlanningContextOwner) return false;
     return GENERATION_DOMAIN_ORDER.some((domain) => {
       const state = headCoachDomainPlanStates[domain];
       const allowedActions = new Set(state.activeDetail?.allowedActions ?? []);
@@ -3213,7 +3213,7 @@ export function CoachAthletePlanningProfileView({
         allowedActions.has("REQUEST_REVISION")
       );
     });
-  }, [headCoachDomainPlanStates, headCoachReviewMode]);
+  }, [headCoachDomainPlanStates, isHeadCoachPlanningContextOwner]);
   const planningContextLocked =
     setupState.hasHeadCoachConfigured
       ? upstreamPlanningContext?.planningContextLocked === true || hasSubmittedDomainPlans
@@ -3592,7 +3592,7 @@ export function CoachAthletePlanningProfileView({
     ],
   );
   const persistedGovernedPlanContext = useMemo(() => {
-    if (headCoachReviewMode && persistedVerifiedDomain !== null) {
+    if (isHeadCoachPlanningContextOwner && persistedVerifiedDomain !== null) {
       const domainState = headCoachDomainPlanStates[persistedVerifiedDomain];
       const activeDetail = domainState.activeDetail;
       const planId = activeDetail?.plan.id?.trim() ?? "";
@@ -3626,7 +3626,7 @@ export function CoachAthletePlanningProfileView({
     athleteIdTrimmed,
     entityId,
     headCoachDomainPlanStates,
-    headCoachReviewMode,
+    isHeadCoachPlanningContextOwner,
     persistedGovernedPlanDomain,
     persistedSkillsPlanDetail?.plan.id,
     persistedSkillsPlanDetail?.version.id,
@@ -4486,7 +4486,7 @@ export function CoachAthletePlanningProfileView({
   ]);
 
   useEffect(() => {
-    if (!accessGateReady || entityId === "" || athleteIdTrimmed === "" || !headCoachReviewMode) {
+    if (!accessGateReady || entityId === "" || athleteIdTrimmed === "" || !isHeadCoachPlanningContextOwner) {
       setHeadCoachDomainPlanStates(createEmptyHeadCoachDomainPlanStates());
       return;
     }
@@ -4549,7 +4549,7 @@ export function CoachAthletePlanningProfileView({
     return () => {
       cancelled = true;
     };
-  }, [accessGateReady, athleteIdTrimmed, entityId, headCoachReviewMode]);
+  }, [accessGateReady, athleteIdTrimmed, entityId, isHeadCoachPlanningContextOwner]);
 
   useEffect(() => {
     setPlanDatesConfirmedForCurrentAthlete(false);
@@ -4610,7 +4610,7 @@ export function CoachAthletePlanningProfileView({
 
   const refreshHeadCoachDomainPlanState = useCallback(
     async (domain: TrainingPlanGenerationDomain): Promise<void> => {
-      if (!headCoachReviewMode || entityId === "" || athleteIdTrimmed === "") return;
+      if (!isHeadCoachPlanningContextOwner || entityId === "" || athleteIdTrimmed === "") return;
 
       setHeadCoachDomainPlanStates((prev) => ({
         ...prev,
@@ -4657,7 +4657,7 @@ export function CoachAthletePlanningProfileView({
         },
       }));
     },
-    [athleteIdTrimmed, entityId, headCoachReviewMode],
+    [athleteIdTrimmed, entityId, isHeadCoachPlanningContextOwner],
   );
 
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
@@ -5348,7 +5348,7 @@ export function CoachAthletePlanningProfileView({
           actionDomain,
         );
       }
-      if (headCoachReviewMode) {
+      if (isHeadCoachPlanningContextOwner) {
         await refreshHeadCoachDomainPlanState(actionDomain);
       } else {
         await refreshPersistedPlanDetail(
@@ -5398,7 +5398,7 @@ export function CoachAthletePlanningProfileView({
         actionDomain,
         coachFeedback,
       );
-      if (headCoachReviewMode) {
+      if (isHeadCoachPlanningContextOwner) {
         await refreshHeadCoachDomainPlanState(actionDomain);
       } else {
         await refreshPersistedPlanDetail(
@@ -5645,7 +5645,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderHeadCoachPlanReviewPanel() {
-    if (!headCoachReviewMode || persistedVerifiedDomain === null) return null;
+    if (!isHeadCoachPlanningContextOwner || persistedVerifiedDomain === null) return null;
 
     const domainState = headCoachDomainPlanStates[persistedVerifiedDomain];
     const activeDetail = domainState.activeDetail;
@@ -5822,12 +5822,12 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderHeadCoachReviewWorkspace() {
-    if (!headCoachReviewMode) return null;
+  /** Head Coach submitted-plan cards + inline review panel (shared by pure HC Step 6 and HC-with-domain Step 6). */
+  function renderHeadCoachSubmittedDomainPlansSection() {
+    if (!isHeadCoachPlanningContextOwner) return null;
     const locked = upstreamPlanningContext?.planningContextLocked === true;
     return (
       <div className="space-y-4">
-        {renderHeadCoachPlanningContextLockAction()}
         {renderHeadCoachPlanReviewPanel()}
         <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
           <div className="space-y-1">
@@ -5842,6 +5842,16 @@ export function CoachAthletePlanningProfileView({
             {GENERATION_DOMAIN_ORDER.map(renderHeadCoachDomainPlanCard)}
           </div>
         </section>
+      </div>
+    );
+  }
+
+  function renderHeadCoachReviewWorkspace() {
+    if (!isHeadCoachPlanningContextOwner) return null;
+    return (
+      <div className="space-y-4">
+        {renderHeadCoachPlanningContextLockAction()}
+        {renderHeadCoachSubmittedDomainPlansSection()}
       </div>
     );
   }
@@ -9539,6 +9549,11 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     </div>
                   )}
+                  {!headCoachReviewMode && isHeadCoachPlanningContextOwner ? (
+                    <div className="mt-6 space-y-4 border-t border-slate-200 pt-6">
+                      {renderHeadCoachSubmittedDomainPlansSection()}
+                    </div>
+                  ) : null}
                   {renderStep6WorkflowActionsStrip()}
                   </>
                   )}

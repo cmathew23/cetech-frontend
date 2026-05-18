@@ -974,6 +974,7 @@ function normalizeEntityAssignmentRow(raw: unknown): EntityAssignmentRow | null 
   const coachEmail =
     typeof o.coachEmail === "string" ? o.coachEmail.trim() : "";
   const missingHeadCoachAssignment = o.missingHeadCoachAssignment === true;
+  const canGeneratePlan = o.canGeneratePlan === true;
 
   return {
     assignmentId,
@@ -989,6 +990,7 @@ function normalizeEntityAssignmentRow(raw: unknown): EntityAssignmentRow | null 
     createdAt,
     status,
     missingHeadCoachAssignment,
+    canGeneratePlan,
   };
 }
 
@@ -1067,6 +1069,33 @@ export async function createAthleteCoachAssignment(
       }),
     },
   );
+  adaptBackendSuccess(raw);
+}
+
+/**
+ * PATCH /entities/:entityId/assignments/athlete-coach/:athleteId/:coachId
+ * Body uses API field names `athleteId` / `coachId` with **profile** UUIDs.
+ */
+export async function patchAthleteCoachAssignment(
+  entityId: string,
+  athleteProfileId: string,
+  coachProfileId: string,
+  patch: { canGeneratePlan: boolean },
+): Promise<void> {
+  const eid = entityId.trim();
+  const aid = athleteProfileId.trim();
+  const cid = coachProfileId.trim();
+  if (eid === "" || aid === "" || cid === "") {
+    throw {
+      message: "entityId, athleteProfileId, and coachProfileId are required",
+      status: 400,
+      code: "ASSIGNMENT_PATCH_INPUT_REQUIRED",
+    };
+  }
+  const raw = await apiRequest(paths.entities.unassignAthleteCoach(eid, aid, cid), {
+    method: "PATCH",
+    body: JSON.stringify({ canGeneratePlan: patch.canGeneratePlan }),
+  });
   adaptBackendSuccess(raw);
 }
 

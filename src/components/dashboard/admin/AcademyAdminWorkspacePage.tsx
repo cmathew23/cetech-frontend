@@ -31,6 +31,7 @@ import {
   fetchEntityMembers,
   fetchMyAcademy,
   INVITATION_STATUS_FILTERS,
+  patchAthleteCoachAssignment,
   removeAthleteCoachAssignment,
   type InvitationStatusFilter,
   revokeEntityInvitation,
@@ -479,6 +480,13 @@ export function AcademyAdminWorkspacePage({
   const [removingAssignmentKey, setRemovingAssignmentKey] = useState<string | null>(
     null,
   );
+  const [canGeneratePlanUpdatingKey, setCanGeneratePlanUpdatingKey] = useState<
+    string | null
+  >(null);
+  const [canGeneratePlanNotice, setCanGeneratePlanNotice] = useState<{
+    variant: "success" | "danger";
+    message: string;
+  } | null>(null);
   const [unassignModalOpen, setUnassignModalOpen] = useState(false);
   const [unassignTarget, setUnassignTarget] = useState<{
     athleteProfileId: string;
@@ -932,6 +940,7 @@ export function AcademyAdminWorkspacePage({
     setRevokeError(null);
     setAssignmentError(null);
     setAssignmentSuccess(null);
+    setCanGeneratePlanNotice(null);
     setInviteError(null);
     setInviteSuccess(null);
   }
@@ -1124,6 +1133,44 @@ export function AcademyAdminWorkspacePage({
     if (removingAssignmentKey !== null) return;
     setUnassignModalOpen(false);
     setUnassignTarget(null);
+  }
+
+  async function handleToggleCanGeneratePlan(
+    row: EntityAssignmentRow,
+    nextValue: boolean,
+  ) {
+    if (!selectedEntityId || canGeneratePlanUpdatingKey !== null) return;
+    const rowKey = `${row.athleteProfileId}:${row.coachProfileId}`;
+    setCanGeneratePlanUpdatingKey(rowKey);
+    setCanGeneratePlanNotice(null);
+    setAssignmentError(null);
+    setAssignmentSuccess(null);
+    try {
+      await patchAthleteCoachAssignment(
+        selectedEntityId,
+        row.athleteProfileId,
+        row.coachProfileId,
+        { canGeneratePlan: nextValue },
+      );
+      const rows = await fetchEntityAssignments(selectedEntityId);
+      setAssignments(rows);
+      setCanGeneratePlanNotice({
+        variant: "success",
+        message: nextValue
+          ? "Plan generation enabled for this assignment."
+          : "Plan generation disabled for this assignment.",
+      });
+    } catch (e) {
+      setCanGeneratePlanNotice({
+        variant: "danger",
+        message: formatAdminApiError(
+          e,
+          "Could not update plan generation permission.",
+        ),
+      });
+    } finally {
+      setCanGeneratePlanUpdatingKey(null);
+    }
   }
 
   async function performRemoveAssignment(
@@ -1691,6 +1738,15 @@ export function AcademyAdminWorkspacePage({
                 {assignmentSuccess}
               </Alert>
             ) : null}
+            {canGeneratePlanNotice ? (
+              <Alert
+                variant={canGeneratePlanNotice.variant}
+                className="mb-4"
+                role="status"
+              >
+                {canGeneratePlanNotice.message}
+              </Alert>
+            ) : null}
             {assignmentsError ? (
               <Alert variant="danger" className="mb-4">
                 {assignmentsError}
@@ -1728,7 +1784,9 @@ export function AcademyAdminWorkspacePage({
                         <th className="px-6 py-3 text-xs font-medium text-slate-500">Coach</th>
                         <th className="px-3 py-3 text-[11px] font-medium text-slate-400">Primary</th>
                         <th className="px-4 py-3 text-xs font-medium text-slate-500">Details</th>
-                        <th className="px-3 py-3 text-[11px] font-medium text-slate-400">Assigned</th>
+                        <th className="px-3 py-3 text-[11px] font-medium text-slate-400">
+                          Can generate plan
+                        </th>
                         <th className="px-5 py-3 text-right text-xs font-medium text-slate-500">Action</th>
                       </tr>
                     </thead>
@@ -1794,8 +1852,32 @@ export function AcademyAdminWorkspacePage({
                                 • Assigned: {formatDateTime(row.createdAt)}
                               </span>
                             </td>
-                            <td className="border-y border-slate-100 bg-white px-3 py-5 text-xs text-slate-400 group-hover:bg-slate-50/70">
-                              —
+                            <td className="border-y border-slate-100 bg-white px-3 py-5 group-hover:bg-slate-50/70">
+                              <div className="flex flex-wrap items-center gap-2">
+                                  <StatusBadge
+                                    variant={row.canGeneratePlan ? "success" : "neutral"}
+                                  >
+                                    {row.canGeneratePlan ? "Yes" : "No"}
+                                  </StatusBadge>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="px-2.5 py-1 text-[11px]"
+                                    loading={canGeneratePlanUpdatingKey === rowKey}
+                                    disabled={
+                                      canGeneratePlanUpdatingKey !== null &&
+                                      canGeneratePlanUpdatingKey !== rowKey
+                                    }
+                                    onClick={() =>
+                                      void handleToggleCanGeneratePlan(
+                                        row,
+                                        !row.canGeneratePlan,
+                                      )
+                                    }
+                                  >
+                                    {row.canGeneratePlan ? "Disable" : "Enable"}
+                                  </Button>
+                              </div>
                             </td>
                             <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 text-right group-hover:bg-slate-50/70">
                               <div className="flex items-start justify-end">

@@ -64,4 +64,6 @@ export type EntityAssignmentRow = {
   status: string;
   /** True when athlete belongs to a Head-Coach-present academy but has no Head Coach assigned. */
   missingHeadCoachAssignment: boolean;
+  /** Backend plan-generation ownership for this coach on this athlete. */
+  canGeneratePlan: boolean;
 };

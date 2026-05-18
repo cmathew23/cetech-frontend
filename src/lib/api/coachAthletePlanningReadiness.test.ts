@@ -358,6 +358,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 30_000,
       },
     );
     expect(result.upstreamPlanningContextLocked).toBe(true);

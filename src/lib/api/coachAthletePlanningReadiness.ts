@@ -15,6 +15,8 @@ const TRAINING_PLAN_PERSIST_DRAFT_TIMEOUT_MS = 60_000;
 const TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS = 60_000;
 /** Active/detail can return large persisted plan graphs and is needed for assistant plan viewing. */
 const TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS = 60_000;
+/** Locked upstream context can aggregate season, workload, and goals after multi-domain plans exist. */
+const TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS = 30_000;
 type WorkloadAssessmentValue =
   | string
   | number
@@ -1702,6 +1704,7 @@ export async function fetchCoachAthleteUpstreamPlanningContext(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS,
     },
   );
   return parseUpstreamPlanningContextPayload(adaptBackendSuccess(raw));

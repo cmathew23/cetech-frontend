@@ -1908,6 +1908,85 @@ function planWindowWithinSelectedSeasonBounds(
   return planStart >= seasonStart && planEnd <= seasonEnd;
 }
 
+function trimmedNonEmpty(
+  ...values: Array<string | null | undefined>
+): string | null {
+  for (const value of values) {
+    const t = typeof value === "string" ? value.trim() : "";
+    if (t !== "") return t;
+  }
+  return null;
+}
+
+/**
+ * Derives locked season id, plan window, and sport the same way the assistant domain workspace
+ * summary hydrates nested/fallback upstream fields (planWindow, planningContext, season/workload).
+ */
+function deriveAssistantLockedUpstreamFields(input: {
+  upstream: CoachAthleteUpstreamPlanningContext | null;
+  profile: CoachAthletePlanningProfileData | null;
+  assistantSportFallback: string | null;
+}): {
+  lockedSeasonCycleId: string | null;
+  lockedPlanWindowStart: string | null;
+  lockedPlanWindowEnd: string | null;
+  lockedSportCode: string | null;
+} {
+  const upstream = input.upstream;
+  if (!upstream) {
+    return {
+      lockedSeasonCycleId: null,
+      lockedPlanWindowStart: null,
+      lockedPlanWindowEnd: null,
+      lockedSportCode: null,
+    };
+  }
+  const pc = upstream.planningContext ?? null;
+
+  const lockedPlanWindowStart = trimmedNonEmpty(
+    upstream.planWindow?.startDate,
+    pc?.startDate,
+    upstream.startDate,
+  );
+  const lockedPlanWindowEnd = trimmedNonEmpty(
+    upstream.planWindow?.endDate,
+    pc?.endDate,
+    upstream.endDate,
+  );
+
+  const planningSeason = pc?.season ?? null;
+  const upstreamSeason = upstream.season ?? null;
+  const contextSeason = planningSeason ?? upstreamSeason;
+
+  const lockedSeasonCycleId = trimmedNonEmpty(
+    upstream.seasonCycleId,
+    pc?.seasonCycleId,
+    contextSeason?.seasonCycleId,
+  );
+
+  const planningWorkload = pc?.workload ?? null;
+  const topWorkload = upstream.workload ?? null;
+  const contextWorkload = planningWorkload ?? topWorkload;
+
+  /** Matches `renderAssistantDomainWorkspace` workloadSportRaw precedence, plus explicit profile sportCode. */
+  const lockedSportCode = trimmedNonEmpty(
+    contextWorkload?.sport,
+    contextSeason?.sport,
+    contextWorkload?.sportCode,
+    input.profile?.sportCode,
+    input.profile?.primarySport,
+    input.profile?.sportContext?.primarySport,
+    input.assistantSportFallback,
+  );
+
+  return {
+    lockedSeasonCycleId,
+    lockedPlanWindowStart,
+    lockedPlanWindowEnd,
+    lockedSportCode,
+  };
+}
+
 function resolveGeneratePlanLocalError(input: {
   entityId: string;
   athleteId: string;
@@ -2278,6 +2357,7 @@ export function CoachAthletePlanningProfileView({
     readinessSources.readiness?.sportCode,
     workloadAssessmentResult?.workloadClassification?.sportCode,
   ]);
+
   const workloadCompletionHoldTimeoutRef = useRef<number | null>(null);
   const workloadAssessmentRequestGenRef = useRef(0);
   const latestSkillsDraftRequestGenRef = useRef(0);
@@ -2308,6 +2388,22 @@ export function CoachAthletePlanningProfileView({
   const [upstreamPlanningContextLoading, setUpstreamPlanningContextLoading] = useState(false);
   const [upstreamPlanningContextError, setUpstreamPlanningContextError] =
     useState<string | null>(null);
+
+  /** Same nested/fallback derivation as assistant locked-context summary — used for local errors + persistence. */
+  const assistantLockedUpstreamDerived = useMemo(
+    () =>
+      deriveAssistantLockedUpstreamFields({
+        upstream: upstreamPlanningContext,
+        profile,
+        assistantSportFallback: athleteSportCode,
+      }),
+    [
+      athleteSportCode,
+      profile,
+      upstreamPlanningContext,
+    ],
+  );
+
   const [cachedLockedPlanWindow, setCachedLockedPlanWindow] = useState<{
     startDate: string | null;
     endDate: string | null;
@@ -3924,9 +4020,9 @@ export function CoachAthletePlanningProfileView({
       }
       if (
         setupState.hasHeadCoachConfigured &&
-        (!upstreamPlanningContext?.seasonCycleId ||
-          !upstreamPlanningContext.startDate ||
-          !upstreamPlanningContext.endDate)
+        (!assistantLockedUpstreamDerived.lockedSeasonCycleId ||
+          !assistantLockedUpstreamDerived.lockedPlanWindowStart ||
+          !assistantLockedUpstreamDerived.lockedPlanWindowEnd)
       ) {
         return {
           [only]:
@@ -3938,7 +4034,7 @@ export function CoachAthletePlanningProfileView({
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
-      if ((athleteSportCode ?? "").trim() === "") {
+      if (!assistantLockedUpstreamDerived.lockedSportCode) {
         return {
           [only]:
             "Sport code is missing for this athlete. The planning owner must complete the Athlete Planning Profile before you can generate.",
@@ -3973,6 +4069,10 @@ export function CoachAthletePlanningProfileView({
   }, [
     activePhaseForSelectedSeason,
     allowedGenerationDomains,
+    assistantLockedUpstreamDerived.lockedPlanWindowEnd,
+    assistantLockedUpstreamDerived.lockedPlanWindowStart,
+    assistantLockedUpstreamDerived.lockedSeasonCycleId,
+    assistantLockedUpstreamDerived.lockedSportCode,
     athleteIdTrimmed,
     athleteSportCode,
     durationDays,
@@ -5827,10 +5927,8 @@ export function CoachAthletePlanningProfileView({
       ? "Loading plan..."
       : assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
     const context = upstreamPlanningContext?.planningContext;
-    const planWindowStart =
-      upstreamPlanningContext?.planWindow?.startDate ?? context?.startDate ?? upstreamPlanningContext?.startDate;
-    const planWindowEnd =
-      upstreamPlanningContext?.planWindow?.endDate ?? context?.endDate ?? upstreamPlanningContext?.endDate;
+    const planWindowStart = assistantLockedUpstreamDerived.lockedPlanWindowStart;
+    const planWindowEnd = assistantLockedUpstreamDerived.lockedPlanWindowEnd;
     const planningContextWorkload = context?.workload ?? null;
     const topLevelWorkload = upstreamPlanningContext?.workload ?? null;
     const contextWorkload = planningContextWorkload ?? topLevelWorkload;
@@ -5866,13 +5964,7 @@ export function CoachAthletePlanningProfileView({
       null;
     const workloadStatus =
       workloadStatusRaw !== null ? toTitleCaseInput(String(workloadStatusRaw).replace(/_/g, " ")) : null;
-    const workloadSportRaw =
-      contextWorkload?.sport ??
-      contextSeason?.sport ??
-      contextWorkload?.sportCode ??
-      profile?.primarySport ??
-      athleteSportCode ??
-      null;
+    const workloadSportRaw = assistantLockedUpstreamDerived.lockedSportCode;
     const workloadSport =
       typeof workloadSportRaw === "string" && workloadSportRaw.trim() !== ""
         ? formatSportLabel(workloadSportRaw)
@@ -7505,7 +7597,20 @@ export function CoachAthletePlanningProfileView({
 
     const seasonCycleId = selectedSeasonCycleId;
     const goalIds = selectedActiveGoals.map((goal) => goal.goalId);
-    const normalizedSportCode = athleteSportCode!.trim();
+    const normalizedSportCode = (
+      isDownstreamDomainCoach
+        ? assistantLockedUpstreamDerived.lockedSportCode
+        : athleteSportCode
+    )
+      ?.trim() ?? "";
+
+    if (normalizedSportCode === "") {
+      setGeneratePlanError("Sport code is required for generation.");
+      setGeneratePlanSuccess(null);
+      setGeneratePlanSuccessDomain(null);
+      setGeneratePlanRecoveryMessage(null);
+      return;
+    }
 
     setGeneratePlanLoading(true);
     setGeneratePlanPhase("executing");
@@ -7544,9 +7649,12 @@ export function CoachAthletePlanningProfileView({
 
       setGeneratePlanPhase("persisting");
       persistPhaseEntered = true;
-      const upstreamSeasonCycleId = upstreamPlanningContext?.seasonCycleId?.trim() ?? "";
-      const upstreamStartDate = upstreamPlanningContext?.startDate?.trim() ?? "";
-      const upstreamEndDate = upstreamPlanningContext?.endDate?.trim() ?? "";
+      const upstreamSeasonCycleId =
+        assistantLockedUpstreamDerived.lockedSeasonCycleId?.trim() ?? "";
+      const upstreamStartDate =
+        assistantLockedUpstreamDerived.lockedPlanWindowStart?.trim() ?? "";
+      const upstreamEndDate =
+        assistantLockedUpstreamDerived.lockedPlanWindowEnd?.trim() ?? "";
       const lockedUpstreamPersistenceContext: TrainingPlanPersistenceContext | null =
         upstreamPlanningContext &&
         (setupState.hasHeadCoachConfigured

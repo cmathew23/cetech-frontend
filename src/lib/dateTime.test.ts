@@ -7,9 +7,33 @@ import {
   formatDateTime,
   formatDateWithWeekday,
   formatPlanningProfileDateDisplay,
+  getLocalDateKey,
   getLocalWeekday,
+  normalizeDateOnlyKey,
   parseTimestampMsForSort,
 } from "@/lib/dateTime";
+
+describe("getLocalDateKey", () => {
+  it("uses the browser-local calendar date, not UTC", () => {
+    const prevTz = process.env.TZ;
+    process.env.TZ = "Asia/Kolkata";
+    try {
+      const istEarlyMorning = new Date("2026-05-19T20:00:00.000Z");
+      expect(getLocalDateKey(istEarlyMorning)).toBe("2026-05-20");
+      expect(istEarlyMorning.toISOString().slice(0, 10)).toBe("2026-05-19");
+    } finally {
+      process.env.TZ = prevTz;
+    }
+  });
+});
+
+describe("normalizeDateOnlyKey", () => {
+  it("returns YYYY-MM-DD from plain or timestamp strings", () => {
+    expect(normalizeDateOnlyKey("2026-05-20")).toBe("2026-05-20");
+    expect(normalizeDateOnlyKey("2026-05-20T00:00:00.000Z")).toBe("2026-05-20");
+    expect(normalizeDateOnlyKey("")).toBeNull();
+  });
+});
 
 describe("formatDateOnly", () => {
   it("formats plain ISO date as DD/MM/YYYY", () => {

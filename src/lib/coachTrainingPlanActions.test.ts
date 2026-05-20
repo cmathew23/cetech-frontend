@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
   resolveTrainingPlanAction,
+  PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL,
   WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
 } from "@/lib/coachTrainingPlanActions";
 
@@ -121,6 +122,7 @@ describe("resolveTrainingPlanAction", () => {
       currentPlanStatus: null,
       fallbackDomain: "NUTRITION",
       hasPlanningProfile: true,
+      planningContextLocked: true,
     });
 
     expect(action.buttonLabel).toBe("Create Nutrition Plan");
@@ -129,13 +131,31 @@ describe("resolveTrainingPlanAction", () => {
     expect(action.disabled).toBe(false);
   });
 
+  it("enables Skills create action while planning context is unlocked", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-locked",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: null,
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: null,
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: false,
+      planningContextLocked: false,
+    });
+
+    expect(action.buttonLabel).toBe("Create Skills Plan");
+    expect(action.disabled).toBe(false);
+    expect(action.href).toBe("/coach/training-plans/athlete-locked/workflow");
+  });
+
   it.each([
-    ["SKILLS", "Create Skills Plan"],
     ["NUTRITION", "Create Nutrition Plan"],
     ["S_AND_C", "Create S&C Plan"],
   ] as const)(
-    "disables %s create action while Head Coach planning context is unlocked",
-    (domain, buttonLabel) => {
+    "disables %s create action while planning context is unlocked",
+    (domain) => {
       const action = resolveTrainingPlanAction({
         athleteId: "athlete-locked",
         assignedFunctions: [domain],
@@ -149,7 +169,7 @@ describe("resolveTrainingPlanAction", () => {
         planningContextLocked: false,
       });
 
-      expect(action.buttonLabel).toBe(buttonLabel);
+      expect(action.buttonLabel).toBe(PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL);
       expect(action.disabled).toBe(true);
       expect(action.href).toBeNull();
       expect(action.helperBelowButton).toBe(
@@ -163,7 +183,7 @@ describe("resolveTrainingPlanAction", () => {
     ["NUTRITION", "Create Nutrition Plan"],
     ["S_AND_C", "Create S&C Plan"],
   ] as const)(
-    "enables %s create action after Head Coach planning context is locked",
+    "enables %s create action after planning context is locked",
     (domain, buttonLabel) => {
       const action = resolveTrainingPlanAction({
         athleteId: "athlete-unlocked",
@@ -217,10 +237,53 @@ describe("resolveTrainingPlanAction", () => {
       isHeadCoachPlanningContextOwner: true,
     });
 
-    expect(action.buttonLabel).toBe("Open Planning Workflow");
+    expect(action.buttonLabel).toBe("Set Planning Context");
     expect(action.helperBelowButton).toBeNull();
     expect(action.href).toBe("/coach/training-plans/athlete103/workflow");
     expect(action.disabled).toBe(false);
+  });
+
+  it("Head Coach with Skills function but canGeneratePlan=false gets workflow entry, not disabled Create Skills Plan", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-302",
+      assignedFunctions: ["SKILLS_COACH"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: true,
+      planningContextLocked: true,
+      canGeneratePlan: false,
+      canGenerateCurrentDomainPlan: false,
+    });
+
+    expect(action.buttonLabel).toBe("Open Planning Workflow");
+    expect(action.disabled).toBe(false);
+    expect(action.href).toBe("/coach/training-plans/athlete-302/workflow");
+    expect(action.helperBelowButton).toBeNull();
+    expect(action.resolvedButtonState).toBe("create_plan");
+  });
+
+  it("Head Coach workflow entry uses Set Planning Context when context is not locked", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-302",
+      assignedFunctions: ["SKILLS_COACH"],
+      athletePlanGenerationDomain: null,
+      currentPlanId: null,
+      currentPlanStatus: null,
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: true,
+      planningContextLocked: false,
+      canGeneratePlan: false,
+    });
+
+    expect(action.buttonLabel).toBe("Set Planning Context");
+    expect(action.disabled).toBe(false);
+    expect(action.helperBelowButton).toBeNull();
   });
 
   it("domain coach ignores another domain plan on row (Skills plan, Nutrition viewer)", () => {
@@ -232,6 +295,7 @@ describe("resolveTrainingPlanAction", () => {
       currentPlanStatus: "ACTIVE",
       fallbackDomain: "NUTRITION",
       hasPlanningProfile: true,
+      planningContextLocked: true,
     });
 
     expect(action.buttonLabel).toBe("Create Nutrition Plan");

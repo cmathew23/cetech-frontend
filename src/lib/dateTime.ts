@@ -13,6 +13,22 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/** Browser-local calendar date as `YYYY-MM-DD` (not UTC). */
+export function getLocalDateKey(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  return `${year}-${month}-${day}`;
+}
+
+/** Normalize API date strings to `YYYY-MM-DD` for comparison with {@link getLocalDateKey}. */
+export function normalizeDateOnlyKey(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed === "") return null;
+  const datePart = trimmed.slice(0, 10);
+  return DATE_ONLY.test(datePart) ? datePart : null;
+}
+
 /**
  * Parse API/user-facing date strings into a Date in local context.
  * - `YYYY-MM-DD` → local calendar date at 00:00 local (avoids UTC off-by-one for plain dates).

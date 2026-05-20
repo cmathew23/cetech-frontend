@@ -11,10 +11,16 @@ import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentif
 import {
   fetchAthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournal,
+  type AthleteWeeklyPlanJournalDay,
 } from "@/lib/api/coachAthletePlanningReadiness";
-import { formatDateOnly } from "@/lib/dateTime";
+import {
+  formatDateOnly,
+  formatDateWithWeekday,
+  getLocalDateKey,
+  normalizeDateOnlyKey,
+} from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 
 type ViewState =
   | { phase: "loading" }
@@ -1339,6 +1345,62 @@ function renderJournalItem(
   );
 }
 
+function findJournalDayForLocalToday(
+  days: AthleteWeeklyPlanJournalDay[],
+  localTodayKey: string,
+): AthleteWeeklyPlanJournalDay | null {
+  return (
+    days.find((day) => normalizeDateOnlyKey(day.date) === localTodayKey) ?? null
+  );
+}
+
+function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
+  return (
+    <div className="grid gap-4 xl:grid-cols-3">
+      {DOMAIN_SECTIONS.map((domain) => {
+        const items =
+          domain.key === "SKILLS"
+            ? day.skills
+            : domain.key === "NUTRITION"
+              ? day.nutrition
+              : day.sandc;
+        return (
+          <div key={`${day.date}-${domain.key}`} className="space-y-3">
+            <div className="border-l-2 border-primary/60 pl-3">
+              <h4 className="text-sm font-semibold text-textPrimary">
+                {domain.sectionTitle}
+              </h4>
+              <p className="text-xs text-textSecondary">
+                {items.length > 0
+                  ? `${items.length} item(s) released`
+                  : domain.emptyMessage}
+              </p>
+            </div>
+            {items.length === 0 ? (
+              <Card
+                padding="compact"
+                accent={false}
+                className="bg-bg text-sm text-textSecondary"
+              >
+                {domain.emptyMessage}
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {domain.key === "NUTRITION" ? renderNutritionDayTotalsPanel(items) : null}
+                {items.map((item, index) =>
+                  renderJournalItem(item, index, {
+                    nutritionDomain: domain.key === "NUTRITION",
+                  }),
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function domainBadge(status: "RELEASED" | "NOT_RELEASED") {
   if (status === "RELEASED") {
     return <StatusBadge variant="success">Released</StatusBadge>;
@@ -1499,6 +1561,29 @@ export function AthleteWeeklyPlanJournalPageContent() {
             </DashboardCardShell>
           ) : null}
 
+          {(() => {
+            const localTodayKey = getLocalDateKey();
+            const todayJournalDay = findJournalDayForLocalToday(
+              readyJournal.days,
+              localTodayKey,
+            );
+            return (
+              <DashboardCardShell
+                title="Today's Plan"
+                subtitle={formatDateWithWeekday(localTodayKey)}
+                className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+              >
+                {todayJournalDay === null ? (
+                  <p className="text-sm text-textSecondary">
+                    No plan released for today.
+                  </p>
+                ) : (
+                  renderJournalDayDomainGrid(todayJournalDay)
+                )}
+              </DashboardCardShell>
+            );
+          })()}
+
           {readyJournal.days.length === 0 ? (
             <DashboardCardShell title="Journal Days">
               <p className="text-sm text-textSecondary">
@@ -1513,50 +1598,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
                 subtitle={formatDateOnly(day.date)}
                 className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
               >
-                <div className="grid gap-4 xl:grid-cols-3">
-                  {DOMAIN_SECTIONS.map((domain) => {
-                    const items =
-                      domain.key === "SKILLS"
-                        ? day.skills
-                        : domain.key === "NUTRITION"
-                          ? day.nutrition
-                          : day.sandc;
-                    return (
-                      <div key={`${day.date}-${domain.key}`} className="space-y-3">
-                        <div className="border-l-2 border-primary/60 pl-3">
-                          <h4 className="text-sm font-semibold text-textPrimary">
-                            {domain.sectionTitle}
-                          </h4>
-                          <p className="text-xs text-textSecondary">
-                            {items.length > 0
-                              ? `${items.length} item(s) released`
-                              : domain.emptyMessage}
-                          </p>
-                        </div>
-                        {items.length === 0 ? (
-                          <Card
-                            padding="compact"
-                            accent={false}
-                            className="bg-bg text-sm text-textSecondary"
-                          >
-                            {domain.emptyMessage}
-                          </Card>
-                        ) : (
-                          <div className="space-y-3">
-                            {domain.key === "NUTRITION"
-                              ? renderNutritionDayTotalsPanel(items)
-                              : null}
-                            {items.map((item, index) =>
-                              renderJournalItem(item, index, {
-                                nutritionDomain: domain.key === "NUTRITION",
-                              }),
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                {renderJournalDayDomainGrid(day)}
               </DashboardCardShell>
             ))
           )}

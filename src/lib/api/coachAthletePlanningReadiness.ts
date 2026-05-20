@@ -17,6 +17,8 @@ const TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS = 60_000;
 const TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS = 60_000;
 /** Locked upstream context can aggregate season, workload, and goals after multi-domain plans exist. */
 const TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS = 30_000;
+/** Domain summary aggregates per-domain plan status for Head Coach submitted-plan review. */
+const TRAINING_PLAN_DOMAIN_SUMMARY_TIMEOUT_MS = 30_000;
 type WorkloadAssessmentValue =
   | string
   | number
@@ -1261,6 +1263,181 @@ export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanRe
   };
 }
 
+type ParsedUpstreamWorkload = NonNullable<CoachAthleteUpstreamPlanningContext["workload"]>;
+
+function parseUpstreamWorkloadRecord(
+  workloadRecord: AnyRecord,
+): ParsedUpstreamWorkload {
+  const nestedRecommendedRange = asRecord(workloadRecord.recommendedRange);
+  return {
+    weeklyTrainingHours: readNumberKey([workloadRecord], [
+      "weeklyTrainingHours",
+      "currentWeeklyTrainingHours",
+    ]),
+    recommendedMinHours:
+      readNumberKey([workloadRecord], [
+        "recommendedMinHours",
+        "recommendedMinimumHours",
+      ]) ??
+      readNumberKey(nestedRecommendedRange ? [nestedRecommendedRange] : [], [
+        "minHours",
+        "minimumHours",
+      ]),
+    recommendedMaxHours:
+      readNumberKey([workloadRecord], [
+        "recommendedMaxHours",
+        "recommendedMaximumHours",
+      ]) ??
+      readNumberKey(nestedRecommendedRange ? [nestedRecommendedRange] : [], [
+        "maxHours",
+        "maximumHours",
+      ]),
+    status: readStringKey([workloadRecord], [
+      "status",
+      "trainingLoadStatus",
+      "workloadStatus",
+    ]),
+    sportCode: readStringKey([workloadRecord], ["sportCode", "athleteSportCode"]),
+    sport: readStringKey([workloadRecord], ["sport"]),
+    ageBand: readStringKey([workloadRecord], ["ageBand"]),
+    validatedLevel: readStringKey([workloadRecord], ["validatedLevel"]),
+    classificationStatus: readStringKey([workloadRecord], [
+      "classificationStatus",
+      "workloadClassification",
+    ]),
+    trainingLoadStatus: readStringKey([workloadRecord], [
+      "trainingLoadStatus",
+      "status",
+      "workloadStatus",
+    ]),
+    recommendedRange: {
+      minHours:
+        readNumberKey([workloadRecord], ["recommendedRangeMinHours"]) ??
+        readNumberKey(nestedRecommendedRange ? [nestedRecommendedRange] : [], [
+          "minHours",
+          "minimumHours",
+        ]) ??
+        readNumberKey([workloadRecord], [
+          "recommendedMinHours",
+          "recommendedMinimumHours",
+        ]),
+      maxHours:
+        readNumberKey([workloadRecord], ["recommendedRangeMaxHours"]) ??
+        readNumberKey(nestedRecommendedRange ? [nestedRecommendedRange] : [], [
+          "maxHours",
+          "maximumHours",
+        ]) ??
+        readNumberKey([workloadRecord], [
+          "recommendedMaxHours",
+          "recommendedMaximumHours",
+        ]),
+      label:
+        readStringKey([workloadRecord], ["recommendedRangeLabel"]) ??
+        readStringKey(nestedRecommendedRange ? [nestedRecommendedRange] : [], ["label"]),
+    },
+    restrictionSummary: readStringKey([workloadRecord], ["restrictionSummary"]),
+    summary: readStringKey([workloadRecord], ["summary", "workloadSummary"]),
+  };
+}
+
+function mergeUpstreamWorkloadRecords(
+  workloads: ParsedUpstreamWorkload[],
+): ParsedUpstreamWorkload | null {
+  if (workloads.length === 0) return null;
+
+  const merged: ParsedUpstreamWorkload = {
+    weeklyTrainingHours: null,
+    recommendedMinHours: null,
+    recommendedMaxHours: null,
+    status: null,
+    sportCode: null,
+    sport: null,
+    ageBand: null,
+    validatedLevel: null,
+    classificationStatus: null,
+    trainingLoadStatus: null,
+    recommendedRange: { minHours: null, maxHours: null, label: null },
+    restrictionSummary: null,
+    summary: null,
+  };
+
+  for (const workload of workloads) {
+    if (workload.weeklyTrainingHours !== null && merged.weeklyTrainingHours === null) {
+      merged.weeklyTrainingHours = workload.weeklyTrainingHours;
+    }
+    if (workload.recommendedMinHours !== null && merged.recommendedMinHours === null) {
+      merged.recommendedMinHours = workload.recommendedMinHours;
+    }
+    if (workload.recommendedMaxHours !== null && merged.recommendedMaxHours === null) {
+      merged.recommendedMaxHours = workload.recommendedMaxHours;
+    }
+    if (workload.status !== null && merged.status === null) {
+      merged.status = workload.status;
+    }
+    if (workload.sportCode !== null && merged.sportCode === null) {
+      merged.sportCode = workload.sportCode;
+    }
+    if (workload.sport !== null && merged.sport === null) {
+      merged.sport = workload.sport;
+    }
+    if (workload.ageBand !== null && merged.ageBand === null) {
+      merged.ageBand = workload.ageBand;
+    }
+    if (workload.validatedLevel !== null && merged.validatedLevel === null) {
+      merged.validatedLevel = workload.validatedLevel;
+    }
+    if (workload.classificationStatus !== null && merged.classificationStatus === null) {
+      merged.classificationStatus = workload.classificationStatus;
+    }
+    if (workload.trainingLoadStatus !== null && merged.trainingLoadStatus === null) {
+      merged.trainingLoadStatus = workload.trainingLoadStatus;
+    }
+    if (
+      workload.restrictionSummary !== null &&
+      merged.restrictionSummary === null
+    ) {
+      merged.restrictionSummary = workload.restrictionSummary;
+    }
+    if (workload.summary !== null && merged.summary === null) {
+      merged.summary = workload.summary;
+    }
+    if (
+      workload.recommendedRange.minHours !== null &&
+      merged.recommendedRange.minHours === null
+    ) {
+      merged.recommendedRange.minHours = workload.recommendedRange.minHours;
+    }
+    if (
+      workload.recommendedRange.maxHours !== null &&
+      merged.recommendedRange.maxHours === null
+    ) {
+      merged.recommendedRange.maxHours = workload.recommendedRange.maxHours;
+    }
+    if (workload.recommendedRange.label !== null && merged.recommendedRange.label === null) {
+      merged.recommendedRange.label = workload.recommendedRange.label;
+    }
+  }
+
+  const hasData =
+    merged.weeklyTrainingHours !== null ||
+    merged.recommendedMinHours !== null ||
+    merged.recommendedMaxHours !== null ||
+    merged.status !== null ||
+    merged.sportCode !== null ||
+    merged.sport !== null ||
+    merged.ageBand !== null ||
+    merged.validatedLevel !== null ||
+    merged.classificationStatus !== null ||
+    merged.trainingLoadStatus !== null ||
+    merged.restrictionSummary !== null ||
+    merged.summary !== null ||
+    merged.recommendedRange.minHours !== null ||
+    merged.recommendedRange.maxHours !== null ||
+    merged.recommendedRange.label !== null;
+
+  return hasData ? merged : null;
+}
+
 export function parseUpstreamPlanningContextPayload(
   data: unknown,
 ): CoachAthleteUpstreamPlanningContext {
@@ -1308,15 +1485,24 @@ export function parseUpstreamPlanningContextPayload(
       .map((candidate) => asRecord(candidate.season))
       .find((candidate) => candidate !== null) ??
     null;
-  const workloadRecord =
-    asRecord(planningContextRecord?.workload) ??
-    asRecord(record.workloadSummary) ??
-    asRecord(record.workload) ??
-    asRecord(record.workloadAssessment) ??
-    records
-      .map((candidate) => asRecord(candidate.workloadSummary))
-      .find((candidate) => candidate !== null) ??
-    null;
+  const workloadRecordCandidates: AnyRecord[] = [];
+  const pushWorkloadCandidate = (value: unknown): void => {
+    const candidate = asRecord(value);
+    if (candidate === null) return;
+    if (!workloadRecordCandidates.includes(candidate)) {
+      workloadRecordCandidates.push(candidate);
+    }
+  };
+  pushWorkloadCandidate(planningContextRecord?.workload);
+  pushWorkloadCandidate(record.workloadSummary);
+  pushWorkloadCandidate(record.workload);
+  pushWorkloadCandidate(record.workloadAssessment);
+  for (const candidate of records) {
+    pushWorkloadCandidate(candidate.workloadSummary);
+    pushWorkloadCandidate(candidate.workload);
+    pushWorkloadCandidate(candidate.workloadAssessment);
+    pushWorkloadCandidate(candidate.workloadClassification);
+  }
   const goalArray =
     readFirstArray(
       planningContextRecord ? [planningContextRecord] : [],
@@ -1376,80 +1562,11 @@ export function parseUpstreamPlanningContextPayload(
           sport: readStringKey([seasonRecord], ["sport"]),
         }
       : null;
-  const parsedWorkload =
-    workloadRecord !== null
-      ? {
-          weeklyTrainingHours: readNumberKey([workloadRecord], [
-            "weeklyTrainingHours",
-            "currentWeeklyTrainingHours",
-          ]),
-          recommendedMinHours: readNumberKey([workloadRecord], [
-            "recommendedMinHours",
-            "recommendedMinimumHours",
-          ]),
-          recommendedMaxHours: readNumberKey([workloadRecord], [
-            "recommendedMaxHours",
-            "recommendedMaximumHours",
-          ]),
-          status: readStringKey([workloadRecord], [
-            "status",
-            "trainingLoadStatus",
-            "workloadStatus",
-          ]),
-          sportCode: readStringKey([workloadRecord], ["sportCode", "athleteSportCode"]),
-          sport: readStringKey([workloadRecord], ["sport"]),
-          ageBand: readStringKey([workloadRecord], ["ageBand"]),
-          validatedLevel: readStringKey([workloadRecord], ["validatedLevel"]),
-          classificationStatus: readStringKey([workloadRecord], [
-            "classificationStatus",
-            "workloadClassification",
-          ]),
-          trainingLoadStatus: readStringKey([workloadRecord], [
-            "trainingLoadStatus",
-            "status",
-            "workloadStatus",
-          ]),
-          recommendedRange: {
-            minHours:
-              readNumberKey([workloadRecord], ["recommendedRangeMinHours"]) ??
-              readNumberKey(
-                records
-                  .map((candidate) => asRecord(candidate.recommendedRange))
-                  .filter((candidate): candidate is AnyRecord => candidate !== null),
-                ["minHours", "minimumHours"],
-              ) ??
-              readNumberKey([workloadRecord], [
-                "recommendedMinHours",
-                "recommendedMinimumHours",
-              ]),
-            maxHours:
-              readNumberKey([workloadRecord], ["recommendedRangeMaxHours"]) ??
-              readNumberKey(
-                records
-                  .map((candidate) => asRecord(candidate.recommendedRange))
-                  .filter((candidate): candidate is AnyRecord => candidate !== null),
-                ["maxHours", "maximumHours"],
-              ) ??
-              readNumberKey([workloadRecord], [
-                "recommendedMaxHours",
-                "recommendedMaximumHours",
-              ]),
-            label:
-              readStringKey(
-                [workloadRecord],
-                ["recommendedRangeLabel"],
-              ) ??
-              readStringKey(
-                records
-                  .map((candidate) => asRecord(candidate.recommendedRange))
-                  .filter((candidate): candidate is AnyRecord => candidate !== null),
-                ["label"],
-              ),
-          },
-          restrictionSummary: readStringKey([workloadRecord], ["restrictionSummary"]),
-          summary: readStringKey([workloadRecord], ["summary", "workloadSummary"]),
-        }
-      : null;
+  const parsedWorkload = mergeUpstreamWorkloadRecords(
+    workloadRecordCandidates.map((workloadRecord) =>
+      parseUpstreamWorkloadRecord(workloadRecord),
+    ),
+  );
   const seasonCycleId = readStringKey(
     planningContextRecord ? [planningContextRecord] : records,
     ["seasonCycleId", "selectedSeasonCycleId", "seasonId"],
@@ -1477,6 +1594,13 @@ export function parseUpstreamPlanningContextPayload(
     ]);
   const validatedLevel =
     readStringKey(planningContextRecord ? [planningContextRecord] : records, ["validatedLevel"]) ??
+    readStringKey(records, ["validatedLevel"]) ??
+    readStringKey(
+      records
+        .map((candidate) => asRecord(candidate.levelValidation))
+        .filter((candidate): candidate is AnyRecord => candidate !== null),
+      ["validatedLevel"],
+    ) ??
     parsedWorkload?.validatedLevel ??
     null;
 
@@ -1520,13 +1644,34 @@ export function parseUpstreamPlanningContextPayload(
   };
 }
 
+export function isUpstreamPlanningContextLocked(
+  context: CoachAthleteUpstreamPlanningContext | null | undefined,
+): boolean {
+  return (
+    context?.planningContextLocked === true ||
+    context?.upstreamPlanningContextLocked === true
+  );
+}
+
 function parseWorkloadAssessmentPayload(
   data: unknown,
 ): CoachAthleteTrainingPlanWorkloadAssessment {
   const records = collectRecords(data);
-  const workloadClassificationRecord = records
-    .map((record) => asRecord(record.workloadClassification))
-    .find((record) => record !== null) ?? null;
+  const workloadClassificationRecord =
+    records
+      .map((record) => asRecord(record.workloadClassification))
+      .find((record) => record !== null) ??
+    records
+      .map((record) => asRecord(record.primary))
+      .map((primary) => asRecord(primary?.workloadClassification))
+      .find((record) => record !== null) ??
+    records.find(
+      (record) =>
+        typeof record.weeklyTrainingHours === "number" &&
+        (typeof record.status === "string" ||
+          typeof record.recommendedMinHours === "number"),
+    ) ??
+    null;
   const knownKeys = new Set([
     "athleteId",
     "workloadClassification",
@@ -1755,6 +1900,7 @@ export async function fetchDomainPlanSummary(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: TRAINING_PLAN_DOMAIN_SUMMARY_TIMEOUT_MS,
     },
   );
   return parseDomainPlanSummaryPayload(adaptBackendSuccess(raw));

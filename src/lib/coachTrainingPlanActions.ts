@@ -5,7 +5,16 @@ import {
 } from "@/lib/coachAuthority";
 
 export const WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE =
-  "Waiting for Head Coach to lock planning context.";
+  "Waiting for locked planning context.";
+
+export const PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL = "Planning Context Required";
+
+/** Nutrition and S&C generation require athlete-specific locked planning context. */
+export function downstreamDomainRequiresLockedPlanningContext(
+  domain: CoachPlanCreationDomain | null,
+): boolean {
+  return domain === "NUTRITION" || domain === "S_AND_C";
+}
 
 /** Shown when backend marks this coach as not the designated generator for this athlete/domain. */
 export const PLAN_GENERATION_NOT_ASSIGNED_MESSAGE =
@@ -171,6 +180,7 @@ export function resolveTrainingPlanAction(input: {
   if (
     effectivePlanId === "" &&
     resolvedDomain !== null &&
+    input.isHeadCoachPlanningContextOwner !== true &&
     isPlanGenerationBlockedByOwnership(ownershipFlags)
   ) {
     return {
@@ -186,13 +196,12 @@ export function resolveTrainingPlanAction(input: {
 
   if (
     effectivePlanId === "" &&
-    input.hasHeadCoachConfigured === true &&
     input.isHeadCoachPlanningContextOwner !== true &&
-    input.planningContextLocked !== true &&
-    resolvedDomain !== null
+    downstreamDomainRequiresLockedPlanningContext(resolvedDomain) &&
+    input.planningContextLocked !== true
   ) {
     return {
-      buttonLabel: coachPlanCreationButtonLabel(resolvedDomain),
+      buttonLabel: PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL,
       disabled: true,
       helperBelowButton: WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
       href: null,
@@ -214,18 +223,23 @@ export function resolveTrainingPlanAction(input: {
     };
   }
 
+  if (input.isHeadCoachPlanningContextOwner === true) {
+    const headCoachWorkflowLabel =
+      input.planningContextLocked === true
+        ? "Open Planning Workflow"
+        : "Set Planning Context";
+    return {
+      buttonLabel: headCoachWorkflowLabel,
+      disabled: false,
+      helperBelowButton: null,
+      href: planningProfileHrefForAthlete(athleteIdTrimmed),
+      planStatusLabel: null,
+      resolvedButtonState: "create_plan",
+      resolvedDomain,
+    };
+  }
+
   if (resolvedDomain === null) {
-    if (input.isHeadCoachPlanningContextOwner === true) {
-      return {
-        buttonLabel: "Open Planning Workflow",
-        disabled: false,
-        helperBelowButton: null,
-        href: planningProfileHrefForAthlete(athleteIdTrimmed),
-        planStatusLabel: null,
-        resolvedButtonState: "create_plan",
-        resolvedDomain,
-      };
-    }
     return {
       buttonLabel: "Plan creation unavailable",
       disabled: true,

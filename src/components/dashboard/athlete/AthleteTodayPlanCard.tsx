@@ -7,9 +7,15 @@ import { Card } from "@/components/ui/Card";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchAthleteTodayPlan,
+  fetchAthleteWeeklyPlanJournal,
   type AthleteTodayPlan,
+  type AthleteWeeklyPlanJournalDay,
 } from "@/lib/api/coachAthletePlanningReadiness";
-import { formatDateWithWeekday } from "@/lib/dateTime";
+import {
+  formatDateWithWeekday,
+  getLocalDateKey,
+  normalizeDateOnlyKey,
+} from "@/lib/dateTime";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -38,6 +44,32 @@ const DOMAIN_SUMMARY = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveTodayPlanFromJournalDay(
+  apiPlan: AthleteTodayPlan,
+  journalDay: AthleteWeeklyPlanJournalDay | null,
+  localTodayKey: string,
+): AthleteTodayPlan {
+  if (journalDay === null) {
+    return apiPlan;
+  }
+  return {
+    ...apiPlan,
+    date: localTodayKey,
+    skills: journalDay.skills,
+    nutrition: journalDay.nutrition,
+    sandc: journalDay.sandc,
+  };
+}
+
+function findJournalDayForLocalToday(
+  days: AthleteWeeklyPlanJournalDay[],
+  localTodayKey: string,
+): AthleteWeeklyPlanJournalDay | null {
+  return (
+    days.find((day) => normalizeDateOnlyKey(day.date) === localTodayKey) ?? null
+  );
 }
 
 function summarizeTodayItem(item: unknown): string | null {
@@ -91,7 +123,16 @@ export function AthleteTodayPlanCard() {
     let cancelled = false;
     void (async () => {
       try {
-        const todayPlan = await fetchAthleteTodayPlan(entityId, athleteId);
+        const localTodayKey = getLocalDateKey();
+        const [journal, apiTodayPlan] = await Promise.all([
+          fetchAthleteWeeklyPlanJournal(entityId, athleteId),
+          fetchAthleteTodayPlan(entityId, athleteId),
+        ]);
+        const todayPlan = resolveTodayPlanFromJournalDay(
+          apiTodayPlan,
+          findJournalDayForLocalToday(journal.days, localTodayKey),
+          localTodayKey,
+        );
         if (!cancelled) {
           setState({ phase: "ready", todayPlan });
         }
@@ -124,7 +165,7 @@ export function AthleteTodayPlanCard() {
   return (
     <DashboardCardShell
       title="Today’s Plan"
-      subtitle={todayPlan?.date ? formatDateWithWeekday(todayPlan.date) : undefined}
+      subtitle={formatDateWithWeekday(getLocalDateKey())}
       className="min-h-[280px]"
     >
       <div className="space-y-3">

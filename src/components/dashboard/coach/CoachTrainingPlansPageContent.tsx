@@ -15,7 +15,10 @@ import {
   fetchCoachMeDashboard,
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
-import { fetchCoachAthleteUpstreamPlanningContext } from "@/lib/api/coachAthletePlanningReadiness";
+import {
+  fetchCoachAthleteUpstreamPlanningContext,
+  isUpstreamPlanningContextLocked,
+} from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -187,14 +190,14 @@ export function CoachTrainingPlansPageContent() {
         const headCoachConfigured = dash.hasHeadCoachConfigured === true;
         const headCoachUser = headCoachConfigured && currentCoachIsHeadCoach(dash.academyCoachRole);
         const lockMap: Record<string, boolean | null> = {};
-        if (headCoachConfigured && !headCoachUser && entityId !== "") {
+        if (!headCoachUser && entityId !== "") {
           const contextResults = await Promise.allSettled(
             rows.map(async (row) => {
               const context = await fetchCoachAthleteUpstreamPlanningContext(
                 entityId,
                 row.athleteId,
               );
-              return [row.athleteId, context.planningContextLocked] as const;
+              return [row.athleteId, isUpstreamPlanningContextLocked(context)] as const;
             }),
           );
           for (const result of contextResults) {

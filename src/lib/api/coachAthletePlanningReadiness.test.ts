@@ -16,6 +16,7 @@ import {
   fetchAthleteWeeklyPlanJournal,
   fetchCoachAthleteTrainingPlanCompleteness,
   fetchCoachAthleteUpstreamPlanningContext,
+  fetchDomainPlanSummary,
   fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
   headApprove,
@@ -218,6 +219,70 @@ describe("parseReadinessPayload", () => {
     });
   });
 
+  it("parses Athlete 401 locked upstream response shape for display fields", () => {
+    expect(
+      parseUpstreamPlanningContextPayload({
+        upstreamPlanningContextLocked: true,
+        planningContextLocked: true,
+        planWindow: { startDate: "2026-05-20", endDate: "2026-05-26" },
+        season: { phaseName: "Off Season", phaseCode: "OFF_SEASON" },
+        workload: {
+          weeklyTrainingHours: 16,
+          recommendedRange: { minHours: 10, maxHours: 16, label: "10 - 16 hrs/week" },
+          trainingLoadStatus: "OPTIMAL",
+        },
+        planningContext: {
+          validatedLevel: null,
+          workload: {
+            weeklyTrainingHours: 16,
+            recommendedRange: { minHours: 10, maxHours: 16, label: "10 - 16 hrs/week" },
+          },
+        },
+      }),
+    ).toMatchObject({
+      planningContextLocked: true,
+      upstreamPlanningContextLocked: true,
+      workloadSummary: {
+        weeklyTrainingHours: 16,
+        recommendedMinHours: 10,
+        recommendedMaxHours: 16,
+      },
+      workload: {
+        recommendedRange: { label: "10 - 16 hrs/week" },
+      },
+    });
+  });
+
+  it("merges partial planningContext workload with enriched workloadSummary", () => {
+    expect(
+      parseUpstreamPlanningContextPayload({
+        data: {
+          planningContextLocked: true,
+          planningContext: {
+            workload: {
+              weeklyTrainingHours: 16,
+            },
+          },
+          workloadSummary: {
+            weeklyTrainingHours: 16,
+            recommendedMinHours: 10,
+            recommendedMaxHours: 18,
+            status: "OPTIMAL",
+            validatedLevel: "ADVANCED",
+          },
+        },
+      }),
+    ).toMatchObject({
+      workloadSummary: {
+        weeklyTrainingHours: 16,
+        recommendedMinHours: 10,
+        recommendedMaxHours: 18,
+        status: "OPTIMAL",
+        validatedLevel: "ADVANCED",
+      },
+    });
+  });
+
   it("parses enriched locked planning context fields", () => {
     expect(
       parseUpstreamPlanningContextPayload({
@@ -363,6 +428,32 @@ describe("parseReadinessPayload", () => {
     );
     expect(result.upstreamPlanningContextLocked).toBe(true);
     expect(result.seasonCycleId).toBe("season-1");
+  });
+
+  it("fetches domain plan summary with extended timeout for Head Coach review", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        domains: {
+          SKILLS: { trainingPlanId: "plan-skills", status: "RELEASED" },
+          NUTRITION: { trainingPlanId: "plan-nutrition", status: "ASSISTANT_COACH_APPROVED" },
+          S_AND_C: { trainingPlanId: null, status: null },
+        },
+      },
+    });
+
+    const result = await fetchDomainPlanSummary("entity-1", "athlete-1");
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      paths.entities.athleteTrainingPlanDomainSummary("entity-1", "athlete-1"),
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 30_000,
+      },
+    );
+    expect(result.SKILLS.trainingPlanId).toBe("plan-skills");
+    expect(result.NUTRITION.status).toBe("ASSISTANT_COACH_APPROVED");
   });
 
   it("locks planning context with planWindow dates", async () => {

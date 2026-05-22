@@ -4,7 +4,60 @@
 
 **Coach planning workspace UI (user flows only):** [`docs/ui/COACH_PLANNING_FLOW.md`](../ui/COACH_PLANNING_FLOW.md), [`docs/ui/SNC_UI.md`](../ui/SNC_UI.md), [`docs/ui/GOALS_UI.md`](../ui/GOALS_UI.md).
 
-Latest milestone: App Context + Assignment Pipeline Stabilization completed and documented. **Athlete Planning Profile** (athlete working page at `/athlete/profile-planning`, coach read-only planning profile view, coach dashboard `hasPlanningProfile` column) is implemented — see **`docs/srs/IMPLEMENTATION_STATUS.md`** (section *Athlete Planning Profile — Athlete + coach*).
+Latest milestone: **Workflow stabilization** completed and documented (generation ownership, planning context lock, Head Coach / no-Head-Coach paths). See **`docs/srs/IMPLEMENTATION_STATUS.md`** (*Workflow Stabilization Completed*). Prior milestone: App Context + Assignment Pipeline Stabilization. **Athlete Planning Profile** and coach training-plan workspace remain documented in **`docs/srs/IMPLEMENTATION_STATUS.md`**.
+
+## Current workflow validation status
+
+| # | Scenario | Status |
+|---|----------|--------|
+| 1 | Head Coach no function + Skills / Nutrition / S&C (Taylor Golf Academy, athlete501) | **Passed** |
+| 2 | Head Coach with Skills + Nutrition / S&C (Howard Golf Academy, athlete601) | **Passed** |
+| 3 | Head Coach with Skills + separate Skills Coach + Nutrition / S&C (Howard Golf Academy, athlete604) | **Passed** |
+| 4 | No Head Coach + Skills / Nutrition / S&C (Harding Golf Academy, athlete701) | **Passed** |
+| 5 | No Head Coach + second Skills Coach path (Harding Golf Academy, athlete702) | **Passed** |
+
+Detail per academy, athlete, and coach accounts: **`docs/srs/IMPLEMENTATION_STATUS.md`** (*Verified workflow matrix*).
+
+**Testing note:** Current workflow phase is **complete enough to stop workflow testing** unless new changes touch workflow logic.
+
+## Current next priority
+
+**Next major task:** **DB history / versioning audit**
+
+**Reason:**
+
+- Current data overwrite risk prevents reliable past-vs-current comparison.
+- Dashboard, metrics, adherence, and longitudinal analytics should **not** proceed until history/versioning is audited.
+
+**Recommended first step:** Inspect/report only — **no code**, **no migration** (see `docs/srs/DB_SAFETY_RULES.md`, `docs/srs/phase-2-gaps.md` §13).
+
+## Testing note (workflow slice)
+
+**Backend verified commands:**
+
+```bash
+TMPDIR=/tmp TEMP=/tmp TMP=/tmp npm run test:raw -- tests/aiGenerationOrchestrator --runInBand
+TMPDIR=/tmp TEMP=/tmp TMP=/tmp npm run test:raw -- tests/trainingPlanManagement/trainingPlanWorkflowRelease.api.test.js --runInBand
+TMPDIR=/tmp TEMP=/tmp TMP=/tmp npm run test:raw -- tests/trainingPlanGeneration --runInBand
+```
+
+**Frontend verified command:**
+
+```bash
+npx vitest run src/lib/coachTrainingPlanActions.test.ts
+```
+
+Targeted ESLint was run on touched workflow files before commit. Global lint may still report unrelated pre-existing issues outside the workflow slice.
+
+### Environment note (Prisma CLI / test bootstrap)
+
+For Prisma CLI or test bootstrap, `PRISMA_DATABASE_URL` may need to be exported from `DIRECT_DATABASE_URL`:
+
+```bash
+export PRISMA_DATABASE_URL="$(grep '^DIRECT_DATABASE_URL=' .env.local .env 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '\"')"
+```
+
+**Keep secrets out of logs.**
 
 ## Academy admin, onboarding, and gaps (source of truth)
 

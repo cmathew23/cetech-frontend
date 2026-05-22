@@ -12,6 +12,87 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 ---
 
+## Workflow Stabilization Completed
+
+**Status:** Core Head Coach and no-Head-Coach generation/release workflows are functionally validated. **Stop workflow testing** unless new code changes touch workflow logic. **Next major module:** DB history/versioning audit (see `docs/srs/phase-2-gaps.md`, `docs/srs/DB_SAFETY_RULES.md`).
+
+### Backend commits (workflow slice)
+
+| Commit | Summary |
+|--------|---------|
+| `f94d39b` | `fix(nutrition): reject unapplied revision requests` |
+| `ddae1f7` | `test(workflow): align release fixtures with generation ownership` |
+| `f67d77d` | `fix: require locked planning context for downstream generation` |
+
+### Frontend commits (workflow slice)
+
+| Commit | Summary |
+|--------|---------|
+| `0dab1ff` | `fix(coach): enable downstream generation after locked context` |
+| `bda4d29` | `fix(coach): stabilize planning workflow gating` |
+
+### Backend test results (verified)
+
+| Suite / file | Result |
+|--------------|--------|
+| `tests/aiGenerationOrchestrator` | 15 suites passed, 262 tests passed |
+| `tests/aiGenerationOrchestrator/orchestrator.api.test.js` | 98 tests passed |
+| `tests/trainingPlanManagement/trainingPlanWorkflowRelease.api.test.js` | 60 tests passed |
+| `tests/trainingPlanGeneration` | 9 suites passed, 123 tests passed |
+
+### Frontend test / lint notes
+
+| Check | Result |
+|-------|--------|
+| `src/lib/coachTrainingPlanActions.test.ts` | 45 tests passed |
+| Targeted ESLint on touched workflow files | Passed before commit |
+| Global lint | Unrelated pre-existing issues remain outside this workflow slice; **do not** treat those as workflow blockers |
+
+### Verified workflow matrix
+
+#### 1. Head Coach no function + Skills / Nutrition / S&C — **PASSED**
+
+- **Academy:** Taylor Golf Academy  
+- **Athlete:** athlete501 / Ranjit Sharma  
+- **Coaches:** coach501 = Head Coach (no function); coach502 = Skills; coach503 = Nutrition; coach504 = S&C  
+- **Result:** Head Coach locked planning context; Skills / Nutrition / S&C generated and submitted; Head Coach approved/released; athlete weekly journal showed all three released; Head Coach → Nutrition revision worked; Nutrition internal revision worked; S&C internal revision worked.
+
+#### 2. Head Coach with Skills + Nutrition / S&C — **PASSED**
+
+- **Academy:** Howard Golf Academy  
+- **Athlete:** athlete601 / Sunny Menon  
+- **Coaches:** coach601 = Head Coach + Skills (`canGeneratePlan` Yes); coach603 = Nutrition; coach604 = S&C  
+- **Result:** Head Coach locked planning context; Head Coach generated/released Skills; Nutrition / S&C submitted; Head Coach released all domains; athlete weekly journal showed all three released.
+
+#### 3. Head Coach with Skills + separate Skills + Nutrition / S&C — **PASSED**
+
+- **Academy:** Howard Golf Academy  
+- **Athlete:** athlete604 / Mason McDermott  
+- **Coaches:** coach601 = Head Coach + Skills (`canGeneratePlan` No); coach602 = separate Skills Coach (`canGeneratePlan` Yes); coach603 = Nutrition; coach604 = S&C  
+- **Result:** coach601 locked planning context and reviewed/released; coach602 generated/released Skills; coach603 generated/released Nutrition; coach604 generated/released S&C; athlete weekly journal showed all three released; user explicitly confirmed Skills plan was released by coach602.
+
+#### 4. No Head Coach + Skills / Nutrition / S&C — **PASSED** (Athlete 701)
+
+- **Academy:** Harding Golf Academy  
+- **Athlete:** athlete701 / Sandeep Kumar  
+- **Coaches:** coach701 = Skills Coach / planning authority; coach703 = Nutrition; coach704 = S&C  
+- **Result:** Skills Coach locked planning context and released Skills; Nutrition / S&C generated after locked context; athlete weekly journal showed all three released.
+
+#### 5. No Head Coach + second Skills Coach path — **PASSED** (Athlete 702)
+
+- **Academy:** Harding Golf Academy  
+- **Athlete:** athlete702 / Ritesh Reddy  
+- **Coaches:** coach702 = Skills Coach / planning authority; coach703 = Nutrition; coach704 = S&C  
+- **Result:** Second Skills Coach path passed; academy-level season/phase data was reused; athlete-specific planning context lock worked; athlete weekly journal showed all three released.
+
+### Conclusion
+
+- Core Head Coach and no-Head-Coach generation/release workflows are **functionally validated**.
+- **Stop workflow testing** unless new code changes touch workflow logic.
+- **Next major module:** DB history/versioning audit (inspect/report first — no migration until reviewed).
+
+---
+
 ## App Context + Assignment Pipeline Stabilization (COMPLETED)
 
 Documented below: **backend contract** and **frontend behavior** as implemented (see `src/lib/accessContext.ts`, `src/hooks/useAuth.ts`, `src/middleware/authGuard.ts`, `src/app/login/page.tsx`, `src/components/dashboard/admin/AcademyAdminWorkspacePage.tsx`, `src/lib/api/academyAdmin.ts`).

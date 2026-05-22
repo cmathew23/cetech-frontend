@@ -55,3 +55,53 @@
 - **Scope-creep prevention (deferred):**
   - no OpenWearables or device ingestion implementation in Phase 1
   - no medical/blood marker enforcement logic in athlete APP submission gates
+
+---
+
+## Phase 1 — Training plan workflow boundaries (validated)
+
+### A. Validated workflow boundaries
+
+- **Head Coach no function** workflow is supported.
+- **Head Coach with Skills** workflow is supported.
+- **Head Coach with Skills plus separate Skills Coach** workflow is supported.
+- **No-Head-Coach Skills fallback** workflow is supported.
+- **Direct release** applies only when **no Head Coach** exists.
+- **Head Coach review/release** applies when a **Head Coach** exists.
+
+### B. Training plan generation ownership boundary
+
+- Generation ownership is **athlete-specific**.
+- **`AthleteCoachAssignment.canGeneratePlan`** controls generation ownership (backend assignment table).
+- **Role/function alone is insufficient** for Create / Generate enablement.
+- If a **separate Skills Coach** owns Skills for an athlete, a Head Coach with Skills must **not** generate Skills for that athlete unless backend assignment says **`canGeneratePlan=true`**.
+- **Frontend must not override** backend assignment ownership (`mergePlanGenerationOwnershipForDomain`, `coachTrainingPlanActions.ts`).
+
+**Examples:**
+
+| Athlete | Head Coach | Skills generator | `canGeneratePlan` (Skills) | Who generates Skills |
+|---------|------------|------------------|----------------------------|----------------------|
+| athlete601 | coach601 (HC + Skills) | coach601 | Yes | Head Coach generates Skills |
+| athlete604 | coach601 (HC + Skills) | coach602 (Skills Coach) | No (coach601) / Yes (coach602) | coach602 generates; coach601 locks / reviews / releases |
+
+### C. Planning context lock boundary
+
+**If Head Coach exists:**
+
+- Head Coach owns planning context.
+- Assistant Skills / Nutrition / S&C coaches require **locked Head Coach planning context** before generation.
+- Domain coaches **submit** to Head Coach.
+- Head Coach **approves / releases**.
+
+**If no Head Coach exists:**
+
+- Assigned **Skills Coach** is fallback planning authority.
+- Nutrition / S&C require **locked Skills planning context**.
+- Domain coaches use **direct release** (no Head Coach review path).
+
+### D. Explicit non-goals (current phase)
+
+- Do **not** implement a backend centralized action-state endpoint yet.
+- Do **not** refactor workflow UI architecture yet.
+- Do **not** start dashboards / metrics / adherence before **DB history/versioning audit**.
+- Do **not** redesign nutrition catalog during workflow stabilization.

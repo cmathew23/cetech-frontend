@@ -167,3 +167,70 @@ If any rule is violated:
 ## FINAL RULE
 
 > **If you are not 100% sure a command is safe, DO NOT RUN IT.**
+
+---
+
+## DB reset prohibition (reinforced)
+
+- Do **not** run `prisma migrate reset`.
+- Do **not** run destructive reset commands.
+- Do **not** wipe dev/test data unless **explicitly approved** in the current session.
+- Use **`migrate deploy`** / **`db push`** only where appropriate and safe — never as a substitute for understanding impact.
+
+---
+
+## History / versioning next-slice safety
+
+**Before** implementing DB history or versioning:
+
+1. **First** audit current schema and services (inspect/report only).
+2. **No migration** until the audit is reviewed.
+3. **No broad redesign** of existing tables.
+4. **No destructive alteration** of existing tables.
+5. **Prefer append-only** history / snapshot patterns.
+6. **Preserve** current source-of-truth records while adding history.
+
+---
+
+## History design principles
+
+- Do **not** overwrite data needed for comparison.
+- Use **append-only history records** or **versioned records**.
+- Keep **current** tables where needed for fast current-state reads.
+- Store **immutable snapshots** for planning context locks and important athlete state changes.
+- **`TrainingPlanVersion`** already provides versioning for plans — **do not mutate** old versions.
+- Future **adherence logs** should be **append-only**.
+
+---
+
+## Tables to audit next
+
+| Area | Tables / entities (representative) |
+|------|-----------------------------------|
+| Planning profile | `AthletePlanningProfile`, `AthletePlanningProfileHistory` |
+| Workload | `TrainingPlanWorkloadAssessment`, workload assessment variants |
+| Planning context | Planning context lock tables / snapshots |
+| Plans | `TrainingPlan`, `TrainingPlanVersion`, `TrainingDay`, `PlannedSession` |
+| Season / goals | Goal, Season, SeasonPhase tables |
+| Assignment | `AthleteCoachAssignment` |
+| Audit | Workflow / audit logs |
+| Adherence / metrics | Athlete adherence, completion, metric tables (if present) |
+
+---
+
+## Required Cursor / Codex behavior for next DB history task
+
+When starting the **DB History / Versioning Audit** slice:
+
+1. **First response** must be **inspect / report only**.
+2. **No code edits** in the first pass.
+3. **No migrations**.
+4. **No Prisma schema changes**.
+5. Report: what already has history, what **overwrites**, and a **recommended minimal first slice**.
+
+**Goal of audit:**
+
+- Identify overwrite risks.
+- Preserve historical snapshots.
+- Enable past-vs-current comparisons.
+- Support future dashboards, metrics, and adherence analytics.

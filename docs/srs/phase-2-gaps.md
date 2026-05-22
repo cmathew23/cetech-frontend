@@ -128,3 +128,92 @@ Future **multi-role** users require routing that defers to **`accessContext`** a
 - **Wearable ingestion (OpenWearables):** deferred. Current APP keeps wearables as MVP locked state (`Wearable Status: No`) with no ingestion pipeline.
 - **Nutrition intelligence using cuisine preference:** deferred. `regionalCuisinePreference` persistence exists, but deeper nutrition logic/personalization based on that field is not yet implemented.
 - **Blood marker utilization:** deferred. Blood report parameters are captured as optional Stage 2 inputs; downstream scoring/recommendation/enforcement logic is not implemented in current frontend flow.
+
+---
+
+## 11. Centralized workflow action state gap
+
+**Current problem:**
+
+- Frontend workflow decision logic remains **scattered** across:
+  - `src/components/dashboard/coach/CoachAthletePlanningProfileView.tsx`
+  - `src/components/dashboard/coach/CoachTrainingPlansPageContent.tsx`
+  - `src/lib/coachTrainingPlanActions.ts`
+  - `src/lib/api/coachAthletePlanningReadiness.ts`
+
+**Future improvement:**
+
+- Backend should expose **domain-specific action state**, for example:
+
+```json
+{
+  "domain": "NUTRITION",
+  "canCreate": true,
+  "canSubmit": false,
+  "canApprove": false,
+  "canRelease": false,
+  "disabledReason": null,
+  "buttonLabel": "Create Nutrition Plan",
+  "planningContextLocked": true,
+  "lockedContextSummary": { }
+}
+```
+
+- Frontend should **render backend action state** instead of recalculating workflow policy in multiple places.
+
+---
+
+## 12. Nutrition catalog data quality gap
+
+The Nutrition revision system worked **functionally**, but one Rice catalog item had **suspicious macros**:
+
+| Field | Value |
+|-------|--------|
+| Label | Rice, 1 bowl |
+| Calories | 148 kcal |
+| Protein | 2.9 g |
+| Carbs | 4.6 g |
+| Fat | 13.1 g |
+
+**Future task:** Review **NutritionCatalogItem** ID `8533d846-25c7-48a4-a7c1-5fc450a5e80a`.
+
+**Check:** label, serving, calories, protein, carbs, fat, source dataset.
+
+---
+
+## 13. DB history / versioning gap (next major slice)
+
+**Priority:** Required **before** dashboard / metrics / adherence work.
+
+**Problem:**
+
+- Several current tables may **overwrite** state.
+- Future dashboard / metrics / adherence require **past-vs-current** comparison.
+
+**Audit scope (initial):**
+
+- `AthletePlanningProfile` / `AthletePlanningProfileHistory`
+- `WorkloadAssessment` / `TrainingPlanWorkloadAssessment`
+- Planning context lock snapshots
+- Goals / seasons / season phases
+- `AthleteCoachAssignment`
+- `TrainingPlan` / `TrainingPlanVersion`
+- Athlete adherence / journal tables
+- Metrics / performance tables (if present)
+
+**Process:** Inspect/report only first — **no migration** until audit is reviewed. See `docs/srs/DB_SAFETY_RULES.md`.
+
+---
+
+## 14. Revision hardening gap
+
+**Current:**
+
+- Nutrition add-item / date revision integrity is now guarded (backend `f94d39b`; frontend submit/version alignment).
+
+**Future hardening:**
+
+- Broader deterministic revision intent matching
+- Per-day revision UI
+- Case-insensitive / simple-punctuation item matching across domains
+- Avoid fake revision success messages when backend did not apply changes

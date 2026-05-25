@@ -230,6 +230,10 @@ export const paths = {
     meDashboard: "/coach/me/dashboard",
     assignedAthletes: "/coach/me/assigned-athletes",
   },
+  trainingSessions: {
+    plannedSessionAdherenceEvents: (plannedSessionId: string) =>
+      `/training-sessions/planned-sessions/${encodeURIComponent(plannedSessionId)}/adherence-events`,
+  },
   trainingPlans: {
     byId: (planId: string) => `/training-plans/${encodeURIComponent(planId)}`,
   },

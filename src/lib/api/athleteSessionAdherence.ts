@@ -2,6 +2,8 @@ import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
+const PLANNED_SESSION_ADHERENCE_TIMEOUT_MS = 120_000;
+
 export type SessionAdherenceOutcome = "COMPLETED" | "PARTIAL" | "SKIPPED";
 
 export type SessionAdherenceEventType = "RECORDED" | "UPDATED" | "VERIFIED";
@@ -253,6 +255,7 @@ export async function fetchPlannedSessionAdherenceEvents(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: PLANNED_SESSION_ADHERENCE_TIMEOUT_MS,
     },
   );
   return parsePlannedSessionAdherenceEventsPayload(raw, id);

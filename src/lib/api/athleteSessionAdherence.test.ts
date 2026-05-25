@@ -90,6 +90,7 @@ describe("athleteSessionAdherence API", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 120_000,
       },
     );
     expect(result).toHaveLength(1);

@@ -1294,10 +1294,20 @@ function itemHeading(
   return `Entry ${index + 1}`;
 }
 
+type AdherenceJournalDomainKey = "SKILLS" | "S_AND_C" | "NUTRITION";
+
 const ADHERENCE_ELIGIBLE_SESSION_TYPES = new Set([
   "SKILL",
   "STRENGTH_CONDITIONING",
 ]);
+
+function prescribedWorkLabelForAdherenceDomain(
+  domainKey: AdherenceJournalDomainKey,
+): string {
+  if (domainKey === "SKILLS") return "Prescribed Skill Drills";
+  if (domainKey === "S_AND_C") return "Prescribed S&C Exercises";
+  return "Prescribed Meal Items";
+}
 
 const ADHERENCE_OUTCOME_OPTIONS: Array<{
   value: SessionAdherenceOutcome;
@@ -1377,9 +1387,11 @@ function formatAdherenceOccurredAt(value: string | null): string {
 function SessionAdherencePanel({
   plannedSessionId,
   totalPrescribedItems,
+  adherenceDomainKey,
 }: {
   plannedSessionId: string;
   totalPrescribedItems: number;
+  adherenceDomainKey: AdherenceJournalDomainKey;
 }) {
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -1504,18 +1516,26 @@ function SessionAdherencePanel({
     totalPrescribedItems,
   ]);
 
+  const historyReady = historyPhase === "ready";
+  const formLocked = submitting || !historyReady;
+
   return (
-    <div className="mt-3 border-t border-slate-200/80 pt-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
-        Session adherence
-      </p>
+    <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
+      <div className="border-b border-orange-200/60 pb-2">
+        <h4 className="text-sm font-semibold text-textPrimary">Session adherence</h4>
+        <p className="mt-1 text-xs leading-relaxed text-textSecondary">
+          Log whether you completed the prescribed work. Duration is recorded separately.
+        </p>
+      </div>
 
       {historyPhase === "loading" ? (
-        <p className="mt-2 text-xs text-textSecondary">Loading adherence…</p>
+        <p className="mt-2.5 text-xs text-textSecondary">Loading adherence…</p>
       ) : null}
 
-      {historyPhase === "error" && historyError ? (
-        <p className="mt-2 text-xs text-red-700">{historyError}</p>
+      {historyPhase === "error" ? (
+        <p className="mt-2.5 text-xs text-textSecondary">
+          Previous adherence status unavailable. Please refresh the page.
+        </p>
       ) : null}
 
       {historyPhase === "ready" && latestAthleteEvent ? (
@@ -1561,11 +1581,12 @@ function SessionAdherencePanel({
         </dl>
       ) : null}
 
-      <fieldset className="mt-3 space-y-2" disabled={submitting}>
-        <legend className="text-xs font-medium text-textSecondary">Log session</legend>
+      <fieldset className="mt-3 space-y-2.5" disabled={formLocked}>
+        <legend className="text-xs font-semibold text-textPrimary">Log session</legend>
         {totalPrescribedItems > 0 ? (
-          <p className="text-xs text-textSecondary">
-            Prescribed items: {totalPrescribedItems}
+          <p className="text-xs font-medium text-textPrimary">
+            {prescribedWorkLabelForAdherenceDomain(adherenceDomainKey)}:{" "}
+            {totalPrescribedItems}
           </p>
         ) : null}
         <div className="flex flex-wrap gap-3">
@@ -1649,12 +1670,12 @@ function SessionAdherencePanel({
             className={cn(designSystem.input.root, "min-h-[4rem] w-full resize-y")}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
           <Button
             type="button"
-            variant="secondary"
+            variant="primary"
             onClick={() => void handleSubmit()}
-            disabled={submitting || historyPhase !== "ready"}
+            disabled={formLocked}
           >
             {submitting ? "Submitting…" : "Submit"}
           </Button>
@@ -1683,10 +1704,15 @@ function SessionAdherencePanel({
 function renderJournalItem(
   item: unknown,
   index: number,
-  options?: { nutritionDomain?: boolean; showAdherenceForm?: boolean },
+  options?: {
+    nutritionDomain?: boolean;
+    showAdherenceForm?: boolean;
+    adherenceDomainKey?: AdherenceJournalDomainKey;
+  },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
   const showAdherenceForm = options?.showAdherenceForm === true;
+  const adherenceDomainKey = options?.adherenceDomainKey;
   if (isScalar(item)) {
     return (
       <Card key={`scalar-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -1747,10 +1773,11 @@ function renderJournalItem(
             Plan details are available for this entry.
           </p>
         ) : null}
-        {showAdherencePanel ? (
+        {showAdherencePanel && adherenceDomainKey ? (
           <SessionAdherencePanel
             plannedSessionId={plannedSessionId}
             totalPrescribedItems={getTotalPrescribedItems(item)}
+            adherenceDomainKey={adherenceDomainKey}
           />
         ) : null}
       </div>
@@ -1805,6 +1832,10 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                     nutritionDomain: domain.key === "NUTRITION",
                     showAdherenceForm:
                       domain.key === "SKILLS" || domain.key === "S_AND_C",
+                    adherenceDomainKey:
+                      domain.key === "SKILLS" || domain.key === "S_AND_C"
+                        ? domain.key
+                        : undefined,
                   }),
                 )}
               </div>

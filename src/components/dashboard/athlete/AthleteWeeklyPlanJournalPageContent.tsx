@@ -1000,6 +1000,13 @@ function extractJournalStructureSections(record: Record<string, unknown>): Loose
   return sections;
 }
 
+function getTotalPrescribedItems(item: Record<string, unknown>): number {
+  return extractJournalStructureSections(item).reduce(
+    (total, section) => total + section.items.length,
+    0,
+  );
+}
+
 const STRUCTURE_ITEM_ROW_PRIORITY = [
   "label",
   "name",
@@ -1327,10 +1334,28 @@ function isSessionAdherenceEligible(
   return ADHERENCE_ELIGIBLE_SESSION_TYPES.has(sessionType);
 }
 
-function completionPercentForOutcome(outcome: SessionAdherenceOutcome): number {
-  if (outcome === "COMPLETED") return 100;
-  if (outcome === "SKIPPED") return 0;
-  return 50;
+function resolveAdherenceCompletionPercent(input: {
+  outcome: SessionAdherenceOutcome;
+  totalPrescribedItems: number;
+  partialCompletedItemsRaw: string;
+}):
+  | { completionPercent: number }
+  | { error: string } {
+  const { outcome, totalPrescribedItems, partialCompletedItemsRaw } = input;
+  if (outcome === "COMPLETED") return { completionPercent: 100 };
+  if (outcome === "SKIPPED") return { completionPercent: 0 };
+  if (totalPrescribedItems === 0 || totalPrescribedItems === 1) {
+    return { completionPercent: 50 };
+  }
+  const parsed = Number(partialCompletedItemsRaw.trim());
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed >= totalPrescribedItems) {
+    return {
+      error: `Completed items must be a whole number from 1 to ${totalPrescribedItems - 1}.`,
+    };
+  }
+  return {
+    completionPercent: Math.round((parsed / totalPrescribedItems) * 100),
+  };
 }
 
 function findLatestAthleteAdherenceEvent(
@@ -1349,7 +1374,13 @@ function formatAdherenceOccurredAt(value: string | null): string {
   return formatted !== "" ? formatted : value;
 }
 
-function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string }) {
+function SessionAdherencePanel({
+  plannedSessionId,
+  totalPrescribedItems,
+}: {
+  plannedSessionId: string;
+  totalPrescribedItems: number;
+}) {
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
   );
@@ -1357,6 +1388,7 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [outcome, setOutcome] = useState<SessionAdherenceOutcome | "">("");
+  const [partialCompletedItems, setPartialCompletedItems] = useState("");
   const [actualDurationMinutes, setActualDurationMinutes] = useState("");
   const [athleteNotes, setAthleteNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1423,6 +1455,19 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
       durationValue = parsed;
     }
 
+    const completionResult = resolveAdherenceCompletionPercent({
+      outcome,
+      totalPrescribedItems,
+      partialCompletedItemsRaw: partialCompletedItems,
+    });
+    if ("error" in completionResult) {
+      setSubmitMessage({
+        variant: "danger",
+        text: completionResult.error,
+      });
+      return;
+    }
+
     setSubmitting(true);
     setSubmitMessage(null);
     try {
@@ -1430,7 +1475,7 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
       await recordPlannedSessionAdherenceEvent(plannedSessionId, {
         eventType,
         adherenceOutcome: outcome,
-        completionPercent: completionPercentForOutcome(outcome),
+        completionPercent: completionResult.completionPercent,
         ...(durationValue !== undefined
           ? { actualDurationMinutes: durationValue }
           : {}),
@@ -1454,7 +1499,9 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
     historyPhase,
     latestAthleteEvent,
     outcome,
+    partialCompletedItems,
     plannedSessionId,
+    totalPrescribedItems,
   ]);
 
   return (
@@ -1516,6 +1563,11 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
 
       <fieldset className="mt-3 space-y-2" disabled={submitting}>
         <legend className="text-xs font-medium text-textSecondary">Log session</legend>
+        {totalPrescribedItems > 0 ? (
+          <p className="text-xs text-textSecondary">
+            Prescribed items: {totalPrescribedItems}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-3">
           {ADHERENCE_OUTCOME_OPTIONS.map((option) => (
             <label
@@ -1527,13 +1579,43 @@ function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string 
                 name={`adherence-outcome-${plannedSessionId}`}
                 value={option.value}
                 checked={outcome === option.value}
-                onChange={() => setOutcome(option.value)}
+                onChange={() => {
+                  setOutcome(option.value);
+                  if (option.value !== "PARTIAL") {
+                    setPartialCompletedItems("");
+                  }
+                }}
                 className="h-3.5 w-3.5 border-slate-300 text-primary focus:ring-primary/30"
               />
               <span>{option.label}</span>
             </label>
           ))}
         </div>
+        {outcome === "PARTIAL" &&
+        totalPrescribedItems > 1 ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-textPrimary">
+            <label
+              htmlFor={`adherence-partial-completed-${plannedSessionId}`}
+              className="text-xs font-medium text-textSecondary"
+            >
+              Completed items:
+            </label>
+            <Input
+              id={`adherence-partial-completed-${plannedSessionId}`}
+              type="number"
+              min={1}
+              max={totalPrescribedItems - 1}
+              step={1}
+              inputMode="numeric"
+              value={partialCompletedItems}
+              onChange={(event) => setPartialCompletedItems(event.target.value)}
+              className="max-w-[5rem]"
+            />
+            <span className="text-xs text-textSecondary">
+              of {totalPrescribedItems}
+            </span>
+          </div>
+        ) : null}
         <div className="space-y-1">
           <label
             htmlFor={`adherence-duration-${plannedSessionId}`}
@@ -1666,7 +1748,10 @@ function renderJournalItem(
           </p>
         ) : null}
         {showAdherencePanel ? (
-          <SessionAdherencePanel plannedSessionId={plannedSessionId} />
+          <SessionAdherencePanel
+            plannedSessionId={plannedSessionId}
+            totalPrescribedItems={getTotalPrescribedItems(item)}
+          />
         ) : null}
       </div>
     </Card>

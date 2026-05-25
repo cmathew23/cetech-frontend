@@ -6,13 +6,22 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
+import {
+  fetchPlannedSessionAdherenceEvents,
+  recordPlannedSessionAdherenceEvent,
+  type AthleteSessionAdherenceEvent,
+  type SessionAdherenceOutcome,
+} from "@/lib/api/athleteSessionAdherence";
 import {
   fetchAthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournalDay,
 } from "@/lib/api/coachAthletePlanningReadiness";
+import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatDateOnly,
   formatDateWithWeekday,
@@ -20,7 +29,8 @@ import {
   normalizeDateOnlyKey,
 } from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 type ViewState =
   | { phase: "loading" }
@@ -1277,12 +1287,324 @@ function itemHeading(
   return `Entry ${index + 1}`;
 }
 
+const ADHERENCE_ELIGIBLE_SESSION_TYPES = new Set([
+  "SKILL",
+  "STRENGTH_CONDITIONING",
+]);
+
+const ADHERENCE_OUTCOME_OPTIONS: Array<{
+  value: SessionAdherenceOutcome;
+  label: string;
+}> = [
+  { value: "COMPLETED", label: "Completed" },
+  { value: "PARTIAL", label: "Partial" },
+  { value: "SKIPPED", label: "Skipped" },
+];
+
+function readPlannedSessionIdFromItem(item: Record<string, unknown>): string | null {
+  const id = item.id;
+  if (typeof id !== "string") return null;
+  const trimmed = id.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function readItemSessionType(item: Record<string, unknown>): string | null {
+  const merged = mergeJournalRecordCandidateFields(item);
+  const raw = merged.sessionType;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function isSessionAdherenceEligible(
+  showAdherenceForm: boolean,
+  item: Record<string, unknown>,
+): boolean {
+  if (!showAdherenceForm) return false;
+  if (!readPlannedSessionIdFromItem(item)) return false;
+  const sessionType = readItemSessionType(item);
+  if (!sessionType) return false;
+  return ADHERENCE_ELIGIBLE_SESSION_TYPES.has(sessionType);
+}
+
+function completionPercentForOutcome(outcome: SessionAdherenceOutcome): number {
+  if (outcome === "COMPLETED") return 100;
+  if (outcome === "SKIPPED") return 0;
+  return 50;
+}
+
+function findLatestAthleteAdherenceEvent(
+  events: AthleteSessionAdherenceEvent[],
+): AthleteSessionAdherenceEvent | null {
+  return (
+    events.find(
+      (event) => event.eventType === "RECORDED" || event.eventType === "UPDATED",
+    ) ?? null
+  );
+}
+
+function formatAdherenceOccurredAt(value: string | null): string {
+  if (!value) return "—";
+  const formatted = formatDateOnly(value, "");
+  return formatted !== "" ? formatted : value;
+}
+
+function SessionAdherencePanel({ plannedSessionId }: { plannedSessionId: string }) {
+  const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [events, setEvents] = useState<AthleteSessionAdherenceEvent[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [outcome, setOutcome] = useState<SessionAdherenceOutcome | "">("");
+  const [actualDurationMinutes, setActualDurationMinutes] = useState("");
+  const [athleteNotes, setAthleteNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<{
+    variant: "success" | "danger";
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHistoryPhase("loading");
+    setHistoryError(null);
+    void (async () => {
+      try {
+        const fetched = await fetchPlannedSessionAdherenceEvents(plannedSessionId);
+        if (cancelled) return;
+        setEvents(fetched);
+        setHistoryPhase("ready");
+      } catch (error) {
+        if (cancelled) return;
+        setEvents([]);
+        setHistoryPhase("error");
+        setHistoryError(
+          isNormalizedApiError(error)
+            ? error.message
+            : "Could not load adherence history.",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plannedSessionId, reloadKey]);
+
+  const latestAthleteEvent = useMemo(
+    () => findLatestAthleteAdherenceEvent(events),
+    [events],
+  );
+
+  const handleSubmit = useCallback(async () => {
+    if (historyPhase !== "ready") {
+      return;
+    }
+
+    if (outcome === "") {
+      setSubmitMessage({
+        variant: "danger",
+        text: "Select a status before submitting.",
+      });
+      return;
+    }
+
+    const durationRaw = actualDurationMinutes.trim();
+    let durationValue: number | undefined;
+    if (durationRaw !== "") {
+      const parsed = Number(durationRaw);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        setSubmitMessage({
+          variant: "danger",
+          text: "Actual duration must be a whole number of minutes.",
+        });
+        return;
+      }
+      durationValue = parsed;
+    }
+
+    setSubmitting(true);
+    setSubmitMessage(null);
+    try {
+      const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
+      await recordPlannedSessionAdherenceEvent(plannedSessionId, {
+        eventType,
+        adherenceOutcome: outcome,
+        completionPercent: completionPercentForOutcome(outcome),
+        ...(durationValue !== undefined
+          ? { actualDurationMinutes: durationValue }
+          : {}),
+        ...(athleteNotes.trim() !== "" ? { athleteNotes: athleteNotes.trim() } : {}),
+      });
+      setSubmitMessage({ variant: "success", text: "Adherence saved." });
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setSubmitMessage({
+        variant: "danger",
+        text: isNormalizedApiError(error)
+          ? error.message
+          : "Could not save adherence.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    actualDurationMinutes,
+    athleteNotes,
+    historyPhase,
+    latestAthleteEvent,
+    outcome,
+    plannedSessionId,
+  ]);
+
+  return (
+    <div className="mt-3 border-t border-slate-200/80 pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
+        Session adherence
+      </p>
+
+      {historyPhase === "loading" ? (
+        <p className="mt-2 text-xs text-textSecondary">Loading adherence…</p>
+      ) : null}
+
+      {historyPhase === "error" && historyError ? (
+        <p className="mt-2 text-xs text-red-700">{historyError}</p>
+      ) : null}
+
+      {historyPhase === "ready" && latestAthleteEvent ? (
+        <dl className="mt-2 space-y-1 text-xs">
+          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <dt className="text-textSecondary">Status</dt>
+            <dd className="text-textPrimary">
+              {latestAthleteEvent.adherenceOutcome
+                ? formatEnumeratedLabel(latestAthleteEvent.adherenceOutcome)
+                : "—"}
+            </dd>
+          </div>
+          {latestAthleteEvent.completionPercent !== null ? (
+            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Completion</dt>
+              <dd className="text-textPrimary">
+                {Math.round(latestAthleteEvent.completionPercent)}%
+              </dd>
+            </div>
+          ) : null}
+          {latestAthleteEvent.actualDurationMinutes !== null ? (
+            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Duration</dt>
+              <dd className="text-textPrimary">
+                {Math.round(latestAthleteEvent.actualDurationMinutes)} min
+              </dd>
+            </div>
+          ) : null}
+          {latestAthleteEvent.athleteNotes ? (
+            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Note</dt>
+              <dd className="min-w-0 break-words text-textPrimary">
+                {latestAthleteEvent.athleteNotes}
+              </dd>
+            </div>
+          ) : null}
+          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <dt className="text-textSecondary">Logged</dt>
+            <dd className="text-textPrimary">
+              {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+
+      <fieldset className="mt-3 space-y-2" disabled={submitting}>
+        <legend className="text-xs font-medium text-textSecondary">Log session</legend>
+        <div className="flex flex-wrap gap-3">
+          {ADHERENCE_OUTCOME_OPTIONS.map((option) => (
+            <label
+              key={option.value}
+              className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-textPrimary"
+            >
+              <input
+                type="radio"
+                name={`adherence-outcome-${plannedSessionId}`}
+                value={option.value}
+                checked={outcome === option.value}
+                onChange={() => setOutcome(option.value)}
+                className="h-3.5 w-3.5 border-slate-300 text-primary focus:ring-primary/30"
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+        <div className="space-y-1">
+          <label
+            htmlFor={`adherence-duration-${plannedSessionId}`}
+            className="text-xs font-medium text-textSecondary"
+          >
+            Actual duration (minutes)
+          </label>
+          <Input
+            id={`adherence-duration-${plannedSessionId}`}
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={actualDurationMinutes}
+            onChange={(event) => setActualDurationMinutes(event.target.value)}
+            className="max-w-[10rem]"
+          />
+        </div>
+        <div className="space-y-1">
+          <label
+            htmlFor={`adherence-notes-${plannedSessionId}`}
+            className="text-xs font-medium text-textSecondary"
+          >
+            Note (optional)
+          </label>
+          <textarea
+            id={`adherence-notes-${plannedSessionId}`}
+            rows={2}
+            value={athleteNotes}
+            onChange={(event) => setAthleteNotes(event.target.value)}
+            className={cn(designSystem.input.root, "min-h-[4rem] w-full resize-y")}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void handleSubmit()}
+            disabled={submitting || historyPhase !== "ready"}
+          >
+            {submitting ? "Submitting…" : "Submit"}
+          </Button>
+          {submitting ? (
+            <span className="text-xs text-textSecondary">Saving…</span>
+          ) : null}
+        </div>
+      </fieldset>
+
+      {submitMessage ? (
+        <p
+          className={cn(
+            "mt-2 text-xs",
+            submitMessage.variant === "success"
+              ? "text-emerald-700"
+              : "text-red-700",
+          )}
+        >
+          {submitMessage.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function renderJournalItem(
   item: unknown,
   index: number,
-  options?: { nutritionDomain?: boolean },
+  options?: { nutritionDomain?: boolean; showAdherenceForm?: boolean },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
+  const showAdherenceForm = options?.showAdherenceForm === true;
   if (isScalar(item)) {
     return (
       <Card key={`scalar-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -1308,6 +1630,9 @@ function renderJournalItem(
     : collectDetailRows(item);
   const structureSections = extractJournalStructureSections(item);
   const hasStructuredContent = structureSections.length > 0;
+  const plannedSessionId = readPlannedSessionIdFromItem(item);
+  const showAdherencePanel =
+    isSessionAdherenceEligible(showAdherenceForm, item) && plannedSessionId !== null;
 
   return (
     <Card key={`record-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -1339,6 +1664,9 @@ function renderJournalItem(
           <p className="text-sm text-textSecondary">
             Plan details are available for this entry.
           </p>
+        ) : null}
+        {showAdherencePanel ? (
+          <SessionAdherencePanel plannedSessionId={plannedSessionId} />
         ) : null}
       </div>
     </Card>
@@ -1390,6 +1718,8 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                 {items.map((item, index) =>
                   renderJournalItem(item, index, {
                     nutritionDomain: domain.key === "NUTRITION",
+                    showAdherenceForm:
+                      domain.key === "SKILLS" || domain.key === "S_AND_C",
                   }),
                 )}
               </div>

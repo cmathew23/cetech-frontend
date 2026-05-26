@@ -2047,6 +2047,7 @@ function SessionAdherencePanel({
 
   const historyReady = historyPhase === "ready";
   const formLocked = submitting || !historyReady;
+  const hasExistingAthleteLog = Boolean(latestAthleteEvent);
 
   return (
     <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
@@ -2209,11 +2210,12 @@ function SessionAdherencePanel({
             onClick={() => void handleSubmit()}
             disabled={formLocked}
           >
-            {submitting ? "Submitting…" : "Submit"}
+            {submitting
+              ? "Saving…"
+              : hasExistingAthleteLog
+                ? "Update log"
+                : "Submit"}
           </Button>
-          {submitting ? (
-            <span className="text-xs text-textSecondary">Saving…</span>
-          ) : null}
         </div>
       </fieldset>
 

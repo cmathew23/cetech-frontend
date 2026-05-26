@@ -49,6 +49,8 @@ export type RecordNutritionSessionAdherenceInput = {
   eventType?: AthleteSessionAdherenceRecordEventType;
   notes?: string;
   items: NutritionAdherenceItemInput[];
+  /** ISO-8601 timestamp; omitted values default to `new Date().toISOString()` on POST. */
+  occurredAt?: string | null;
 };
 
 export type AthleteSessionAdherenceEvent = {
@@ -292,7 +294,7 @@ function assertRecordSessionAdherenceInput(
   return input;
 }
 
-function resolveOccurredAt(input: RecordSessionAdherenceInput): string {
+function resolveOccurredAt(input: { occurredAt?: string | null }): string {
   const provided = input.occurredAt?.trim();
   if (provided) return provided;
   return new Date().toISOString();
@@ -472,6 +474,16 @@ function assertRecordNutritionSessionAdherenceInput(
       };
     }
   }
+  if (input.occurredAt !== undefined && input.occurredAt !== null) {
+    const occurredAt = input.occurredAt.trim();
+    if (occurredAt === "") {
+      throw {
+        message: "occurredAt must be a non-empty ISO-8601 timestamp",
+        status: 400,
+        code: "INVALID_OCCURRED_AT",
+      };
+    }
+  }
   return { ...input, eventType };
 }
 
@@ -481,6 +493,7 @@ export function buildRecordNutritionSessionAdherenceRequestBody(
   const validated = assertRecordNutritionSessionAdherenceInput(input);
   const body: Record<string, unknown> = {
     eventType: validated.eventType ?? "RECORDED",
+    occurredAt: resolveOccurredAt(validated),
     items: validated.items.map((item) => ({
       plannedItemOrder: item.plannedItemOrder,
       consumedPortionFactor: item.consumedPortionFactor,

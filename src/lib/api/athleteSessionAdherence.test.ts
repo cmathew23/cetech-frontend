@@ -375,6 +375,7 @@ describe("athleteSessionAdherence API", () => {
     const body = parsePostBody();
     expect(body).toEqual({
       eventType: "RECORDED",
+      occurredAt: "2026-05-19T12:00:00.000Z",
       notes: "Ate most of it",
       items: [
         { plannedItemOrder: 1, consumedPortionFactor: 1 },
@@ -385,7 +386,6 @@ describe("athleteSessionAdherence API", () => {
     expect(body).not.toHaveProperty("completionPercent");
     expect(body).not.toHaveProperty("actualDurationMinutes");
     expect(body).not.toHaveProperty("athleteNotes");
-    expect(body).not.toHaveProperty("occurredAt");
     expect(apiRequestMock).toHaveBeenCalledWith(
       "/training-sessions/planned-sessions/nutrition-session-2/adherence-events",
       expect.objectContaining({ method: "POST" }),
@@ -406,13 +406,27 @@ describe("athleteSessionAdherence API", () => {
 
     expect(body).toEqual({
       eventType: "RECORDED",
+      occurredAt: "2026-05-19T12:00:00.000Z",
       items: [{ plannedItemOrder: 1, consumedPortionFactor: 0 }],
     });
     expect(body).not.toHaveProperty("adherenceOutcome");
     expect(body).not.toHaveProperty("completionPercent");
     expect(body).not.toHaveProperty("actualDurationMinutes");
     expect(body).not.toHaveProperty("athleteNotes");
-    expect(body).not.toHaveProperty("occurredAt");
+  });
+
+  it("buildRecordNutritionSessionAdherenceRequestBody uses provided occurredAt", () => {
+    const body = buildRecordNutritionSessionAdherenceRequestBody({
+      items: [{ plannedItemOrder: 1, consumedPortionFactor: 1 }],
+      occurredAt: "2026-05-19T08:00:00.000Z",
+    });
+
+    expect(body).toMatchObject({
+      eventType: "RECORDED",
+      occurredAt: "2026-05-19T08:00:00.000Z",
+    });
+    expect(body).not.toHaveProperty("adherenceOutcome");
+    expect(body).not.toHaveProperty("athleteNotes");
   });
 
   it("buildRecordSessionAdherenceRequestBody never includes forbidden POST keys", () => {

@@ -1798,6 +1798,7 @@ function NutritionSessionAdherencePanel({
         </p>
       ) : null}
 
+      {/* History readiness must not lock past/current adherence. Backend enforces final write rules. */}
       <fieldset className="mt-3 space-y-3" disabled={submitting || !canLogAdherence}>
         <legend className="text-xs font-semibold text-textPrimary">
           {prescribedWorkLabelForAdherenceDomain("NUTRITION")}: {foodRows.length}
@@ -1992,9 +1993,6 @@ function SessionAdherencePanel({
     if (!canLogAdherence) {
       return;
     }
-    if (historyPhase !== "ready") {
-      return;
-    }
 
     if (outcome === "") {
       setSubmitMessage({
@@ -2060,7 +2058,6 @@ function SessionAdherencePanel({
     actualDurationMinutes,
     athleteNotes,
     canLogAdherence,
-    historyPhase,
     latestAthleteEvent,
     outcome,
     partialCompletedItems,
@@ -2068,8 +2065,9 @@ function SessionAdherencePanel({
     totalPrescribedItems,
   ]);
 
-  const historyReady = historyPhase === "ready";
-  const formLocked = submitting || !historyReady || !canLogAdherence;
+  // History readiness must not lock past/current adherence. Backend enforces final write rules.
+  const formFieldsDisabled = submitting || !canLogAdherence;
+  const submitDisabled = formFieldsDisabled || outcome === "";
   const hasExistingAthleteLog = Boolean(latestAthleteEvent);
 
   return (
@@ -2087,7 +2085,7 @@ function SessionAdherencePanel({
 
       {historyPhase === "error" ? (
         <p className="mt-2.5 text-xs text-textSecondary">
-          Previous adherence status unavailable. Please refresh the page.
+          Previous adherence status unavailable. You can still log this session.
         </p>
       ) : null}
 
@@ -2140,7 +2138,7 @@ function SessionAdherencePanel({
         </p>
       ) : null}
 
-      <fieldset className="mt-3 space-y-2.5" disabled={formLocked}>
+      <fieldset className="mt-3 space-y-2.5" disabled={formFieldsDisabled}>
         <legend className="text-xs font-semibold text-textPrimary">Log session</legend>
         {totalPrescribedItems > 0 ? (
           <p className="text-xs font-medium text-textPrimary">
@@ -2237,7 +2235,7 @@ function SessionAdherencePanel({
             type="button"
             variant="primary"
             onClick={() => void handleSubmit()}
-            disabled={formLocked}
+            disabled={submitDisabled}
           >
             {submitting
               ? "Saving…"
@@ -2398,18 +2396,11 @@ function resolveJournalDayAdherenceLogging(day: AthleteWeeklyPlanJournalDay): {
   const loggingOpensOn = formatDateOnly(day.date);
   const adherenceDayScopeKey = dayKey ?? `day-${day.dayNumber}`;
 
-  if (dayKey === null) {
-    return {
-      canLogAdherence: true,
-      isFutureDay: false,
-      loggingOpensOn,
-      adherenceDayScopeKey,
-    };
-  }
+  const isFutureDay = dayKey !== null && dayKey > localTodayKey;
+  const canLogAdherence = !isFutureDay;
 
-  const isFutureDay = dayKey > localTodayKey;
   return {
-    canLogAdherence: dayKey <= localTodayKey,
+    canLogAdherence,
     isFutureDay,
     loggingOpensOn,
     adherenceDayScopeKey,

@@ -12,8 +12,10 @@ import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchPlannedSessionAdherenceEvents,
+  recordNutritionPlannedSessionAdherenceEvent,
   recordPlannedSessionAdherenceEvent,
   type AthleteSessionAdherenceEvent,
+  type NutritionAdherenceEventItem,
   type SessionAdherenceOutcome,
 } from "@/lib/api/athleteSessionAdherence";
 import {
@@ -27,10 +29,18 @@ import {
   formatDateWithWeekday,
   getLocalDateKey,
   normalizeDateOnlyKey,
+  parseToLocalDate,
 } from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type ReactElement,
+} from "react";
 
 type ViewState =
   | { phase: "loading" }
@@ -1384,14 +1394,553 @@ function formatAdherenceOccurredAt(value: string | null): string {
   return formatted !== "" ? formatted : value;
 }
 
+const NUTRITION_PORTION_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0, label: "Not eaten" },
+  { value: 0.5, label: "Half" },
+  { value: 1, label: "Full" },
+  { value: 1.25, label: "Extra" },
+];
+
+const FIBER_SOURCE_KEYS = ["plannedFiberG", "fiberG", "fiber", "Fiber"] as const;
+
+const PLANNED_MINERAL_KEYS = [
+  { label: "Calcium", planned: "plannedCalciumMg", fallbacks: ["calciumMg", "calcium"] as const },
+  { label: "Magnesium", planned: "plannedMagnesiumMg", fallbacks: ["magnesiumMg", "magnesium"] as const },
+  { label: "Potassium", planned: "plannedPotassiumMg", fallbacks: ["potassiumMg", "potassium"] as const },
+  { label: "Sodium", planned: "plannedSodiumMg", fallbacks: ["sodiumMg", "sodium"] as const },
+] as const;
+
+type NutritionAdherenceFoodRow = {
+  plannedItemOrder: number;
+  label: string;
+  serving: string | null;
+  timing: string | null;
+  plannedNutrientRows: Array<{ label: string; value: string }>;
+};
+
+function isNutritionSessionAdherenceEligible(
+  nutritionDomain: boolean,
+  item: Record<string, unknown>,
+): boolean {
+  if (!nutritionDomain) return false;
+  if (!readPlannedSessionIdFromItem(item)) return false;
+  return readItemSessionType(item) === "NUTRITION";
+}
+
+function resolvePlannedItemOrderFromLeaf(
+  leaf: Record<string, unknown>,
+  fallbackIndex: number,
+): number | null {
+  const merged = mergeJournalRecordCandidateFields(leaf);
+  const candidates = [
+    merged.plannedItemOrder,
+    merged.order,
+    merged.Order,
+    merged.itemOrder,
+    merged.orderIndex,
+    merged.index,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseFiniteNumber(candidate);
+    if (parsed !== null && Number.isInteger(parsed) && parsed >= 1) {
+      return parsed;
+    }
+  }
+  return fallbackIndex >= 0 ? fallbackIndex + 1 : null;
+}
+
+function readPresentNutrientNumber(
+  merged: Record<string, unknown>,
+  primaryKey: string,
+  fallbackKeys: readonly string[],
+): number | null | undefined {
+  if (objectFieldPresent(merged, primaryKey)) {
+    if (merged[primaryKey] === null) return null;
+    const primary = parseFiniteNumber(merged[primaryKey]);
+    if (primary !== null) return primary;
+  }
+  const fallback = pickExplicitMacroNumber(merged, fallbackKeys);
+  return fallback === null ? undefined : fallback;
+}
+
+function collectPlannedNutrientDisplayRowsForAdherence(
+  leaf: Record<string, unknown>,
+): Array<{ label: string; value: string }> {
+  const merged = mergeJournalRecordCandidateFields(leaf);
+  const rows: Array<{ label: string; value: string }> = [];
+
+  const calories = readPresentNutrientNumber(
+    merged,
+    "plannedCaloriesKcal",
+    CALORIE_SOURCE_KEYS,
+  );
+  if (typeof calories === "number") {
+    rows.push({ label: "Calories", value: `${Math.round(calories)} kcal` });
+  }
+
+  const protein = readPresentNutrientNumber(merged, "plannedProteinG", PROTEIN_SOURCE_KEYS);
+  if (typeof protein === "number") {
+    rows.push({ label: "Protein", value: `${formatGramsRounded(protein)} g` });
+  }
+
+  const carbs = readPresentNutrientNumber(
+    merged,
+    "plannedCarbohydrateG",
+    CARB_SOURCE_KEYS,
+  );
+  if (typeof carbs === "number") {
+    rows.push({ label: "Carbs", value: `${formatGramsRounded(carbs)} g` });
+  }
+
+  const fat = readPresentNutrientNumber(merged, "plannedFatG", FAT_SOURCE_KEYS);
+  if (typeof fat === "number") {
+    rows.push({ label: "Fat", value: `${formatGramsRounded(fat)} g` });
+  }
+
+  const fiber = readPresentNutrientNumber(merged, "plannedFiberG", FIBER_SOURCE_KEYS);
+  if (typeof fiber === "number") {
+    rows.push({ label: "Fiber", value: `${formatGramsRounded(fiber)} g` });
+  }
+
+  for (const mineral of PLANNED_MINERAL_KEYS) {
+    const value = readPresentNutrientNumber(merged, mineral.planned, mineral.fallbacks);
+    if (typeof value === "number") {
+      rows.push({ label: mineral.label, value: `${formatGramsRounded(value)} mg` });
+    }
+  }
+
+  return rows;
+}
+
+function nutritionFoodLabelFromLeaf(leaf: Record<string, unknown>, index: number): string {
+  const merged = mergeJournalRecordCandidateFields(leaf);
+  for (const key of ["label", "name", "title", "foodName", "itemName"] as const) {
+    const raw = merged[key];
+    if (typeof raw === "string" && raw.trim() !== "") return raw.trim();
+  }
+  return `Item ${index + 1}`;
+}
+
+function collectNutritionAdherenceFoodRows(sessionItem: Record<string, unknown>): {
+  rows: NutritionAdherenceFoodRow[];
+  hasUnresolvedOrder: boolean;
+} {
+  const leaves = collectNutritionFoodLeavesFromRoots([sessionItem]);
+  const rows: NutritionAdherenceFoodRow[] = [];
+  let hasUnresolvedOrder = false;
+
+  leaves.forEach((leaf, index) => {
+    const plannedItemOrder = resolvePlannedItemOrderFromLeaf(leaf, index);
+    if (plannedItemOrder === null) {
+      hasUnresolvedOrder = true;
+      return;
+    }
+    rows.push({
+      plannedItemOrder,
+      label: nutritionFoodLabelFromLeaf(leaf, index),
+      serving: nutritionServingPhrase(mergeJournalRecordCandidateFields(leaf)),
+      timing: timingPhrase(mergeJournalRecordCandidateFields(leaf)),
+      plannedNutrientRows: collectPlannedNutrientDisplayRowsForAdherence(leaf),
+    });
+  });
+
+  return { rows, hasUnresolvedOrder };
+}
+
+function collectConsumedNutrientDisplayRows(
+  item: NutritionAdherenceEventItem,
+): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+
+  if (typeof item.consumedCaloriesKcal === "number") {
+    rows.push({
+      label: "Calories",
+      value: `${Math.round(item.consumedCaloriesKcal)} kcal`,
+    });
+  }
+  if (typeof item.consumedProteinG === "number") {
+    rows.push({ label: "Protein", value: `${formatGramsRounded(item.consumedProteinG)} g` });
+  }
+  if (typeof item.consumedCarbohydrateG === "number") {
+    rows.push({
+      label: "Carbs",
+      value: `${formatGramsRounded(item.consumedCarbohydrateG)} g`,
+    });
+  }
+  if (typeof item.consumedFatG === "number") {
+    rows.push({ label: "Fat", value: `${formatGramsRounded(item.consumedFatG)} g` });
+  }
+  if (typeof item.consumedFiberG === "number") {
+    rows.push({ label: "Fiber", value: `${formatGramsRounded(item.consumedFiberG)} g` });
+  }
+  if (typeof item.consumedCalciumMg === "number") {
+    rows.push({
+      label: "Calcium",
+      value: `${formatGramsRounded(item.consumedCalciumMg)} mg`,
+    });
+  }
+  if (typeof item.consumedMagnesiumMg === "number") {
+    rows.push({
+      label: "Magnesium",
+      value: `${formatGramsRounded(item.consumedMagnesiumMg)} mg`,
+    });
+  }
+  if (typeof item.consumedPotassiumMg === "number") {
+    rows.push({
+      label: "Potassium",
+      value: `${formatGramsRounded(item.consumedPotassiumMg)} mg`,
+    });
+  }
+  if (typeof item.consumedSodiumMg === "number") {
+    rows.push({
+      label: "Sodium",
+      value: `${formatGramsRounded(item.consumedSodiumMg)} mg`,
+    });
+  }
+
+  return rows;
+}
+
+function portionFactorsFromLatestEvent(
+  event: AthleteSessionAdherenceEvent | null,
+): Record<number, number> {
+  const map: Record<number, number> = {};
+  if (!event?.items) return map;
+  for (const item of event.items) {
+    map[item.plannedItemOrder] = item.consumedPortionFactor;
+  }
+  return map;
+}
+
+function NutritionSessionAdherencePanel({
+  plannedSessionId,
+  sessionItem,
+  canLogAdherence = true,
+  loggingOpensOn,
+}: {
+  plannedSessionId: string;
+  sessionItem: Record<string, unknown>;
+  canLogAdherence?: boolean;
+  loggingOpensOn?: string;
+}) {
+  const { rows: foodRows, hasUnresolvedOrder } = useMemo(
+    () => collectNutritionAdherenceFoodRows(sessionItem),
+    [sessionItem],
+  );
+
+  const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [events, setEvents] = useState<AthleteSessionAdherenceEvent[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [portionByOrder, setPortionByOrder] = useState<Record<number, number>>({});
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<{
+    variant: "success" | "danger";
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHistoryPhase("loading");
+    void (async () => {
+      try {
+        const fetched = await fetchPlannedSessionAdherenceEvents(plannedSessionId);
+        if (cancelled) return;
+        setEvents(fetched);
+        setHistoryPhase("ready");
+      } catch {
+        if (cancelled) return;
+        setEvents([]);
+        setHistoryPhase("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plannedSessionId, reloadKey]);
+
+  const latestAthleteEvent = useMemo(
+    () => findLatestAthleteAdherenceEvent(events),
+    [events],
+  );
+
+  useEffect(() => {
+    const prefilled = portionFactorsFromLatestEvent(latestAthleteEvent);
+    const next: Record<number, number> = {};
+    for (const row of foodRows) {
+      next[row.plannedItemOrder] =
+        prefilled[row.plannedItemOrder] ?? 0;
+    }
+    setPortionByOrder(next);
+    setNotes(latestAthleteEvent?.athleteNotes ?? "");
+  }, [foodRows, latestAthleteEvent, plannedSessionId, reloadKey]);
+
+  const consumedByOrder = useMemo(() => {
+    const map = new Map<number, NutritionAdherenceEventItem>();
+    for (const item of latestAthleteEvent?.items ?? []) {
+      map.set(item.plannedItemOrder, item);
+    }
+    return map;
+  }, [latestAthleteEvent]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!canLogAdherence) {
+      return;
+    }
+    if (hasUnresolvedOrder) {
+      setSubmitMessage({
+        variant: "danger",
+        text: "Cannot log adherence until each food item has a valid order.",
+      });
+      return;
+    }
+    if (foodRows.length === 0) {
+      setSubmitMessage({
+        variant: "danger",
+        text: "No loggable meal items found for this session.",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitMessage(null);
+    try {
+      const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
+      await recordNutritionPlannedSessionAdherenceEvent(plannedSessionId, {
+        eventType,
+        items: foodRows.map((row) => ({
+          plannedItemOrder: row.plannedItemOrder,
+          consumedPortionFactor: portionByOrder[row.plannedItemOrder] ?? 0,
+        })),
+        ...(notes.trim() !== "" ? { notes: notes.trim() } : {}),
+      });
+      setSubmitMessage({ variant: "success", text: "Nutrition adherence saved." });
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setSubmitMessage({
+        variant: "danger",
+        text: isNormalizedApiError(error)
+          ? error.message
+          : "Could not save nutrition adherence.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    canLogAdherence,
+    foodRows,
+    hasUnresolvedOrder,
+    latestAthleteEvent,
+    notes,
+    portionByOrder,
+    plannedSessionId,
+  ]);
+
+  const submitDisabled =
+    submitting || !canLogAdherence || hasUnresolvedOrder || foodRows.length === 0;
+
+  return (
+    <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
+      <div className="border-b border-orange-200/60 pb-2">
+        <h4 className="text-sm font-semibold text-textPrimary">Nutrition adherence</h4>
+        <p className="mt-1 text-xs leading-relaxed text-textSecondary">
+          Log how much of each prescribed food you ate.
+        </p>
+      </div>
+
+      {historyPhase === "loading" ? (
+        <p className="mt-2.5 text-xs text-textSecondary">Loading adherence…</p>
+      ) : null}
+
+      {historyPhase === "error" ? (
+        <p className="mt-2.5 text-xs text-textSecondary">
+          Previous adherence status unavailable. You can still log this meal.
+        </p>
+      ) : null}
+
+      {historyPhase === "ready" && latestAthleteEvent ? (
+        <dl className="mt-2 space-y-1 text-xs">
+          {latestAthleteEvent.athleteNotes ? (
+            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Note</dt>
+              <dd className="min-w-0 break-words text-textPrimary">
+                {latestAthleteEvent.athleteNotes}
+              </dd>
+            </div>
+          ) : null}
+          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <dt className="text-textSecondary">Logged</dt>
+            <dd className="text-textPrimary">
+              {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {hasUnresolvedOrder ? (
+        <p className="mt-2 text-xs text-red-700">
+          Some food items are missing a valid order. Logging is disabled until the plan
+          includes order for each item.
+        </p>
+      ) : null}
+
+      {foodRows.length === 0 ? (
+        <p className="mt-2 text-xs text-textSecondary">
+          No structured meal items to log for this session.
+        </p>
+      ) : null}
+
+      {loggingOpensOn && !canLogAdherence ? (
+        <p className="mt-2 text-xs text-textSecondary">
+          Logging opens on {loggingOpensOn}
+        </p>
+      ) : null}
+
+      {/* History readiness must not lock past/current adherence. Backend enforces final write rules. */}
+      <fieldset className="mt-3 space-y-3" disabled={submitting || !canLogAdherence}>
+        <legend className="text-xs font-semibold text-textPrimary">
+          {prescribedWorkLabelForAdherenceDomain("NUTRITION")}: {foodRows.length}
+        </legend>
+
+        {foodRows.map((row) => {
+          const consumedItem = consumedByOrder.get(row.plannedItemOrder);
+          const consumedRows = consumedItem
+            ? collectConsumedNutrientDisplayRows(consumedItem)
+            : [];
+          return (
+            <div
+              key={`nutrition-adherence-${plannedSessionId}-${row.plannedItemOrder}`}
+              className="rounded border border-orange-200/70 bg-white/50 px-2.5 py-2"
+            >
+              <p className="text-sm font-medium text-textPrimary">{row.label}</p>
+              {row.serving ? (
+                <p className="text-xs text-textSecondary">Serving: {row.serving}</p>
+              ) : null}
+              {row.timing ? (
+                <p className="text-xs text-textSecondary">Timing: {row.timing}</p>
+              ) : null}
+              {row.plannedNutrientRows.length > 0 ? (
+                <dl className="mt-1.5 space-y-0.5 text-xs">
+                  {row.plannedNutrientRows.map((nutrient) => (
+                    <div
+                      key={`${row.plannedItemOrder}-planned-${nutrient.label}`}
+                      className="grid grid-cols-[minmax(0,5.5rem)_1fr] gap-x-2"
+                    >
+                      <dt className="text-textSecondary">{nutrient.label}</dt>
+                      <dd className="text-textPrimary">{nutrient.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {NUTRITION_PORTION_OPTIONS.map((option) => (
+                  <label
+                    key={`${row.plannedItemOrder}-${option.value}`}
+                    className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-textPrimary"
+                  >
+                    <input
+                      type="radio"
+                      name={`nutrition-portion-${plannedSessionId}-${row.plannedItemOrder}`}
+                      checked={
+                        (portionByOrder[row.plannedItemOrder] ?? 0) === option.value
+                      }
+                      onChange={() =>
+                        setPortionByOrder((current) => ({
+                          ...current,
+                          [row.plannedItemOrder]: option.value,
+                        }))
+                      }
+                      className="h-3.5 w-3.5 border-slate-300 text-primary focus:ring-primary/30"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+              {consumedRows.length > 0 ? (
+                <div className="mt-2 border-t border-orange-200/50 pt-1.5">
+                  <p className="text-xs font-medium text-textSecondary">Logged intake</p>
+                  <dl className="mt-1 space-y-0.5 text-xs">
+                    {consumedRows.map((nutrient) => (
+                      <div
+                        key={`${row.plannedItemOrder}-consumed-${nutrient.label}`}
+                        className="grid grid-cols-[minmax(0,5.5rem)_1fr] gap-x-2"
+                      >
+                        <dt className="text-textSecondary">{nutrient.label}</dt>
+                        <dd className="text-textPrimary">{nutrient.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <div className="space-y-1">
+          <label
+            htmlFor={`nutrition-adherence-notes-${plannedSessionId}`}
+            className="text-xs font-medium text-textSecondary"
+          >
+            Note (optional)
+          </label>
+          <textarea
+            id={`nutrition-adherence-notes-${plannedSessionId}`}
+            rows={2}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            className={cn(designSystem.input.root, "min-h-[4rem] w-full resize-y")}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => void handleSubmit()}
+            disabled={submitDisabled}
+          >
+            {submitting
+              ? "Saving…"
+              : latestAthleteEvent
+                ? "Update log"
+                : "Submit"}
+          </Button>
+          {submitting ? (
+            <span className="text-xs text-textSecondary">Saving…</span>
+          ) : null}
+        </div>
+      </fieldset>
+
+      {submitMessage ? (
+        <p
+          className={cn(
+            "mt-2 text-xs",
+            submitMessage.variant === "success"
+              ? "text-emerald-700"
+              : "text-red-700",
+          )}
+        >
+          {submitMessage.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SessionAdherencePanel({
   plannedSessionId,
   totalPrescribedItems,
   adherenceDomainKey,
+  canLogAdherence = true,
+  loggingOpensOn,
 }: {
   plannedSessionId: string;
   totalPrescribedItems: number;
   adherenceDomainKey: AdherenceJournalDomainKey;
+  canLogAdherence?: boolean;
+  loggingOpensOn?: string;
 }) {
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -1441,7 +1990,7 @@ function SessionAdherencePanel({
   );
 
   const handleSubmit = useCallback(async () => {
-    if (historyPhase !== "ready") {
+    if (!canLogAdherence) {
       return;
     }
 
@@ -1508,7 +2057,7 @@ function SessionAdherencePanel({
   }, [
     actualDurationMinutes,
     athleteNotes,
-    historyPhase,
+    canLogAdherence,
     latestAthleteEvent,
     outcome,
     partialCompletedItems,
@@ -1516,8 +2065,10 @@ function SessionAdherencePanel({
     totalPrescribedItems,
   ]);
 
-  const historyReady = historyPhase === "ready";
-  const formLocked = submitting || !historyReady;
+  // History readiness must not lock past/current adherence. Backend enforces final write rules.
+  const formFieldsDisabled = submitting || !canLogAdherence;
+  const submitDisabled = formFieldsDisabled || outcome === "";
+  const hasExistingAthleteLog = Boolean(latestAthleteEvent);
 
   return (
     <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
@@ -1534,7 +2085,7 @@ function SessionAdherencePanel({
 
       {historyPhase === "error" ? (
         <p className="mt-2.5 text-xs text-textSecondary">
-          Previous adherence status unavailable. Please refresh the page.
+          Previous adherence status unavailable. You can still log this session.
         </p>
       ) : null}
 
@@ -1581,7 +2132,13 @@ function SessionAdherencePanel({
         </dl>
       ) : null}
 
-      <fieldset className="mt-3 space-y-2.5" disabled={formLocked}>
+      {loggingOpensOn && !canLogAdherence ? (
+        <p className="mt-2 text-xs text-textSecondary">
+          Logging opens on {loggingOpensOn}
+        </p>
+      ) : null}
+
+      <fieldset className="mt-3 space-y-2.5" disabled={formFieldsDisabled}>
         <legend className="text-xs font-semibold text-textPrimary">Log session</legend>
         {totalPrescribedItems > 0 ? (
           <p className="text-xs font-medium text-textPrimary">
@@ -1629,7 +2186,8 @@ function SessionAdherencePanel({
               step={1}
               inputMode="numeric"
               value={partialCompletedItems}
-              onChange={(event) => setPartialCompletedItems(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setPartialCompletedItems(event.target.value)}
               className="max-w-[5rem]"
             />
             <span className="text-xs text-textSecondary">
@@ -1651,7 +2209,8 @@ function SessionAdherencePanel({
             step={1}
             inputMode="numeric"
             value={actualDurationMinutes}
-            onChange={(event) => setActualDurationMinutes(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setActualDurationMinutes(event.target.value)}
             className="max-w-[10rem]"
           />
         </div>
@@ -1666,7 +2225,8 @@ function SessionAdherencePanel({
             id={`adherence-notes-${plannedSessionId}`}
             rows={2}
             value={athleteNotes}
-            onChange={(event) => setAthleteNotes(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+              setAthleteNotes(event.target.value)}
             className={cn(designSystem.input.root, "min-h-[4rem] w-full resize-y")}
           />
         </div>
@@ -1675,13 +2235,14 @@ function SessionAdherencePanel({
             type="button"
             variant="primary"
             onClick={() => void handleSubmit()}
-            disabled={formLocked}
+            disabled={submitDisabled}
           >
-            {submitting ? "Submitting…" : "Submit"}
+            {submitting
+              ? "Saving…"
+              : hasExistingAthleteLog
+                ? "Update log"
+                : "Submit"}
           </Button>
-          {submitting ? (
-            <span className="text-xs text-textSecondary">Saving…</span>
-          ) : null}
         </div>
       </fieldset>
 
@@ -1708,11 +2269,17 @@ function renderJournalItem(
     nutritionDomain?: boolean;
     showAdherenceForm?: boolean;
     adherenceDomainKey?: AdherenceJournalDomainKey;
+    canLogAdherence?: boolean;
+    loggingOpensOn?: string;
+    adherenceDayScopeKey?: string;
   },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
   const showAdherenceForm = options?.showAdherenceForm === true;
   const adherenceDomainKey = options?.adherenceDomainKey;
+  const canLogAdherence = options?.canLogAdherence ?? true;
+  const loggingOpensOn = options?.loggingOpensOn;
+  const adherenceDayScopeKey = options?.adherenceDayScopeKey ?? "unknown-day";
   if (isScalar(item)) {
     return (
       <Card key={`scalar-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -1741,6 +2308,9 @@ function renderJournalItem(
   const plannedSessionId = readPlannedSessionIdFromItem(item);
   const showAdherencePanel =
     isSessionAdherenceEligible(showAdherenceForm, item) && plannedSessionId !== null;
+  const showNutritionAdherencePanel =
+    isNutritionSessionAdherenceEligible(nutritionDomain, item) &&
+    plannedSessionId !== null;
 
   return (
     <Card key={`record-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -1773,11 +2343,23 @@ function renderJournalItem(
             Plan details are available for this entry.
           </p>
         ) : null}
+        {showNutritionAdherencePanel ? (
+          <NutritionSessionAdherencePanel
+            key={`nutrition-adherence-${adherenceDayScopeKey}-${plannedSessionId}`}
+            plannedSessionId={plannedSessionId}
+            sessionItem={item}
+            canLogAdherence={canLogAdherence}
+            loggingOpensOn={loggingOpensOn}
+          />
+        ) : null}
         {showAdherencePanel && adherenceDomainKey ? (
           <SessionAdherencePanel
+            key={`session-adherence-${adherenceDayScopeKey}-${plannedSessionId}`}
             plannedSessionId={plannedSessionId}
             totalPrescribedItems={getTotalPrescribedItems(item)}
             adherenceDomainKey={adherenceDomainKey}
+            canLogAdherence={canLogAdherence}
+            loggingOpensOn={loggingOpensOn}
           />
         ) : null}
       </div>
@@ -1794,7 +2376,103 @@ function findJournalDayForLocalToday(
   );
 }
 
+function journalDayKey(day: AthleteWeeklyPlanJournalDay): string | null {
+  const fromNormalize = normalizeDateOnlyKey(day.date);
+  if (fromNormalize !== null) return fromNormalize;
+
+  const parsed = parseToLocalDate(day.date);
+  if (parsed === null) return null;
+  return getLocalDateKey(parsed);
+}
+
+function resolveJournalDayAdherenceLogging(day: AthleteWeeklyPlanJournalDay): {
+  canLogAdherence: boolean;
+  isFutureDay: boolean;
+  loggingOpensOn: string;
+  adherenceDayScopeKey: string;
+} {
+  const localTodayKey = getLocalDateKey();
+  const dayKey = journalDayKey(day);
+  const loggingOpensOn = formatDateOnly(day.date);
+  const adherenceDayScopeKey = dayKey ?? `day-${day.dayNumber}`;
+
+  const isFutureDay = dayKey !== null && dayKey > localTodayKey;
+  const canLogAdherence = !isFutureDay;
+
+  return {
+    canLogAdherence,
+    isFutureDay,
+    loggingOpensOn,
+    adherenceDayScopeKey,
+  };
+}
+
+function findJournalDayByKey(
+  days: AthleteWeeklyPlanJournalDay[],
+  selectedDayKey: string | null,
+): AthleteWeeklyPlanJournalDay | null {
+  if (selectedDayKey === null) return null;
+  return (
+    days.find((day) => normalizeDateOnlyKey(day.date) === selectedDayKey) ?? null
+  );
+}
+
+function resolveDefaultSelectedDayKey(
+  days: AthleteWeeklyPlanJournalDay[],
+  localTodayKey: string,
+): string | null {
+  const todayDay = findJournalDayForLocalToday(days, localTodayKey);
+  if (todayDay !== null) {
+    const todayKey = journalDayKey(todayDay);
+    if (todayKey !== null) return todayKey;
+  }
+  for (const day of days) {
+    const key = journalDayKey(day);
+    if (key !== null) return key;
+  }
+  return null;
+}
+
+function renderJournalDaySelector(props: {
+  days: AthleteWeeklyPlanJournalDay[];
+  selectedDayKey: string | null;
+  localTodayKey: string;
+  onSelectDayKey: (dayKey: string) => void;
+}): ReactElement {
+  const { days, selectedDayKey, localTodayKey, onSelectDayKey } = props;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {days.map((day) => {
+        const dayKey = journalDayKey(day);
+        if (dayKey === null) return null;
+        const isToday = dayKey === localTodayKey;
+        const isSelected = dayKey === selectedDayKey;
+        return (
+          <button
+            key={`${day.date}-${day.dayNumber}`}
+            type="button"
+            onClick={() => onSelectDayKey(dayKey)}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              isSelected
+                ? "border-orange-500 bg-orange-100 text-textPrimary shadow-sm"
+                : isToday
+                  ? "border-orange-300 bg-orange-50 text-textPrimary hover:border-orange-400"
+                  : "border-slate-200/90 bg-white text-textSecondary hover:border-slate-300 hover:text-textPrimary",
+            )}
+          >
+            {isToday ? "Today" : `Day ${day.dayNumber}`}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
+  const { canLogAdherence, loggingOpensOn, adherenceDayScopeKey } =
+    resolveJournalDayAdherenceLogging(day);
+
   return (
     <div className="grid gap-4 xl:grid-cols-3">
       {DOMAIN_SECTIONS.map((domain) => {
@@ -1836,6 +2514,9 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                       domain.key === "SKILLS" || domain.key === "S_AND_C"
                         ? domain.key
                         : undefined,
+                    canLogAdherence,
+                    loggingOpensOn,
+                    adherenceDayScopeKey,
                   }),
                 )}
               </div>
@@ -1860,6 +2541,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
 
   const retryLoadJournal = useCallback(() => {
     setState({ phase: "loading" });
@@ -1893,6 +2575,26 @@ export function AthleteWeeklyPlanJournalPageContent() {
     if (state.phase !== "ready") return;
     developmentLogWeeklyJournalNutritionInspection(state.journal);
   }, [state]);
+
+  useEffect(() => {
+    if (state.phase !== "ready") return;
+    const localTodayKey = getLocalDateKey();
+    const defaultDayKey = resolveDefaultSelectedDayKey(
+      state.journal.days,
+      localTodayKey,
+    );
+    // Reset invalid selection after journal fetch/reload (not user chip clicks).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync key to loaded days
+    setSelectedDayKey((current) => {
+      const stillValid =
+        current !== null &&
+        state.journal.days.some(
+          (day) => normalizeDateOnlyKey(day.date) === current,
+        );
+      if (stillValid) return current;
+      return defaultDayKey;
+    });
+  }, [state, reloadKey]);
 
   const isLoading = planningIds.phase === "loading" ||
     (planningIds.phase === "ready" && state.phase === "loading");
@@ -2007,29 +2709,6 @@ export function AthleteWeeklyPlanJournalPageContent() {
             </DashboardCardShell>
           ) : null}
 
-          {(() => {
-            const localTodayKey = getLocalDateKey();
-            const todayJournalDay = findJournalDayForLocalToday(
-              readyJournal.days,
-              localTodayKey,
-            );
-            return (
-              <DashboardCardShell
-                title="Today's Plan"
-                subtitle={formatDateWithWeekday(localTodayKey)}
-                className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
-              >
-                {todayJournalDay === null ? (
-                  <p className="text-sm text-textSecondary">
-                    No plan released for today.
-                  </p>
-                ) : (
-                  renderJournalDayDomainGrid(todayJournalDay)
-                )}
-              </DashboardCardShell>
-            );
-          })()}
-
           {readyJournal.days.length === 0 ? (
             <DashboardCardShell title="Journal Days">
               <p className="text-sm text-textSecondary">
@@ -2037,16 +2716,59 @@ export function AthleteWeeklyPlanJournalPageContent() {
               </p>
             </DashboardCardShell>
           ) : (
-            readyJournal.days.map((day) => (
-              <DashboardCardShell
-                key={`${day.date}-${day.dayNumber}`}
-                title={`Day ${day.dayNumber}`}
-                subtitle={formatDateOnly(day.date)}
-                className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
-              >
-                {renderJournalDayDomainGrid(day)}
-              </DashboardCardShell>
-            ))
+            (() => {
+              const localTodayKey = getLocalDateKey();
+              const defaultDayKey = resolveDefaultSelectedDayKey(
+                readyJournal.days,
+                localTodayKey,
+              );
+              const effectiveDayKey = selectedDayKey ?? defaultDayKey;
+              const selectedDay = findJournalDayByKey(
+                readyJournal.days,
+                effectiveDayKey,
+              );
+              const selectedIsToday =
+                effectiveDayKey !== null && effectiveDayKey === localTodayKey;
+              return (
+                <div className="space-y-3">
+                  <DashboardCardShell
+                    title="Plan by day"
+                    subtitle="Choose a day to view your released plan"
+                    className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+                  >
+                    {renderJournalDaySelector({
+                      days: readyJournal.days,
+                      selectedDayKey: effectiveDayKey,
+                      localTodayKey,
+                      onSelectDayKey: setSelectedDayKey,
+                    })}
+                  </DashboardCardShell>
+
+                  {selectedDay === null ? (
+                    <DashboardCardShell title="Journal Days">
+                      <p className="text-sm text-textSecondary">
+                        No weekly journal entries are available yet.
+                      </p>
+                    </DashboardCardShell>
+                  ) : (
+                    <DashboardCardShell
+                      title={
+                        selectedIsToday
+                          ? "Today's Plan"
+                          : `Day ${selectedDay.dayNumber}`
+                      }
+                      subtitle={formatDateWithWeekday(selectedDay.date)}
+                      className={cn(
+                        "shadow-[0_10px_30px_rgba(15,23,42,0.05)]",
+                        selectedIsToday && "ring-1 ring-orange-200/90",
+                      )}
+                    >
+                      {renderJournalDayDomainGrid(selectedDay)}
+                    </DashboardCardShell>
+                  )}
+                </div>
+              );
+            })()
           )}
               </>
             );

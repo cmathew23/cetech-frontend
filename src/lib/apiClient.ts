@@ -50,9 +50,10 @@ export function isNormalizedApiError(e: unknown): e is NormalizedApiError {
 /**
  * Message extraction from JSON error bodies (explicit order):
  * 1. payload.message
- * 2. payload.error?.message (when `error` is an object)
+ * 2. payload.error (when `error` is a string)
+ * 3. payload.error?.message (when `error` is an object)
  */
-function extractMessageFromPayload(
+export function extractMessageFromPayload(
   data: unknown,
   fallback: string,
 ): string {
@@ -66,6 +67,9 @@ function extractMessageFromPayload(
   }
 
   const err = o.error;
+  if (typeof err === "string" && err.trim() !== "") {
+    return err.trim();
+  }
   if (err && typeof err === "object") {
     const em = (err as { message?: unknown }).message;
     if (typeof em === "string" && em.trim() !== "") {

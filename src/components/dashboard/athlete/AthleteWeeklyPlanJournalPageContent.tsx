@@ -1614,9 +1614,13 @@ function portionFactorsFromLatestEvent(
 function NutritionSessionAdherencePanel({
   plannedSessionId,
   sessionItem,
+  canLogAdherence = true,
+  loggingOpensOn,
 }: {
   plannedSessionId: string;
   sessionItem: Record<string, unknown>;
+  canLogAdherence?: boolean;
+  loggingOpensOn?: string;
 }) {
   const { rows: foodRows, hasUnresolvedOrder } = useMemo(
     () => collectNutritionAdherenceFoodRows(sessionItem),
@@ -1681,6 +1685,9 @@ function NutritionSessionAdherencePanel({
   }, [latestAthleteEvent]);
 
   const handleSubmit = useCallback(async () => {
+    if (!canLogAdherence) {
+      return;
+    }
     if (hasUnresolvedOrder) {
       setSubmitMessage({
         variant: "danger",
@@ -1721,6 +1728,7 @@ function NutritionSessionAdherencePanel({
       setSubmitting(false);
     }
   }, [
+    canLogAdherence,
     foodRows,
     hasUnresolvedOrder,
     latestAthleteEvent,
@@ -1730,7 +1738,7 @@ function NutritionSessionAdherencePanel({
   ]);
 
   const submitDisabled =
-    submitting || hasUnresolvedOrder || foodRows.length === 0;
+    submitting || !canLogAdherence || hasUnresolvedOrder || foodRows.length === 0;
 
   return (
     <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
@@ -1783,7 +1791,13 @@ function NutritionSessionAdherencePanel({
         </p>
       ) : null}
 
-      <fieldset className="mt-3 space-y-3" disabled={submitting}>
+      {!canLogAdherence && loggingOpensOn ? (
+        <p className="mt-2 text-xs text-textSecondary">
+          Logging opens on {loggingOpensOn}
+        </p>
+      ) : null}
+
+      <fieldset className="mt-3 space-y-3" disabled={submitting || !canLogAdherence}>
         <legend className="text-xs font-semibold text-textPrimary">
           {prescribedWorkLabelForAdherenceDomain("NUTRITION")}: {foodRows.length}
         </legend>
@@ -1917,10 +1931,14 @@ function SessionAdherencePanel({
   plannedSessionId,
   totalPrescribedItems,
   adherenceDomainKey,
+  canLogAdherence = true,
+  loggingOpensOn,
 }: {
   plannedSessionId: string;
   totalPrescribedItems: number;
   adherenceDomainKey: AdherenceJournalDomainKey;
+  canLogAdherence?: boolean;
+  loggingOpensOn?: string;
 }) {
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -1970,6 +1988,9 @@ function SessionAdherencePanel({
   );
 
   const handleSubmit = useCallback(async () => {
+    if (!canLogAdherence) {
+      return;
+    }
     if (historyPhase !== "ready") {
       return;
     }
@@ -2037,6 +2058,7 @@ function SessionAdherencePanel({
   }, [
     actualDurationMinutes,
     athleteNotes,
+    canLogAdherence,
     historyPhase,
     latestAthleteEvent,
     outcome,
@@ -2046,7 +2068,7 @@ function SessionAdherencePanel({
   ]);
 
   const historyReady = historyPhase === "ready";
-  const formLocked = submitting || !historyReady;
+  const formLocked = submitting || !historyReady || !canLogAdherence;
   const hasExistingAthleteLog = Boolean(latestAthleteEvent);
 
   return (
@@ -2109,6 +2131,12 @@ function SessionAdherencePanel({
             </dd>
           </div>
         </dl>
+      ) : null}
+
+      {!canLogAdherence && loggingOpensOn ? (
+        <p className="mt-2 text-xs text-textSecondary">
+          Logging opens on {loggingOpensOn}
+        </p>
       ) : null}
 
       <fieldset className="mt-3 space-y-2.5" disabled={formLocked}>
@@ -2242,11 +2270,15 @@ function renderJournalItem(
     nutritionDomain?: boolean;
     showAdherenceForm?: boolean;
     adherenceDomainKey?: AdherenceJournalDomainKey;
+    canLogAdherence?: boolean;
+    loggingOpensOn?: string;
   },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
   const showAdherenceForm = options?.showAdherenceForm === true;
   const adherenceDomainKey = options?.adherenceDomainKey;
+  const canLogAdherence = options?.canLogAdherence !== false;
+  const loggingOpensOn = options?.loggingOpensOn;
   if (isScalar(item)) {
     return (
       <Card key={`scalar-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -2314,6 +2346,8 @@ function renderJournalItem(
           <NutritionSessionAdherencePanel
             plannedSessionId={plannedSessionId}
             sessionItem={item}
+            canLogAdherence={canLogAdherence}
+            loggingOpensOn={loggingOpensOn}
           />
         ) : null}
         {showAdherencePanel && adherenceDomainKey ? (
@@ -2321,6 +2355,8 @@ function renderJournalItem(
             plannedSessionId={plannedSessionId}
             totalPrescribedItems={getTotalPrescribedItems(item)}
             adherenceDomainKey={adherenceDomainKey}
+            canLogAdherence={canLogAdherence}
+            loggingOpensOn={loggingOpensOn}
           />
         ) : null}
       </div>
@@ -2404,6 +2440,11 @@ function renderJournalDaySelector(props: {
 }
 
 function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
+  const localTodayKey = getLocalDateKey();
+  const dayKey = journalDayKey(day);
+  const canLogAdherence = dayKey !== null && dayKey <= localTodayKey;
+  const loggingOpensOn = formatDateOnly(day.date);
+
   return (
     <div className="grid gap-4 xl:grid-cols-3">
       {DOMAIN_SECTIONS.map((domain) => {
@@ -2445,6 +2486,8 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                       domain.key === "SKILLS" || domain.key === "S_AND_C"
                         ? domain.key
                         : undefined,
+                    canLogAdherence,
+                    loggingOpensOn,
                   }),
                 )}
               </div>

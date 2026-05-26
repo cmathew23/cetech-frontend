@@ -29,6 +29,7 @@ import {
   formatDateWithWeekday,
   getLocalDateKey,
   normalizeDateOnlyKey,
+  parseToLocalDate,
 } from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
@@ -1791,7 +1792,7 @@ function NutritionSessionAdherencePanel({
         </p>
       ) : null}
 
-      {!canLogAdherence && loggingOpensOn ? (
+      {loggingOpensOn && !canLogAdherence ? (
         <p className="mt-2 text-xs text-textSecondary">
           Logging opens on {loggingOpensOn}
         </p>
@@ -2133,7 +2134,7 @@ function SessionAdherencePanel({
         </dl>
       ) : null}
 
-      {!canLogAdherence && loggingOpensOn ? (
+      {loggingOpensOn && !canLogAdherence ? (
         <p className="mt-2 text-xs text-textSecondary">
           Logging opens on {loggingOpensOn}
         </p>
@@ -2272,13 +2273,15 @@ function renderJournalItem(
     adherenceDomainKey?: AdherenceJournalDomainKey;
     canLogAdherence?: boolean;
     loggingOpensOn?: string;
+    adherenceDayScopeKey?: string;
   },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
   const showAdherenceForm = options?.showAdherenceForm === true;
   const adherenceDomainKey = options?.adherenceDomainKey;
-  const canLogAdherence = options?.canLogAdherence !== false;
+  const canLogAdherence = options?.canLogAdherence ?? true;
   const loggingOpensOn = options?.loggingOpensOn;
+  const adherenceDayScopeKey = options?.adherenceDayScopeKey ?? "unknown-day";
   if (isScalar(item)) {
     return (
       <Card key={`scalar-${index}`} accent={false} padding="compact" className="bg-bg">
@@ -2344,6 +2347,7 @@ function renderJournalItem(
         ) : null}
         {showNutritionAdherencePanel ? (
           <NutritionSessionAdherencePanel
+            key={`nutrition-adherence-${adherenceDayScopeKey}-${plannedSessionId}`}
             plannedSessionId={plannedSessionId}
             sessionItem={item}
             canLogAdherence={canLogAdherence}
@@ -2352,6 +2356,7 @@ function renderJournalItem(
         ) : null}
         {showAdherencePanel && adherenceDomainKey ? (
           <SessionAdherencePanel
+            key={`session-adherence-${adherenceDayScopeKey}-${plannedSessionId}`}
             plannedSessionId={plannedSessionId}
             totalPrescribedItems={getTotalPrescribedItems(item)}
             adherenceDomainKey={adherenceDomainKey}
@@ -2374,7 +2379,41 @@ function findJournalDayForLocalToday(
 }
 
 function journalDayKey(day: AthleteWeeklyPlanJournalDay): string | null {
-  return normalizeDateOnlyKey(day.date);
+  const fromNormalize = normalizeDateOnlyKey(day.date);
+  if (fromNormalize !== null) return fromNormalize;
+
+  const parsed = parseToLocalDate(day.date);
+  if (parsed === null) return null;
+  return getLocalDateKey(parsed);
+}
+
+function resolveJournalDayAdherenceLogging(day: AthleteWeeklyPlanJournalDay): {
+  canLogAdherence: boolean;
+  isFutureDay: boolean;
+  loggingOpensOn: string;
+  adherenceDayScopeKey: string;
+} {
+  const localTodayKey = getLocalDateKey();
+  const dayKey = journalDayKey(day);
+  const loggingOpensOn = formatDateOnly(day.date);
+  const adherenceDayScopeKey = dayKey ?? `day-${day.dayNumber}`;
+
+  if (dayKey === null) {
+    return {
+      canLogAdherence: true,
+      isFutureDay: false,
+      loggingOpensOn,
+      adherenceDayScopeKey,
+    };
+  }
+
+  const isFutureDay = dayKey > localTodayKey;
+  return {
+    canLogAdherence: dayKey <= localTodayKey,
+    isFutureDay,
+    loggingOpensOn,
+    adherenceDayScopeKey,
+  };
 }
 
 function findJournalDayByKey(
@@ -2440,10 +2479,8 @@ function renderJournalDaySelector(props: {
 }
 
 function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
-  const localTodayKey = getLocalDateKey();
-  const dayKey = journalDayKey(day);
-  const canLogAdherence = dayKey !== null && dayKey <= localTodayKey;
-  const loggingOpensOn = formatDateOnly(day.date);
+  const { canLogAdherence, loggingOpensOn, adherenceDayScopeKey } =
+    resolveJournalDayAdherenceLogging(day);
 
   return (
     <div className="grid gap-4 xl:grid-cols-3">
@@ -2488,6 +2525,7 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                         : undefined,
                     canLogAdherence,
                     loggingOpensOn,
+                    adherenceDayScopeKey,
                   }),
                 )}
               </div>

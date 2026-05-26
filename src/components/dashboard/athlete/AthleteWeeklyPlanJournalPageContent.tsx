@@ -2335,6 +2335,72 @@ function findJournalDayForLocalToday(
   );
 }
 
+function journalDayKey(day: AthleteWeeklyPlanJournalDay): string | null {
+  return normalizeDateOnlyKey(day.date);
+}
+
+function findJournalDayByKey(
+  days: AthleteWeeklyPlanJournalDay[],
+  selectedDayKey: string | null,
+): AthleteWeeklyPlanJournalDay | null {
+  if (selectedDayKey === null) return null;
+  return (
+    days.find((day) => normalizeDateOnlyKey(day.date) === selectedDayKey) ?? null
+  );
+}
+
+function resolveDefaultSelectedDayKey(
+  days: AthleteWeeklyPlanJournalDay[],
+  localTodayKey: string,
+): string | null {
+  const todayDay = findJournalDayForLocalToday(days, localTodayKey);
+  if (todayDay !== null) {
+    const todayKey = journalDayKey(todayDay);
+    if (todayKey !== null) return todayKey;
+  }
+  for (const day of days) {
+    const key = journalDayKey(day);
+    if (key !== null) return key;
+  }
+  return null;
+}
+
+function renderJournalDaySelector(props: {
+  days: AthleteWeeklyPlanJournalDay[];
+  selectedDayKey: string | null;
+  localTodayKey: string;
+  onSelectDayKey: (dayKey: string) => void;
+}): ReactElement {
+  const { days, selectedDayKey, localTodayKey, onSelectDayKey } = props;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {days.map((day) => {
+        const dayKey = journalDayKey(day);
+        if (dayKey === null) return null;
+        const isToday = dayKey === localTodayKey;
+        const isSelected = dayKey === selectedDayKey;
+        return (
+          <button
+            key={`${day.date}-${day.dayNumber}`}
+            type="button"
+            onClick={() => onSelectDayKey(dayKey)}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              isSelected
+                ? "border-orange-500 bg-orange-100 text-textPrimary shadow-sm"
+                : isToday
+                  ? "border-orange-300 bg-orange-50 text-textPrimary hover:border-orange-400"
+                  : "border-slate-200/90 bg-white text-textSecondary hover:border-slate-300 hover:text-textPrimary",
+            )}
+          >
+            {isToday ? "Today" : `Day ${day.dayNumber}`}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
   return (
     <div className="grid gap-4 xl:grid-cols-3">
@@ -2401,6 +2467,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
 
   const retryLoadJournal = useCallback(() => {
     setState({ phase: "loading" });
@@ -2434,6 +2501,26 @@ export function AthleteWeeklyPlanJournalPageContent() {
     if (state.phase !== "ready") return;
     developmentLogWeeklyJournalNutritionInspection(state.journal);
   }, [state]);
+
+  useEffect(() => {
+    if (state.phase !== "ready") return;
+    const localTodayKey = getLocalDateKey();
+    const defaultDayKey = resolveDefaultSelectedDayKey(
+      state.journal.days,
+      localTodayKey,
+    );
+    // Reset invalid selection after journal fetch/reload (not user chip clicks).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync key to loaded days
+    setSelectedDayKey((current) => {
+      const stillValid =
+        current !== null &&
+        state.journal.days.some(
+          (day) => normalizeDateOnlyKey(day.date) === current,
+        );
+      if (stillValid) return current;
+      return defaultDayKey;
+    });
+  }, [state, reloadKey]);
 
   const isLoading = planningIds.phase === "loading" ||
     (planningIds.phase === "ready" && state.phase === "loading");
@@ -2548,29 +2635,6 @@ export function AthleteWeeklyPlanJournalPageContent() {
             </DashboardCardShell>
           ) : null}
 
-          {(() => {
-            const localTodayKey = getLocalDateKey();
-            const todayJournalDay = findJournalDayForLocalToday(
-              readyJournal.days,
-              localTodayKey,
-            );
-            return (
-              <DashboardCardShell
-                title="Today's Plan"
-                subtitle={formatDateWithWeekday(localTodayKey)}
-                className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
-              >
-                {todayJournalDay === null ? (
-                  <p className="text-sm text-textSecondary">
-                    No plan released for today.
-                  </p>
-                ) : (
-                  renderJournalDayDomainGrid(todayJournalDay)
-                )}
-              </DashboardCardShell>
-            );
-          })()}
-
           {readyJournal.days.length === 0 ? (
             <DashboardCardShell title="Journal Days">
               <p className="text-sm text-textSecondary">
@@ -2578,16 +2642,59 @@ export function AthleteWeeklyPlanJournalPageContent() {
               </p>
             </DashboardCardShell>
           ) : (
-            readyJournal.days.map((day) => (
-              <DashboardCardShell
-                key={`${day.date}-${day.dayNumber}`}
-                title={`Day ${day.dayNumber}`}
-                subtitle={formatDateOnly(day.date)}
-                className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
-              >
-                {renderJournalDayDomainGrid(day)}
-              </DashboardCardShell>
-            ))
+            (() => {
+              const localTodayKey = getLocalDateKey();
+              const defaultDayKey = resolveDefaultSelectedDayKey(
+                readyJournal.days,
+                localTodayKey,
+              );
+              const effectiveDayKey = selectedDayKey ?? defaultDayKey;
+              const selectedDay = findJournalDayByKey(
+                readyJournal.days,
+                effectiveDayKey,
+              );
+              const selectedIsToday =
+                effectiveDayKey !== null && effectiveDayKey === localTodayKey;
+              return (
+                <div className="space-y-3">
+                  <DashboardCardShell
+                    title="Plan by day"
+                    subtitle="Choose a day to view your released plan"
+                    className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+                  >
+                    {renderJournalDaySelector({
+                      days: readyJournal.days,
+                      selectedDayKey: effectiveDayKey,
+                      localTodayKey,
+                      onSelectDayKey: setSelectedDayKey,
+                    })}
+                  </DashboardCardShell>
+
+                  {selectedDay === null ? (
+                    <DashboardCardShell title="Journal Days">
+                      <p className="text-sm text-textSecondary">
+                        No weekly journal entries are available yet.
+                      </p>
+                    </DashboardCardShell>
+                  ) : (
+                    <DashboardCardShell
+                      title={
+                        selectedIsToday
+                          ? "Today's Plan"
+                          : `Day ${selectedDay.dayNumber}`
+                      }
+                      subtitle={formatDateWithWeekday(selectedDay.date)}
+                      className={cn(
+                        "shadow-[0_10px_30px_rgba(15,23,42,0.05)]",
+                        selectedIsToday && "ring-1 ring-orange-200/90",
+                      )}
+                    >
+                      {renderJournalDayDomainGrid(selectedDay)}
+                    </DashboardCardShell>
+                  )}
+                </div>
+              );
+            })()
           )}
               </>
             );

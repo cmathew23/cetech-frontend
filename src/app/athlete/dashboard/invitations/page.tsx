@@ -1,5 +1,6 @@
 import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
 import { AthleteInvitationsPageContent } from "@/components/dashboard/athlete/AthleteInvitationsPageContent";
+import { AthleteWeeklyAdherenceOverview } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceOverview";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -13,6 +14,7 @@ export default function AthleteDashboardInvitationsPage() {
           subtitle="Pending academy invitations. Accept or decline to continue."
           trailing={<AthleteHeaderIdentityMetadata />}
         />
+        <AthleteWeeklyAdherenceOverview />
         <AthleteInvitationsPageContent />
       </div>
     </DashboardLayout>

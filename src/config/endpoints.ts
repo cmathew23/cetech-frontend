@@ -80,6 +80,17 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athlete-planning-profile/me/confirm`,
     athletePlanningProfileByAthlete: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/planning-profile`,
+    weeklyAdherenceSummary: (
+      entityId: string,
+      athleteId: string,
+      query: { weekStart: string; weekEnd: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/weekly-adherence-summary`;
+      const params = new URLSearchParams();
+      params.set("weekStart", query.weekStart);
+      params.set("weekEnd", query.weekEnd);
+      return `${base}?${params.toString()}`;
+    },
     /** GET/POST — training plan level validation (coach review). */
     athleteTrainingPlanLevelValidation: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/level-validation`,

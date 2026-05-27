@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@/hooks/useAuth";
+import type { AccessContextPayload } from "@/lib/accessContext";
 import { fetchAthleteMeProfile, type AthleteMeProfile } from "@/lib/api/athleteMe";
 import {
   resolveCurrentAthletePlanningIdentifiers,
@@ -9,13 +9,27 @@ import {
 } from "@/lib/athletePlanningIdentity";
 import { useEffect, useMemo, useState } from "react";
 
+export type AthletePlanningAuthContext = {
+  accessContext: AccessContextPayload | null;
+  accessGateReady: boolean;
+};
+
 type AthletePlanningIdentifierState =
   | { phase: "loading"; ids: null }
   | { phase: "ready"; ids: AthletePlanningIdentifiers }
   | { phase: "not_ready"; ids: null };
 
-export function useAthletePlanningIdentifiers(): AthletePlanningIdentifierState {
-  const { accessContext, accessGateReady } = useAuth();
+/**
+ * Resolves athlete planning identifiers (entityId, athleteId) from the shared
+ * auth context provided by AthleteInvitationProvider.
+ *
+ * Callers MUST pass the auth context from the invitation gate to avoid
+ * redundant useAuth() bootstraps that cause identity resolution failures.
+ */
+export function useAthletePlanningIdentifiers(
+  authCtx: AthletePlanningAuthContext,
+): AthletePlanningIdentifierState {
+  const { accessContext, accessGateReady } = authCtx;
   const [athleteProfile, setAthleteProfile] = useState<AthleteMeProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileLoadAttempted, setProfileLoadAttempted] = useState(false);

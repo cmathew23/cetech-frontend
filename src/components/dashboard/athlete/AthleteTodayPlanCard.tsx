@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -106,7 +107,8 @@ function summarizeTodayItem(item: unknown): string | null {
 }
 
 export function AthleteTodayPlanCard() {
-  const planningIds = useAthletePlanningIdentifiers();
+  const { accessContext, accessGateReady } = useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });

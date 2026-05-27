@@ -58,6 +58,19 @@ function persistAccessContext(payload: AccessContextPayload | null) {
   }
 }
 
+function readPersistedAccessContext(): AccessContextPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(ACCESS_CONTEXT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AccessContextPayload;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    window.sessionStorage.removeItem(ACCESS_CONTEXT_STORAGE_KEY);
+    return null;
+  }
+}
+
 function toNormalizedError(e: unknown): NormalizedApiError {
   if (isNormalizedApiError(e)) {
     return e;
@@ -108,7 +121,7 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<NormalizedApiError | null>(null);
   const [accessContext, setAccessContext] = useState<AccessContextPayload | null>(
-    null,
+    () => readPersistedAccessContext(),
   );
   /** False until GET /me/app-context completes (or is skipped when logged out). */
   const [accessGateReady, setAccessGateReady] = useState(false);
@@ -153,16 +166,17 @@ export function useAuth() {
     }
 
     setAccessGateReady(false);
+    setAccessContext(readPersistedAccessContext());
     try {
       const me = await fetchMe();
       let ctx: AccessContextPayload | null = null;
       try {
         ctx = await fetchAccessContext();
       } catch {
-        ctx = null;
+        ctx = readPersistedAccessContext();
       }
       setAccessContext(ctx);
-      persistAccessContext(ctx);
+      if (ctx !== null) persistAccessContext(ctx);
       setAccessGateReady(true);
       return { ...me, accessContext: ctx };
     } catch (e) {
@@ -187,7 +201,7 @@ export function useAuth() {
       return null;
     }
     setAccessGateReady(false);
-    setAccessContext(null);
+    setAccessContext(readPersistedAccessContext());
     setError(null);
     try {
       const me = await fetchMe();
@@ -195,10 +209,10 @@ export function useAuth() {
       try {
         ctx = await fetchAccessContext();
       } catch {
-        ctx = null;
+        ctx = readPersistedAccessContext();
       }
       setAccessContext(ctx);
-      persistAccessContext(ctx);
+      if (ctx !== null) persistAccessContext(ctx);
       setAccessGateReady(true);
       return { ...me, accessContext: ctx };
     } catch (e) {

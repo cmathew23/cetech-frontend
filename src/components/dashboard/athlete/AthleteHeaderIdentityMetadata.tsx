@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { fetchMyProfile, type ProfileMe } from "@/lib/api/profile";
 import type { AppContextUser } from "@/lib/accessContext";
 import { toTitleCaseInput } from "@/lib/textFormat";
@@ -29,10 +29,10 @@ function athleteNameFromProfileMe(profile: ProfileMe | null): string {
 
 /**
  * Athlete dashboard identity rows — matches {@link AdminDashboardHeader} metadata styling.
- * Data: `useAuth` app-context + optional GET /profile/me (same pattern as admin dashboard).
+ * Data: shared athlete app-context + optional GET /profile/me (same pattern as admin dashboard).
  */
 export function AthleteHeaderIdentityMetadata() {
-  const { accessContext } = useAuth();
+  const { accessContext } = useAthleteInvitationGate();
   const [profileMe, setProfileMe] = useState<ProfileMe | null>(null);
 
   useEffect(() => {

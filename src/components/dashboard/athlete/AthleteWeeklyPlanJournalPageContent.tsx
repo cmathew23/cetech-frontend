@@ -1,6 +1,7 @@
 "use client";
 
 import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
+import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -2536,7 +2537,8 @@ function domainBadge(status: "RELEASED" | "NOT_RELEASED") {
 }
 
 export function AthleteWeeklyPlanJournalPageContent() {
-  const planningIds = useAthletePlanningIdentifiers();
+  const { accessContext, accessGateReady } = useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
   const [state, setState] = useState<ViewState>({ phase: "loading" });

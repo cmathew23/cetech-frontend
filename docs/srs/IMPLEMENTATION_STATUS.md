@@ -6,15 +6,63 @@
 
 - `docs/srs/03-ux/onboarding.md` — `GET /onboarding/status`, `GET /me/app-context`, `POST /onboarding/academy-setup`, invitation-aware rules, deprecated shortcuts
 - `docs/srs/03-ux/admin-dashboard.md` — `/admin/*` guards, eligibility, known admin UI issues
-- `docs/srs/phase-2-gaps.md` — open gaps (including coach invitation visibility), integration risks
+- `docs/srs/phase-2-gaps.md` — open gaps (including coach invitation visibility); **§13** adherence (completed); **§14** metrics dashboards (open)
 
 The sections below retain **auth password-flow** notes; **dashboard/onboarding** summaries in older revisions are superseded by the documents above.
 
 ---
 
+## Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening
+
+**Merged work:** Backend PR **#46** (`feature/nutrition-adherence`); frontend PR **#10** (`feature/nutrition-adherence-ui`).
+
+**Code references (frontend):** `src/app/athlete/weekly-plan/page.tsx`, `src/components/dashboard/athlete/AthleteWeeklyPlanJournalPageContent.tsx`, `src/lib/api/athleteSessionAdherence.ts`, `src/lib/apiClient.ts`, `paths.trainingSessions.plannedSessionAdherenceEvents(plannedSessionId)`.
+
+### Backend completed
+
+- Skills/S&C session adherence history is available through **`AthleteSessionAdherenceEvent`**.
+- Added **`AthleteNutritionItemAdherence`** table for item-level Nutrition adherence history (Prisma migration — apply with `npx prisma migrate deploy`; see `docs/srs/DB_SAFETY_RULES.md`).
+- Nutrition adherence uses the existing **planned-session adherence-events** endpoint (`GET`/`POST` `.../planned-sessions/:plannedSessionId/adherence-events`).
+- Nutrition **POST** creates one **`AthleteSessionAdherenceEvent`** plus item-level **`AthleteNutritionItemAdherence`** rows.
+- Nutrition **GET** returns **`items[]`** for Nutrition adherence events.
+- Nutrition planned/consumed snapshots include **calories, protein, carbs, fat, fiber, calcium, magnesium, potassium, and sodium**.
+- Nutrition **`completionPercent`** and **`adherenceOutcome`** are **backend-derived** from `consumedPortionFactor`.
+- Added backend **future-day adherence guard** using **`TrainingDay.date`**.
+- Future-day adherence **writes** are blocked for **SKILL**, **STRENGTH_CONDITIONING**, and **NUTRITION**.
+- **GET** adherence history remains allowed for future planned days.
+
+### Frontend completed
+
+- Added Nutrition adherence API client/types (`athleteSessionAdherence.ts`).
+- Added **`NutritionSessionAdherencePanel`** in athlete weekly journal.
+- Nutrition portion controls: **Not eaten**, **Half**, **Full**, **Extra**.
+- Restored **selected-day** weekly journal layout (Plan by day).
+- Fixed **Submit / Update log** button state after save.
+- Fixed frontend API error extraction for backend `{ "error": "..." }` responses (`apiClient.ts`).
+- Added **`occurredAt`** to Nutrition adherence POST.
+- Disabled **future-day** logging in UI while keeping future plans visible.
+- Fixed **past/current-day** logging so history loading does **not** disable Submit.
+
+### Validation
+
+| Check | Result |
+|-------|--------|
+| Backend `sessionAdherenceHistory` targeted suite | **23 tests passed** |
+| Frontend `athleteSessionAdherence.test.ts` | **14 tests passed** |
+| Manual QA | **athlete501** across all available journal days |
+
+### Still future (not in this slice)
+
+- Weekly adherence metrics dashboard (athlete + coach).
+- Nutrition nutrient drilldown / analytics dashboards.
+- Wearables, AI adherence feedback, meal replacement/custom food, scoring/leaderboards, charts-heavy analytics.
+- See `docs/srs/phase-2-gaps.md` for remaining gaps; **next planned work:** **Metrics Dashboard — Weekly Adherence**.
+
+---
+
 ## Workflow Stabilization Completed
 
-**Status:** Core Head Coach and no-Head-Coach generation/release workflows are functionally validated. **Stop workflow testing** unless new code changes touch workflow logic. **Next major module:** DB history/versioning audit (see `docs/srs/phase-2-gaps.md`, `docs/srs/DB_SAFETY_RULES.md`).
+**Status:** Core Head Coach and no-Head-Coach generation/release workflows are functionally validated. **Stop workflow testing** unless new code changes touch workflow logic. **Next planned product slice:** Metrics Dashboard — Weekly Adherence (`docs/srs/phase-2-gaps.md` §14). Athlete adherence logging is **completed** in this file (see *Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening*).
 
 ### Backend commits (workflow slice)
 
@@ -89,7 +137,7 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 - Core Head Coach and no-Head-Coach generation/release workflows are **functionally validated**.
 - **Stop workflow testing** unless new code changes touch workflow logic.
-- **Next major module:** DB history/versioning audit (inspect/report first — no migration until reviewed).
+- **Next planned work:** Metrics Dashboard — Weekly Adherence. Athlete adherence event logging is **completed** (see *Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening* above).
 
 ---
 

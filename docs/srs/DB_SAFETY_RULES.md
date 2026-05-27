@@ -179,6 +179,35 @@ If any rule is violated:
 
 ---
 
+## Nutrition Adherence migration (`AthleteNutritionItemAdherence`)
+
+Nutrition Adherence added the **`AthleteNutritionItemAdherence`** table through a **Prisma migration** on the backend.
+
+**Rules:**
+
+- Apply the migration with **`npx prisma migrate deploy`** against the **correct** target database.
+- Do **not** use `prisma migrate reset`.
+- Do **not** use `prisma db push --force-reset`.
+- Do **not** run `npm`/DB **reset** commands to fix missing-table errors.
+
+**Adherence history tables:**
+
+| Table | Role |
+|-------|------|
+| `AthleteSessionAdherenceEvent` | Session-level adherence history for **Skills**, **S&C**, and **Nutrition** |
+| `AthleteNutritionItemAdherence` | Item-level **Nutrition** adherence snapshots (planned vs consumed nutrients) |
+
+**Operational guidance** — if runtime error says **`AthleteNutritionItemAdherence` table does not exist**:
+
+1. Confirm backend **main** contains the migration.
+2. Confirm the **target DB** is correct (`DATABASE_URL` / environment).
+3. Run **non-destructive** `npx prisma migrate deploy` against that DB.
+4. Restart the backend service.
+5. Do **not** install `pg` or add packages just to inspect migration state.
+6. Do **not** expose DB credentials in logs.
+
+---
+
 ## History / versioning next-slice safety
 
 **Before** implementing DB history or versioning:
@@ -199,7 +228,7 @@ If any rule is violated:
 - Keep **current** tables where needed for fast current-state reads.
 - Store **immutable snapshots** for planning context locks and important athlete state changes.
 - **`TrainingPlanVersion`** already provides versioning for plans — **do not mutate** old versions.
-- Future **adherence logs** should be **append-only**.
+- **Athlete adherence logs (shipped):** `AthleteSessionAdherenceEvent` and `AthleteNutritionItemAdherence` are **append-oriented** event history — treat as immutable once written; do not overwrite or bulk-delete during investigation.
 
 ---
 
@@ -214,7 +243,8 @@ If any rule is violated:
 | Season / goals | Goal, Season, SeasonPhase tables |
 | Assignment | `AthleteCoachAssignment` |
 | Audit | Workflow / audit logs |
-| Adherence / metrics | Athlete adherence, completion, metric tables (if present) |
+| Adherence (shipped — verify only) | `AthleteSessionAdherenceEvent`, `AthleteNutritionItemAdherence` |
+| Metrics / completion | Performance, completion, and other metric tables (if present) |
 
 ---
 
@@ -233,4 +263,4 @@ When starting the **DB History / Versioning Audit** slice:
 - Identify overwrite risks.
 - Preserve historical snapshots.
 - Enable past-vs-current comparisons.
-- Support future dashboards, metrics, and adherence analytics.
+- Support future dashboards, metrics, and analytics (adherence **logging** is already live; audit confirms append-only semantics and what remains overwrite-prone elsewhere).

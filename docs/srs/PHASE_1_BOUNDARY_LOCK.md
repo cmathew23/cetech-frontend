@@ -99,9 +99,37 @@
 - Nutrition / S&C require **locked Skills planning context**.
 - Domain coaches use **direct release** (no Head Coach review path).
 
-### D. Explicit non-goals (current phase)
+### D. Session Adherence and Nutrition Adherence — Phase 1 adherence baseline (COMPLETED)
+
+**Session Adherence and Nutrition Adherence are now part of the completed Phase 1 adherence baseline.** Merged backend **#46** (`feature/nutrition-adherence`); frontend **#10** (`feature/nutrition-adherence-ui`).
+
+**Completed adherence baseline:**
+
+- Skills adherence history via **`AthleteSessionAdherenceEvent`**.
+- S&C adherence history via **`AthleteSessionAdherenceEvent`**.
+- Nutrition adherence history via **`AthleteSessionAdherenceEvent`** + **`AthleteNutritionItemAdherence`**.
+- Nutrition adherence captures **item-level planned-vs-consumed nutrient snapshots** (calories, macros, fiber, calcium, magnesium, potassium, sodium).
+- Athlete weekly journal (`/athlete/weekly-plan`) supports **selected-day** adherence logging for Skills, S&C, and Nutrition.
+- **Future-day adherence write protection** is **backend-enforced** (`TrainingDay.date`; blocks SKILL, STRENGTH_CONDITIONING, NUTRITION writes; GET history still allowed).
+- **Frontend future-day disable** is **UX only**; backend remains source of truth.
+- **History GET** must not permanently disable past/current submit; Submit becomes **Update log** after a saved athlete event exists.
+
+**Still outside this completed slice:**
+
+- Wearables integration.
+- Weekly adherence metrics dashboard.
+- Nutrition nutrient analytics dashboard.
+- AI adherence feedback.
+- Meal replacement / custom food logging.
+- Scoring / leaderboards.
+- Charts-heavy analytics.
+- Coach recommendations based on adherence.
+
+**Next planned work (before wearables):** **Metrics Dashboard — Weekly Adherence** (athlete and coach dashboard cards).
+
+### E. Explicit non-goals (current phase)
 
 - Do **not** implement a backend centralized action-state endpoint yet.
 - Do **not** refactor workflow UI architecture yet.
-- Do **not** start dashboards / metrics / adherence before **DB history/versioning audit**.
-- Do **not** redesign nutrition catalog during workflow stabilization.
+- Do **not** conflate **completed athlete adherence logging** (§D) with **metrics dashboards**, wearables, or charts-heavy analytics (those remain future slices).
+- Do **not** redesign nutrition catalog during workflow stabilization (catalog QA is a separate gap — see `docs/srs/phase-2-gaps.md`).

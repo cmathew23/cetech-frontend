@@ -4,7 +4,23 @@
 
 **Coach planning workspace UI (user flows only):** [`docs/ui/COACH_PLANNING_FLOW.md`](../ui/COACH_PLANNING_FLOW.md), [`docs/ui/SNC_UI.md`](../ui/SNC_UI.md), [`docs/ui/GOALS_UI.md`](../ui/GOALS_UI.md).
 
-Latest milestone: **Workflow stabilization** completed and documented (generation ownership, planning context lock, Head Coach / no-Head-Coach paths). See **`docs/srs/IMPLEMENTATION_STATUS.md`** (*Workflow Stabilization Completed*). Prior milestone: App Context + Assignment Pipeline Stabilization. **Athlete Planning Profile** and coach training-plan workspace remain documented in **`docs/srs/IMPLEMENTATION_STATUS.md`**.
+## Latest completed module
+
+**Session Adherence + Nutrition Adherence + Adherence State Hardening** (backend **#46**, frontend **#10**).
+
+**Summary:** The system now supports Skills, S&C, and Nutrition adherence history.
+
+- Skills/S&C use **`AthleteSessionAdherenceEvent`**.
+- Nutrition uses **`AthleteSessionAdherenceEvent`** plus **`AthleteNutritionItemAdherence`**.
+- Nutrition item adherence captures planned-vs-consumed nutrients including calories, macros, fiber, calcium, magnesium, potassium, and sodium.
+- Athlete weekly journal supports **selected-day** adherence logging (`/athlete/weekly-plan`).
+- **Past/today** logging is enabled.
+- **Future-day** logging is disabled in frontend and rejected by backend (GET history still allowed).
+- **Submit** changes to **Update log** after a saved event exists.
+
+Detail: **`docs/srs/IMPLEMENTATION_STATUS.md`** (*Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening*).
+
+**Prior milestones:** Workflow stabilization; App Context + Assignment Pipeline Stabilization; Athlete Planning Profile + coach training-plan workspace (`IMPLEMENTATION_STATUS.md`).
 
 ## Current workflow validation status
 
@@ -20,16 +36,13 @@ Detail per academy, athlete, and coach accounts: **`docs/srs/IMPLEMENTATION_STAT
 
 **Testing note:** Current workflow phase is **complete enough to stop workflow testing** unless new changes touch workflow logic.
 
-## Current next priority
+## Next planned work
 
-**Next major task:** **DB history / versioning audit**
+**Metrics Dashboard — Weekly Adherence** for athlete and coach dashboards (see `docs/srs/phase-2-gaps.md` §14).
 
-**Reason:**
+**Supporting (parallel):** DB history / versioning audit for non-adherence tables (`phase-2-gaps.md` §15, `DB_SAFETY_RULES.md`) — inspect/report first; no migration until reviewed.
 
-- Current data overwrite risk prevents reliable past-vs-current comparison.
-- Dashboard, metrics, adherence, and longitudinal analytics should **not** proceed until history/versioning is audited.
-
-**Recommended first step:** Inspect/report only — **no code**, **no migration** (see `docs/srs/DB_SAFETY_RULES.md`, `docs/srs/phase-2-gaps.md` §13).
+**Completed (do not re-open):** Athlete adherence logging for Skills, S&C, and Nutrition (`phase-2-gaps.md` §13).
 
 ## Testing note (workflow slice)
 
@@ -64,7 +77,7 @@ export PRISMA_DATABASE_URL="$(grep '^DIRECT_DATABASE_URL=' .env.local .env 2>/de
 - **`docs/srs/IMPLEMENTATION_STATUS.md`** — System state including athlete + coach **Athlete Planning Profile** routes, APIs, coach **training plan draft** UI on planning profile, and deferred items (confirm/readiness UI on athlete APP)
 - **`docs/srs/03-ux/onboarding.md`** — Academy admin onboarding flow, access-context routing rules, invitation-aware behavior, deprecated shortcuts, failure UX, multi-role note  
 - **`docs/srs/03-ux/admin-dashboard.md`** — Admin dashboard gating, admin route behavior, known admin UI issues  
-- **`docs/srs/phase-2-gaps.md`** — Open issues (e.g. coach invitation visibility), access-context `null` risk, verification notes; **§9** Athlete Planning Profile remainder  
+- **`docs/srs/phase-2-gaps.md`** — Open issues (e.g. coach invitation visibility), access-context `null` risk; **§13** adherence (completed); **§14** metrics dashboards (open); **§15** DB audit  
 
 Legacy one-line routing notes in older files are superseded by these documents.
 

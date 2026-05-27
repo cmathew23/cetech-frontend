@@ -74,6 +74,7 @@ Future **multi-role** users require routing that defers to **`accessContext`** a
 
 | Document | Purpose |
 |----------|---------|
+| `docs/srs/IMPLEMENTATION_STATUS.md` | Shipped features including adherence (§ Completed: Session Adherence + Nutrition Adherence) |
 | `docs/srs/03-ux/onboarding.md` | Academy admin onboarding + invitation-aware rules |
 | `docs/srs/03-ux/admin-dashboard.md` | Admin dashboard gating and known UI issues |
 | `docs/frontend/FRONTEND_GUARDRAILS.md` | Hooks, guards, API layer rules (`GET /me/app-context`) |
@@ -181,14 +182,57 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 
 ---
 
-## 13. DB history / versioning gap (next major slice)
+## 13. Session Adherence + Nutrition Adherence + Adherence State Hardening (COMPLETED)
 
-**Priority:** Required **before** dashboard / metrics / adherence work.
+**Status:** **Closed.** Merged backend **#46** (`feature/nutrition-adherence`) and frontend **#10** (`feature/nutrition-adherence-ui`). Do **not** track the items below as active gaps.
+
+**Completed (removed from active gaps):**
+
+- Skills/S&C session adherence history (`AthleteSessionAdherenceEvent`).
+- Nutrition adherence DB history (`AthleteSessionAdherenceEvent` + `AthleteNutritionItemAdherence`).
+- Nutrition item-level adherence persistence (planned-vs-consumed nutrient snapshots).
+- Nutrition adherence POST support (session event + item rows; `occurredAt` required).
+- Nutrition adherence GET `items[]` support.
+- Nutrition adherence UI in athlete weekly journal (`NutritionSessionAdherencePanel`).
+- Submit / Update log state hardening (post-save label; history must not block past/current submit).
+- Future-day adherence backend guard (`TrainingDay.date`; SKILL / STRENGTH_CONDITIONING / NUTRITION writes blocked).
+- Future-day frontend disable state (plans visible; submit disabled).
+- Selected-day weekly journal layout restored.
+
+**Validation reference:** Backend `sessionAdherenceHistory` suite (23 tests); frontend `athleteSessionAdherence.test.ts` (14 tests); manual QA athlete501.
+
+---
+
+## 14. Adherence metrics and analytics (FUTURE — open)
+
+**Next planned slice:** **Metrics Dashboard — Weekly Adherence** (before wearables).
+
+**Remaining future gaps:**
+
+- Weekly adherence metrics dashboard.
+- Athlete dashboard weekly adherence cards.
+- Coach dashboard role-scoped adherence cards.
+- Nutrition nutrient drilldown dashboard.
+- Nutrition catalog QA / unit normalization (see note below).
+- Wearables integration.
+- Daily/weekly adherence trend charts.
+- AI adherence feedback (later).
+- Meal replacement / custom food logging (later).
+
+**Catalog QA note (not adherence logic):** Some nutrition catalog values may need QA/unit normalization — e.g. unusually high sodium values on specific items. This is **catalog data quality**, not a defect in adherence POST/GET or journal UI. Example tracked item: Rice catalog entry in §12.
+
+---
+
+## 15. DB history / versioning gap (parallel / supporting)
+
+**Priority:** Required **before** coach/metrics **dashboards** and **longitudinal analytics** that compare non-adherence state over time.
+
+**Clarification:** Athlete **adherence event logging** (§13) is **done**. **Weekly adherence metrics dashboards** (§14) are the next product slice. This audit targets **other** tables that may still overwrite state needed for broader past-vs-current comparison.
 
 **Problem:**
 
-- Several current tables may **overwrite** state.
-- Future dashboard / metrics / adherence require **past-vs-current** comparison.
+- Several current tables may **overwrite** state outside the adherence-event tables.
+- Future dashboard / metrics work still requires **past-vs-current** comparison on planning profile, workload, assignments, etc.
 
 **Audit scope (initial):**
 
@@ -198,14 +242,14 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 - Goals / seasons / season phases
 - `AthleteCoachAssignment`
 - `TrainingPlan` / `TrainingPlanVersion`
-- Athlete adherence / journal tables
 - Metrics / performance tables (if present)
+- **Adherence tables (verify append-only semantics, do not re-build logging):** `AthleteSessionAdherenceEvent`, `AthleteNutritionItemAdherence`
 
 **Process:** Inspect/report only first — **no migration** until audit is reviewed. See `docs/srs/DB_SAFETY_RULES.md`.
 
 ---
 
-## 14. Revision hardening gap
+## 16. Revision hardening gap
 
 **Current:**
 

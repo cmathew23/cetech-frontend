@@ -1,6 +1,5 @@
 "use client";
 
-import { CoachWeeklyAdherenceOverview } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { InvitationInboxSection } from "@/components/invitations/InvitationInboxSection";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,8 +24,6 @@ export default function CoachDashboardInvitationsPage() {
         title="Invitations"
         subtitle="Pending academy invitations. Accept or decline to continue."
       />
-
-      <CoachWeeklyAdherenceOverview />
 
       <InvitationInboxSection
         showTitle={false}

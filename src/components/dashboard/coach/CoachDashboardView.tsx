@@ -1,6 +1,7 @@
 "use client";
 
 import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
+import { CoachWeeklyAdherenceOverview } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import {
@@ -191,6 +192,8 @@ export function CoachDashboardView() {
             </div>
           </div>
         </section>
+
+        <CoachWeeklyAdherenceOverview />
 
         <section className="space-y-3">
           <div>

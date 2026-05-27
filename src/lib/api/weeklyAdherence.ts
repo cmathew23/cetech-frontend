@@ -19,8 +19,16 @@ function readNonNegInt(value: unknown): number {
 }
 
 function readPercent(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, value));
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.min(100, value));
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(100, parsed));
+    }
+  }
+  return 0;
 }
 
 export type WeeklyAdherenceDomainKey =
@@ -33,6 +41,16 @@ const DOMAIN_KEYS: WeeklyAdherenceDomainKey[] = [
   "NUTRITION",
   "STRENGTH_CONDITIONING",
 ];
+
+const DOMAIN_KEY_ALIASES: Record<string, WeeklyAdherenceDomainKey> = {
+  SKILL: "SKILL",
+  SKILLS: "SKILL",
+  NUTRITION: "NUTRITION",
+  STRENGTH_CONDITIONING: "STRENGTH_CONDITIONING",
+  S_AND_C: "STRENGTH_CONDITIONING",
+  SNC: "STRENGTH_CONDITIONING",
+  "S&C": "STRENGTH_CONDITIONING",
+};
 
 export type WeeklyAdherenceRecentNote = {
   date: string;
@@ -81,12 +99,11 @@ function parseRecentNotes(raw: unknown): WeeklyAdherenceRecentNote[] {
 function parseDomainSummary(raw: unknown): WeeklyAdherenceDomainSummary | null {
   const row = asRecord(raw);
   if (!row) return null;
-  const recentNotes = parseRecentNotes(row.recentNotes);
   return {
     plannedSessions: readNonNegInt(row.plannedSessions),
     loggedSessions: readNonNegInt(row.loggedSessions),
     adherencePercent: readPercent(row.adherencePercent),
-    recentNotes,
+    recentNotes: parseRecentNotes(row.recentNotes),
   };
 }
 
@@ -104,24 +121,53 @@ function parseOverallSummary(raw: unknown): WeeklyAdherenceOverallSummary | null
 function parseVisibleDomains(raw: unknown): WeeklyAdherenceDomainKey[] {
   if (!Array.isArray(raw)) return [];
   return raw.reduce<WeeklyAdherenceDomainKey[]>((acc, item) => {
-    const key = readString(item).toUpperCase();
-    if (
-      key === "SKILL" ||
-      key === "NUTRITION" ||
-      key === "STRENGTH_CONDITIONING"
-    ) {
-      acc.push(key);
-    }
+    const key = DOMAIN_KEY_ALIASES[readString(item).toUpperCase()];
+    if (key && !acc.includes(key)) acc.push(key);
     return acc;
   }, []);
 }
 
+function looksLikeWeeklyAdherenceRecord(record: Record<string, unknown>): boolean {
+  return (
+    "domains" in record ||
+    "weekStart" in record ||
+    "weekEnd" in record ||
+    "athleteId" in record
+  );
+}
+
+/** Unwrap `{ success, data }`, `{ message, data }`, or a direct summary object. */
+export function unwrapWeeklyAdherencePayload(payload: unknown): Record<string, unknown> {
+  let current: unknown = adaptBackendSuccess(payload);
+
+  for (let depth = 0; depth < 4; depth += 1) {
+    const record = asRecord(current);
+    if (!record) return {};
+
+    if (looksLikeWeeklyAdherenceRecord(record)) {
+      return record;
+    }
+
+    const nested = record.data;
+    if (nested !== undefined && nested !== null) {
+      current = nested;
+      continue;
+    }
+
+    return record;
+  }
+
+  return asRecord(current) ?? {};
+}
+
+function normalizeDomainKey(rawKey: string): WeeklyAdherenceDomainKey | null {
+  return DOMAIN_KEY_ALIASES[rawKey.trim().toUpperCase()] ?? null;
+}
+
 export function parseWeeklyAdherenceSummaryPayload(
-  data: unknown,
+  payload: unknown,
 ): WeeklyAdherenceSummary {
-  const root = asRecord(data) ?? {};
-  const nested = asRecord(root.data);
-  const record = nested ?? root;
+  const record = unwrapWeeklyAdherencePayload(payload);
 
   const domainsRaw = asRecord(record.domains) ?? {};
   const domains: Partial<
@@ -131,6 +177,13 @@ export function parseWeeklyAdherenceSummaryPayload(
   for (const key of DOMAIN_KEYS) {
     const parsed = parseDomainSummary(domainsRaw[key]);
     if (parsed) domains[key] = parsed;
+  }
+
+  for (const [rawKey, rawValue] of Object.entries(domainsRaw)) {
+    const normalized = normalizeDomainKey(rawKey);
+    if (!normalized || domains[normalized]) continue;
+    const parsed = parseDomainSummary(rawValue);
+    if (parsed) domains[normalized] = parsed;
   }
 
   return {
@@ -157,5 +210,11 @@ export async function fetchWeeklyAdherenceSummary(params: {
     ),
     { method: "GET", cache: "no-store" },
   );
-  return parseWeeklyAdherenceSummaryPayload(adaptBackendSuccess(raw));
+  return parseWeeklyAdherenceSummaryPayload(raw);
+}
+
+export function hasNutritionAdherenceDomain(
+  summary: WeeklyAdherenceSummary | null | undefined,
+): boolean {
+  return summary?.domains.NUTRITION != null;
 }

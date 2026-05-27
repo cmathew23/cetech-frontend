@@ -1,10 +1,12 @@
 "use client";
 
-import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
-import { Badge } from "@/components/ui/Badge";
+import { Card } from "@/components/ui/Card";
 import { formatDateOnly } from "@/lib/dateTime";
+import { cn } from "@/lib/utils";
 import type {
   WeeklyAdherenceDomainKey,
+  WeeklyAdherenceDomainSummary,
+  WeeklyAdherenceOverallSummary,
   WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 
@@ -20,129 +22,143 @@ const DOMAIN_ORDER: WeeklyAdherenceDomainKey[] = [
   "STRENGTH_CONDITIONING",
 ];
 
-function formatPercent(value: number): string {
+export type WeeklyAdherenceMetricTile = {
+  key: string;
+  label: string;
+  adherencePercent: number;
+  loggedSessions: number;
+  plannedSessions: number;
+};
+
+export function buildWeeklyAdherenceMetricTiles(
+  summary: WeeklyAdherenceSummary,
+): WeeklyAdherenceMetricTile[] {
+  const tiles: WeeklyAdherenceMetricTile[] = [];
+
+  if (summary.overall != null) {
+    tiles.push(metricTileFromSummary("overall", "Overall", summary.overall));
+  }
+
+  for (const domainKey of DOMAIN_ORDER) {
+    const domain = summary.domains[domainKey];
+    if (domain) {
+      tiles.push(
+        metricTileFromSummary(domainKey, DOMAIN_LABELS[domainKey], domain),
+      );
+    }
+  }
+
+  return tiles;
+}
+
+function metricTileFromSummary(
+  key: string,
+  label: string,
+  data: WeeklyAdherenceDomainSummary | WeeklyAdherenceOverallSummary,
+): WeeklyAdherenceMetricTile {
+  return {
+    key,
+    label,
+    adherencePercent: data.adherencePercent,
+    loggedSessions: data.loggedSessions,
+    plannedSessions: data.plannedSessions,
+  };
+}
+
+export function formatAdherencePercentDisplay(value: number): string {
   if (!Number.isFinite(value)) return "—";
   const rounded = Math.round(value * 10) / 10;
-  return `${rounded % 1 === 0 ? Math.round(rounded) : rounded}%`;
+  return `${rounded % 1 === 0 ? Math.round(rounded) : rounded.toFixed(1)}%`;
 }
 
-function adherenceBadgeVariant(
-  percent: number,
-): "success" | "warning" | "neutral" {
-  if (percent >= 80) return "success";
-  if (percent >= 50) return "warning";
-  return "neutral";
+function percentToneClass(percent: number): string {
+  if (percent >= 80) return "text-emerald-700";
+  if (percent >= 50) return "text-amber-700";
+  return "text-slate-600";
 }
 
-function AdherenceMetricCard({
-  title,
-  plannedSessions,
-  loggedSessions,
-  adherencePercent,
-  recentNotes,
-}: {
-  title: string;
-  plannedSessions: number;
-  loggedSessions: number;
-  adherencePercent: number;
-  recentNotes?: { date: string; plannedSessionId: string; note: string }[];
-}) {
-  const notes = recentNotes ?? [];
-
+function AdherenceMetricTile({ tile }: { tile: WeeklyAdherenceMetricTile }) {
   return (
-    <DashboardCardShell title={title} className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={adherenceBadgeVariant(adherencePercent)}>
-          {formatPercent(adherencePercent)}
-        </Badge>
-        <span className="text-xs text-textMuted">adherence</span>
-      </div>
-      <dl className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <dt className="text-xs font-medium text-textMuted">Planned</dt>
-          <dd className="font-semibold tabular-nums text-textPrimary">
-            {plannedSessions}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium text-textMuted">Logged</dt>
-          <dd className="font-semibold tabular-nums text-textPrimary">
-            {loggedSessions}
-          </dd>
-        </div>
-      </dl>
-      {notes.length > 0 ? (
-        <div className="space-y-2 border-t border-border pt-3">
-          <p className="text-xs font-semibold text-textSecondary">Recent notes</p>
-          <ul className="space-y-2">
-            {notes.map((entry) => (
-              <li
-                key={`${entry.plannedSessionId}-${entry.date}-${entry.note.slice(0, 24)}`}
-                className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2"
-              >
-                <p className="text-xs font-medium text-textMuted">
-                  {formatDateOnly(entry.date, entry.date || "—")}
-                </p>
-                <p className="mt-0.5 text-sm text-textPrimary">{entry.note}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </DashboardCardShell>
+    <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5 shadow-sm">
+      <p className="text-xs font-medium tracking-wide text-textMuted">
+        {tile.label}
+      </p>
+      <p
+        className={cn(
+          "mt-1 text-2xl font-semibold leading-none tabular-nums",
+          percentToneClass(tile.adherencePercent),
+        )}
+      >
+        {formatAdherencePercentDisplay(tile.adherencePercent)}
+      </p>
+    </div>
   );
 }
 
 export type WeeklyAdherenceCardsProps = {
   summary: WeeklyAdherenceSummary;
-  /** Optional heading above the card grid (e.g. athlete name for coach view). */
-  heading?: string;
+  athleteHeading?: string;
+  showSectionHeader?: boolean;
 };
 
 export function WeeklyAdherenceCards({
   summary,
-  heading,
+  athleteHeading,
+  showSectionHeader = true,
 }: WeeklyAdherenceCardsProps) {
-  const domainKeys = DOMAIN_ORDER.filter((key) => summary.domains[key] != null);
+  const tiles = buildWeeklyAdherenceMetricTiles(summary);
   const weekLabel = `${formatDateOnly(summary.weekStart, summary.weekStart)} – ${formatDateOnly(summary.weekEnd, summary.weekEnd)}`;
 
-  return (
-    <div className="space-y-3">
-      {heading ? (
-        <h3 className="text-sm font-semibold text-textPrimary">{heading}</h3>
-      ) : null}
-      <p className="text-xs text-textMuted">Week of {weekLabel}</p>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {summary.overall != null ? (
-          <AdherenceMetricCard
-            title="Overall"
-            plannedSessions={summary.overall.plannedSessions}
-            loggedSessions={summary.overall.loggedSessions}
-            adherencePercent={summary.overall.adherencePercent}
-          />
-        ) : null}
-        {domainKeys.map((key) => {
-          const domain = summary.domains[key];
-          if (!domain) return null;
-          return (
-            <AdherenceMetricCard
-              key={key}
-              title={DOMAIN_LABELS[key]}
-              plannedSessions={domain.plannedSessions}
-              loggedSessions={domain.loggedSessions}
-              adherencePercent={domain.adherencePercent}
-              recentNotes={
-                domain.recentNotes.length > 0 ? domain.recentNotes : undefined
-              }
-            />
-          );
-        })}
-      </div>
-      {domainKeys.length === 0 && summary.overall == null ? (
-        <p className="text-sm text-textSecondary">
-          No adherence domains returned for this week.
-        </p>
-      ) : null}
+  const grid = (
+    <div
+      className={cn(
+        "grid gap-3",
+        tiles.length >= 4
+          ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
+          : tiles.length === 3
+            ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+            : tiles.length === 2
+              ? "grid-cols-1 sm:grid-cols-2"
+              : "grid-cols-1",
+      )}
+    >
+      {tiles.map((tile) => (
+        <AdherenceMetricTile key={tile.key} tile={tile} />
+      ))}
     </div>
+  );
+
+  if (tiles.length === 0) {
+    return (
+      <p className="text-sm text-textSecondary">
+        No adherence metrics returned for this week.
+      </p>
+    );
+  }
+
+  if (!showSectionHeader) {
+    return (
+      <div className="space-y-2">
+        {athleteHeading ? (
+          <p className="text-sm font-semibold text-textPrimary">{athleteHeading}</p>
+        ) : null}
+        {grid}
+      </div>
+    );
+  }
+
+  return (
+    <Card
+      title="Weekly Adherence"
+      subtitle={`Current plan week: ${weekLabel}`}
+      accent={false}
+      padding="compact"
+      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+    >
+      {athleteHeading ? (
+        <p className="mb-3 text-sm font-semibold text-textPrimary">{athleteHeading}</p>
+      ) : null}
+      {grid}
+    </Card>
   );
 }

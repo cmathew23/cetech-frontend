@@ -2,6 +2,8 @@ import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
+const WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS = 120_000;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -58,11 +60,41 @@ export type WeeklyAdherenceRecentNote = {
   note: string;
 };
 
+export type SessionDomainContext = {
+  completedSessions: number;
+  partialSessions: number;
+  missedSessions: number;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number;
+};
+
+export type NutritionDomainContext = {
+  plannedCaloriesKcal: number;
+  actualCaloriesKcal: number;
+  calorieGapKcal: number;
+  plannedProteinG: number;
+  actualProteinG: number;
+  plannedCarbohydrateG: number;
+  actualCarbohydrateG: number;
+  plannedFatG: number;
+  actualFatG: number;
+  fullItems: number;
+  halfItems: number;
+  notEatenItems: number;
+  extraItems: number;
+  totalItems: number;
+};
+
+export type WeeklyAdherenceDomainContext =
+  | SessionDomainContext
+  | NutritionDomainContext;
+
 export type WeeklyAdherenceDomainSummary = {
   plannedSessions: number;
   loggedSessions: number;
   adherencePercent: number;
   recentNotes: WeeklyAdherenceRecentNote[];
+  context: WeeklyAdherenceDomainContext | null;
 };
 
 export type WeeklyAdherenceOverallSummary = {
@@ -96,7 +128,54 @@ function parseRecentNotes(raw: unknown): WeeklyAdherenceRecentNote[] {
   }, []);
 }
 
-function parseDomainSummary(raw: unknown): WeeklyAdherenceDomainSummary | null {
+function readFiniteNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return 0;
+}
+
+function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainContext {
+  return {
+    completedSessions: readNonNegInt(raw.completedSessions),
+    partialSessions: readNonNegInt(raw.partialSessions),
+    missedSessions: readNonNegInt(raw.missedSessions),
+    plannedDurationMinutes: readNonNegInt(raw.plannedDurationMinutes),
+    actualDurationMinutes: readNonNegInt(raw.actualDurationMinutes),
+  };
+}
+
+function parseNutritionDomainContext(raw: Record<string, unknown>): NutritionDomainContext {
+  return {
+    plannedCaloriesKcal: readFiniteNumber(raw.plannedCaloriesKcal),
+    actualCaloriesKcal: readFiniteNumber(raw.actualCaloriesKcal),
+    calorieGapKcal: readFiniteNumber(raw.calorieGapKcal),
+    plannedProteinG: readFiniteNumber(raw.plannedProteinG),
+    actualProteinG: readFiniteNumber(raw.actualProteinG),
+    plannedCarbohydrateG: readFiniteNumber(raw.plannedCarbohydrateG),
+    actualCarbohydrateG: readFiniteNumber(raw.actualCarbohydrateG),
+    plannedFatG: readFiniteNumber(raw.plannedFatG),
+    actualFatG: readFiniteNumber(raw.actualFatG),
+    fullItems: readNonNegInt(raw.fullItems),
+    halfItems: readNonNegInt(raw.halfItems),
+    notEatenItems: readNonNegInt(raw.notEatenItems),
+    extraItems: readNonNegInt(raw.extraItems),
+    totalItems: readNonNegInt(raw.totalItems),
+  };
+}
+
+function parseDomainContext(
+  domainKey: WeeklyAdherenceDomainKey | null,
+  raw: unknown,
+): WeeklyAdherenceDomainContext | null {
+  const ctx = asRecord(raw);
+  if (!ctx) return null;
+  if (domainKey === "NUTRITION") return parseNutritionDomainContext(ctx);
+  return parseSessionDomainContext(ctx);
+}
+
+function parseDomainSummary(
+  raw: unknown,
+  domainKey: WeeklyAdherenceDomainKey | null = null,
+): WeeklyAdherenceDomainSummary | null {
   const row = asRecord(raw);
   if (!row) return null;
   return {
@@ -104,6 +183,7 @@ function parseDomainSummary(raw: unknown): WeeklyAdherenceDomainSummary | null {
     loggedSessions: readNonNegInt(row.loggedSessions),
     adherencePercent: readPercent(row.adherencePercent),
     recentNotes: parseRecentNotes(row.recentNotes),
+    context: parseDomainContext(domainKey, row.context),
   };
 }
 
@@ -175,14 +255,14 @@ export function parseWeeklyAdherenceSummaryPayload(
   > = {};
 
   for (const key of DOMAIN_KEYS) {
-    const parsed = parseDomainSummary(domainsRaw[key]);
+    const parsed = parseDomainSummary(domainsRaw[key], key);
     if (parsed) domains[key] = parsed;
   }
 
   for (const [rawKey, rawValue] of Object.entries(domainsRaw)) {
     const normalized = normalizeDomainKey(rawKey);
     if (!normalized || domains[normalized]) continue;
-    const parsed = parseDomainSummary(rawValue);
+    const parsed = parseDomainSummary(rawValue, normalized);
     if (parsed) domains[normalized] = parsed;
   }
 
@@ -208,7 +288,11 @@ export async function fetchWeeklyAdherenceSummary(params: {
       params.athleteId,
       { weekStart: params.weekStart, weekEnd: params.weekEnd },
     ),
-    { method: "GET", cache: "no-store" },
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS,
+    },
   );
   return parseWeeklyAdherenceSummaryPayload(raw);
 }
@@ -217,4 +301,16 @@ export function hasNutritionAdherenceDomain(
   summary: WeeklyAdherenceSummary | null | undefined,
 ): boolean {
   return summary?.domains.NUTRITION != null;
+}
+
+export function isNutritionContext(
+  ctx: WeeklyAdherenceDomainContext | null | undefined,
+): ctx is NutritionDomainContext {
+  return ctx != null && "plannedCaloriesKcal" in ctx;
+}
+
+export function isSessionContext(
+  ctx: WeeklyAdherenceDomainContext | null | undefined,
+): ctx is SessionDomainContext {
+  return ctx != null && "completedSessions" in ctx;
 }

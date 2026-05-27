@@ -1,19 +1,39 @@
-import { getLocalDateKey } from "@/lib/dateTime";
+import type { AthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
+import { getLocalDateKey, normalizeDateOnlyKey } from "@/lib/dateTime";
 
-/** Monday–Sunday calendar week in local timezone, as `YYYY-MM-DD`. */
-export function getCurrentWeekDateRange(date: Date = new Date()): {
+export type WeeklyAdherencePlanRange = {
   weekStart: string;
   weekEnd: string;
-} {
-  const local = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const weekday = local.getDay();
-  const daysFromMonday = weekday === 0 ? 6 : weekday - 1;
-  const monday = new Date(local);
-  monday.setDate(local.getDate() - daysFromMonday);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return {
-    weekStart: getLocalDateKey(monday),
-    weekEnd: getLocalDateKey(sunday),
-  };
+};
+
+export function resolveWeeklyAdherencePlanRangeFromJournal(
+  journal: AthleteWeeklyPlanJournal,
+): WeeklyAdherencePlanRange | null {
+  const dayDates = journal.days
+    .map((day) => normalizeDateOnlyKey(day.date))
+    .filter((date): date is string => date !== null)
+    .sort();
+  const todayKey = getLocalDateKey();
+
+  if (dayDates.includes(todayKey)) {
+    return {
+      weekStart: dayDates[0],
+      weekEnd: dayDates[dayDates.length - 1],
+    };
+  }
+
+  const weekStart = normalizeDateOnlyKey(journal.weekStartDate);
+  const weekEnd = normalizeDateOnlyKey(journal.weekEndDate);
+  if (weekStart !== null && weekEnd !== null) {
+    return { weekStart, weekEnd };
+  }
+
+  if (dayDates.length > 0) {
+    return {
+      weekStart: dayDates[0],
+      weekEnd: dayDates[dayDates.length - 1],
+    };
+  }
+
+  return null;
 }

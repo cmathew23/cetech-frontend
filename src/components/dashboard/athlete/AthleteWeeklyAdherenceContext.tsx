@@ -7,8 +7,14 @@ import {
   hasNutritionAdherenceDomain,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
+import {
+  fetchAthleteWeeklyPlanJournal,
+} from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
-import { getCurrentWeekDateRange } from "@/lib/weeklyAdherenceWeek";
+import {
+  resolveWeeklyAdherencePlanRangeFromJournal,
+  type WeeklyAdherencePlanRange,
+} from "@/lib/weeklyAdherenceWeek";
 import {
   createContext,
   useCallback,
@@ -65,13 +71,15 @@ export function AthleteWeeklyAdherenceProvider({
 }: {
   children: ReactNode;
 }) {
-  const { isGateReady, hasActiveAcademyMembership } = useAthleteInvitationGate();
-  const planningIds = useAthletePlanningIdentifiers();
-  const weekRange = useMemo(() => getCurrentWeekDateRange(), []);
+  const { isGateReady, hasActiveAcademyMembership, accessContext, accessGateReady } =
+    useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
 
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
+  const [planWeekRange, setPlanWeekRange] =
+    useState<WeeklyAdherencePlanRange | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const entityId = planningIds.ids?.entityId ?? "";
@@ -99,6 +107,11 @@ export function AthleteWeeklyAdherenceProvider({
 
     void (async () => {
       try {
+        const journal = await fetchAthleteWeeklyPlanJournal(entityId, athleteId);
+        const weekRange = resolveWeeklyAdherencePlanRangeFromJournal(journal);
+        if (weekRange === null) {
+          throw new Error("Could not resolve released plan week.");
+        }
         const data = await fetchWeeklyAdherenceSummary({
           entityId,
           athleteId,
@@ -106,11 +119,13 @@ export function AthleteWeeklyAdherenceProvider({
           weekEnd: weekRange.weekEnd,
         });
         if (!cancelled) {
+          setPlanWeekRange(weekRange);
           setSummary(data);
           setError(null);
         }
       } catch (e) {
         if (!cancelled) {
+          setPlanWeekRange(null);
           setSummary(null);
           setError(formatLoadError(e));
         }
@@ -129,8 +144,6 @@ export function AthleteWeeklyAdherenceProvider({
     isGateReady,
     planningIds.phase,
     reloadKey,
-    weekRange.weekEnd,
-    weekRange.weekStart,
   ]);
 
   const nutritionKpi: NutritionAdherenceKpiState = useMemo(() => {
@@ -215,11 +228,19 @@ export function AthleteWeeklyAdherenceProvider({
       nutritionKpi,
       summary,
       error,
-      weekStart: weekRange.weekStart,
-      weekEnd: weekRange.weekEnd,
+      weekStart: planWeekRange?.weekStart ?? "",
+      weekEnd: planWeekRange?.weekEnd ?? "",
       reload,
     }),
-    [error, nutritionKpi, phase, reload, summary, weekRange.weekEnd, weekRange.weekStart],
+    [
+      error,
+      nutritionKpi,
+      phase,
+      planWeekRange?.weekEnd,
+      planWeekRange?.weekStart,
+      reload,
+      summary,
+    ],
   );
 
   return (

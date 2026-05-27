@@ -9,14 +9,18 @@ import {
   fetchCoachAssignedAthletes,
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
+import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import {
   fetchWeeklyAdherenceSummary,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
-import { getCurrentWeekDateRange } from "@/lib/weeklyAdherenceWeek";
-import { useEffect, useMemo, useState } from "react";
+import {
+  resolveWeeklyAdherencePlanRangeFromJournal,
+  type WeeklyAdherencePlanRange,
+} from "@/lib/weeklyAdherenceWeek";
+import { useEffect, useState } from "react";
 
 function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
@@ -26,6 +30,7 @@ function formatLoadError(e: unknown): string {
 
 type AthleteAdherenceState = {
   athlete: CoachAssignedAthleteRow;
+  weekRange: WeeklyAdherencePlanRange | null;
   summary: WeeklyAdherenceSummary | null;
   error: string | null;
 };
@@ -53,8 +58,6 @@ function CoachWeeklyAdherenceCard({
 export function CoachWeeklyAdherenceOverview() {
   const { accessContext, accessGateReady } = useAuth();
   const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
-  const weekRange = useMemo(() => getCurrentWeekDateRange(), []);
-  const weekLabel = `${formatDateOnly(weekRange.weekStart, weekRange.weekStart)} – ${formatDateOnly(weekRange.weekEnd, weekRange.weekEnd)}`;
 
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -120,6 +123,14 @@ export function CoachWeeklyAdherenceOverview() {
       const results = await Promise.all(
         athletes.map(async (athlete) => {
           try {
+            const journal = await fetchAthleteWeeklyPlanJournal(
+              entityId,
+              athlete.athleteId,
+            );
+            const weekRange = resolveWeeklyAdherencePlanRangeFromJournal(journal);
+            if (weekRange === null) {
+              throw new Error("Could not resolve released plan week.");
+            }
             const summary = await fetchWeeklyAdherenceSummary({
               entityId,
               athleteId: athlete.athleteId,
@@ -128,12 +139,14 @@ export function CoachWeeklyAdherenceOverview() {
             });
             return {
               athlete,
+              weekRange,
               summary,
               error: null,
             } satisfies AthleteAdherenceState;
           } catch (e) {
             return {
               athlete,
+              weekRange: null,
               summary: null,
               error: formatLoadError(e),
             } satisfies AthleteAdherenceState;
@@ -155,9 +168,22 @@ export function CoachWeeklyAdherenceOverview() {
     entityId,
     rosterError,
     rosterLoading,
-    weekRange.weekEnd,
-    weekRange.weekStart,
   ]);
+
+  const loadedWeekLabels = adherenceByAthlete
+    .map((entry) =>
+      entry.weekRange
+        ? `${formatDateOnly(entry.weekRange.weekStart, entry.weekRange.weekStart)} – ${formatDateOnly(entry.weekRange.weekEnd, entry.weekRange.weekEnd)}`
+        : "",
+    )
+    .filter((label) => label !== "");
+  const uniqueWeekLabels = Array.from(new Set(loadedWeekLabels));
+  const weekLabel =
+    uniqueWeekLabels.length === 1
+      ? uniqueWeekLabels[0]
+      : uniqueWeekLabels.length > 1
+        ? "Released plan weeks"
+        : "Loading plan week...";
 
   if (!accessGateReady) {
     return (

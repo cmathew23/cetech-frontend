@@ -34,7 +34,10 @@ export function AthleteWeeklyAdherenceSection() {
   const { phase, summary, error, reload, weekStart, weekEnd } =
     useAthleteWeeklyAdherence();
 
-  const weekLabel = `${formatDateOnly(weekStart, weekStart)} – ${formatDateOnly(weekEnd, weekEnd)}`;
+  const weekLabel =
+    weekStart !== "" && weekEnd !== ""
+      ? `${formatDateOnly(weekStart, weekStart)} – ${formatDateOnly(weekEnd, weekEnd)}`
+      : "Loading plan week...";
 
   if (phase === "hidden") {
     return null;

@@ -6,9 +6,12 @@ import {
   fetchMyEntityInvitations,
   type MyEntityInvitationRow,
 } from "@/lib/api/entityInvitationsMe";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, type AuthSessionResult } from "@/hooks/useAuth";
 import { isNormalizedApiError } from "@/lib/apiClient";
-import { bootstrapAthleteRequiresInvitationInbox } from "@/lib/accessContext";
+import {
+  bootstrapAthleteRequiresInvitationInbox,
+  type AccessContextPayload,
+} from "@/lib/accessContext";
 import {
   createContext,
   useCallback,
@@ -28,7 +31,7 @@ type AthleteInvitationContextValue = {
   loading: boolean;
   loadError: string | null;
   refreshInvitations: () => Promise<void>;
-  acceptInvitation: (invitationId: string) => Promise<void>;
+  acceptInvitation: (invitationId: string) => Promise<AuthSessionResult | null>;
   declineInvitation: (invitationId: string) => Promise<void>;
   isGateReady: boolean;
   /** True when GET /me/app-context reports an active academy membership. */
@@ -37,6 +40,10 @@ type AthleteInvitationContextValue = {
   invitationAccessLocked: boolean;
   hasPendingInvitations: boolean;
   pendingCount: number;
+  /** Shared auth state — avoids redundant useAuth() bootstraps in child hooks. */
+  accessContext: AccessContextPayload | null;
+  /** Shared auth gate readiness from the single provider-level useAuth() instance. */
+  accessGateReady: boolean;
 };
 
 const AthleteInvitationContext =
@@ -90,7 +97,8 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
   const acceptInvitation = useCallback(
     async (invitationId: string) => {
       await acceptEntityInvitation(invitationId);
-      await Promise.all([refreshInvitations(), refreshSession()]);
+      const [, session] = await Promise.all([refreshInvitations(), refreshSession()]);
+      return session;
     },
     [refreshInvitations, refreshSession],
   );
@@ -135,6 +143,8 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
       invitationAccessLocked,
       hasPendingInvitations,
       pendingCount,
+      accessContext: accessContext ?? null,
+      accessGateReady,
     }),
     [
       invitations,
@@ -148,6 +158,8 @@ export function AthleteInvitationProvider({ children }: { children: ReactNode })
       invitationAccessLocked,
       hasPendingInvitations,
       pendingCount,
+      accessContext,
+      accessGateReady,
     ],
   );
 

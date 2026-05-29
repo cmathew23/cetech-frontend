@@ -224,7 +224,7 @@ export default function AdminProfileSettingsPage() {
         <dl className="mt-3 space-y-3 text-sm">
           <div>
             <dt className="text-xs font-medium text-textSecondary">User ID</dt>
-            <dd className="mt-0.5 break-all font-mono text-textPrimary">
+            <dd className="mt-0.5 break-all text-textPrimary">
               {readOnlyDisplay(identity.userId)}
             </dd>
           </div>

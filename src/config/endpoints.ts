@@ -91,6 +91,29 @@ export const paths = {
       params.set("weekEnd", query.weekEnd);
       return `${base}?${params.toString()}`;
     },
+    athleteWearableSummary: (
+      entityId: string,
+      athleteId: string,
+      query: { startDate: string; endDate: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/summary`;
+      const params = new URLSearchParams();
+      params.set("startDate", query.startDate);
+      params.set("endDate", query.endDate);
+      return `${base}?${params.toString()}`;
+    },
+    athleteWearableProviders: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/providers`,
+    athleteWearableConnections: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/connections`,
+    athleteWearableConnect: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/connect`,
+    athleteWearableConnectionRefresh: (
+      entityId: string,
+      athleteId: string,
+      connectionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/connections/${encodeURIComponent(connectionId)}/refresh`,
     /** GET/POST — training plan level validation (coach review). */
     athleteTrainingPlanLevelValidation: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/level-validation`,

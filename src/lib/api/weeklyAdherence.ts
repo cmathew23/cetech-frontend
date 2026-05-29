@@ -2,7 +2,7 @@ import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
-const WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS = 120_000;
+const WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS = 240_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

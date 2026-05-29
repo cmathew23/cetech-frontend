@@ -1,10 +1,12 @@
 "use client";
 
+import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
+import { currentCoachIsHeadCoach, normalizeCoachFunctionValue } from "@/lib/coachAuthority";
 import {
   fetchCoachAssignedAthletes,
   type CoachAssignedAthleteRow,
@@ -26,6 +28,41 @@ function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
   if (e instanceof Error) return e.message;
   return "Could not load weekly adherence.";
+}
+
+function resolveCoachWearableViewerContext(input: {
+  academyCoachRole: string | null | undefined;
+  functions: string[] | null | undefined;
+}): "HEAD_COACH" | "SKILLS" | "NUTRITION" | "S_AND_C" | "DEFAULT" {
+  if (currentCoachIsHeadCoach(input.academyCoachRole)) return "HEAD_COACH";
+
+  const normalized = (input.functions ?? []).map((value) =>
+    normalizeCoachFunctionValue(value),
+  );
+
+  if (normalized.some((value) => value === "SKILLS" || value === "SKILLS_COACH")) {
+    return "SKILLS";
+  }
+  if (
+    normalized.some(
+      (value) => value === "NUTRITION" || value === "NUTRITION_COACH",
+    )
+  ) {
+    return "NUTRITION";
+  }
+  if (
+    normalized.some(
+      (value) =>
+        value === "S_AND_C" ||
+        value === "STRENGTH_AND_CONDITIONING" ||
+        value === "S_AND_C_COACH" ||
+        value === "STRENGTH_AND_CONDITIONING_COACH",
+    )
+  ) {
+    return "S_AND_C";
+  }
+
+  return "DEFAULT";
 }
 
 type AthleteAdherenceState = {
@@ -55,9 +92,19 @@ function CoachWeeklyAdherenceCard({
   );
 }
 
-export function CoachWeeklyAdherenceOverview() {
+export function CoachWeeklyAdherenceOverview({
+  academyCoachRole = null,
+  functions = null,
+}: {
+  academyCoachRole?: string | null;
+  functions?: string[] | null;
+}) {
   const { accessContext, accessGateReady } = useAuth();
   const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
+  const wearableViewerContext = resolveCoachWearableViewerContext({
+    academyCoachRole,
+    functions,
+  });
 
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -256,6 +303,18 @@ export function CoachWeeklyAdherenceOverview() {
                     athleteHeading={heading}
                     showSectionHeader={false}
                   />
+                ) : null}
+                {entry.weekRange ? (
+                  <div className="mt-3">
+                    <WearableSummarySection
+                      entityId={entityId}
+                      athleteId={entry.athlete.athleteId}
+                      planStartDate={entry.weekRange.weekStart}
+                      planEndDate={entry.weekRange.weekEnd}
+                      windowLabel={`Plan window: ${formatDateOnly(entry.weekRange.weekStart, entry.weekRange.weekStart)} – ${formatDateOnly(entry.weekRange.weekEnd, entry.weekRange.weekEnd)}`}
+                      viewerContext={wearableViewerContext}
+                    />
+                  </div>
                 ) : null}
               </div>
             );

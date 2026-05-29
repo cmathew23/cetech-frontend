@@ -253,13 +253,13 @@ export default function AdminAboutAcademyPage() {
         <dl className="grid max-w-2xl gap-4 text-sm sm:grid-cols-1">
           <div>
             <dt className="text-xs font-medium text-textSecondary">Academy ID</dt>
-            <dd className="mt-0.5 break-all font-mono text-textPrimary">
+            <dd className="mt-0.5 break-all text-textPrimary">
               {profile.academyId}
             </dd>
           </div>
           <div>
             <dt className="text-xs font-medium text-textSecondary">Entity ID</dt>
-            <dd className="mt-0.5 break-all font-mono text-textPrimary">
+            <dd className="mt-0.5 break-all text-textPrimary">
               {profile.entityId}
             </dd>
           </div>

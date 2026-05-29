@@ -193,7 +193,10 @@ export function CoachDashboardView() {
           </div>
         </section>
 
-        <CoachWeeklyAdherenceOverview />
+        <CoachWeeklyAdherenceOverview
+          academyCoachRole={dash?.academyCoachRole ?? null}
+          functions={dash?.functions ?? null}
+        />
 
         <section className="space-y-3">
           <div>

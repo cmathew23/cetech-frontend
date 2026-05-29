@@ -1,5 +1,6 @@
 "use client";
 
+import { WearableConnectionsSettings } from "@/components/settings/WearableConnectionsSettings";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -273,6 +274,8 @@ export function AthleteSettingsPageContent() {
           />
         </dl>
       </DashboardCardShell>
+
+      <WearableConnectionsSettings />
 
       <div>
         <Button

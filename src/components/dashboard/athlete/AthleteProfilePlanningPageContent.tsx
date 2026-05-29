@@ -9,6 +9,7 @@ import { FormField } from "@/components/ui/FormField";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useAuth } from "@/hooks/useAuth";
+import Link from "next/link";
 import { fetchAthleteMeProfile } from "@/lib/api/athleteMe";
 import {
   buildPlanningProfileDefaults,
@@ -1169,10 +1170,19 @@ export function AthleteProfilePlanningPageContent() {
             {section?.description ? (
               <p className="text-sm text-textSecondary">{section.description}</p>
             ) : null}
-            <div className="rounded-md border border-border bg-surface p-3">
+            <div className="rounded-md border border-border bg-surface p-3 space-y-3">
               <p className="text-sm text-textPrimary">
                 Wearable Status: {wearableStatus}
               </p>
+              <p className="text-xs text-textMuted">
+                This section is read-only. Connect or refresh wearables in Settings.
+              </p>
+              <Link
+                href="/athlete/settings"
+                className="inline-flex text-sm font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Manage wearable connection in Settings
+              </Link>
             </div>
           </div>
         </DashboardCardShell>

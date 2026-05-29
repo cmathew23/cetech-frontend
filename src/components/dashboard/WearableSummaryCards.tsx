@@ -33,6 +33,14 @@ type MetricDefinition = {
   formatter?: "date" | "datetime" | "boolean" | "text";
 };
 
+export type WearableViewerContext =
+  | "ATHLETE"
+  | "HEAD_COACH"
+  | "SKILLS"
+  | "NUTRITION"
+  | "S_AND_C"
+  | "DEFAULT";
+
 const METRIC_DEFINITIONS: Record<string, MetricDefinition[]> = {
   connectionSync: [
     { label: "Wearable Status", candidates: ["wearableStatus", "status"], formatter: "text" },
@@ -257,14 +265,74 @@ function WearableGroupCard({ group }: { group: WearableMetricGroup }) {
   );
 }
 
+function resolveVisibleGroupKeys(viewerContext: WearableViewerContext): string[] {
+  if (viewerContext === "HEAD_COACH") {
+    return [
+      "connectionSync",
+      "recoveryReadiness",
+      "activityTrainingLoad",
+      "cardiovascularFitness",
+      "workoutPerformance",
+      "movementQuality",
+      "bodyHealthMetrics",
+      "metadataProviderData",
+    ];
+  }
+
+  if (viewerContext === "SKILLS") {
+    return [
+      "connectionSync",
+      "recoveryReadiness",
+      "activityTrainingLoad",
+      "cardiovascularFitness",
+      "workoutPerformance",
+      "movementQuality",
+    ];
+  }
+
+  if (viewerContext === "S_AND_C") {
+    return [
+      "connectionSync",
+      "recoveryReadiness",
+      "activityTrainingLoad",
+      "cardiovascularFitness",
+      "workoutPerformance",
+      "movementQuality",
+      "bodyHealthMetrics",
+    ];
+  }
+
+  if (viewerContext === "NUTRITION") {
+    return [
+      "connectionSync",
+      "recoveryReadiness",
+      "activityTrainingLoad",
+      "bodyHealthMetrics",
+    ];
+  }
+
+  return [
+    "connectionSync",
+    "recoveryReadiness",
+    "activityTrainingLoad",
+    "cardiovascularFitness",
+    "workoutPerformance",
+    "movementQuality",
+    "bodyHealthMetrics",
+    "metadataProviderData",
+  ];
+}
+
 export function WearableSummaryCards({
   summary,
   title = "Wearable Summary",
   subtitle,
+  viewerContext = "DEFAULT",
 }: {
   summary: WearableSummary;
   title?: string;
   subtitle?: string;
+  viewerContext?: WearableViewerContext;
 }) {
   const resolvedSubtitle =
     subtitle ??
@@ -279,7 +347,7 @@ export function WearableSummaryCards({
     summary.groups.movementQuality,
     summary.groups.bodyHealthMetrics,
     summary.groups.metadataProviderData,
-  ];
+  ].filter((group) => resolveVisibleGroupKeys(viewerContext).includes(group.key));
 
   return (
     <Card

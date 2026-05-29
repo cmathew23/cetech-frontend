@@ -2,6 +2,8 @@ import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
+const WEARABLE_SUMMARY_TIMEOUT_MS = 240_000;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -344,6 +346,7 @@ export async function fetchWearableSummary(params: {
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: WEARABLE_SUMMARY_TIMEOUT_MS,
     },
   );
 

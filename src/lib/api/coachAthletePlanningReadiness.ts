@@ -19,6 +19,8 @@ const TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS = 60_000;
 const TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS = 30_000;
 /** Domain summary aggregates per-domain plan status for Head Coach submitted-plan review. */
 const TRAINING_PLAN_DOMAIN_SUMMARY_TIMEOUT_MS = 30_000;
+/** Weekly journal and today plan on athlete/coach dashboards can be slow for large plans. */
+const ATHLETE_DASHBOARD_PLAN_FETCH_TIMEOUT_MS = 240_000;
 type WorkloadAssessmentValue =
   | string
   | number
@@ -2428,6 +2430,7 @@ export async function fetchAthleteWeeklyPlanJournal(
   const raw = await apiRequest(url, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: ATHLETE_DASHBOARD_PLAN_FETCH_TIMEOUT_MS,
   });
   return parseAthleteWeeklyPlanJournalPayload(raw);
 }
@@ -2444,6 +2447,7 @@ export async function fetchAthleteTodayPlan(
   const raw = await apiRequest(url, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: ATHLETE_DASHBOARD_PLAN_FETCH_TIMEOUT_MS,
   });
   return parseAthleteTodayPlanPayload(raw);
 }

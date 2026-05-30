@@ -4,9 +4,39 @@
 
 **Coach planning workspace UI (user flows only):** [`docs/ui/COACH_PLANNING_FLOW.md`](../ui/COACH_PLANNING_FLOW.md), [`docs/ui/SNC_UI.md`](../ui/SNC_UI.md), [`docs/ui/GOALS_UI.md`](../ui/GOALS_UI.md).
 
+## Current platform status
+
+**Current completed major modules:**
+
+- Identity & Roles
+- Athlete Management
+- Goals
+- Seasons
+- Athlete Planning Profile
+- Workload Assessment
+- Structured Context Builder
+- Sports Intelligence
+- Training Plan Generation
+- Coach Review Workflow
+- Domain Release Workflow
+- Skills Adherence
+- S&C Adherence
+- Nutrition Adherence
+- Weekly Adherence Dashboard
+
+**Next planned work:**
+
+- Open Wearables Integration
+- Metrics Dashboard Expansion
+- Golf Metrics Layer
+- Readiness & Recovery Foundation
+- Future AI-driven athlete insights
+
+---
+
 ## Latest completed module
 
-**Session Adherence + Nutrition Adherence + Adherence State Hardening** (backend **#46**, frontend **#10**).
+**Weekly Adherence Dashboard** (athlete + coach overview cards, domain KPI adherence percentages). Prior slice: **Session Adherence + Nutrition Adherence + Adherence State Hardening** (backend **#46**, frontend **#10**).
 
 **Summary:** The system now supports Skills, S&C, and Nutrition adherence history.
 
@@ -38,11 +68,11 @@ Detail per academy, athlete, and coach accounts: **`docs/srs/IMPLEMENTATION_STAT
 
 ## Next planned work
 
-**Metrics Dashboard — Weekly Adherence** for athlete and coach dashboards (see `docs/srs/phase-2-gaps.md` §14).
+**Open Wearables Integration** and **Metrics Dashboard Expansion** (see `docs/srs/phase-2-gaps.md` — Open Wearables Integration; §14 remaining analytics gaps).
 
 **Supporting (parallel):** DB history / versioning audit for non-adherence tables (`phase-2-gaps.md` §15, `DB_SAFETY_RULES.md`) — inspect/report first; no migration until reviewed.
 
-**Completed (do not re-open):** Athlete adherence logging for Skills, S&C, and Nutrition (`phase-2-gaps.md` §13).
+**Completed (do not re-open):** Athlete adherence logging for Skills, S&C, and Nutrition (`phase-2-gaps.md` §13); **Weekly Adherence Dashboard** (`IMPLEMENTATION_STATUS.md`).
 
 ## Testing note (workflow slice)
 

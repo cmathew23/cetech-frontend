@@ -12,6 +12,68 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 ---
 
+## Weekly Adherence Dashboard (Completed)
+
+### Backend
+
+- Weekly adherence aggregation API implemented.
+- Supports **SKILL**, **NUTRITION**, and **STRENGTH_CONDITIONING** domains.
+- Returns:
+  - `plannedSessions`
+  - `loggedSessions`
+  - `adherencePercent`
+  - `weekStart`
+  - `weekEnd`
+
+### Frontend
+
+- Athlete Weekly Adherence Overview implemented.
+- Coach Weekly Adherence Overview implemented.
+- Dashboard loads automatically after login.
+- Dashboard persists after page refresh.
+- KPI cards display domain-level adherence percentages.
+- Weekly adherence context provider added to stabilize state management.
+
+---
+
+## Session Adherence UI (Completed)
+
+### Skills
+
+- Athlete can log completion of prescribed skill drills.
+- History displayed to athlete.
+- Existing log can be updated.
+
+### S&C
+
+- Athlete can log completion of prescribed S&C exercises.
+- History displayed to athlete.
+- Existing log can be updated.
+
+---
+
+## Nutrition Adherence UI (Completed)
+
+### Nutrition
+
+- Athlete can log adherence per prescribed nutrition item.
+- Item-level adherence supported.
+- `occurredAt` captured and persisted.
+- Existing adherence records can be updated.
+- History displayed to athlete.
+
+---
+
+## Frontend Workflow Stabilization (Completed)
+
+- Weekly journal pagination restored.
+- Future-day logging blocked.
+- Submit button disabled until history loads.
+- Review cards no longer auto-open unexpectedly.
+- Dashboard survives login/reload cycles.
+
+---
+
 ## Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening
 
 **Merged work:** Backend PR **#46** (`feature/nutrition-adherence`); frontend PR **#10** (`feature/nutrition-adherence-ui`).
@@ -53,16 +115,15 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 ### Still future (not in this slice)
 
-- Weekly adherence metrics dashboard (athlete + coach).
 - Nutrition nutrient drilldown / analytics dashboards.
 - Wearables, AI adherence feedback, meal replacement/custom food, scoring/leaderboards, charts-heavy analytics.
-- See `docs/srs/phase-2-gaps.md` for remaining gaps; **next planned work:** **Metrics Dashboard — Weekly Adherence**.
+- See `docs/srs/phase-2-gaps.md` for remaining gaps; **next planned work:** **Open Wearables Integration** and metrics dashboard expansion.
 
 ---
 
 ## Workflow Stabilization Completed
 
-**Status:** Core Head Coach and no-Head-Coach generation/release workflows are functionally validated. **Stop workflow testing** unless new code changes touch workflow logic. **Next planned product slice:** Metrics Dashboard — Weekly Adherence (`docs/srs/phase-2-gaps.md` §14). Athlete adherence logging is **completed** in this file (see *Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening*).
+**Status:** Core Head Coach and no-Head-Coach generation/release workflows are functionally validated. **Stop workflow testing** unless new code changes touch workflow logic. **Next planned product slice:** Open Wearables Integration (`docs/srs/phase-2-gaps.md`). Athlete adherence logging and **Weekly Adherence Dashboard** are **completed** in this file.
 
 ### Backend commits (workflow slice)
 
@@ -137,7 +198,7 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 - Core Head Coach and no-Head-Coach generation/release workflows are **functionally validated**.
 - **Stop workflow testing** unless new code changes touch workflow logic.
-- **Next planned work:** Metrics Dashboard — Weekly Adherence. Athlete adherence event logging is **completed** (see *Completed: Session Adherence + Nutrition Adherence + Adherence State Hardening* above).
+- **Next planned work:** Open Wearables Integration. Athlete adherence event logging and **Weekly Adherence Dashboard** are **completed** (see sections above).
 
 ---
 

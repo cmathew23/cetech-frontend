@@ -264,3 +264,32 @@ When starting the **DB History / Versioning Audit** slice:
 - Preserve historical snapshots.
 - Enable past-vs-current comparisons.
 - Support future dashboards, metrics, and analytics (adherence **logging** is already live; audit confirms append-only semantics and what remains overwrite-prone elsewhere).
+
+---
+
+## Wearables Integration Safety Requirements
+
+**Before** Open Wearables implementation:
+
+- No existing adherence tables may be modified destructively.
+- No existing APP tables may be modified destructively.
+- No existing planning-context tables may be modified destructively.
+- Wearable data must be stored in **new isolated tables**.
+- Historical wearable records must be **append-only**.
+- Wearable imports must **never overwrite** previously collected source data.
+
+---
+
+## Metrics History Rule
+
+All future metrics systems must preserve historical records.
+
+**Examples:**
+
+- Wearable metrics
+- Recovery metrics
+- Readiness metrics
+- Golf metrics
+- Future athlete performance metrics
+
+Historical values must be queryable for trend analysis and AI evaluation.

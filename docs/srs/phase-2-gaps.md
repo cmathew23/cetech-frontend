@@ -203,15 +203,12 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 
 ---
 
-## 14. Adherence metrics and analytics (FUTURE — open)
+## 14. Adherence metrics and analytics
 
-**Next planned slice:** **Metrics Dashboard — Weekly Adherence** (before wearables).
+**Weekly Adherence Dashboard:** **Completed** (see `docs/srs/IMPLEMENTATION_STATUS.md` — *Weekly Adherence Dashboard (Completed)*). Athlete and coach weekly adherence overview cards, domain KPI percentages, and weekly adherence context provider are implemented.
 
 **Remaining future gaps:**
 
-- Weekly adherence metrics dashboard.
-- Athlete dashboard weekly adherence cards.
-- Coach dashboard role-scoped adherence cards.
 - Nutrition nutrient drilldown dashboard.
 - Nutrition catalog QA / unit normalization (see note below).
 - Wearables integration.
@@ -220,6 +217,51 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 - Meal replacement / custom food logging (later).
 
 **Catalog QA note (not adherence logic):** Some nutrition catalog values may need QA/unit normalization — e.g. unusually high sodium values on specific items. This is **catalog data quality**, not a defect in adherence POST/GET or journal UI. Example tracked item: Rice catalog entry in §12.
+
+---
+
+## Open Wearables Integration
+
+Planned after adherence stabilization.
+
+### Objectives
+
+- Import wearable metrics into CETECH.
+- Use Open Wearables as normalization layer.
+- Avoid direct vendor-specific integrations inside planning engine.
+
+### Initial Sources
+
+- Garmin
+- Suunto
+- Oura
+- Polar
+- Coros
+- Apple Health
+- Google Health Connect
+
+### Phase 2 Capabilities
+
+- Sleep metrics
+- Recovery metrics
+- HRV
+- Resting heart rate
+- Training load metrics
+- Energy expenditure
+- Activity sessions
+- Daily readiness indicators
+
+### Future AI Usage
+
+Wearable data may be consumed by:
+
+- Athlete Planning Profile
+- Workload Assessment
+- Sports Intelligence
+- Future Metrics Dashboard
+- Future Readiness Engine
+
+**No wearable data currently influences plan generation.**
 
 ---
 

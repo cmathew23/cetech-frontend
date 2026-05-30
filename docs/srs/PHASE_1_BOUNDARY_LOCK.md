@@ -116,8 +116,7 @@
 
 **Still outside this completed slice:**
 
-- Wearables integration.
-- Weekly adherence metrics dashboard.
+- Wearables integration (Phase 2 — see `docs/srs/phase-2-gaps.md` Open Wearables Integration).
 - Nutrition nutrient analytics dashboard.
 - AI adherence feedback.
 - Meal replacement / custom food logging.
@@ -125,7 +124,51 @@
 - Charts-heavy analytics.
 - Coach recommendations based on adherence.
 
-**Next planned work (before wearables):** **Metrics Dashboard — Weekly Adherence** (athlete and coach dashboard cards).
+**Weekly Adherence Dashboard:** **Completed** (see `docs/srs/IMPLEMENTATION_STATUS.md`).
+
+---
+
+## Adherence Scope Locked For Phase 1
+
+Phase 1 adherence consists of:
+
+### Skills
+
+- Completion tracking
+- Duration tracking
+- Notes
+- History
+
+### S&C
+
+- Completion tracking
+- Duration tracking
+- Notes
+- History
+
+### Nutrition
+
+- Prescribed item adherence
+- Actual consumption tracking
+- Calorie tracking support
+- History
+
+### Explicitly Deferred
+
+The following are **NOT** part of Phase 1:
+
+- Wearables ingestion
+- Recovery scoring
+- Readiness scoring
+- HRV analytics
+- Sleep analytics
+- Automatic adherence from wearable data
+- AI adherence recommendations
+- Cross-domain athlete performance analytics
+
+These remain **Phase 2** items.
+
+---
 
 ### E. Explicit non-goals (current phase)
 

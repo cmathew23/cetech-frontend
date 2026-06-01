@@ -10,7 +10,9 @@ import {
   fetchWearableConnections,
   fetchWearableProviders,
   formatWearableConnectionStatusLabel,
+  isSafeWearableAuthorizationUrl,
   normalizeWearableProviderKey,
+  openWearableAuthorizationInNewTab,
   refreshWearableConnection,
   type WearableConnection,
   type WearableProvider,
@@ -88,6 +90,7 @@ function ProviderCard({
   connectBusy,
   refreshBusy,
   actionError,
+  authorizationUrl,
   onConnect,
   onRefresh,
 }: {
@@ -96,6 +99,7 @@ function ProviderCard({
   connectBusy: boolean;
   refreshBusy: boolean;
   actionError: string | null;
+  authorizationUrl: string | null;
   onConnect: () => void;
   onRefresh: () => void;
 }) {
@@ -133,15 +137,27 @@ function ProviderCard({
 
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
           {provider.connectSupported ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={connectBusy}
-              disabled={connectBusy || refreshBusy}
-              onClick={onConnect}
-            >
-              Connect
-            </Button>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Button
+                type="button"
+                variant="primary"
+                loading={connectBusy}
+                disabled={connectBusy || refreshBusy}
+                onClick={onConnect}
+              >
+                Connect
+              </Button>
+              {authorizationUrl && isSafeWearableAuthorizationUrl(authorizationUrl) ? (
+                <a
+                  href={authorizationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-center text-sm font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Open authorization page
+                </a>
+              ) : null}
+            </div>
           ) : (
             <Button type="button" variant="secondary" disabled>
               Mobile app required
@@ -189,6 +205,9 @@ export function WearableConnectionsSettings() {
   const [connections, setConnections] = useState<WearableConnection[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [redirectMessage, setRedirectMessage] = useState<string | null>(null);
+  const [authorizationUrlByProvider, setAuthorizationUrlByProvider] = useState<
+    Record<string, string>
+  >({});
   const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
   const [refreshingConnectionId, setRefreshingConnectionId] = useState<string | null>(
     null,
@@ -264,15 +283,25 @@ export function WearableConnectionsSettings() {
     setCardActionError(null);
     setRedirectMessage(null);
     setConnectingProvider(provider.provider);
+    const providerKey = normalizeWearableProviderKey(provider.provider);
     try {
       const result = await connectWearableProvider(
         entityId,
         athleteId,
         provider.provider,
       );
-      if (result.authorizationUrl) {
-        setRedirectMessage("Redirecting to provider authorization...");
-        window.location.assign(result.authorizationUrl);
+      if (
+        result.authorizationUrl &&
+        isSafeWearableAuthorizationUrl(result.authorizationUrl)
+      ) {
+        setAuthorizationUrlByProvider((prev) => ({
+          ...prev,
+          [providerKey]: result.authorizationUrl!,
+        }));
+        openWearableAuthorizationInNewTab(result.authorizationUrl);
+        setRedirectMessage(
+          "Authorization opened in a new tab. You can also right-click “Open authorization page” below if the tab did not open.",
+        );
         return;
       }
       await loadWearables();
@@ -396,6 +425,11 @@ export function WearableConnectionsSettings() {
                       refreshingConnectionId === connection.connectionId
                     }
                     actionError={isActiveCard ? cardActionError : null}
+                    authorizationUrl={
+                      authorizationUrlByProvider[
+                        normalizeWearableProviderKey(provider.provider)
+                      ] ?? null
+                    }
                     onConnect={() => void handleConnect(provider)}
                     onRefresh={() => {
                       if (connection) void handleRefresh(connection);

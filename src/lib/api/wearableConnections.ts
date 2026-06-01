@@ -199,6 +199,24 @@ export function normalizeWearableProviderKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+/** Only http(s) authorization URLs from CETECH connect may be opened in the browser. */
+export function isSafeWearableAuthorizationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/** Opens provider OAuth in a new tab; returns false if blocked or URL is unsafe. */
+export function openWearableAuthorizationInNewTab(url: string): boolean {
+  if (!isSafeWearableAuthorizationUrl(url)) return false;
+  if (typeof window === "undefined") return false;
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  return opened !== null;
+}
+
 export async function fetchWearableProviders(
   entityId: string,
   athleteId: string,

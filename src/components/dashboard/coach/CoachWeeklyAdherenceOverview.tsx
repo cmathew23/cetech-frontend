@@ -1,5 +1,6 @@
 "use client";
 
+import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
 import { Card } from "@/components/ui/Card";
@@ -68,6 +69,7 @@ function resolveCoachWearableViewerContext(input: {
 type AthleteAdherenceState = {
   athlete: CoachAssignedAthleteRow;
   weekRange: WeeklyAdherencePlanRange | null;
+  trainingPlanVersionId: string | null;
   summary: WeeklyAdherenceSummary | null;
   error: string | null;
 };
@@ -187,6 +189,7 @@ export function CoachWeeklyAdherenceOverview({
             return {
               athlete,
               weekRange,
+              trainingPlanVersionId: journal.domains.SKILLS?.versionId?.trim() ?? null,
               summary,
               error: null,
             } satisfies AthleteAdherenceState;
@@ -194,6 +197,7 @@ export function CoachWeeklyAdherenceOverview({
             return {
               athlete,
               weekRange: null,
+              trainingPlanVersionId: null,
               summary: null,
               error: formatLoadError(e),
             } satisfies AthleteAdherenceState;
@@ -304,6 +308,13 @@ export function CoachWeeklyAdherenceOverview({
                     showSectionHeader={false}
                   />
                 ) : null}
+                <div className="mt-3">
+                  <SportMetricsSection
+                    entityId={entityId}
+                    athleteId={entry.athlete.athleteId}
+                    trainingPlanVersionId={entry.trainingPlanVersionId}
+                  />
+                </div>
                 {entry.weekRange ? (
                   <div className="mt-3">
                     <WearableSummarySection

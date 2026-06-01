@@ -14,6 +14,7 @@ import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/Ath
 import { AthleteRecoveryStatusCard } from "@/components/dashboard/athlete/AthleteRecoveryStatusCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
 import { AthleteUpcomingScheduleCard } from "@/components/dashboard/athlete/AthleteUpcomingScheduleCard";
+import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
@@ -44,6 +45,24 @@ function AthleteWearableSummaryWithPlanWindow({
       planStartDate={weekStart !== "" ? weekStart : undefined}
       planEndDate={weekEnd !== "" ? weekEnd : undefined}
       planWindowPending={planWindowPending}
+    />
+  );
+}
+
+function AthleteSportMetricsWithPlanVersion({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+
+  return (
+    <SportMetricsSection
+      entityId={entityId}
+      athleteId={athleteId}
+      trainingPlanVersionId={trainingPlanVersionId}
     />
   );
 }
@@ -98,6 +117,11 @@ export function AthleteDashboardShell() {
               <AthleteInsightsCard />
             </div>
           </section>
+
+          <AthleteSportMetricsWithPlanVersion
+            entityId={entityId}
+            athleteId={athleteId}
+          />
 
           <AthleteWearableSummaryWithPlanWindow
             entityId={entityId}

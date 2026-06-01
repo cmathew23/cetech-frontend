@@ -46,6 +46,7 @@ export type AthleteWeeklyAdherenceState = {
   error: string | null;
   weekStart: string;
   weekEnd: string;
+  trainingPlanVersionId: string;
   reload: () => void;
 };
 
@@ -80,6 +81,7 @@ export function AthleteWeeklyAdherenceProvider({
   const [fetching, setFetching] = useState(false);
   const [planWeekRange, setPlanWeekRange] =
     useState<WeeklyAdherencePlanRange | null>(null);
+  const [trainingPlanVersionId, setTrainingPlanVersionId] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
   const entityId = planningIds.ids?.entityId ?? "";
@@ -120,12 +122,14 @@ export function AthleteWeeklyAdherenceProvider({
         });
         if (!cancelled) {
           setPlanWeekRange(weekRange);
+          setTrainingPlanVersionId(journal.domains.SKILLS?.versionId?.trim() ?? "");
           setSummary(data);
           setError(null);
         }
       } catch (e) {
         if (!cancelled) {
           setPlanWeekRange(null);
+          setTrainingPlanVersionId("");
           setSummary(null);
           setError(formatLoadError(e));
         }
@@ -230,6 +234,7 @@ export function AthleteWeeklyAdherenceProvider({
       error,
       weekStart: planWeekRange?.weekStart ?? "",
       weekEnd: planWeekRange?.weekEnd ?? "",
+      trainingPlanVersionId,
       reload,
     }),
     [
@@ -240,6 +245,7 @@ export function AthleteWeeklyAdherenceProvider({
       planWeekRange?.weekStart,
       reload,
       summary,
+      trainingPlanVersionId,
     ],
   );
 

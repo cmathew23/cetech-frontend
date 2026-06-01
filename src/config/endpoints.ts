@@ -102,6 +102,19 @@ export const paths = {
       params.set("endDate", query.endDate);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsGolfWeeklySummary: (
+      entityId: string,
+      athleteId: string,
+      query: { trainingPlanVersionId: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/weekly-summary`;
+      const params = new URLSearchParams();
+      params.set("trainingPlanVersionId", query.trainingPlanVersionId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsGolfRecords: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
     athleteWearableProviders: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/providers`,
     athleteWearableConnections: (entityId: string, athleteId: string) =>

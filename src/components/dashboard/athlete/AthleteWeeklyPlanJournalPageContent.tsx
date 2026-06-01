@@ -1,6 +1,11 @@
 "use client";
 
 import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
+import {
+  buildSportMetricsDrillKey,
+  LogSportResultModal,
+  type SportMetricsDrillLogContext,
+} from "@/components/dashboard/athlete/LogSportResultModal";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -1142,9 +1147,34 @@ function nutritionStructuredItemLeadingLine(opts: {
   );
 }
 
+type SkillsSportMetricsJournalOptions = {
+  entityId: string;
+  athleteId: string;
+  trainingPlanVersionId: string;
+  plannedSessionId: string;
+  dayDate: string;
+  sessionTitle: string;
+  loggedDrillKeys: Record<string, true>;
+  onOpenLog: (context: SportMetricsDrillLogContext) => void;
+};
+
+function readSessionTitleFromItem(item: Record<string, unknown>): string {
+  const merged = mergeJournalRecordCandidateFields(item);
+  for (const key of ["name", "title", "label"]) {
+    const value = merged[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+  return "Skills session";
+}
+
 function renderJournalStructureSections(
   record: Record<string, unknown>,
-  options?: { nutritionDomain?: boolean },
+  options?: {
+    nutritionDomain?: boolean;
+    skillsSportMetrics?: SkillsSportMetricsJournalOptions;
+  },
 ) {
   const sections = extractJournalStructureSections(record);
   if (sections.length === 0) return null;
@@ -1199,6 +1229,27 @@ function renderJournalStructureSections(
                   );
                   const hideGenericHeading =
                     /^Item\s+\d+$/i.test(heading.trim()) && detailRows.length > 0;
+                  const skillsSportMetrics = options?.skillsSportMetrics;
+                  const drillLogContext: SportMetricsDrillLogContext | null =
+                    skillsSportMetrics
+                      ? {
+                          entityId: skillsSportMetrics.entityId,
+                          athleteId: skillsSportMetrics.athleteId,
+                          trainingPlanVersionId:
+                            skillsSportMetrics.trainingPlanVersionId,
+                          plannedSessionId: skillsSportMetrics.plannedSessionId,
+                          dayDate: skillsSportMetrics.dayDate,
+                          sessionTitle: skillsSportMetrics.sessionTitle,
+                          sectionKey: "skill",
+                          drill: mergeJournalRecordCandidateFields(rawItem),
+                          itemIndex,
+                        }
+                      : null;
+                  const drillKey = drillLogContext
+                    ? buildSportMetricsDrillKey(drillLogContext)
+                    : null;
+                  const drillLogged =
+                    drillKey !== null && skillsSportMetrics?.loggedDrillKeys[drillKey] === true;
 
                   return (
                     <div
@@ -1226,6 +1277,23 @@ function renderJournalStructureSections(
                         </dl>
                       ) : heading.startsWith("Item ") ? (
                         <p className="text-xs text-textSecondary">Structured entry</p>
+                      ) : null}
+                      {drillLogContext && skillsSportMetrics ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="text-xs"
+                            onClick={() => skillsSportMetrics.onOpenLog(drillLogContext)}
+                          >
+                            Log Sport Result
+                          </Button>
+                          {drillLogged ? (
+                            <span className="text-xs font-medium text-emerald-700">
+                              Sport result logged
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   );
@@ -2273,6 +2341,7 @@ function renderJournalItem(
     canLogAdherence?: boolean;
     loggingOpensOn?: string;
     adherenceDayScopeKey?: string;
+    skillsSportMetrics?: SkillsSportMetricsJournalOptions;
   },
 ) {
   const nutritionDomain = options?.nutritionDomain === true;
@@ -2338,6 +2407,7 @@ function renderJournalItem(
         ) : null}
         {renderJournalStructureSections(item, {
           nutritionDomain,
+          skillsSportMetrics: options?.skillsSportMetrics,
         })}
         {!hasStructuredContent && detailRows.length === 0 ? (
           <p className="text-sm text-textSecondary">
@@ -2470,7 +2540,15 @@ function renderJournalDaySelector(props: {
   );
 }
 
-function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElement {
+function renderJournalDayDomainGrid(
+  day: AthleteWeeklyPlanJournalDay,
+  journalOptions?: {
+    skillsSportMetricsBase?: Omit<
+      SkillsSportMetricsJournalOptions,
+      "plannedSessionId" | "dayDate" | "sessionTitle"
+    >;
+  },
+): ReactElement {
   const { canLogAdherence, loggingOpensOn, adherenceDayScopeKey } =
     resolveJournalDayAdherenceLogging(day);
 
@@ -2506,8 +2584,21 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
             ) : (
               <div className="space-y-3">
                 {domain.key === "NUTRITION" ? renderNutritionDayTotalsPanel(items) : null}
-                {items.map((item, index) =>
-                  renderJournalItem(item, index, {
+                {items.map((item, index) => {
+                  const skillsSportMetrics =
+                    domain.key === "SKILLS" &&
+                    journalOptions?.skillsSportMetricsBase &&
+                    isRecord(item) &&
+                    readPlannedSessionIdFromItem(item)
+                      ? {
+                          ...journalOptions.skillsSportMetricsBase,
+                          plannedSessionId: readPlannedSessionIdFromItem(item)!,
+                          dayDate: day.date,
+                          sessionTitle: readSessionTitleFromItem(item),
+                        }
+                      : undefined;
+
+                  return renderJournalItem(item, index, {
                     nutritionDomain: domain.key === "NUTRITION",
                     showAdherenceForm:
                       domain.key === "SKILLS" || domain.key === "S_AND_C",
@@ -2518,8 +2609,9 @@ function renderJournalDayDomainGrid(day: AthleteWeeklyPlanJournalDay): ReactElem
                     canLogAdherence,
                     loggingOpensOn,
                     adherenceDayScopeKey,
-                  }),
-                )}
+                    skillsSportMetrics,
+                  });
+                })}
               </div>
             )}
           </div>
@@ -2544,6 +2636,9 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [sportLogContext, setSportLogContext] =
+    useState<SportMetricsDrillLogContext | null>(null);
+  const [loggedDrillKeys, setLoggedDrillKeys] = useState<Record<string, true>>({});
 
   const retryLoadJournal = useCallback(() => {
     setState({ phase: "loading" });
@@ -2607,6 +2702,22 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const allDomainsNotReleased = journal
     ? DOMAIN_SECTIONS.every((domain) => journal.domains[domain.key].status === "NOT_RELEASED")
     : false;
+
+  const resolvedJournalEntityId = journal?.entityId.trim() || entityId;
+  const resolvedJournalAthleteId = journal?.athleteId.trim() || athleteId;
+  const skillsTrainingPlanVersionId = journal?.domains.SKILLS.versionId?.trim() ?? "";
+  const skillsSportMetricsBase =
+    journal &&
+    skillsTrainingPlanVersionId !== "" &&
+    journal.domains.SKILLS.status === "RELEASED"
+      ? {
+          entityId: resolvedJournalEntityId,
+          athleteId: resolvedJournalAthleteId,
+          trainingPlanVersionId: skillsTrainingPlanVersionId,
+          loggedDrillKeys,
+          onOpenLog: setSportLogContext,
+        }
+      : undefined;
 
   return (
     <div className="space-y-4">
@@ -2765,7 +2876,9 @@ export function AthleteWeeklyPlanJournalPageContent() {
                         selectedIsToday && "ring-1 ring-orange-200/90",
                       )}
                     >
-                      {renderJournalDayDomainGrid(selectedDay)}
+                      {renderJournalDayDomainGrid(selectedDay, {
+                        skillsSportMetricsBase,
+                      })}
                     </DashboardCardShell>
                   )}
                 </div>
@@ -2777,6 +2890,18 @@ export function AthleteWeeklyPlanJournalPageContent() {
           })()}
         </>
       )}
+      {journal ? (
+        <LogSportResultModal
+          open={sportLogContext !== null}
+          context={sportLogContext}
+          weekStartDate={journal.weekStartDate}
+          weekEndDate={journal.weekEndDate}
+          onClose={() => setSportLogContext(null)}
+          onSuccess={(drillKey) => {
+            setLoggedDrillKeys((current) => ({ ...current, [drillKey]: true }));
+          }}
+        />
+      ) : null}
     </div>
   );
 }

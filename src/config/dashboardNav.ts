@@ -7,6 +7,7 @@ import {
   Link2,
   Mail,
   Settings,
+  Sparkles,
   ShieldCheck,
   UserRound,
   Users,
@@ -34,6 +35,7 @@ export const adminSidebarNavItems: DashboardNavItem[] = [
 export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/coach/athletes", label: "Athletes", icon: Users },
+  { href: "/coach/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/coach/training-plans", label: "Training Plan", icon: Calendar },
   { href: "/coach/dashboard/invitations", label: "Invitations", icon: Mail },
 ];
@@ -41,6 +43,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
 export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/athlete/weekly-plan", label: "Weekly Plan", icon: Calendar },
+  { href: "/athlete/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/athlete/coaches", label: "Coaches", icon: Users },
   { href: "/athlete/dashboard/invitations", label: "Invitations", icon: Mail },
   { href: "/athlete/profile-planning", label: "Athlete Profile Planning", icon: ClipboardList },

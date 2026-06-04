@@ -10,7 +10,6 @@ import {
   type FynPromptOption,
 } from "@/components/fyn/FynPromptButtonBar";
 
-const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -21,10 +20,19 @@ import {
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
-import { queryFynAssistant, type FynAssistantPromptKey } from "@/lib/api/fynAssistant";
+import {
+  fetchFynAssistantHistory,
+  getFynPromptLabel,
+  queryFynAssistant,
+  type FynAssistantPromptKey,
+} from "@/lib/api/fynAssistant";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+
+const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
+const FYN_HISTORY_LOAD_WARNING =
+  "Could not load recent Fyn history. You can still send a new prompt.";
 
 const COACH_FYN_PROMPTS: Array<FynPromptOption<FynAssistantPromptKey>> = [
   { key: "SUMMARIZE_ATHLETE", label: "Summarize athlete" },
@@ -39,13 +47,6 @@ function formatError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatPromptLabel(promptKey: FynAssistantPromptKey): string {
-  return (
-    COACH_FYN_PROMPTS.find((prompt) => prompt.key === promptKey)?.label ??
-    promptKey.replaceAll("_", " ")
-  );
-}
-
 export function CoachFynAssistantPageContent() {
   const { accessContext, accessGateReady } = useAuth();
   const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
@@ -56,6 +57,7 @@ export function CoachFynAssistantPageContent() {
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<FynChatMessage[]>([]);
+  const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [activePromptKey, setActivePromptKey] =
     useState<FynAssistantPromptKey>("SUMMARIZE_ATHLETE");
@@ -92,6 +94,7 @@ export function CoachFynAssistantPageContent() {
 
   useEffect(() => {
     setMessages([]);
+    setHistoryWarning(null);
     setSubmitting(false);
     setActivePromptKey("SUMMARIZE_ATHLETE");
     if (entityId === "" || selectedAthleteId.trim() === "") {
@@ -101,6 +104,23 @@ export function CoachFynAssistantPageContent() {
 
     let cancelled = false;
     void (async () => {
+      try {
+        const history = await fetchFynAssistantHistory({
+          entityId,
+          athleteId: selectedAthleteId,
+          role: "coach",
+        });
+        if (!cancelled) {
+          setMessages(history.messages);
+          setHistoryWarning(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setMessages([]);
+          setHistoryWarning(FYN_HISTORY_LOAD_WARNING);
+        }
+      }
+
       try {
         const journal = await fetchAthleteWeeklyPlanJournal(entityId, selectedAthleteId);
         if (!cancelled) {
@@ -125,7 +145,8 @@ export function CoachFynAssistantPageContent() {
       if (entityId === "" || selectedAthleteId.trim() === "") return;
 
       const trimmedMessage = message?.trim() ?? "";
-      const userText = trimmedMessage !== "" ? trimmedMessage : formatPromptLabel(promptKey);
+      const userText =
+        trimmedMessage !== "" ? trimmedMessage : getFynPromptLabel(promptKey, "coach");
       setSubmitting(true);
       setActivePromptKey(promptKey);
       setMessages((current) => [
@@ -150,17 +171,27 @@ export function CoachFynAssistantPageContent() {
           message: trimmedMessage !== "" ? trimmedMessage : undefined,
           trainingPlanVersionId,
         });
-        setMessages((current) =>
-          current
-            .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
-            .concat({
-              id: `assistant-${Date.now()}`,
-              role: "assistant",
-              text: response.answer,
-              warnings: response.warnings,
-              usedSources: response.usedSources,
-            }),
-        );
+
+        try {
+          const history = await fetchFynAssistantHistory({
+            entityId,
+            athleteId: selectedAthleteId,
+            role: "coach",
+          });
+          setMessages(history.messages);
+        } catch {
+          setMessages((current) =>
+            current
+              .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
+              .concat({
+                id: `assistant-${Date.now()}`,
+                role: "assistant",
+                text: response.answer,
+                warnings: response.warnings,
+                usedSources: response.usedSources,
+              }),
+          );
+        }
       } catch (error) {
         const errorText = formatError(error, "Unable to reach Fyn Assistant.");
         setMessages((current) =>
@@ -239,6 +270,8 @@ export function CoachFynAssistantPageContent() {
           </p>
         )}
       </Card>
+
+      {historyWarning ? <Alert variant="warning">{historyWarning}</Alert> : null}
 
       <FynChatThread
         messages={messages}

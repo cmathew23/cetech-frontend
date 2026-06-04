@@ -10,7 +10,6 @@ import {
   type FynPromptOption,
 } from "@/components/fyn/FynPromptButtonBar";
 
-const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -21,10 +20,26 @@ import {
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
-import { queryFynAssistant, type FynAssistantPromptKey } from "@/lib/api/fynAssistant";
+import {
+  fetchFynAssistantHistory,
+  getFynPromptLabel,
+  queryFynAssistant,
+  type FynAssistantPromptKey,
+} from "@/lib/api/fynAssistant";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+
+const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
+const FYN_HISTORY_LOAD_WARNING =
+  "Could not load recent Fyn history. You can still send a new prompt.";
 
 const COACH_FYN_PROMPTS: Array<FynPromptOption<FynAssistantPromptKey>> = [
   { key: "SUMMARIZE_ATHLETE", label: "Summarize athlete" },
@@ -39,13 +54,6 @@ function formatError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatPromptLabel(promptKey: FynAssistantPromptKey): string {
-  return (
-    COACH_FYN_PROMPTS.find((prompt) => prompt.key === promptKey)?.label ??
-    promptKey.replaceAll("_", " ")
-  );
-}
-
 export function CoachFynAssistantPageContent() {
   const { accessContext, accessGateReady } = useAuth();
   const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
@@ -56,9 +64,17 @@ export function CoachFynAssistantPageContent() {
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<FynChatMessage[]>([]);
+  const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [activePromptKey, setActivePromptKey] =
     useState<FynAssistantPromptKey>("SUMMARIZE_ATHLETE");
+  const latestEntityIdRef = useRef(entityId);
+  const latestSelectedAthleteIdRef = useRef(selectedAthleteId);
+
+  useEffect(() => {
+    latestEntityIdRef.current = entityId;
+    latestSelectedAthleteIdRef.current = selectedAthleteId;
+  }, [entityId, selectedAthleteId]);
 
   useEffect(() => {
     if (!accessGateReady) return;
@@ -92,22 +108,50 @@ export function CoachFynAssistantPageContent() {
 
   useEffect(() => {
     setMessages([]);
+    setHistoryWarning(null);
     setSubmitting(false);
     setActivePromptKey("SUMMARIZE_ATHLETE");
+    setTrainingPlanVersionId(null);
     if (entityId === "" || selectedAthleteId.trim() === "") {
-      setTrainingPlanVersionId(null);
       return;
     }
 
+    const requestedEntityId = entityId;
+    const requestedAthleteId = selectedAthleteId;
     let cancelled = false;
+    const isCurrentSelection = () =>
+      latestEntityIdRef.current === requestedEntityId &&
+      latestSelectedAthleteIdRef.current === requestedAthleteId;
+
     void (async () => {
       try {
-        const journal = await fetchAthleteWeeklyPlanJournal(entityId, selectedAthleteId);
-        if (!cancelled) {
+        const history = await fetchFynAssistantHistory({
+          entityId: requestedEntityId,
+          athleteId: requestedAthleteId,
+          role: "coach",
+        });
+
+        if (!cancelled && isCurrentSelection()) {
+          setMessages(history.messages);
+          setHistoryWarning(null);
+        }
+      } catch {
+        if (!cancelled && isCurrentSelection()) {
+          setMessages([]);
+          setHistoryWarning(FYN_HISTORY_LOAD_WARNING);
+        }
+      }
+
+      try {
+        const journal = await fetchAthleteWeeklyPlanJournal(
+          requestedEntityId,
+          requestedAthleteId,
+        );
+        if (!cancelled && isCurrentSelection()) {
           setTrainingPlanVersionId(journal.domains.SKILLS.versionId?.trim() ?? null);
         }
       } catch {
-        if (!cancelled) setTrainingPlanVersionId(null);
+        if (!cancelled && isCurrentSelection()) setTrainingPlanVersionId(null);
       }
     })();
     return () => {
@@ -124,8 +168,17 @@ export function CoachFynAssistantPageContent() {
     async (promptKey: FynAssistantPromptKey, message?: string) => {
       if (entityId === "" || selectedAthleteId.trim() === "") return;
 
+      const requestedEntityId = entityId;
+      const requestedAthleteId = selectedAthleteId;
+      const requestedTrainingPlanVersionId = trainingPlanVersionId;
+      const createdAt = new Date().toISOString();
       const trimmedMessage = message?.trim() ?? "";
-      const userText = trimmedMessage !== "" ? trimmedMessage : formatPromptLabel(promptKey);
+      const userText =
+        trimmedMessage !== "" ? trimmedMessage : getFynPromptLabel(promptKey, "coach");
+      const isCurrentSelection = () =>
+        latestEntityIdRef.current === requestedEntityId &&
+        latestSelectedAthleteIdRef.current === requestedAthleteId;
+
       setSubmitting(true);
       setActivePromptKey(promptKey);
       setMessages((current) => [
@@ -134,48 +187,72 @@ export function CoachFynAssistantPageContent() {
           id: `user-${Date.now()}`,
           role: "user",
           text: userText,
+          createdAt,
         },
         {
           id: FYN_LOADING_MESSAGE_ID,
           role: "loading",
           text: FYN_LOADING_TEXT,
+          createdAt,
         },
       ]);
 
       try {
         const response = await queryFynAssistant({
-          entityId,
-          athleteId: selectedAthleteId,
+          entityId: requestedEntityId,
+          athleteId: requestedAthleteId,
           promptKey,
           message: trimmedMessage !== "" ? trimmedMessage : undefined,
-          trainingPlanVersionId,
+          trainingPlanVersionId: requestedTrainingPlanVersionId,
         });
-        setMessages((current) =>
-          current
-            .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
-            .concat({
-              id: `assistant-${Date.now()}`,
-              role: "assistant",
-              text: response.answer,
-              warnings: response.warnings,
-              usedSources: response.usedSources,
-            }),
-        );
+
+        try {
+          const history = await fetchFynAssistantHistory({
+            entityId: requestedEntityId,
+            athleteId: requestedAthleteId,
+            role: "coach",
+          });
+
+          if (isCurrentSelection()) {
+            setMessages(history.messages);
+            setHistoryWarning(null);
+          }
+        } catch {
+          if (isCurrentSelection()) {
+            setMessages((current) =>
+              current
+                .filter((entry) => entry.id !== FYN_LOADING_MESSAGE_ID)
+                .concat({
+                  id: `assistant-${Date.now()}`,
+                  role: "assistant",
+                  text: response.answer,
+                  createdAt: new Date().toISOString(),
+                  warnings: response.warnings,
+                  usedSources: response.usedSources,
+                }),
+            );
+          }
+        }
       } catch (error) {
         const errorText = formatError(error, "Unable to reach Fyn Assistant.");
-        setMessages((current) =>
-          current.map((entry) =>
-            entry.id === FYN_LOADING_MESSAGE_ID
-              ? {
-                  id: `assistant-error-${Date.now()}`,
-                  role: "assistant",
-                  text: errorText,
-                }
-              : entry,
-          ),
-        );
+        if (isCurrentSelection()) {
+          setMessages((current) =>
+            current.map((entry) =>
+              entry.id === FYN_LOADING_MESSAGE_ID
+                ? {
+                    id: `assistant-error-${Date.now()}`,
+                    role: "assistant",
+                    text: errorText,
+                    createdAt: new Date().toISOString(),
+                  }
+                : entry,
+            ),
+          );
+        }
       } finally {
-        setSubmitting(false);
+        if (isCurrentSelection()) {
+          setSubmitting(false);
+        }
       }
     },
     [entityId, selectedAthleteId, trainingPlanVersionId],
@@ -222,6 +299,9 @@ export function CoachFynAssistantPageContent() {
             <p className="text-sm text-textSecondary">
               Fyn is read-only. Responses are scoped to {selectedAthlete.displayName}.
             </p>
+            <p className="text-sm text-textSecondary">
+              Recent chats from the last 72 hours are shown for the selected athlete.
+            </p>
             <FynPromptButtonBar
               prompts={COACH_FYN_PROMPTS}
               disabled={submitting}
@@ -239,6 +319,8 @@ export function CoachFynAssistantPageContent() {
           </p>
         )}
       </Card>
+
+      {historyWarning ? <Alert variant="warning">{historyWarning}</Alert> : null}
 
       <FynChatThread
         messages={messages}

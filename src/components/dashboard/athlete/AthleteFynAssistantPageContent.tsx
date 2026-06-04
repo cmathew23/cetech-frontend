@@ -106,6 +106,7 @@ export function AthleteFynAssistantPageContent() {
     async (promptKey: FynAssistantPromptKey, message?: string) => {
       if (entityId === "" || athleteId === "") return;
 
+      const createdAt = new Date().toISOString();
       const trimmedMessage = message?.trim() ?? "";
       const userLabel =
         trimmedMessage !== "" ? trimmedMessage : getFynPromptLabel(promptKey, "athlete");
@@ -117,11 +118,13 @@ export function AthleteFynAssistantPageContent() {
           id: `user-${Date.now()}`,
           role: "user",
           text: userLabel,
+          createdAt,
         },
         {
           id: FYN_LOADING_MESSAGE_ID,
           role: "loading",
           text: FYN_LOADING_TEXT,
+          createdAt,
         },
       ]);
 
@@ -149,6 +152,7 @@ export function AthleteFynAssistantPageContent() {
                 id: `assistant-${Date.now()}`,
                 role: "assistant",
                 text: response.answer,
+                createdAt: new Date().toISOString(),
                 warnings: response.warnings,
                 usedSources: response.usedSources,
               }),
@@ -163,6 +167,7 @@ export function AthleteFynAssistantPageContent() {
                   id: `assistant-error-${Date.now()}`,
                   role: "assistant",
                   text: errorText,
+                  createdAt: new Date().toISOString(),
                 }
               : entry,
           ),
@@ -199,6 +204,9 @@ export function AthleteFynAssistantPageContent() {
         <div className="space-y-3">
           <p className="text-sm text-textSecondary">
             Choose a prompt or ask a short follow-up. Fyn is read-only in this view.
+          </p>
+          <p className="text-sm text-textSecondary">
+            Recent chats from the last 72 hours are shown here.
           </p>
           <FynPromptButtonBar
             prompts={ATHLETE_FYN_PROMPTS}

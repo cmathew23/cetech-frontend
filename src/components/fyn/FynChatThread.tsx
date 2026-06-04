@@ -10,6 +10,7 @@ export type FynChatMessage = {
   id: string;
   role: "user" | "assistant" | "loading";
   text: string;
+  createdAt?: string;
   warnings?: string[];
   usedSources?: {
     plan: boolean;
@@ -27,6 +28,20 @@ function sourceLabels(usedSources: FynChatMessage["usedSources"]): string[] {
   if (usedSources.sportMetrics) labels.push("Golf Metrics");
   if (usedSources.wearables) labels.push("Wearables");
   return labels;
+}
+
+function formatMessageTimestamp(createdAt?: string): string | null {
+  if (!createdAt) return null;
+
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 export function FynChatThread({
@@ -48,6 +63,7 @@ export function FynChatThread({
     <div className="space-y-3">
       {messages.map((message) => {
         const sources = sourceLabels(message.usedSources);
+        const timestamp = formatMessageTimestamp(message.createdAt);
         return (
           <Card
             key={message.id}
@@ -74,6 +90,9 @@ export function FynChatThread({
                       ? "Fyn"
                       : "You"}
                   </p>
+                  {timestamp ? (
+                    <p className="mt-1 text-xs text-textSecondary">{timestamp}</p>
+                  ) : null}
                 </div>
                 {message.role === "loading" ? (
                   <p className="text-sm text-textPrimary">

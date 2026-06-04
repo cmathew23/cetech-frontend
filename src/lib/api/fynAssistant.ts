@@ -141,11 +141,13 @@ export function mapFynHistoryToChatMessages(
         id: `${item.id}-user`,
         role: "user",
         text: userText,
+        createdAt: item.createdAt,
       },
       {
         id: `${item.id}-assistant`,
         role: "assistant",
         text: item.assistantMessage,
+        createdAt: item.createdAt,
         warnings: item.warnings,
         usedSources: item.usedSources,
       },

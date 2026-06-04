@@ -142,11 +142,13 @@ describe("mapFynHistoryToChatMessages", () => {
       id: "audit-1-user",
       role: "user",
       text: "Explain today’s plan",
+      createdAt: "2026-06-01T10:00:00.000Z",
     });
     expect(messages[1]).toEqual({
       id: "audit-1-assistant",
       role: "assistant",
       text: "Today focuses on short game.",
+      createdAt: "2026-06-01T10:00:00.000Z",
       warnings: ["No wearable data."],
       usedSources: {
         plan: true,
@@ -176,7 +178,7 @@ describe("fetchFynAssistantHistory", () => {
     apiRequestMock.mockReset();
   });
 
-  it("calls the history endpoint with GET", async () => {
+  it("calls the history endpoint with the requested athlete id", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,
       data: {
@@ -203,6 +205,37 @@ describe("fetchFynAssistantHistory", () => {
     expect(result.windowHours).toBe(72);
     expect(result.items).toHaveLength(1);
     expect(result.messages).toHaveLength(2);
+  });
+
+  it("uses the provided athlete id for each history GET request", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        windowHours: 72,
+        items: [],
+      },
+    });
+
+    await fetchFynAssistantHistory({
+      entityId: "entity-1",
+      athleteId: "athlete-501",
+      role: "coach",
+    });
+    await fetchFynAssistantHistory({
+      entityId: "entity-1",
+      athleteId: "athlete-502",
+      role: "coach",
+    });
+
+    const firstPath = apiRequestMock.mock.calls[0]?.[0];
+    const secondPath = apiRequestMock.mock.calls[1]?.[0];
+
+    expect(firstPath).toBe(
+      "/entities/entity-1/athletes/athlete-501/fyn-assistant/history",
+    );
+    expect(secondPath).toBe(
+      "/entities/entity-1/athletes/athlete-502/fyn-assistant/history",
+    );
   });
 
   it("defaults usedSources safely when missing or partial", async () => {

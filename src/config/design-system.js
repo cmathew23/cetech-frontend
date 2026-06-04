@@ -37,7 +37,7 @@ export const designSystem = {
     h2: "mb-4 text-lg font-semibold text-textPrimary sm:text-xl lg:text-2xl",
     h3: "mb-4 text-lg font-semibold text-textPrimary",
     body: "text-base font-normal text-textPrimary",
-    muted: "text-sm font-light text-textSecondary",
+    muted: "text-sm font-normal text-textSecondary",
   },
 
   spacing: {
@@ -84,7 +84,7 @@ export const designSystem = {
       nav: "flex flex-col gap-2",
       link:
         "flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium leading-snug text-gray-300 transition-all duration-200 hover:bg-primary/15 hover:text-white",
-      linkActive: "bg-primary/90 text-white shadow-sm",
+      linkActive: "bg-primary/90 font-semibold text-white shadow-sm",
       /** Logout sits after nav items; top rule separates it without pushing it to the viewport bottom. */
       logout:
         "mt-2 border-t border-white/10 pt-3 text-gray-300 hover:bg-primary/15 hover:text-white",
@@ -126,7 +126,7 @@ export const designSystem = {
 
   button: {
     base:
-      "inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
     primary:
       "bg-primary text-white shadow-sm hover:bg-primaryDark hover:-translate-y-px focus:ring-primary/50",
     secondary:
@@ -168,7 +168,7 @@ export const designSystem = {
         "transition-colors duration-150 odd:bg-card even:bg-card hover:bg-gray-50 [&:last-child_td]:border-b-0",
     },
     cell: {
-      head: "border-b border-gray-200 px-4 py-3 text-left text-sm font-medium text-textPrimary",
+      head: "border-b border-gray-200 px-4 py-3 text-left text-sm font-semibold text-textPrimary",
       body: "border-b border-gray-200 px-4 py-4 align-middle text-textSecondary",
     },
   },

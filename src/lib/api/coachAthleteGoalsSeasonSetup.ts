@@ -69,6 +69,102 @@ export type GoalSummary = {
 };
 
 export type GoalPriority = "LOW" | "MEDIUM" | "HIGH";
+export type GoalLibraryAthleteLevel =
+  | "BEGINNER"
+  | "INTERMEDIATE"
+  | "ADVANCED"
+  | "ELITE";
+export type GoalLibraryDomain = "SKILLS" | "S_AND_C" | "NUTRITION";
+export type GoalSourceType = "CUSTOM" | "LIBRARY";
+
+export type GoalLibraryItem = {
+  libraryGoalId: string;
+  goalName: string;
+  goalType: string;
+  goalCategory: string;
+  domain?: GoalLibraryDomain | null;
+  defaultDomain?: GoalLibraryDomain | null;
+  categoryKey: string;
+  categoryLabel: string;
+  taxonomyAreaKey: string;
+  athleteLevel: GoalLibraryAthleteLevel;
+  seasonPhases: string[];
+  successCriteria: string[];
+  metricsToWatch: string[];
+  capabilityCodes: string[];
+  recommendedDomains?: GoalLibraryDomain[];
+};
+
+export type GoalLibraryCategory = {
+  categoryKey: string;
+  categoryLabel: string;
+  levels: Record<GoalLibraryAthleteLevel, GoalLibraryItem[]>;
+};
+
+export type GoalLibraryResponse = {
+  sportCode: string;
+  providerKey: string;
+  version: string;
+  categories: GoalLibraryCategory[];
+};
+
+export type GoalLibrarySnapshot = {
+  goalName: string;
+  categoryLabel: string;
+  successCriteria: string[];
+  metricsToWatch: string[];
+  capabilityCodes: string[];
+  recommendedDomains?: GoalLibraryDomain[];
+  seasonPhases: string[];
+};
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.reduce<string[]>((acc, item) => {
+    const parsed = readString(item);
+    if (parsed) acc.push(parsed);
+    return acc;
+  }, []);
+}
+
+function readGoalLibraryDomain(
+  value: unknown,
+): GoalLibraryDomain | null {
+  const parsed = readString(value);
+  return parsed === "SKILLS" || parsed === "S_AND_C" || parsed === "NUTRITION"
+    ? parsed
+    : null;
+}
+
+function readGoalLibraryDomainList(value: unknown): GoalLibraryDomain[] {
+  if (!Array.isArray(value)) return [];
+  return value.reduce<GoalLibraryDomain[]>((acc, item) => {
+    const parsed = readGoalLibraryDomain(item);
+    if (parsed) acc.push(parsed);
+    return acc;
+  }, []);
+}
+
+function readGoalLibraryAthleteLevel(
+  value: unknown,
+): GoalLibraryAthleteLevel | null {
+  const parsed = readString(value);
+  return parsed === "BEGINNER" ||
+    parsed === "INTERMEDIATE" ||
+    parsed === "ADVANCED" ||
+    parsed === "ELITE"
+    ? parsed
+    : null;
+}
+
+function emptyGoalLibraryLevels(): Record<GoalLibraryAthleteLevel, GoalLibraryItem[]> {
+  return {
+    BEGINNER: [],
+    INTERMEDIATE: [],
+    ADVANCED: [],
+    ELITE: [],
+  };
+}
 
 function parseSeasonCycle(value: unknown): SeasonCycleSummary | null {
   const record = asRecord(value);
@@ -129,6 +225,95 @@ function parseGoal(value: unknown): GoalSummary | null {
     targetValue: readNumber(record.targetValue),
     startDate: readString(record.startDate),
     targetDate: readString(record.targetDate),
+  };
+}
+
+function parseGoalLibraryItem(value: unknown): GoalLibraryItem | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const libraryGoalId = readString(record.libraryGoalId);
+  const goalName = readString(record.goalName);
+  const goalType = readString(record.goalType);
+  const goalCategory = readString(record.goalCategory);
+  const categoryKey = readString(record.categoryKey);
+  const categoryLabel = readString(record.categoryLabel);
+  const taxonomyAreaKey = readString(record.taxonomyAreaKey);
+  const athleteLevel = readGoalLibraryAthleteLevel(record.athleteLevel);
+  if (
+    !libraryGoalId ||
+    !goalName ||
+    !goalType ||
+    !goalCategory ||
+    !categoryKey ||
+    !categoryLabel ||
+    !taxonomyAreaKey ||
+    !athleteLevel
+  ) {
+    return null;
+  }
+
+  return {
+    libraryGoalId,
+    goalName,
+    goalType,
+    goalCategory,
+    domain: readGoalLibraryDomain(record.domain),
+    defaultDomain: readGoalLibraryDomain(record.defaultDomain),
+    categoryKey,
+    categoryLabel,
+    taxonomyAreaKey,
+    athleteLevel,
+    seasonPhases: readStringArray(record.seasonPhases),
+    successCriteria: readStringArray(record.successCriteria),
+    metricsToWatch: readStringArray(record.metricsToWatch),
+    capabilityCodes: readStringArray(record.capabilityCodes),
+    recommendedDomains: readGoalLibraryDomainList(record.recommendedDomains),
+  };
+}
+
+function parseGoalLibraryCategory(value: unknown): GoalLibraryCategory | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const categoryKey = readString(record.categoryKey);
+  const categoryLabel = readString(record.categoryLabel);
+  const levelsRecord = asRecord(record.levels);
+  if (!categoryKey || !categoryLabel || !levelsRecord) return null;
+
+  const levels = emptyGoalLibraryLevels();
+  for (const levelKey of Object.keys(levels) as GoalLibraryAthleteLevel[]) {
+    const items = Array.isArray(levelsRecord[levelKey]) ? levelsRecord[levelKey] : [];
+    levels[levelKey] = items
+      .map(parseGoalLibraryItem)
+      .filter((item): item is GoalLibraryItem => item !== null);
+  }
+
+  return {
+    categoryKey,
+    categoryLabel,
+    levels,
+  };
+}
+
+function parseGoalLibraryResponse(value: unknown): GoalLibraryResponse {
+  const data = adaptBackendSuccess(value);
+  const record = asRecord(data);
+  if (!record) {
+    throw {
+      message: "Goal library response must be an object.",
+      status: 500,
+      code: "GOAL_LIBRARY_INVALID",
+    } satisfies NormalizedApiError;
+  }
+
+  const categories = extractList(record, ["categories"])
+    .map(parseGoalLibraryCategory)
+    .filter((item): item is GoalLibraryCategory => item !== null);
+
+  return {
+    sportCode: readString(record.sportCode) ?? "",
+    providerKey: readString(record.providerKey) ?? "",
+    version: readString(record.version) ?? "",
+    categories,
   };
 }
 
@@ -322,6 +507,28 @@ export async function fetchGoalsForAthlete(athleteId: string): Promise<GoalSumma
     .filter((item): item is GoalSummary => item !== null);
 }
 
+export async function fetchGoalLibrary(input: {
+  sport: string;
+  seasonPhase?: string | null;
+  level?: GoalLibraryAthleteLevel | null;
+  categoryKey?: string | null;
+}): Promise<GoalLibraryResponse> {
+  const sport = requireNonEmpty(input.sport, "sport");
+  const raw = await apiRequest(
+    paths.goalLibrary({
+      sport,
+      seasonPhase: input.seasonPhase ?? null,
+      level: input.level ?? null,
+      categoryKey: input.categoryKey ?? null,
+    }),
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+  );
+  return parseGoalLibraryResponse(raw);
+}
+
 export async function createGoal(input: {
   athleteId: string;
   entityId: string;
@@ -378,15 +585,21 @@ export async function createPhaseAwareGoal(input: {
   entityId: string;
   seasonCycleId: string;
   seasonPhaseId: string;
-  goalType: "PERFORMANCE";
+  goalType: string;
   domain: "SKILLS" | "S_AND_C" | "NUTRITION";
   goalName: string;
   successCriteria?: string;
-  goalCategory: "TRAINING";
+  goalCategory: string;
   createdByCoachId: string;
   priority?: GoalPriority;
   targetValue?: number;
   targetDate?: string;
+  goalSourceType?: GoalSourceType;
+  libraryGoalId?: string;
+  categoryKey?: string;
+  taxonomyAreaKey?: string;
+  athleteLevelSnapshot?: GoalLibraryAthleteLevel;
+  librarySnapshotJson?: GoalLibrarySnapshot;
 }): Promise<GoalSummary> {
   const body: Record<string, unknown> = {
     athleteId: requireNonEmpty(input.athleteId, "athleteId"),
@@ -410,6 +623,27 @@ export async function createPhaseAwareGoal(input: {
   }
   if (typeof input.targetDate === "string" && input.targetDate.trim() !== "") {
     body.targetDate = input.targetDate.trim();
+  }
+  if (typeof input.goalSourceType === "string" && input.goalSourceType.trim() !== "") {
+    body.goalSourceType = input.goalSourceType.trim();
+  }
+  if (typeof input.libraryGoalId === "string" && input.libraryGoalId.trim() !== "") {
+    body.libraryGoalId = input.libraryGoalId.trim();
+  }
+  if (typeof input.categoryKey === "string" && input.categoryKey.trim() !== "") {
+    body.categoryKey = input.categoryKey.trim();
+  }
+  if (typeof input.taxonomyAreaKey === "string" && input.taxonomyAreaKey.trim() !== "") {
+    body.taxonomyAreaKey = input.taxonomyAreaKey.trim();
+  }
+  if (
+    typeof input.athleteLevelSnapshot === "string" &&
+    input.athleteLevelSnapshot.trim() !== ""
+  ) {
+    body.athleteLevelSnapshot = input.athleteLevelSnapshot.trim();
+  }
+  if (input.librarySnapshotJson) {
+    body.librarySnapshotJson = input.librarySnapshotJson;
   }
 
   const raw = await apiRequest(paths.goals.root, {

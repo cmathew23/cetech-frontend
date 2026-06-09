@@ -308,13 +308,16 @@ export function CoachWeeklyAdherenceOverview({
                     showSectionHeader={false}
                   />
                 ) : null}
-                <div className="mt-3">
-                  <SportMetricsSection
-                    entityId={entityId}
-                    athleteId={entry.athlete.athleteId}
-                    trainingPlanVersionId={entry.trainingPlanVersionId}
-                  />
-                </div>
+                {wearableViewerContext !== "NUTRITION" &&
+                  wearableViewerContext !== "S_AND_C" ? (
+                  <div className="mt-3">
+                    <SportMetricsSection
+                      entityId={entityId}
+                      athleteId={entry.athlete.athleteId}
+                      trainingPlanVersionId={entry.trainingPlanVersionId}
+                    />
+                  </div>
+                ) : null}
                 {entry.weekRange ? (
                   <div className="mt-3">
                     <WearableSummarySection

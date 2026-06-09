@@ -8,9 +8,9 @@ import {
 import type { GenerationDomain } from "@/lib/coachAuthority";
 
 type AnyRecord = Record<string, unknown>;
-const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 120_000;
-/** Persist-draft POST can carry large planner payloads; keep below generic client default. */
-const TRAINING_PLAN_PERSIST_DRAFT_TIMEOUT_MS = 60_000;
+const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 480_000;
+/** Persist-draft POST can carry large planner payloads after AI generation. */
+const TRAINING_PLAN_PERSIST_DRAFT_TIMEOUT_MS = 480_000;
 /** Latest-domain-draft GET can return large day/session graphs. */
 const TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS = 60_000;
 /** Active/detail can return large persisted plan graphs and is needed for assistant plan viewing. */
@@ -365,6 +365,25 @@ export type CoachAthleteTrainingPlanExecuteResult = {
   } | null;
   generatedPlannerCandidate: unknown;
   generationContextSnapshot: unknown;
+  raw: unknown;
+};
+
+export type TrainingPlanGenerationJobStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED";
+
+export type TrainingPlanGenerationJobStage = string | null;
+
+export type CoachAthleteTrainingPlanGenerationJob = {
+  jobId: string | null;
+  domain: TrainingPlanGenerationDomain | null;
+  status: TrainingPlanGenerationJobStatus | null;
+  progressPercent: number | null;
+  progressStage: TrainingPlanGenerationJobStage;
+  progressMessage: string | null;
+  errorMessage: string | null;
   raw: unknown;
 };
 
@@ -1403,20 +1422,25 @@ function mergeUpstreamWorkloadRecords(
     if (workload.summary !== null && merged.summary === null) {
       merged.summary = workload.summary;
     }
-    if (
-      workload.recommendedRange.minHours !== null &&
-      merged.recommendedRange.minHours === null
-    ) {
-      merged.recommendedRange.minHours = workload.recommendedRange.minHours;
-    }
-    if (
-      workload.recommendedRange.maxHours !== null &&
-      merged.recommendedRange.maxHours === null
-    ) {
-      merged.recommendedRange.maxHours = workload.recommendedRange.maxHours;
-    }
-    if (workload.recommendedRange.label !== null && merged.recommendedRange.label === null) {
-      merged.recommendedRange.label = workload.recommendedRange.label;
+    if (workload.recommendedRange !== null && merged.recommendedRange !== null) {
+      if (
+        workload.recommendedRange.minHours !== null &&
+        merged.recommendedRange.minHours === null
+      ) {
+        merged.recommendedRange.minHours = workload.recommendedRange.minHours;
+      }
+      if (
+        workload.recommendedRange.maxHours !== null &&
+        merged.recommendedRange.maxHours === null
+      ) {
+        merged.recommendedRange.maxHours = workload.recommendedRange.maxHours;
+      }
+      if (
+        workload.recommendedRange.label !== null &&
+        merged.recommendedRange.label === null
+      ) {
+        merged.recommendedRange.label = workload.recommendedRange.label;
+      }
     }
   }
 
@@ -1433,9 +1457,9 @@ function mergeUpstreamWorkloadRecords(
     merged.trainingLoadStatus !== null ||
     merged.restrictionSummary !== null ||
     merged.summary !== null ||
-    merged.recommendedRange.minHours !== null ||
-    merged.recommendedRange.maxHours !== null ||
-    merged.recommendedRange.label !== null;
+    merged.recommendedRange?.minHours != null ||
+    merged.recommendedRange?.maxHours != null ||
+    merged.recommendedRange?.label != null;
 
   return hasData ? merged : null;
 }
@@ -1798,6 +1822,51 @@ function parseExecutePayload(data: unknown): CoachAthleteTrainingPlanExecuteResu
   };
 }
 
+function parseTrainingPlanGenerationJobPayload(
+  data: unknown,
+): CoachAthleteTrainingPlanGenerationJob {
+  const records = collectRecords(data);
+  const rawDomain =
+    readStringKey(records, ["domain", "generationDomain"])
+    ?? readStringKey(records, ["jobDomain"]);
+  const normalizedDomain =
+    rawDomain === "SKILLS" || rawDomain === "NUTRITION" || rawDomain === "S_AND_C"
+      ? rawDomain
+      : null;
+  const rawStatus = readStringKey(records, ["status", "jobStatus"]);
+  const normalizedStatus =
+    rawStatus === "QUEUED" ||
+    rawStatus === "RUNNING" ||
+    rawStatus === "COMPLETED" ||
+    rawStatus === "FAILED"
+      ? rawStatus
+      : null;
+  const progressPercent = readNumberKey(records, ["progressPercent"]);
+  const nestedError = records
+    .map((record) => asRecord(record.error))
+    .find((record) => record !== null) ?? null;
+  const errorMessage =
+    readStringKey(records, ["errorMessage"])
+    ?? readStringKey(nestedError ? [nestedError] : [], ["errorMessage", "message"]);
+
+  return {
+    jobId: readStringKey(records, ["jobId"]),
+    domain: normalizedDomain,
+    status: normalizedStatus,
+    progressPercent:
+      typeof progressPercent === "number"
+      && Number.isFinite(progressPercent)
+      && progressPercent >= 0
+      && progressPercent <= 100
+        ? progressPercent
+        : null,
+    progressStage: readStringKey(records, ["progressStage", "stage"]),
+    progressMessage: readStringKey(records, ["progressMessage", "message"]),
+    errorMessage,
+    raw: data,
+  };
+}
+
 function parsePersistDraftPayload(data: unknown): CoachAthleteTrainingPlanPersistDraftResult {
   const records = collectRecords(data);
   return {
@@ -2038,6 +2107,69 @@ export async function executeCoachAthleteTrainingPlan(
   return parseExecutePayload(adaptBackendSuccess(raw));
 }
 
+export async function startCoachAthleteTrainingPlanGenerationJob(
+  entityId: string,
+  athleteId: string,
+  payload: {
+    sportCode: string;
+    durationDays: 7 | 15 | 30;
+    generationDomain: TrainingPlanGenerationDomain;
+  },
+): Promise<CoachAthleteTrainingPlanGenerationJob> {
+  const ids = assertIds(entityId, athleteId);
+  const sportCode = payload.sportCode.trim();
+  const generationDomain = payload.generationDomain;
+  if (sportCode === "") {
+    throw {
+      message: "sportCode is required",
+      status: 400,
+      code: "SPORT_CODE_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanGenerationJobs(ids.entityId, ids.athleteId),
+    {
+      method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+      body: JSON.stringify({
+        sportCode,
+        durationDays: payload.durationDays,
+        generationDomain,
+      }),
+    },
+  );
+  return parseTrainingPlanGenerationJobPayload(adaptBackendSuccess(raw));
+}
+
+export async function fetchCoachAthleteTrainingPlanGenerationJob(
+  entityId: string,
+  athleteId: string,
+  jobId: string,
+): Promise<CoachAthleteTrainingPlanGenerationJob> {
+  const ids = assertIds(entityId, athleteId);
+  const normalizedJobId = jobId.trim();
+  if (normalizedJobId === "") {
+    throw {
+      message: "jobId is required",
+      status: 400,
+      code: "TRAINING_PLAN_GENERATION_JOB_ID_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanGenerationJobById(
+      ids.entityId,
+      ids.athleteId,
+      normalizedJobId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+    },
+  );
+  return parseTrainingPlanGenerationJobPayload(adaptBackendSuccess(raw));
+}
+
 export async function persistCoachAthleteTrainingPlanDraft(
   entityId: string,
   athleteId: string,
@@ -2165,6 +2297,7 @@ export async function submitTrainingPlanReview(
     ),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
       body: JSON.stringify({ generationDomain: domain }),
     },
   );
@@ -2211,6 +2344,7 @@ export async function headApproveTrainingPlan(
     ),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
       body: JSON.stringify({ generationDomain: domain }),
     },
   );
@@ -2266,6 +2400,7 @@ export async function requestTrainingPlanRevision(
     ),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
       body: JSON.stringify({
         generationDomain: domain,
         coachFeedback: feedback,
@@ -2313,6 +2448,7 @@ export async function releaseTrainingPlanToAthlete(
     ),
     {
       method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
       body: JSON.stringify({ generationDomain: domain }),
     },
   );

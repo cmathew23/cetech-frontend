@@ -187,6 +187,14 @@ export const paths = {
     },
     athleteTrainingPlanExecute: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/execute`,
+    athleteTrainingPlanGenerationJobs: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/jobs`,
+    athleteTrainingPlanGenerationJobById: (
+      entityId: string,
+      athleteId: string,
+      jobId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/jobs/${encodeURIComponent(jobId)}`,
     athleteTrainingPlanPersistDraft: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/persist-draft`,
     athleteTrainingPlanLatestDomainDraft: (
@@ -320,5 +328,21 @@ export const paths = {
     byId: (goalId: string) => `/goals/${encodeURIComponent(goalId)}`,
     patchStatus: (goalId: string) =>
       `/goals/${encodeURIComponent(goalId)}/status`,
+  },
+  goalLibrary: (query: {
+    sport: string;
+    seasonPhase?: string | null;
+    level?: string | null;
+    categoryKey?: string | null;
+  }) => {
+    const params = new URLSearchParams();
+    params.set("sport", query.sport);
+    const seasonPhase = query.seasonPhase?.trim() ?? "";
+    if (seasonPhase !== "") params.set("seasonPhase", seasonPhase);
+    const level = query.level?.trim() ?? "";
+    if (level !== "") params.set("level", level);
+    const categoryKey = query.categoryKey?.trim() ?? "";
+    if (categoryKey !== "") params.set("categoryKey", categoryKey);
+    return `/goal-library?${params.toString()}`;
   },
 } as const;

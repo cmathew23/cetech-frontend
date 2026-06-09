@@ -12,6 +12,7 @@ vi.mock("@/lib/apiClient", () => ({
 import { paths } from "@/config/endpoints";
 import {
   executeCoachAthleteTrainingPlan,
+  fetchCoachAthleteTrainingPlanGenerationJob,
   fetchAthleteTodayPlan,
   fetchAthleteWeeklyPlanJournal,
   fetchCoachAthleteTrainingPlanCompleteness,
@@ -32,6 +33,7 @@ import {
   requestRevision,
   reviseNutritionPlan,
   releaseTrainingPlanVersionToAthlete,
+  startCoachAthleteTrainingPlanGenerationJob,
   submitReview,
   submitTrainingPlanVersionForReview,
 } from "@/lib/api/coachAthletePlanningReadiness";
@@ -523,7 +525,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plan-generation/execute",
       {
         method: "POST",
-        timeoutMs: 120000,
+        timeoutMs: 480_000,
         body: JSON.stringify({
           sportCode: "SOCCER",
           durationDays: 7,
@@ -534,6 +536,92 @@ describe("parseReadinessPayload", () => {
     expect(result.completenessDecision).toEqual({
       canGenerate: false,
       missingRequirements: ["upstreamGenerationDecisionPassed", "seasonDefined"],
+    });
+  });
+
+  it("starts an async generation job", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        jobId: "job-1",
+        domain: "SKILLS",
+        status: "QUEUED",
+        progressPercent: 0,
+        progressStage: "QUEUED",
+        progressMessage: "Generation job queued.",
+      },
+    });
+
+    const result = await startCoachAthleteTrainingPlanGenerationJob(
+      "entity-1",
+      "athlete-1",
+      {
+        sportCode: "GOLF",
+        durationDays: 7,
+        generationDomain: "SKILLS",
+      },
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/jobs",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          sportCode: "GOLF",
+          durationDays: 7,
+          generationDomain: "SKILLS",
+        }),
+      },
+    );
+    expect(result).toMatchObject({
+      jobId: "job-1",
+      domain: "SKILLS",
+      status: "QUEUED",
+      progressPercent: 0,
+      progressStage: "QUEUED",
+      progressMessage: "Generation job queued.",
+    });
+  });
+
+  it("polls a generation job and parses safe error messages", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        jobId: "job-1",
+        domain: "NUTRITION",
+        status: "FAILED",
+        progressPercent: 65,
+        progressStage: "GENERATING",
+        progressMessage: "Generating meals...",
+        error: {
+          errorMessage: "Planner service timed out.",
+        },
+      },
+    });
+
+    const result = await fetchCoachAthleteTrainingPlanGenerationJob(
+      "entity-1",
+      "athlete-1",
+      "job-1",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/jobs/job-1",
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 480_000,
+      },
+    );
+    expect(result).toMatchObject({
+      jobId: "job-1",
+      domain: "NUTRITION",
+      status: "FAILED",
+      progressPercent: 65,
+      progressStage: "GENERATING",
+      progressMessage: "Generating meals...",
+      errorMessage: "Planner service timed out.",
     });
   });
 
@@ -552,6 +640,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/submit-review",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "SKILLS" }),
       },
     );
@@ -572,6 +661,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/submit-review",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "SKILLS" }),
       },
     );
@@ -592,6 +682,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/head-approve",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "NUTRITION" }),
       },
     );
@@ -612,6 +703,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/head-approve",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "NUTRITION" }),
       },
     );
@@ -632,6 +724,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/release",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "S_AND_C" }),
       },
     );
@@ -652,6 +745,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/release",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "S_AND_C" }),
       },
     );
@@ -681,6 +775,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/request-revision",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({
           generationDomain: "SKILLS",
           coachFeedback: "Tighten the drill progression",
@@ -716,6 +811,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/request-revision",
       {
         method: "POST",
+        timeoutMs: 480_000,
         body: JSON.stringify({
           generationDomain: "SKILLS",
           coachFeedback: "Tighten the drill progression",
@@ -740,7 +836,7 @@ describe("parseReadinessPayload", () => {
       "/entities/entity-1/athletes/athlete-1/training-plan-generation/nutrition/revise",
       {
         method: "POST",
-        timeoutMs: 120000,
+        timeoutMs: 480_000,
         body: JSON.stringify({
           trainingPlanId: "plan-1",
           versionId: "version-2",
@@ -855,6 +951,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 240_000,
       },
     );
     expect(result.domains.SKILLS.status).toBe("RELEASED");
@@ -877,6 +974,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 240_000,
       },
     );
     expect(result.domains.SKILLS.status).toBe("NOT_RELEASED");
@@ -893,7 +991,7 @@ describe("training plan generation timeouts and helpers", () => {
     apiRequestMock.mockReset();
   });
 
-  it("persist-draft uses 60s client timeout", async () => {
+  it("persist-draft uses extended client timeout", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,
       data: {
@@ -921,7 +1019,7 @@ describe("training plan generation timeouts and helpers", () => {
       "/entities/entity-1/athletes/athlete-1/training-plan-generation/persist-draft",
       expect.objectContaining({
         method: "POST",
-        timeoutMs: 60_000,
+        timeoutMs: 480_000,
       }),
     );
   });

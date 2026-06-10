@@ -194,6 +194,53 @@ describe("parseSportMetricsGolfWeeklySummaryPayload unlinkedEvidence", () => {
     expect(parsed.unlinkedEvidence).toHaveLength(1);
     expect(parsed.unlinkedEvidence[0]?.label).toBe("Flat unlinked");
   });
+
+  it("does not treat an empty goal evidence shell as a linked evidence record", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        sport: "GOLF",
+        weekStartDate: "2026-06-01",
+        weekEndDate: "2026-06-07",
+        status: "NO_DATA_LOGGED",
+        goalEvidence: [
+          {
+            goalId: "goal-801",
+            goalTitle: "Improving Putting performance",
+            evidenceStatus: "NO_DATA_LOGGED",
+            status: "NO_DATA_LOGGED",
+            evidence: [],
+          },
+        ],
+        unlinkedEvidence: [
+          {
+            id: "r1",
+            label: "Drill 1",
+            result: { attempts: 8, successes: 6, successRate: 75 },
+          },
+        ],
+      },
+    });
+
+    expect(parsed.goalEvidence[0]?.evidence).toEqual([]);
+    expect(parsed.goalEvidence[0]?.evidenceStatus).toBe("NO_DATA_LOGGED");
+    expect(parsed.unlinkedEvidence).toHaveLength(1);
+    expect(hasSportMetricsGolfEvidence(parsed)).toBe(true);
+  });
+
+  it("parses optional prescribedSkillsCount from summary payload", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        sport: "GOLF",
+        prescribedSkillsCount: 6,
+        goalEvidence: [],
+        unlinkedEvidence: [],
+      },
+    });
+
+    expect(parsed.prescribedSkillsCount).toBe(6);
+  });
 });
 
 describe("buildGolfSportMetricRecordRequestBody", () => {

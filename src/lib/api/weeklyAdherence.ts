@@ -61,9 +61,16 @@ export type WeeklyAdherenceRecentNote = {
 };
 
 export type SessionDomainContext = {
-  completedSessions: number;
-  partialSessions: number;
-  missedSessions: number;
+  /** Prescribed drills or S&C exercises completed (item-based). */
+  completedItems: number;
+  /** Prescribed items with partial (0.5) credit. */
+  partialItems: number;
+  /** Prescribed items skipped or unlogged. */
+  missedItems: number;
+  /** Total prescribed items when provided in context. */
+  plannedItems: number;
+  /** Backend weighted completion credit when available. */
+  completionCredit: number | null;
   plannedDurationMinutes: number;
   actualDurationMinutes: number;
 };
@@ -83,6 +90,8 @@ export type NutritionDomainContext = {
   notEatenItems: number;
   extraItems: number;
   totalItems: number;
+  /** Backend weighted meal-item follow credit when available. */
+  completionCredit: number | null;
 };
 
 export type WeeklyAdherenceDomainContext =
@@ -128,16 +137,92 @@ function parseRecentNotes(raw: unknown): WeeklyAdherenceRecentNote[] {
   }, []);
 }
 
-function readFiniteNumber(value: unknown): number {
+function readNumericValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function readFiniteNumber(value: unknown): number {
+  return readNumericValue(value) ?? 0;
+}
+
+function readOptionalFiniteNumber(value: unknown): number | null {
+  return readNumericValue(value);
+}
+
+function readFiniteNumberFromKeys(
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+): number {
+  for (const key of keys) {
+    const parsed = readNumericValue(raw[key]);
+    if (parsed !== null) return parsed;
+  }
   return 0;
+}
+
+function readNonNegIntFromKeys(
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+): number {
+  for (const key of keys) {
+    const parsed = readNumericValue(raw[key]);
+    if (parsed !== null && parsed >= 0) return Math.floor(parsed);
+  }
+  return 0;
+}
+
+function readOptionalFiniteNumberFromKeys(
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+): number | null {
+  for (const key of keys) {
+    const parsed = readNumericValue(raw[key]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
 }
 
 function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainContext {
   return {
-    completedSessions: readNonNegInt(raw.completedSessions),
-    partialSessions: readNonNegInt(raw.partialSessions),
-    missedSessions: readNonNegInt(raw.missedSessions),
+    completedItems: readNonNegInt(
+      raw.completedItems ??
+        raw.completedEntries ??
+        raw.completedSessions ??
+        raw.completedCount,
+    ),
+    partialItems: readNonNegInt(
+      raw.partialItems ??
+        raw.partialEntries ??
+        raw.partialSessions ??
+        raw.partialCount,
+    ),
+    missedItems: readNonNegInt(
+      raw.missedItems ??
+        raw.skippedItems ??
+        raw.missedEntries ??
+        raw.missedSessions ??
+        raw.missedCount,
+    ),
+    plannedItems: readNonNegInt(
+      raw.plannedItems ??
+        raw.totalItems ??
+        raw.totalPrescribedItems ??
+        raw.prescribedItems ??
+        raw.plannedEntries ??
+        raw.plannedSessions,
+    ),
+    completionCredit: readOptionalFiniteNumberFromKeys(raw, [
+      "completionCredit",
+      "weightedCompletionCredit",
+      "weightedExerciseCredit",
+      "exerciseCompletionCredit",
+      "drillCompletionCredit",
+    ]),
     plannedDurationMinutes: readNonNegInt(raw.plannedDurationMinutes),
     actualDurationMinutes: readNonNegInt(raw.actualDurationMinutes),
   };
@@ -145,9 +230,26 @@ function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainC
 
 function parseNutritionDomainContext(raw: Record<string, unknown>): NutritionDomainContext {
   return {
-    plannedCaloriesKcal: readFiniteNumber(raw.plannedCaloriesKcal),
-    actualCaloriesKcal: readFiniteNumber(raw.actualCaloriesKcal),
-    calorieGapKcal: readFiniteNumber(raw.calorieGapKcal),
+    plannedCaloriesKcal: readFiniteNumberFromKeys(raw, [
+      "plannedCaloriesKcal",
+      "plannedCalories",
+      "plannedKcal",
+      "totalPlannedCaloriesKcal",
+      "totalPlannedCalories",
+    ]),
+    actualCaloriesKcal: readFiniteNumberFromKeys(raw, [
+      "actualCaloriesKcal",
+      "actualCalories",
+      "consumedCaloriesKcal",
+      "consumedCalories",
+      "loggedCaloriesKcal",
+      "loggedCalories",
+    ]),
+    calorieGapKcal: readFiniteNumberFromKeys(raw, [
+      "calorieGapKcal",
+      "calorieGap",
+      "caloriesGapKcal",
+    ]),
     plannedProteinG: readFiniteNumber(raw.plannedProteinG),
     actualProteinG: readFiniteNumber(raw.actualProteinG),
     plannedCarbohydrateG: readFiniteNumber(raw.plannedCarbohydrateG),
@@ -158,8 +260,82 @@ function parseNutritionDomainContext(raw: Record<string, unknown>): NutritionDom
     halfItems: readNonNegInt(raw.halfItems),
     notEatenItems: readNonNegInt(raw.notEatenItems),
     extraItems: readNonNegInt(raw.extraItems),
-    totalItems: readNonNegInt(raw.totalItems),
+    totalItems: readNonNegIntFromKeys(raw, [
+      "totalItems",
+      "totalPrescribedItems",
+      "prescribedItems",
+      "plannedItems",
+    ]),
+    completionCredit: readOptionalFiniteNumberFromKeys(raw, [
+      "completionCredit",
+      "weightedCompletionCredit",
+      "weightedMealCredit",
+      "mealCompletionCredit",
+    ]),
   };
+}
+
+function nutritionContextHasSignal(raw: Record<string, unknown>): boolean {
+  const signalKeys = [
+    "fullItems",
+    "halfItems",
+    "notEatenItems",
+    "totalItems",
+    "totalPrescribedItems",
+    "plannedCaloriesKcal",
+    "plannedCalories",
+    "actualCaloriesKcal",
+    "actualCalories",
+    "completionCredit",
+    "weightedCompletionCredit",
+  ] as const;
+  return signalKeys.some((key) => key in raw);
+}
+
+function parseNutritionContextFromDomainRow(
+  row: Record<string, unknown>,
+): NutritionDomainContext | null {
+  const contextRecord = asRecord(row.context);
+  const merged: Record<string, unknown> = { ...row };
+  if (contextRecord) {
+    Object.assign(merged, contextRecord);
+  }
+  if (!nutritionContextHasSignal(merged)) return null;
+  return parseNutritionDomainContext(merged);
+}
+
+function sessionContextHasSignal(raw: Record<string, unknown>): boolean {
+  const signalKeys = [
+    "completedItems",
+    "completedEntries",
+    "completedSessions",
+    "partialItems",
+    "partialEntries",
+    "partialSessions",
+    "missedItems",
+    "missedSessions",
+    "plannedItems",
+    "totalItems",
+    "totalPrescribedItems",
+    "prescribedItems",
+    "completionCredit",
+    "weightedCompletionCredit",
+    "plannedDurationMinutes",
+    "actualDurationMinutes",
+  ] as const;
+  return signalKeys.some((key) => key in raw);
+}
+
+function parseSessionContextFromDomainRow(
+  row: Record<string, unknown>,
+): SessionDomainContext | null {
+  const contextRecord = asRecord(row.context);
+  const merged: Record<string, unknown> = { ...row };
+  if (contextRecord) {
+    Object.assign(merged, contextRecord);
+  }
+  if (!sessionContextHasSignal(merged)) return null;
+  return parseSessionDomainContext(merged);
 }
 
 function parseDomainContext(
@@ -183,7 +359,10 @@ function parseDomainSummary(
     loggedSessions: readNonNegInt(row.loggedSessions),
     adherencePercent: readPercent(row.adherencePercent),
     recentNotes: parseRecentNotes(row.recentNotes),
-    context: parseDomainContext(domainKey, row.context),
+    context:
+      domainKey === "NUTRITION"
+        ? parseNutritionContextFromDomainRow(row)
+        : parseSessionContextFromDomainRow(row),
   };
 }
 
@@ -303,14 +482,68 @@ export function hasNutritionAdherenceDomain(
   return summary?.domains.NUTRITION != null;
 }
 
+export function resolveNutritionTotalPrescribedItems(
+  ctx: NutritionDomainContext,
+): number {
+  if (ctx.totalItems > 0) return ctx.totalItems;
+  return ctx.fullItems + ctx.halfItems + ctx.notEatenItems;
+}
+
+/** Weighted meal-item credit for display; prefers backend completionCredit. */
+export function resolveNutritionCompletionCredit(
+  ctx: NutritionDomainContext,
+): number | null {
+  if (ctx.completionCredit != null) return ctx.completionCredit;
+  if (ctx.fullItems > 0 || ctx.halfItems > 0) {
+    return ctx.fullItems + ctx.halfItems * 0.5;
+  }
+  return null;
+}
+
+export function shouldUseNutritionWeightedCreditLine(
+  ctx: NutritionDomainContext,
+): boolean {
+  if (ctx.completionCredit != null) return true;
+  return ctx.halfItems > 0;
+}
+
+export function resolveSessionTotalPrescribedItems(
+  ctx: SessionDomainContext,
+  plannedFallback: number,
+): number {
+  if (ctx.plannedItems > 0) return ctx.plannedItems;
+  return plannedFallback;
+}
+
+export function resolveSessionCompletionCredit(
+  ctx: SessionDomainContext,
+): number | null {
+  if (ctx.completionCredit != null) return ctx.completionCredit;
+  if (ctx.completedItems > 0 || ctx.partialItems > 0) {
+    return ctx.completedItems + ctx.partialItems * 0.5;
+  }
+  return null;
+}
+
 export function isNutritionContext(
   ctx: WeeklyAdherenceDomainContext | null | undefined,
 ): ctx is NutritionDomainContext {
-  return ctx != null && "plannedCaloriesKcal" in ctx;
+  return (
+    ctx != null &&
+    ("plannedCaloriesKcal" in ctx ||
+      "fullItems" in ctx ||
+      "totalItems" in ctx ||
+      "completionCredit" in ctx)
+  );
 }
 
 export function isSessionContext(
   ctx: WeeklyAdherenceDomainContext | null | undefined,
 ): ctx is SessionDomainContext {
-  return ctx != null && "completedSessions" in ctx;
+  return (
+    ctx != null &&
+    ("completedItems" in ctx ||
+      "plannedDurationMinutes" in ctx ||
+      "actualDurationMinutes" in ctx)
+  );
 }

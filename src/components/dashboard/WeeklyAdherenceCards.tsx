@@ -7,6 +7,11 @@ import { cn } from "@/lib/utils";
 import {
   isNutritionContext,
   isSessionContext,
+  resolveNutritionCompletionCredit,
+  resolveNutritionTotalPrescribedItems,
+  resolveSessionCompletionCredit,
+  resolveSessionTotalPrescribedItems,
+  shouldUseNutritionWeightedCreditLine,
   type NutritionDomainContext,
   type SessionDomainContext,
   type WeeklyAdherenceDomainContext,
@@ -26,12 +31,24 @@ const DOMAIN_ORDER: WeeklyAdherenceDomainKey[] = [
   "STRENGTH_CONDITIONING",
 ];
 
+export const ADHERENCE_PERCENT_MEANING: Record<
+  WeeklyAdherenceDomainKey | "overall",
+  string
+> = {
+  overall: "Item-based plan adherence",
+  SKILL: "Prescribed drill completion",
+  NUTRITION: "Meal item adherence",
+  STRENGTH_CONDITIONING: "Prescribed exercise completion",
+};
+
 export type WeeklyAdherenceMetricTile = {
   key: string;
+  domainKey: WeeklyAdherenceDomainKey | "overall";
   label: string;
+  percentMeaning: string;
   adherencePercent: number;
   context: WeeklyAdherenceDomainContext | null;
-  plannedSessions: number;
+  plannedItems: number;
   isOverall: boolean;
 };
 
@@ -43,10 +60,12 @@ export function buildWeeklyAdherenceMetricTiles(
   if (summary.overall != null) {
     tiles.push({
       key: "overall",
+      domainKey: "overall",
       label: "Overall",
+      percentMeaning: ADHERENCE_PERCENT_MEANING.overall,
       adherencePercent: summary.overall.adherencePercent,
       context: null,
-      plannedSessions: 0,
+      plannedItems: 0,
       isOverall: true,
     });
   }
@@ -56,10 +75,12 @@ export function buildWeeklyAdherenceMetricTiles(
     if (domain) {
       tiles.push({
         key: domainKey,
+        domainKey,
         label: DOMAIN_LABELS[domainKey],
+        percentMeaning: ADHERENCE_PERCENT_MEANING[domainKey],
         adherencePercent: domain.adherencePercent,
         context: domain.context,
-        plannedSessions: domain.plannedSessions,
+        plannedItems: domain.plannedSessions,
         isOverall: false,
       });
     }
@@ -72,6 +93,93 @@ export function formatAdherencePercentDisplay(value: number): string {
   if (!Number.isFinite(value)) return "—";
   const rounded = Math.round(value * 10) / 10;
   return `${rounded % 1 === 0 ? Math.round(rounded) : rounded.toFixed(1)}%`;
+}
+
+function formatCompletionCredit(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1);
+}
+
+function formatNum(n: number): string {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+export function formatSessionItemCompletionLine(
+  domainKey: "SKILL" | "STRENGTH_CONDITIONING",
+  ctx: SessionDomainContext,
+  plannedFallback: number,
+): string {
+  const itemLabel =
+    domainKey === "SKILL" ? "prescribed skill drills" : "prescribed S&C exercises";
+  const planned = resolveSessionTotalPrescribedItems(ctx, plannedFallback);
+  const completionCredit = resolveSessionCompletionCredit(ctx);
+
+  if (completionCredit != null && planned > 0) {
+    return `${formatCompletionCredit(completionCredit)} of ${planned} ${itemLabel} completed`;
+  }
+
+  if (ctx.partialItems > 0) {
+    return `${ctx.completedItems} of ${planned} ${itemLabel} completed · ${ctx.partialItems} partial`;
+  }
+
+  return `${ctx.completedItems} of ${planned} ${itemLabel} completed`;
+}
+
+export function formatSessionMinutesContextLines(
+  ctx: SessionDomainContext,
+): string[] {
+  if (ctx.plannedDurationMinutes <= 0 && ctx.actualDurationMinutes <= 0) {
+    return [];
+  }
+
+  const variance = ctx.actualDurationMinutes - ctx.plannedDurationMinutes;
+  let varianceLine = "On planned duration";
+  if (variance > 0) {
+    varianceLine = `+${formatNum(variance)} min vs planned`;
+  } else if (variance < 0) {
+    varianceLine = `-${formatNum(Math.abs(variance))} min vs planned`;
+  }
+
+  return [
+    varianceLine,
+    `${formatNum(ctx.plannedDurationMinutes)} min planned · ${formatNum(ctx.actualDurationMinutes)} min actual`,
+  ];
+}
+
+export function formatNutritionItemCompletionLine(
+  ctx: NutritionDomainContext,
+): string {
+  const total = resolveNutritionTotalPrescribedItems(ctx);
+  const weightedCredit = resolveNutritionCompletionCredit(ctx);
+  const rawLogged = ctx.fullItems + ctx.halfItems;
+
+  if (
+    weightedCredit != null &&
+    total > 0 &&
+    shouldUseNutritionWeightedCreditLine(ctx)
+  ) {
+    return `${formatCompletionCredit(weightedCredit)} of ${total} weighted meal-credit followed`;
+  }
+
+  return `${rawLogged} of ${total} meal items followed`;
+}
+
+export function formatNutritionItemStatusLine(ctx: NutritionDomainContext): string {
+  const parts = [
+    `${ctx.fullItems} full`,
+    `${ctx.halfItems} half`,
+    `${ctx.notEatenItems} missed`,
+  ];
+  if (ctx.extraItems > 0) {
+    parts.push(`${ctx.extraItems} extra`);
+  }
+  return parts.join(" · ");
+}
+
+export function formatNutritionCalorieContextLine(
+  ctx: NutritionDomainContext,
+): string {
+  return `${formatNum(ctx.actualCaloriesKcal)} / ${formatNum(ctx.plannedCaloriesKcal)} kcal`;
 }
 
 type AdherenceStatus = {
@@ -99,10 +207,6 @@ function percentToneClass(percent: number): string {
   return "text-slate-600";
 }
 
-function formatNum(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-}
-
 function AdherenceStatusBadge({ percent }: { percent: number }) {
   const status = resolveAdherenceStatus(percent);
   return (
@@ -113,77 +217,71 @@ function AdherenceStatusBadge({ percent }: { percent: number }) {
 }
 
 function SessionContextLines({
+  domainKey,
   ctx,
-  plannedSessions,
+  plannedItems,
 }: {
+  domainKey: "SKILL" | "STRENGTH_CONDITIONING";
   ctx: SessionDomainContext;
-  plannedSessions: number;
+  plannedItems: number;
 }) {
-  const variance = ctx.actualDurationMinutes - ctx.plannedDurationMinutes;
-  let varianceLine = "On planned duration";
-  if (variance > 0) {
-    varianceLine = `+${formatNum(variance)} min vs planned`;
-  } else if (variance < 0) {
-    varianceLine = `-${formatNum(Math.abs(variance))} min vs planned`;
-  }
-
-  const showDuration =
-    ctx.plannedDurationMinutes > 0 || ctx.actualDurationMinutes > 0;
+  const minuteLines = formatSessionMinutesContextLines(ctx);
 
   return (
     <>
       <p className="text-[11px] leading-tight text-textSecondary">
-        {ctx.completedSessions} of {plannedSessions} completed
+        {formatSessionItemCompletionLine(domainKey, ctx, plannedItems)}
       </p>
-      {showDuration ? (
-        <>
-          <p className="text-[11px] leading-tight text-textSecondary">{varianceLine}</p>
-          <p className="text-[10px] leading-tight text-textMuted">
-            {formatNum(ctx.plannedDurationMinutes)} min planned ·{" "}
-            {formatNum(ctx.actualDurationMinutes)} min actual
-          </p>
-        </>
-      ) : null}
+      {minuteLines.map((line) => (
+        <p
+          key={line}
+          className={cn(
+            "text-[11px] leading-tight text-textSecondary",
+            line.includes("min planned") && "text-[10px] text-textMuted",
+          )}
+        >
+          {line}
+        </p>
+      ))}
     </>
   );
 }
 
 function NutritionContextLines({ ctx }: { ctx: NutritionDomainContext }) {
-  const gap = ctx.calorieGapKcal;
-  let gapLine = "On calorie target";
-  if (gap < 0) {
-    gapLine = `${formatNum(Math.abs(gap))} kcal below plan`;
-  } else if (gap > 0) {
-    gapLine = `+${formatNum(gap)} kcal above plan`;
-  }
-
-  const itemParts = [
-    `${ctx.fullItems} full`,
-    `${ctx.halfItems} half`,
-    `${ctx.notEatenItems} missed`,
-  ];
-  if (ctx.extraItems > 0) {
-    itemParts.push(`${ctx.extraItems} extra`);
-  }
-
   return (
     <>
       <p className="text-[11px] leading-tight text-textSecondary">
-        {formatNum(ctx.actualCaloriesKcal)} / {formatNum(ctx.plannedCaloriesKcal)} kcal
+        {formatNutritionItemCompletionLine(ctx)}
       </p>
-      <p className="text-[11px] leading-tight text-textSecondary">{gapLine}</p>
-      <p className="text-[10px] leading-tight text-textMuted">{itemParts.join(" · ")}</p>
+      <p className="text-[11px] leading-tight text-textSecondary">
+        {formatNutritionItemStatusLine(ctx)}
+      </p>
+      <p className="text-[10px] leading-tight text-textMuted">
+        {formatNutritionCalorieContextLine(ctx)}
+      </p>
     </>
   );
 }
 
+function OverallContextLines() {
+  return (
+    <p className="text-[11px] leading-tight text-textSecondary">
+      Combined item-based adherence across visible plan domains
+    </p>
+  );
+}
+
 function TileContextDetail({ tile }: { tile: WeeklyAdherenceMetricTile }) {
-  if (tile.isOverall || tile.context === null) return null;
+  if (tile.isOverall) {
+    return <OverallContextLines />;
+  }
+  if (tile.context === null) return null;
   if (isSessionContext(tile.context)) {
     return (
       <SessionContextLines
+        domainKey={tile.domainKey as "SKILL" | "STRENGTH_CONDITIONING"}
         ctx={tile.context}
-        plannedSessions={tile.plannedSessions}
+        plannedItems={tile.plannedItems}
       />
     );
   }
@@ -210,6 +308,7 @@ function AdherenceMetricTile({ tile }: { tile: WeeklyAdherenceMetricTile }) {
       >
         {formatAdherencePercentDisplay(tile.adherencePercent)}
       </p>
+      <p className="mt-1 text-[10px] leading-tight text-textMuted">{tile.percentMeaning}</p>
       {contextDetail ? <div className="mt-1.5 space-y-0.5">{contextDetail}</div> : null}
     </div>
   );

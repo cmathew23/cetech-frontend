@@ -67,6 +67,29 @@ function pickUnknownArray(
   return [];
 }
 
+export type SportMetricSkillLink = {
+  skillCode: string | null;
+  skillArea: string | null;
+  sportCapability: string | null;
+  skillCategory: string | null;
+  drillName: string | null;
+};
+
+export type SportMetricResultData = {
+  attempts: number | null;
+  successes: number | null;
+  successRate: number | null;
+  qualityRating: number | null;
+  distanceBand: string | null;
+  targetRadius: string | null;
+  context: string | null;
+  missesLeft: number | null;
+  missesRight: number | null;
+  missesShort: number | null;
+  missesLong: number | null;
+  notes: string | null;
+};
+
 export type SportMetricEvidenceItem = {
   id: string | null;
   label: string;
@@ -77,6 +100,8 @@ export type SportMetricEvidenceItem = {
   notes: string | null;
   occurredAt: string | null;
   status: string | null;
+  skillLink: SportMetricSkillLink | null;
+  result: SportMetricResultData | null;
   raw: unknown;
 };
 
@@ -97,10 +122,63 @@ export type SportMetricsGolfWeeklySummary = {
   status: string;
   trainingPlanVersionId: string | null;
   contextFields: string[];
+  prescribedSkillsCount: number | null;
   goalEvidence: SportMetricGoalEvidenceGroup[];
   unlinkedEvidence: SportMetricEvidenceItem[];
   raw: unknown;
 };
+
+function readFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function parseSkillLink(raw: unknown): SportMetricSkillLink | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const skillCode = pickString(record, ["skillCode", "code"]);
+  const skillArea = pickString(record, ["skillArea", "golfTaxonomy", "taxonomy"]);
+  const sportCapability = pickString(record, ["sportCapability", "capability"]);
+  const skillCategory = pickString(record, ["skillCategory", "category"]);
+  const drillName = pickString(record, ["drillName", "name", "label"]);
+  if (!skillCode && !skillArea && !sportCapability && !skillCategory && !drillName) {
+    return null;
+  }
+  return { skillCode, skillArea, sportCapability, skillCategory, drillName };
+}
+
+function parseResultData(raw: unknown): SportMetricResultData | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const attempts = readFiniteNumber(record.attempts);
+  const successes = readFiniteNumber(record.successes ?? record.targetHits);
+  const successRate = readFiniteNumber(record.successRate);
+  const qualityRating = readFiniteNumber(record.qualityRating);
+  const distanceBand = pickString(record, ["distanceBand"]);
+  const targetRadius = pickString(record, ["targetRadius"]);
+  const context = pickString(record, ["context", "location"]);
+  const missesLeft = readFiniteNumber(record.missesLeft);
+  const missesRight = readFiniteNumber(record.missesRight);
+  const missesShort = readFiniteNumber(record.missesShort);
+  const missesLong = readFiniteNumber(record.missesLong);
+  const notes = pickString(record, ["notes"]);
+  if (
+    attempts === null && successes === null && successRate === null &&
+    qualityRating === null && !distanceBand && !context
+  ) {
+    return null;
+  }
+  return {
+    attempts, successes, successRate, qualityRating,
+    distanceBand, targetRadius, context,
+    missesLeft, missesRight, missesShort, missesLong,
+    notes,
+  };
+}
 
 function parseEvidenceItem(raw: unknown): SportMetricEvidenceItem | null {
   const record = asRecord(raw);
@@ -109,6 +187,10 @@ function parseEvidenceItem(raw: unknown): SportMetricEvidenceItem | null {
   const label =
     pickString(record, ["label", "metricLabel", "evidenceLabel", "title", "name"]) ??
     "Result";
+
+  const skillLink = parseSkillLink(record.skillLink);
+  const resultObj = asRecord(record.result) ?? asRecord(record.valueJson);
+  const result = parseResultData(resultObj);
 
   return {
     id: pickString(record, ["id", "recordId", "metricRecordId"]),
@@ -120,6 +202,8 @@ function parseEvidenceItem(raw: unknown): SportMetricEvidenceItem | null {
     notes: pickString(record, ["notes", "comment", "coachNote", "athleteNote"]),
     occurredAt: pickString(record, ["occurredAt", "recordedAt", "createdAt"]),
     status: pickString(record, ["status"]),
+    skillLink,
+    result,
     raw,
   };
 }
@@ -154,6 +238,20 @@ function parseEvidenceItemList(raw: unknown): SportMetricEvidenceItem[] {
   return single ? [single] : [];
 }
 
+function parseGoalGroupEvidenceList(
+  record: Record<string, unknown>,
+): SportMetricEvidenceItem[] {
+  for (const key of EVIDENCE_ITEM_CONTAINER_KEYS) {
+    const nested = readUnknownArray(record[key]);
+    if (nested.length > 0) {
+      return nested
+        .map(parseEvidenceItem)
+        .filter((item): item is SportMetricEvidenceItem => item !== null);
+    }
+  }
+  return [];
+}
+
 function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -164,7 +262,7 @@ function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | nu
     pickString(goal, ["title", "goalTitle", "name", "label"]) ??
     "Goal";
 
-  const evidence = parseEvidenceItemList(record);
+  const evidence = parseGoalGroupEvidenceList(record);
 
   return {
     goalId: pickString(record, ["goalId", "id"]),
@@ -249,6 +347,12 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
 
   const unlinkedEvidence = parseUnlinkedEvidenceFromSummary(record);
 
+  const prescribedSkillsCount =
+    readFiniteNumber(record.prescribedSkillsCount) ??
+    readFiniteNumber(record.skillsPrescribedCount) ??
+    readFiniteNumber(record.plannedSkillsCount) ??
+    readFiniteNumber(record.prescribedSkillCount);
+
   return {
     sport,
     weekStartDate,
@@ -256,6 +360,7 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
     status,
     trainingPlanVersionId: pickString(record, ["trainingPlanVersionId", "versionId"]),
     contextFields: pickStringArray(record, ["contextFields", "visibleContextFields"]),
+    prescribedSkillsCount,
     goalEvidence,
     unlinkedEvidence,
     raw: payload,
@@ -340,6 +445,7 @@ export type PostGolfSportMetricRecordPayload = {
   valueJson: Record<string, unknown>;
   goalId?: string;
   trainingSessionId?: string;
+  plannedSkillItemOrder?: number;
 };
 
 function assertPostGolfSportMetricRecordPayload(
@@ -421,6 +527,14 @@ export function buildGolfSportMetricRecordRequestBody(
 
   const trainingSessionId = body.trainingSessionId?.trim();
   if (trainingSessionId) requestBody.trainingSessionId = trainingSessionId;
+
+  if (
+    body.plannedSkillItemOrder !== undefined &&
+    Number.isInteger(body.plannedSkillItemOrder) &&
+    body.plannedSkillItemOrder >= 1
+  ) {
+    requestBody.plannedSkillItemOrder = body.plannedSkillItemOrder;
+  }
 
   return requestBody;
 }

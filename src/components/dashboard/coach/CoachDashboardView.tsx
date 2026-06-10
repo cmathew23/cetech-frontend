@@ -1,7 +1,6 @@
 "use client";
 
 import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
-import { CoachWeeklyAdherenceOverview } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import {
@@ -20,6 +19,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 const INVITATIONS_HREF = "/coach/dashboard/invitations";
 const ATHLETES_HREF = "/coach/athletes";
+const ATHLETE_PERFORMANCE_HREF = "/coach/athlete-performance";
 
 /** Matches Admin Dashboard primary invitation CTA styling. */
 const PRIMARY_ACTION_CLASS =
@@ -193,18 +193,13 @@ export function CoachDashboardView() {
           </div>
         </section>
 
-        <CoachWeeklyAdherenceOverview
-          academyCoachRole={dash?.academyCoachRole ?? null}
-          functions={dash?.functions ?? null}
-        />
-
         <section className="space-y-3">
           <div>
             <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
               Action required
             </h2>
             <p className="mt-1 text-xs text-textMuted">
-              Jump to invitations or your assigned athletes workspace.
+              Jump to invitations, athlete performance, or your assigned athletes workspace.
             </p>
           </div>
           <DashboardCardShell
@@ -224,6 +219,19 @@ export function CoachDashboardView() {
                 </div>
                 <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
                   Open invitations →
+                </span>
+              </Link>
+              <Link href={ATHLETE_PERFORMANCE_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-lg font-semibold text-textPrimary">
+                    Athlete Performance
+                  </p>
+                  <p className="text-sm text-textSecondary">
+                    View weekly adherence and performance for your assigned athletes.
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                  View performance →
                 </span>
               </Link>
               <Link href={ATHLETES_HREF} className={cn(PRIMARY_ACTION_CLASS)}>

@@ -3,6 +3,7 @@ import {
   Activity,
   Building2,
   Calendar,
+  MessageSquare,
   ClipboardList,
   LayoutDashboard,
   Link2,
@@ -37,6 +38,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/coach/athlete-performance", label: "Athlete Performance", icon: Activity },
   { href: "/coach/athletes", label: "Athletes", icon: Users },
+  { href: "/coach/chat", label: "Chat with Athlete", icon: MessageSquare },
   { href: "/coach/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/coach/training-plans", label: "Training Plan", icon: Calendar },
   { href: "/coach/dashboard/invitations", label: "Invitations", icon: Mail },
@@ -45,6 +47,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
 export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/athlete/weekly-plan", label: "Weekly Plan", icon: Calendar },
+  { href: "/athlete/chat", label: "Chat with Coach", icon: MessageSquare },
   { href: "/athlete/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/athlete/coaches", label: "Coaches", icon: Users },
   { href: "/athlete/dashboard/invitations", label: "Invitations", icon: Mail },

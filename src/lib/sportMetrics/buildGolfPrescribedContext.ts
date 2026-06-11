@@ -117,10 +117,17 @@ export function buildGolfPrescribedContext(
   const goalId = pickString(drill, ["goalId"]);
   const trainingSessionId = pickString(drill, ["trainingSessionId"]);
 
+  const skillArea = pickString(drill, ["skillArea", "golfTaxonomy", "taxonomy"]);
+  const sportCapability = pickString(drill, ["sportCapability", "capability"]);
+  const skillCategory = pickString(drill, ["skillCategory", "category"]);
+
   return omitUndefined({
     ...(label ? { label } : {}),
     ...(summary ? { summary } : {}),
     ...(skillCode ? { skillCode } : {}),
+    ...(skillArea ? { skillArea } : {}),
+    ...(sportCapability ? { sportCapability } : {}),
+    ...(skillCategory ? { skillCategory } : {}),
     ...(order !== undefined ? { order } : {}),
     ...(reps ? { reps } : {}),
     ...(durationMinutes !== null ? { durationMinutes } : {}),
@@ -145,6 +152,20 @@ export type GolfSportMetricDrillFormValues = {
   ballSpeed: string;
   clubSpeed: string;
   offlineDispersion: string;
+  notes: string;
+};
+
+export type GolfDrillV2FormValues = {
+  context: string;
+  attempts: string;
+  successes: string;
+  qualityRating: string;
+  distanceBand: string;
+  targetRadius: string;
+  missesLeft: string;
+  missesRight: string;
+  missesShort: string;
+  missesLong: string;
   notes: string;
 };
 
@@ -352,6 +373,75 @@ export function validateGolfRoundSportMetricForm(
     return { ok: false, error: penalties.error };
   }
   if (penalties !== undefined) valueJson.penalties = penalties;
+
+  const notes = parseOptionalString(values.notes);
+  if (notes) valueJson.notes = notes;
+
+  return { ok: true, valueJson };
+}
+
+export function validateGolfDrillV2Form(
+  values: GolfDrillV2FormValues,
+): { ok: true; valueJson: Record<string, unknown> } | { ok: false; error: string } {
+  const attempts = parseNonNegativeInt(values.attempts, "Attempts");
+  if (typeof attempts === "object" && "error" in attempts) {
+    return { ok: false, error: attempts.error };
+  }
+
+  const successes = parseNonNegativeInt(values.successes, "Successes");
+  if (typeof successes === "object" && "error" in successes) {
+    return { ok: false, error: successes.error };
+  }
+
+  if (successes > attempts) {
+    return { ok: false, error: "Successes cannot exceed attempts." };
+  }
+
+  const valueJson: Record<string, unknown> = { attempts, successes };
+
+  const qualityRating = parseOptionalNonNegativeInt(values.qualityRating, "Quality rating");
+  if (typeof qualityRating === "object" && qualityRating && "error" in qualityRating) {
+    return { ok: false, error: qualityRating.error };
+  }
+  if (qualityRating !== undefined) {
+    if (qualityRating < 1 || qualityRating > 5) {
+      return { ok: false, error: "Quality rating must be between 1 and 5." };
+    }
+    valueJson.qualityRating = qualityRating;
+  }
+
+  const context = parseOptionalString(values.context);
+  if (context) valueJson.context = context;
+
+  const distanceBand = parseOptionalString(values.distanceBand);
+  if (distanceBand) valueJson.distanceBand = distanceBand;
+
+  const targetRadius = parseOptionalString(values.targetRadius);
+  if (targetRadius) valueJson.targetRadius = targetRadius;
+
+  const missesLeft = parseOptionalNonNegativeInt(values.missesLeft, "Misses left");
+  if (typeof missesLeft === "object" && missesLeft && "error" in missesLeft) {
+    return { ok: false, error: missesLeft.error };
+  }
+  if (missesLeft !== undefined) valueJson.missesLeft = missesLeft;
+
+  const missesRight = parseOptionalNonNegativeInt(values.missesRight, "Misses right");
+  if (typeof missesRight === "object" && missesRight && "error" in missesRight) {
+    return { ok: false, error: missesRight.error };
+  }
+  if (missesRight !== undefined) valueJson.missesRight = missesRight;
+
+  const missesShort = parseOptionalNonNegativeInt(values.missesShort, "Misses short");
+  if (typeof missesShort === "object" && missesShort && "error" in missesShort) {
+    return { ok: false, error: missesShort.error };
+  }
+  if (missesShort !== undefined) valueJson.missesShort = missesShort;
+
+  const missesLong = parseOptionalNonNegativeInt(values.missesLong, "Misses long");
+  if (typeof missesLong === "object" && missesLong && "error" in missesLong) {
+    return { ok: false, error: missesLong.error };
+  }
+  if (missesLong !== undefined) valueJson.missesLong = missesLong;
 
   const notes = parseOptionalString(values.notes);
   if (notes) valueJson.notes = notes;

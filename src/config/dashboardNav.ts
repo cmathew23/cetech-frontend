@@ -1,5 +1,6 @@
 import { adminPaths } from "@/config/adminNav";
 import {
+  Activity,
   Building2,
   Calendar,
   ClipboardList,
@@ -34,6 +35,7 @@ export const adminSidebarNavItems: DashboardNavItem[] = [
 
 export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/coach/athlete-performance", label: "Athlete Performance", icon: Activity },
   { href: "/coach/athletes", label: "Athletes", icon: Users },
   { href: "/coach/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/coach/training-plans", label: "Training Plan", icon: Calendar },

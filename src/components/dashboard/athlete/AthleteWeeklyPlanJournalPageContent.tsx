@@ -4,6 +4,7 @@ import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/At
 import {
   buildSportMetricsDrillKey,
   LogSportResultModal,
+  type LoggedDrillResultSummary,
   type SportMetricsDrillLogContext,
 } from "@/components/dashboard/athlete/LogSportResultModal";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
@@ -1154,9 +1155,63 @@ type SkillsSportMetricsJournalOptions = {
   plannedSessionId: string;
   dayDate: string;
   sessionTitle: string;
-  loggedDrillKeys: Record<string, true>;
+  loggedDrillKeys: Record<string, LoggedDrillResultSummary>;
   onOpenLog: (context: SportMetricsDrillLogContext) => void;
 };
+
+function LoggedDrillSummaryInline({ summary }: { summary: LoggedDrillResultSummary }) {
+  const parts: string[] = [];
+
+  if (summary.attempts !== null && summary.successes !== null) {
+    let ratePart = `${summary.successes}/${summary.attempts}`;
+    if (summary.successRate !== null) {
+      ratePart += ` (${summary.successRate.toFixed(1)}%)`;
+    }
+    parts.push(ratePart);
+  } else if (summary.attempts !== null) {
+    parts.push(`${summary.attempts} attempts`);
+  }
+
+  if (summary.qualityRating !== null) {
+    parts.push(`Quality: ${summary.qualityRating}/5`);
+  }
+
+  if (summary.context) {
+    parts.push(summary.context);
+  }
+
+  const missParts: string[] = [];
+  if (summary.missesLeft != null && summary.missesLeft > 0)
+    missParts.push(`L${summary.missesLeft}`);
+  if (summary.missesRight != null && summary.missesRight > 0)
+    missParts.push(`R${summary.missesRight}`);
+  if (summary.missesShort != null && summary.missesShort > 0)
+    missParts.push(`S${summary.missesShort}`);
+  if (summary.missesLong != null && summary.missesLong > 0)
+    missParts.push(`Lg${summary.missesLong}`);
+
+  if (parts.length === 0 && missParts.length === 0) {
+    return (
+      <p className="mt-1.5 text-xs font-medium text-emerald-700">
+        Sport result logged
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 rounded border border-emerald-200/60 bg-emerald-50/40 px-2 py-1.5">
+      <p className="text-[11px] font-semibold text-emerald-700">Result logged</p>
+      {parts.length > 0 ? (
+        <p className="mt-0.5 text-[11px] text-textSecondary">{parts.join(" · ")}</p>
+      ) : null}
+      {missParts.length > 0 ? (
+        <p className="text-[11px] text-textSecondary">
+          Misses: {missParts.join(" ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function readSessionTitleFromItem(item: Record<string, unknown>): string {
   const merged = mergeJournalRecordCandidateFields(item);
@@ -1248,8 +1303,10 @@ function renderJournalStructureSections(
                   const drillKey = drillLogContext
                     ? buildSportMetricsDrillKey(drillLogContext)
                     : null;
-                  const drillLogged =
-                    drillKey !== null && skillsSportMetrics?.loggedDrillKeys[drillKey] === true;
+                  const drillSummary =
+                    drillKey !== null
+                      ? skillsSportMetrics?.loggedDrillKeys[drillKey] ?? null
+                      : null;
 
                   return (
                     <div
@@ -1279,19 +1336,19 @@ function renderJournalStructureSections(
                         <p className="text-xs text-textSecondary">Structured entry</p>
                       ) : null}
                       {drillLogContext && skillsSportMetrics ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="text-xs"
-                            onClick={() => skillsSportMetrics.onOpenLog(drillLogContext)}
-                          >
-                            Log Sport Result
-                          </Button>
-                          {drillLogged ? (
-                            <span className="text-xs font-medium text-emerald-700">
-                              Sport result logged
-                            </span>
+                        <div className="mt-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="text-xs"
+                              onClick={() => skillsSportMetrics.onOpenLog(drillLogContext)}
+                            >
+                              Log Sport Result
+                            </Button>
+                          </div>
+                          {drillSummary ? (
+                            <LoggedDrillSummaryInline summary={drillSummary} />
                           ) : null}
                         </div>
                       ) : null}
@@ -2638,7 +2695,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [sportLogContext, setSportLogContext] =
     useState<SportMetricsDrillLogContext | null>(null);
-  const [loggedDrillKeys, setLoggedDrillKeys] = useState<Record<string, true>>({});
+  const [loggedDrillKeys, setLoggedDrillKeys] = useState<Record<string, LoggedDrillResultSummary>>({});
 
   const retryLoadJournal = useCallback(() => {
     setState({ phase: "loading" });
@@ -2897,8 +2954,8 @@ export function AthleteWeeklyPlanJournalPageContent() {
           weekStartDate={journal.weekStartDate}
           weekEndDate={journal.weekEndDate}
           onClose={() => setSportLogContext(null)}
-          onSuccess={(drillKey) => {
-            setLoggedDrillKeys((current) => ({ ...current, [drillKey]: true }));
+          onSuccess={(drillKey, summary) => {
+            setLoggedDrillKeys((current) => ({ ...current, [drillKey]: summary }));
           }}
         />
       ) : null}

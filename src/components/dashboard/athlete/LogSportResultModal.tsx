@@ -10,9 +10,10 @@ import {
   buildGolfPrescribedContext,
   defaultOccurredAtForJournalDay,
   mapGolfSportMetricLogMode,
-  validateGolfDrillSportMetricForm,
+  resolveGolfDrillOrder,
+  validateGolfDrillV2Form,
   validateGolfRoundSportMetricForm,
-  type GolfSportMetricDrillFormValues,
+  type GolfDrillV2FormValues,
   type GolfSportMetricLogMode,
   type GolfSportMetricRoundFormValues,
 } from "@/lib/sportMetrics/buildGolfPrescribedContext";
@@ -31,13 +32,25 @@ export type SportMetricsDrillLogContext = {
   itemIndex: number;
 };
 
+export type LoggedDrillResultSummary = {
+  attempts: number | null;
+  successes: number | null;
+  successRate: number | null;
+  qualityRating: number | null;
+  context: string | null;
+  missesLeft: number | null;
+  missesRight: number | null;
+  missesShort: number | null;
+  missesLong: number | null;
+};
+
 export type LogSportResultModalProps = {
   open: boolean;
   context: SportMetricsDrillLogContext | null;
   weekStartDate: string;
   weekEndDate: string;
   onClose: () => void;
-  onSuccess: (drillKey: string) => void;
+  onSuccess: (drillKey: string, summary: LoggedDrillResultSummary) => void;
 };
 
 const MODE_OPTIONS: Array<{ value: GolfSportMetricLogMode; label: string }> = [
@@ -46,16 +59,17 @@ const MODE_OPTIONS: Array<{ value: GolfSportMetricLogMode; label: string }> = [
   { value: "ACTUAL_ROUND", label: "Actual Round — On Course" },
 ];
 
-const EMPTY_DRILL_FORM: GolfSportMetricDrillFormValues = {
+const EMPTY_DRILL_FORM: GolfDrillV2FormValues = {
+  context: "",
   attempts: "",
   successes: "",
+  qualityRating: "",
   distanceBand: "",
-  missPattern: "",
-  provider: "",
-  carryDistance: "",
-  ballSpeed: "",
-  clubSpeed: "",
-  offlineDispersion: "",
+  targetRadius: "",
+  missesLeft: "",
+  missesRight: "",
+  missesShort: "",
+  missesLong: "",
   notes: "",
 };
 
@@ -71,6 +85,115 @@ const EMPTY_ROUND_FORM: GolfSportMetricRoundFormValues = {
   penalties: "",
   notes: "",
 };
+
+function readStringField(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function pickStringFromDrill(drill: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const text = readStringField(drill[key]);
+    if (text !== null) return text;
+  }
+  return null;
+}
+
+function resolveSkillCategory(drill: Record<string, unknown>): string | null {
+  return pickStringFromDrill(drill, ["skillCategory", "category"]);
+}
+
+function readFiniteNumberFromJson(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return null;
+}
+
+function readStringFromJson(value: unknown): string | null {
+  if (typeof value === "string" && value.trim() !== "") return value.trim();
+  return null;
+}
+
+function extractSuccessRateFromResponse(response: unknown): number | null {
+  if (!response || typeof response !== "object") return null;
+  const rec = response as Record<string, unknown>;
+  const candidates = [
+    rec.result,
+    (rec.data as Record<string, unknown> | undefined)?.result,
+    rec.data,
+    rec,
+  ];
+  for (const source of candidates) {
+    if (source && typeof source === "object") {
+      const rate = readFiniteNumberFromJson(
+        (source as Record<string, unknown>).successRate,
+      );
+      if (rate !== null) return rate;
+    }
+  }
+  return null;
+}
+
+export function buildLoggedDrillSummary(
+  valueJson: Record<string, unknown>,
+  backendResponse: unknown,
+): LoggedDrillResultSummary {
+  const attempts = readFiniteNumberFromJson(valueJson.attempts);
+  const successes = readFiniteNumberFromJson(
+    valueJson.successes ?? valueJson.targetHits,
+  );
+
+  let successRate = extractSuccessRateFromResponse(backendResponse);
+  if (successRate === null && attempts !== null && attempts > 0 && successes !== null) {
+    successRate = Math.round((successes / attempts) * 1000) / 10;
+  }
+
+  return {
+    attempts,
+    successes,
+    successRate,
+    qualityRating: readFiniteNumberFromJson(valueJson.qualityRating),
+    context: readStringFromJson(valueJson.context),
+    missesLeft: readFiniteNumberFromJson(valueJson.missesLeft),
+    missesRight: readFiniteNumberFromJson(valueJson.missesRight),
+    missesShort: readFiniteNumberFromJson(valueJson.missesShort),
+    missesLong: readFiniteNumberFromJson(valueJson.missesLong),
+  };
+}
+
+function DrillClassificationDisplay({ drill }: { drill: Record<string, unknown> }) {
+  const skillCode = pickStringFromDrill(drill, ["skillCode", "itemType"]);
+  const skillArea = pickStringFromDrill(drill, ["skillArea", "golfTaxonomy", "taxonomy"]);
+  const sportCapability = pickStringFromDrill(drill, ["sportCapability", "capability"]);
+  const skillCategory = resolveSkillCategory(drill);
+
+  const fields: Array<{ label: string; value: string }> = [];
+  if (skillCode) fields.push({ label: "Skill Code", value: skillCode });
+  if (skillArea) fields.push({ label: "Skill Area", value: skillArea });
+  if (sportCapability) fields.push({ label: "Sport Capability", value: sportCapability });
+  if (skillCategory) fields.push({ label: "Category", value: skillCategory });
+
+  if (fields.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-slate-200/80 bg-slate-50/60 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-textSecondary">
+        Planned Drill Classification
+      </p>
+      <dl className="mt-1 space-y-0.5">
+        {fields.map((field) => (
+          <div
+            key={field.label}
+            className="grid grid-cols-[minmax(0,7rem)_1fr] gap-x-2 text-xs"
+          >
+            <dt className="text-textSecondary">{field.label}</dt>
+            <dd className="text-textPrimary">{field.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
 
 function drillLabelFromContext(context: SportMetricsDrillLogContext): string {
   const label =
@@ -98,7 +221,7 @@ export function LogSportResultModal({
   onSuccess,
 }: LogSportResultModalProps) {
   const [mode, setMode] = useState<GolfSportMetricLogMode>("PRACTICE_FACILITY");
-  const [drillForm, setDrillForm] = useState<GolfSportMetricDrillFormValues>(EMPTY_DRILL_FORM);
+  const [drillForm, setDrillForm] = useState<GolfDrillV2FormValues>(EMPTY_DRILL_FORM);
   const [roundForm, setRoundForm] = useState<GolfSportMetricRoundFormValues>(EMPTY_ROUND_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +245,7 @@ export function LogSportResultModal({
   }, [context?.dayDate]);
 
   const handleDrillField =
-    (field: keyof GolfSportMetricDrillFormValues) =>
+    (field: keyof GolfDrillV2FormValues) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setDrillForm((current) => ({ ...current, [field]: event.target.value }));
       setError(null);
@@ -142,7 +265,7 @@ export function LogSportResultModal({
     const valueResult =
       mode === "ACTUAL_ROUND"
         ? validateGolfRoundSportMetricForm(roundForm)
-        : validateGolfDrillSportMetricForm(drillForm);
+        : validateGolfDrillV2Form(drillForm);
 
     if (!valueResult.ok) {
       setError(valueResult.error);
@@ -165,12 +288,13 @@ export function LogSportResultModal({
       typeof context.drill.trainingSessionId === "string"
         ? context.drill.trainingSessionId.trim()
         : "";
+    const plannedSkillItemOrder = resolveGolfDrillOrder(context.drill, context.itemIndex);
 
     setSubmitting(true);
     setError(null);
 
     try {
-      await postGolfSportMetricRecord(context.entityId, context.athleteId, {
+      const response = await postGolfSportMetricRecord(context.entityId, context.athleteId, {
         trainingPlanVersionId: context.trainingPlanVersionId,
         plannedSessionId: context.plannedSessionId,
         occurredAt,
@@ -181,10 +305,12 @@ export function LogSportResultModal({
         valueJson: valueResult.valueJson,
         ...(goalId ? { goalId } : {}),
         ...(trainingSessionId ? { trainingSessionId } : {}),
+        ...(plannedSkillItemOrder !== undefined ? { plannedSkillItemOrder } : {}),
       });
 
+      const summary = buildLoggedDrillSummary(valueResult.valueJson, response);
       const drillKey = buildSportMetricsDrillKey(context);
-      onSuccess(drillKey);
+      onSuccess(drillKey, summary);
       onClose();
     } catch (submitError) {
       setError(
@@ -329,6 +455,13 @@ export function LogSportResultModal({
             </div>
           ) : (
             <div className="space-y-3">
+              <DrillClassificationDisplay drill={context.drill} />
+              <FormTextField
+                id="sport-drill-context"
+                label="Context / Location (optional)"
+                value={drillForm.context}
+                onChange={handleDrillField("context")}
+              />
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormNumberField
                   id="sport-drill-attempts"
@@ -345,59 +478,59 @@ export function LogSportResultModal({
                   onChange={handleDrillField("successes")}
                 />
               </div>
-              {mode === "PRACTICE_FACILITY" ? (
-                <>
-                  <FormTextField
-                    id="sport-drill-distance"
-                    label="Distance band (optional)"
-                    value={drillForm.distanceBand}
-                    onChange={handleDrillField("distanceBand")}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormNumberField
+                  id="sport-drill-quality"
+                  label="Quality rating (1–5, optional)"
+                  value={drillForm.qualityRating}
+                  onChange={handleDrillField("qualityRating")}
+                />
+                <FormTextField
+                  id="sport-drill-distance"
+                  label="Distance band (optional)"
+                  value={drillForm.distanceBand}
+                  onChange={handleDrillField("distanceBand")}
+                />
+              </div>
+              <FormTextField
+                id="sport-drill-target-radius"
+                label="Target radius (optional)"
+                value={drillForm.targetRadius}
+                onChange={handleDrillField("targetRadius")}
+              />
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-semibold text-textPrimary">
+                  Miss breakdown (optional)
+                </legend>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormNumberField
+                    id="sport-drill-misses-left"
+                    label="Misses left"
+                    value={drillForm.missesLeft}
+                    onChange={handleDrillField("missesLeft")}
                   />
-                  <FormTextField
-                    id="sport-drill-miss"
-                    label="Miss pattern (optional)"
-                    value={drillForm.missPattern}
-                    onChange={handleDrillField("missPattern")}
+                  <FormNumberField
+                    id="sport-drill-misses-right"
+                    label="Misses right"
+                    value={drillForm.missesRight}
+                    onChange={handleDrillField("missesRight")}
                   />
-                </>
-              ) : (
-                <>
-                  <FormTextField
-                    id="sport-drill-provider"
-                    label="Provider (optional)"
-                    value={drillForm.provider}
-                    onChange={handleDrillField("provider")}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormNumberField
+                    id="sport-drill-misses-short"
+                    label="Misses short"
+                    value={drillForm.missesShort}
+                    onChange={handleDrillField("missesShort")}
                   />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FormNumberField
-                      id="sport-drill-carry"
-                      label="Carry distance (optional)"
-                      value={drillForm.carryDistance}
-                      onChange={handleDrillField("carryDistance")}
-                    />
-                    <FormNumberField
-                      id="sport-drill-ball-speed"
-                      label="Ball speed (optional)"
-                      value={drillForm.ballSpeed}
-                      onChange={handleDrillField("ballSpeed")}
-                    />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FormNumberField
-                      id="sport-drill-club-speed"
-                      label="Club speed (optional)"
-                      value={drillForm.clubSpeed}
-                      onChange={handleDrillField("clubSpeed")}
-                    />
-                    <FormNumberField
-                      id="sport-drill-offline"
-                      label="Offline dispersion (optional)"
-                      value={drillForm.offlineDispersion}
-                      onChange={handleDrillField("offlineDispersion")}
-                    />
-                  </div>
-                </>
-              )}
+                  <FormNumberField
+                    id="sport-drill-misses-long"
+                    label="Misses long"
+                    value={drillForm.missesLong}
+                    onChange={handleDrillField("missesLong")}
+                  />
+                </div>
+              </fieldset>
               <FormNotesField
                 id="sport-drill-notes"
                 value={drillForm.notes}

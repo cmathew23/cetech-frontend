@@ -31,7 +31,7 @@ function formatLoadError(e: unknown): string {
   return "Could not load weekly adherence.";
 }
 
-function resolveCoachWearableViewerContext(input: {
+export function resolveCoachWearableViewerContext(input: {
   academyCoachRole: string | null | undefined;
   functions: string[] | null | undefined;
 }): "HEAD_COACH" | "SKILLS" | "NUTRITION" | "S_AND_C" | "DEFAULT" {

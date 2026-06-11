@@ -7,6 +7,8 @@ import {
   sportMetricsStatusVariant,
   type SportMetricEvidenceItem,
   type SportMetricGoalEvidenceGroup,
+  type SportMetricSkillLink,
+  type SportMetricResultData,
   type SportMetricsGolfWeeklySummary,
 } from "@/lib/api/sportMetricsGolf";
 import { formatDateOnly, formatDateOrDateTime } from "@/lib/dateTime";
@@ -106,11 +108,15 @@ export const ADDITIONAL_SKILL_WORK_SECTION_TITLE = "Additional Skill Work";
 export type SportMetricsDisplayLabels = {
   goalSectionFallback: string;
   unlinkedSectionTitle: string;
-  goalEmptyMessage: string;
   includeTechnicalDetailFields: boolean;
 };
 
 function evidenceItemHasTechnicalFields(item: SportMetricEvidenceItem): boolean {
+  if (item.result) {
+    if (item.result.successes !== null) return true;
+    if (item.result.successRate !== null) return true;
+  }
+
   const raw = asRecord(item.raw);
   const valueJson = asRecord(raw?.valueJson) ?? raw;
   if (!valueJson) return false;
@@ -135,10 +141,28 @@ function iterAllEvidenceItems(
 ): SportMetricEvidenceItem[] {
   const items: SportMetricEvidenceItem[] = [];
   for (const group of summary.goalEvidence) {
-    items.push(...group.evidence);
+    items.push(...group.evidence.filter(isRealSportMetricEvidenceItem));
   }
   items.push(...summary.unlinkedEvidence);
   return items;
+}
+
+function isRealSportMetricEvidenceItem(item: SportMetricEvidenceItem): boolean {
+  if (item.id) return true;
+  if (item.result !== null) return true;
+
+  const raw = asRecord(item.raw);
+  const valueJson = asRecord(raw?.valueJson);
+  if (valueJson) {
+    if (readNumber(valueJson.attempts) !== null) return true;
+    if (readNumber(valueJson.successes) !== null) return true;
+    if (readNumber(valueJson.successRate) !== null) return true;
+  }
+
+  if (pickString(raw, ["metricType", "recordId", "metricRecordId"])) return true;
+  if (pickString(asRecord(raw?.prescribedContextJson), ["label"])) return true;
+
+  return false;
 }
 
 export function summaryUsesTechnicalResultLabels(
@@ -160,9 +184,6 @@ export function resolveSportMetricsDisplayLabels(
     unlinkedSectionTitle: technical
       ? ADDITIONAL_SKILL_RESULTS_SECTION_TITLE
       : ADDITIONAL_SKILL_WORK_SECTION_TITLE,
-    goalEmptyMessage: technical
-      ? "No results logged for this goal yet."
-      : "No training context logged for this goal yet.",
     includeTechnicalDetailFields: technical,
   };
 }
@@ -378,17 +399,22 @@ function resolveEvidenceSource(item: SportMetricEvidenceItem): string | null {
   return humanizeSportMetricsEnum(source);
 }
 
-function resolveGroupStatusBadge(group: SportMetricGoalEvidenceGroup): {
-  label: string;
-  variant: StatusBadgeVariant;
-} | null {
-  if (group.evidence.length === 0) return null;
+export type LoggedResultsSummaryStats = {
+  totalAttempts: number;
+  totalSuccesses: number;
+  successRate: number | null;
+  count: number;
+};
 
-  return {
-    label: formatSportMetricsStatusLabel("EVIDENCE_LOGGED"),
-    variant: sportMetricsStatusVariant("EVIDENCE_LOGGED"),
-  };
-}
+export type GoalProgressSummary = {
+  resultsLogged: number;
+  prescribedSkills: number | null;
+  completionPercent: number | null;
+  totalAttempts: number;
+  totalSuccesses: number;
+  successRate: number | null;
+  usesPrescribedCount: boolean;
+};
 
 function EvidenceMeta({
   environment,
@@ -409,6 +435,55 @@ function EvidenceMeta({
   return <p className="text-[11px] text-textMuted">{parts.join(" · ")}</p>;
 }
 
+function SkillLinkDisplay({ skillLink }: { skillLink: SportMetricSkillLink }) {
+  const parts: Array<{ label: string; value: string }> = [];
+  if (skillLink.drillName) parts.push({ label: "Drill", value: skillLink.drillName });
+  if (skillLink.skillCode) parts.push({ label: "Code", value: skillLink.skillCode });
+  if (skillLink.skillArea) parts.push({ label: "Skill Area", value: skillLink.skillArea });
+  if (skillLink.sportCapability) parts.push({ label: "Capability", value: skillLink.sportCapability });
+  if (skillLink.skillCategory) parts.push({ label: "Category", value: skillLink.skillCategory });
+
+  if (parts.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-textSecondary">
+      {parts.map((p) => (
+        <span key={p.label}>
+          <span className="font-medium">{p.label}:</span> {p.value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function MissBreakdownDisplay({ result }: { result: SportMetricResultData }) {
+  const misses: Array<{ label: string; value: number }> = [];
+  if (result.missesLeft !== null) misses.push({ label: "Left", value: result.missesLeft });
+  if (result.missesRight !== null) misses.push({ label: "Right", value: result.missesRight });
+  if (result.missesShort !== null) misses.push({ label: "Short", value: result.missesShort });
+  if (result.missesLong !== null) misses.push({ label: "Long", value: result.missesLong });
+
+  if (misses.length === 0) return null;
+
+  return (
+    <span className="text-[11px] text-textMuted">
+      Misses: {misses.map((m) => `${m.label} ${m.value}`).join(", ")}
+    </span>
+  );
+}
+
+function buildV2ResultDetailLines(result: SportMetricResultData): string[] {
+  const lines: string[] = [];
+  if (result.context) lines.push(`Context: ${result.context}`);
+  if (result.distanceBand) lines.push(`Distance: ${result.distanceBand}`);
+  if (result.attempts !== null) lines.push(formatCountLabel("Attempts", result.attempts));
+  if (result.successes !== null) lines.push(formatCountLabel("Successes", result.successes));
+  if (result.successRate !== null) lines.push(`Success Rate: ${formatPercentLabel(result.successRate)}`);
+  if (result.qualityRating !== null) lines.push(`Quality: ${result.qualityRating}/5`);
+  if (result.targetRadius) lines.push(`Target Radius: ${result.targetRadius}`);
+  return lines;
+}
+
 function EvidenceRow({
   item,
   includeTechnicalDetailFields,
@@ -417,14 +492,20 @@ function EvidenceRow({
   includeTechnicalDetailFields: boolean;
 }) {
   const title = resolveEvidenceDisplayTitle(item);
-  const detailLines = buildEvidenceDetailLines(item, { includeTechnicalDetailFields });
-  const notes = item.notes?.trim() ?? "";
+  const hasV2Result = item.result !== null;
+  const v2Lines = hasV2Result ? buildV2ResultDetailLines(item.result!) : [];
+  const legacyLines = !hasV2Result
+    ? buildEvidenceDetailLines(item, { includeTechnicalDetailFields })
+    : [];
+  const detailLines = v2Lines.length > 0 ? v2Lines : legacyLines;
+  const notes = item.result?.notes?.trim() || item.notes?.trim() || "";
 
   return (
     <div className="rounded-md border border-border bg-surface p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-medium text-textPrimary">{title}</p>
+          {item.skillLink ? <SkillLinkDisplay skillLink={item.skillLink} /> : null}
           <EvidenceMeta
             environment={resolveEvidenceEnvironment(item)}
             source={resolveEvidenceSource(item)}
@@ -433,6 +514,7 @@ function EvidenceRow({
           {detailLines.length > 0 ? (
             <p className="text-sm text-textSecondary">{detailLines.join(" · ")}</p>
           ) : null}
+          {hasV2Result ? <MissBreakdownDisplay result={item.result!} /> : null}
           {notes !== "" ? (
             <p className="text-xs text-textSecondary">{notes}</p>
           ) : null}
@@ -447,50 +529,146 @@ function EvidenceRow({
   );
 }
 
-function GoalEvidenceBlock({
-  group,
+export function computeGoalProgressSummary(
+  summary: SportMetricsGolfWeeklySummary,
+): GoalProgressSummary | null {
+  const logged = computeLoggedResultsSummary(summary);
+  if (!logged) return null;
+
+  const prescribedSkills = summary.prescribedSkillsCount;
+  const usesPrescribedCount =
+    prescribedSkills !== null && prescribedSkills > 0;
+
+  return {
+    resultsLogged: logged.count,
+    prescribedSkills: usesPrescribedCount ? prescribedSkills : null,
+    completionPercent:
+      usesPrescribedCount && prescribedSkills !== null
+        ? Math.round((logged.count / prescribedSkills) * 1000) / 10
+        : null,
+    totalAttempts: logged.totalAttempts,
+    totalSuccesses: logged.totalSuccesses,
+    successRate: logged.successRate,
+    usesPrescribedCount,
+  };
+}
+
+export function formatGoalProgressSummaryLines(
+  progress: GoalProgressSummary,
+): string[] {
+  const lines: string[] = [];
+
+  if (progress.usesPrescribedCount && progress.prescribedSkills !== null) {
+    lines.push(`Skills prescribed: ${progress.prescribedSkills}`);
+    lines.push(`Results logged: ${progress.resultsLogged}`);
+    if (progress.completionPercent !== null) {
+      lines.push(`Completion: ${formatPercentLabel(progress.completionPercent)}`);
+    }
+  } else {
+    lines.push(`Results logged: ${progress.resultsLogged}`);
+  }
+
+  lines.push(`Attempts: ${progress.totalAttempts}`);
+  lines.push(`Successes: ${progress.totalSuccesses}`);
+  if (progress.successRate !== null) {
+    lines.push(`Success Rate: ${formatPercentLabel(progress.successRate)}`);
+  }
+
+  return lines;
+}
+
+function GoalProgressSummaryDisplay({ progress }: { progress: GoalProgressSummary }) {
+  const lines = formatGoalProgressSummaryLines(progress);
+
+  return (
+    <div className="rounded border border-slate-200/60 bg-slate-50/50 px-3 py-2">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-textPrimary">
+        {lines.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GoalProgressSection({
+  summary,
   labels,
 }: {
-  group: SportMetricGoalEvidenceGroup;
+  summary: SportMetricsGolfWeeklySummary;
   labels: SportMetricsDisplayLabels;
 }) {
-  const goalHeading = resolveGoalGroupHeading(group, labels);
-  const successCriteria = resolveGoalSuccessCriteria(group);
-  const statusBadge = resolveGroupStatusBadge(group);
+  const primaryGoal = summary.goalEvidence[0] ?? null;
+  const heading = primaryGoal
+    ? resolveGoalGroupHeading(primaryGoal, labels)
+    : labels.goalSectionFallback;
+  const successCriteria = primaryGoal
+    ? resolveGoalSuccessCriteria(primaryGoal)
+    : null;
+  const progress = computeGoalProgressSummary(summary);
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-textPrimary">{goalHeading}</p>
-          {successCriteria ? (
-            <p className="text-xs text-textSecondary">
-              Success criteria: {successCriteria}
-            </p>
-          ) : null}
-        </div>
-        {statusBadge ? (
-          <StatusBadge variant={statusBadge.variant}>{statusBadge.label}</StatusBadge>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-textPrimary">{heading}</p>
+        {successCriteria ? (
+          <p className="text-xs text-textSecondary">
+            Success criteria: {successCriteria}
+          </p>
         ) : null}
       </div>
 
-      {group.evidence.length > 0 ? (
-        <div className="space-y-2">
-          {group.evidence.map((item, index) => (
-            <EvidenceRow
-              key={item.id ?? `${group.goalId ?? goalHeading}-${index}`}
-              item={item}
-              includeTechnicalDetailFields={labels.includeTechnicalDetailFields}
-            />
-          ))}
-        </div>
+      {progress ? (
+        <GoalProgressSummaryDisplay progress={progress} />
       ) : (
-        <p className="text-sm text-textSecondary">
-          {labels.goalEmptyMessage}
-        </p>
+        <p className="text-sm text-textSecondary">No Results Logged</p>
       )}
     </div>
   );
+}
+
+export function computeLoggedResultsSummary(
+  summary: SportMetricsGolfWeeklySummary,
+): LoggedResultsSummaryStats | null {
+  const items = iterAllEvidenceItems(summary);
+  if (items.length === 0) return null;
+
+  let totalAttempts = 0;
+  let totalSuccesses = 0;
+  let hasAnyData = false;
+
+  for (const item of items) {
+    if (item.result) {
+      if (item.result.attempts !== null) {
+        totalAttempts += item.result.attempts;
+        hasAnyData = true;
+      }
+      if (item.result.successes !== null) {
+        totalSuccesses += item.result.successes;
+      }
+    } else {
+      const raw = asRecord(item.raw);
+      const valueJson = asRecord(raw?.valueJson) ?? raw;
+      if (valueJson) {
+        const att = readNumber(valueJson.attempts);
+        if (att !== null) {
+          totalAttempts += att;
+          hasAnyData = true;
+        }
+        const suc = readNumber(valueJson.successes);
+        if (suc !== null) totalSuccesses += suc;
+      }
+    }
+  }
+
+  if (!hasAnyData) return null;
+
+  return {
+    totalAttempts,
+    totalSuccesses,
+    successRate: totalAttempts > 0 ? (totalSuccesses / totalAttempts) * 100 : null,
+    count: items.length,
+  };
 }
 
 export function SportMetricsEvidenceCards({
@@ -500,6 +678,8 @@ export function SportMetricsEvidenceCards({
 }) {
   const topStatus = resolveSportMetricsTopStatus(summary);
   const labels = resolveSportMetricsDisplayLabels(summary);
+  const showGoalProgress =
+    summary.goalEvidence.length > 0 || hasAnySportMetricsRecords(summary);
 
   return (
     <Card
@@ -513,16 +693,8 @@ export function SportMetricsEvidenceCards({
       }
     >
       <div className="space-y-4">
-        {summary.goalEvidence.length > 0 ? (
-          <div className="space-y-3">
-            {summary.goalEvidence.map((group, index) => (
-              <GoalEvidenceBlock
-                key={group.goalId ?? `${resolveGoalDisplayTitle(group, labels)}-${index}`}
-                group={group}
-                labels={labels}
-              />
-            ))}
-          </div>
+        {showGoalProgress ? (
+          <GoalProgressSection summary={summary} labels={labels} />
         ) : null}
 
         {summary.unlinkedEvidence.length > 0 ? (

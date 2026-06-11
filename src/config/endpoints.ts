@@ -284,6 +284,13 @@ export const paths = {
     /** GET — bootstrap app context (`user`, `academy`, `access`, …). Replaces legacy `/app/access-context`. */
     appContext: "/me/app-context",
   },
+  chat: {
+    athleteCoaches: "/api/chat/athlete/coaches",
+    coachAthletes: "/api/chat/coach/athletes",
+    conversations: "/api/chat/conversations",
+    conversationMessages: (conversationId: string) =>
+      `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+  },
   /** Coach module — Slice 1 dashboard APIs. */
   coach: {
     meDashboard: "/coach/me/dashboard",

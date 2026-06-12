@@ -2,18 +2,49 @@
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
+import {
+  ATHLETE_CHAT_PAGE_READY_EVENT,
+  useChatUnreadCount,
+} from "@/hooks/useChatUnreadCount";
 import { athleteSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export function AthleteSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
   const { invitationAccessLocked, pendingCount, isGateReady } =
     useAthleteInvitationGate();
+  const athleteChatRoute = "/athlete/chat";
+  const [isAthleteChatPageReady, setIsAthleteChatPageReady] = useState(
+    pathname !== athleteChatRoute,
+  );
+  const { unreadCount: chatUnreadCount } = useChatUnreadCount({
+    enabled: pathname !== athleteChatRoute || isAthleteChatPageReady,
+    clearOnError: true,
+  });
   const athleteNavLocked = isGateReady && invitationAccessLocked;
+
+  useEffect(() => {
+    setIsAthleteChatPageReady(pathname !== athleteChatRoute);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (pathname !== athleteChatRoute) return;
+
+    const handleChatPageReady = () => {
+      setIsAthleteChatPageReady(true);
+    };
+
+    window.addEventListener(ATHLETE_CHAT_PAGE_READY_EVENT, handleChatPageReady);
+
+    return () => {
+      window.removeEventListener(ATHLETE_CHAT_PAGE_READY_EVENT, handleChatPageReady);
+    };
+  }, [pathname]);
 
   return (
     <DashboardSidebarFrame
@@ -64,6 +95,11 @@ export function AthleteSidebar() {
                 <span className="inline-flex min-w-0 flex-1 items-center gap-2">
                   <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="truncate">{item.label}</span>
+                  {item.href === athleteChatRoute && chatUnreadCount > 0 ? (
+                    <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
+                      {chatUnreadCount}
+                    </span>
+                  ) : null}
                   {item.href === invitationRoute &&
                   isGateReady &&
                   pendingCount > 0 ? (

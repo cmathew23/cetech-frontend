@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import { useAuth } from "@/hooks/useAuth";
+import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
 import {
   createOrFindChatConversation,
   getCoachChatAthletes,
@@ -49,6 +50,10 @@ export function CoachChatPageContent() {
     const trimmed = source?.trim() ?? "";
     return trimmed !== "" ? formatPersonNameForDisplay(trimmed) : "";
   }, [accessContext?.user]);
+
+  useEffect(() => {
+    requestChatUnreadRefresh();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

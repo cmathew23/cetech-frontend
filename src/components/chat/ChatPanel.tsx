@@ -4,11 +4,11 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getChatMessages, parseChatMessage, type ChatMessage } from "@/lib/api/chat";
-import { getToken } from "@/lib/auth";
-import { API_BASE } from "@/config/endpoints";
+import { getChatSocket } from "@/lib/chatSocket";
+import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { io, type Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 
 const MAX_MESSAGE_LENGTH = 4000;
 const HIDDEN_HISTORY_TEXT =
@@ -20,28 +20,6 @@ type ChatPanelProps = {
   coachName: string;
   currentUserRole: "ATHLETE" | "COACH";
 };
-
-let sharedChatSocket: Socket | null = null;
-let sharedSocketToken: string | null = null;
-
-function getChatSocket(): Socket {
-  const token = getToken();
-  if (!token) {
-    throw new Error("You must be logged in to use chat.");
-  }
-
-  if (!sharedChatSocket || sharedSocketToken !== token) {
-    sharedChatSocket?.disconnect();
-    sharedChatSocket = io(API_BASE, {
-      autoConnect: true,
-      auth: { token },
-      transports: ["websocket", "polling"],
-    });
-    sharedSocketToken = token;
-  }
-
-  return sharedChatSocket;
-}
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
@@ -113,6 +91,7 @@ export function ChatPanel({
         const history = await getChatMessages(conversationId);
         if (cancelled) return;
         setMessages(history);
+        requestChatUnreadRefresh();
       } catch (error) {
         if (cancelled) return;
         setMessages([]);

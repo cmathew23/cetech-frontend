@@ -14,6 +14,10 @@ import {
   type AthleteChatCoach,
   type ChatConversationSummary,
 } from "@/lib/api/chat";
+import {
+  requestAthleteChatPageReady,
+  requestChatUnreadRefresh,
+} from "@/hooks/useChatUnreadCount";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
@@ -38,6 +42,7 @@ export function AthleteChatPageContent() {
   );
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [conversationLoading, setConversationLoading] = useState(false);
+  const [isChatPageReady, setIsChatPageReady] = useState(false);
 
   const athleteName = useMemo(() => {
     const source =
@@ -58,20 +63,15 @@ export function AthleteChatPageContent() {
       setLoading(true);
       setLoadError(null);
       try {
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[AthleteChat] GET /api/chat/athlete/coaches");
-        }
+        console.log("[AthleteChat] GET /api/chat/athlete/coaches");
         const rows = await getAthleteChatCoaches();
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[AthleteChat] parsed coaches:", rows);
-        }
+        console.log("[AthleteChat] response:", rows);
         if (cancelled) return;
         setCoaches(Array.isArray(rows) ? rows : []);
+        setIsChatPageReady(true);
       } catch (error) {
         if (cancelled) return;
-        if (process.env.NODE_ENV === "development") {
-          console.error("[AthleteChat] GET /api/chat/athlete/coaches error:", error);
-        }
+        console.error("[AthleteChat] GET /api/chat/athlete/coaches error:", error);
         setCoaches([]);
         setLoadError(
           formatApiError(error, "Could not load chat coaches. Try again shortly."),
@@ -89,6 +89,12 @@ export function AthleteChatPageContent() {
   }, []);
 
   useEffect(() => {
+    if (!isChatPageReady) return;
+    requestAthleteChatPageReady();
+    requestChatUnreadRefresh();
+  }, [isChatPageReady]);
+
+  useEffect(() => {
     if (selectedCoachProfileId === "") {
       setConversation(null);
       setConversationError(null);
@@ -101,21 +107,18 @@ export function AthleteChatPageContent() {
       setConversationLoading(true);
       setConversationError(null);
       try {
-        if (process.env.NODE_ENV === "development") {
-          console.debug("[AthleteChat] POST /api/chat/conversations", {
-            coachProfileId: selectedCoachProfileId,
-          });
-        }
+        console.log("[AthleteChat] POST /api/chat/conversations", {
+          coachProfileId: selectedCoachProfileId,
+        });
         const result = await createOrFindChatConversation({
           coachProfileId: selectedCoachProfileId,
         });
+        console.log("[AthleteChat] conversation created:", result);
         if (cancelled) return;
         setConversation(result);
       } catch (error) {
         if (cancelled) return;
-        if (process.env.NODE_ENV === "development") {
-          console.error("[AthleteChat] POST /api/chat/conversations error:", error);
-        }
+        console.error("[AthleteChat] POST /api/chat/conversations error:", error);
         setConversation(null);
         setConversationError(
           formatApiError(

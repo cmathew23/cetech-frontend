@@ -2,6 +2,8 @@ import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
+const CHAT_ELIGIBILITY_TIMEOUT_MS = 10_000;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -149,6 +151,7 @@ export async function getAthleteChatCoaches(): Promise<AthleteChatCoach[]> {
   const raw = await apiRequest(paths.chat.athleteCoaches, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: CHAT_ELIGIBILITY_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   return readList(data).reduce<AthleteChatCoach[]>((acc, item) => {
@@ -162,6 +165,7 @@ export async function getCoachChatAthletes(): Promise<CoachChatAthlete[]> {
   const raw = await apiRequest(paths.chat.coachAthletes, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: CHAT_ELIGIBILITY_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   return readList(data).reduce<CoachChatAthlete[]>((acc, item) => {

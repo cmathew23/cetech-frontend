@@ -1,50 +1,27 @@
 "use client";
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
+import { useAthletePageReady } from "@/components/dashboard/athlete/AthletePageReadyContext";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
-import {
-  ATHLETE_CHAT_PAGE_READY_EVENT,
-  useChatUnreadCount,
-} from "@/hooks/useChatUnreadCount";
+import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
 import { athleteSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 
 export function AthleteSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
+  const { isPageReady } = useAthletePageReady();
   const { invitationAccessLocked, pendingCount, isGateReady } =
     useAthleteInvitationGate();
   const athleteChatRoute = "/athlete/chat";
-  const [isAthleteChatPageReady, setIsAthleteChatPageReady] = useState(
-    pathname !== athleteChatRoute,
-  );
   const { unreadCount: chatUnreadCount } = useChatUnreadCount({
-    enabled: pathname !== athleteChatRoute || isAthleteChatPageReady,
+    enabled: isPageReady,
     clearOnError: true,
   });
   const athleteNavLocked = isGateReady && invitationAccessLocked;
-
-  useEffect(() => {
-    setIsAthleteChatPageReady(pathname !== athleteChatRoute);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (pathname !== athleteChatRoute) return;
-
-    const handleChatPageReady = () => {
-      setIsAthleteChatPageReady(true);
-    };
-
-    window.addEventListener(ATHLETE_CHAT_PAGE_READY_EVENT, handleChatPageReady);
-
-    return () => {
-      window.removeEventListener(ATHLETE_CHAT_PAGE_READY_EVENT, handleChatPageReady);
-    };
-  }, [pathname]);
 
   return (
     <DashboardSidebarFrame

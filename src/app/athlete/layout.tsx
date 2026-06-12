@@ -1,5 +1,8 @@
 "use client";
 
+"use client";
+
+import { AthletePageReadyProvider } from "@/components/dashboard/athlete/AthletePageReadyContext";
 import { AthleteInvitationProvider } from "@/components/dashboard/athlete/AthleteInvitationProvider";
 import { DashboardGate } from "@/components/layout/DashboardGate";
 
@@ -11,7 +14,7 @@ export default function AthleteLayout({
   return (
     <DashboardGate>
       <AthleteInvitationProvider>
-        {children}
+        <AthletePageReadyProvider>{children}</AthletePageReadyProvider>
       </AthleteInvitationProvider>
     </DashboardGate>
   );

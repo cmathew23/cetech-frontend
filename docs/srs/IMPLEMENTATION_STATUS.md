@@ -28,11 +28,16 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 ### Frontend
 
 - Athlete Weekly Adherence Overview implemented.
-- Coach Weekly Adherence Overview implemented.
-- Dashboard loads automatically after login.
-- Dashboard persists after page refresh.
-- KPI cards display domain-level adherence percentages.
+- Coach Weekly Adherence Overview implemented (role-scoped domain visibility).
+- Dashboard loads automatically after login and persists after hard refresh.
+- KPI cards display domain-level adherence percentages from backend only.
+- Frontend renders **only backend-returned domains**; does not calculate adherence percent.
+- Frontend does not infer Head Coach / Specialist domain access from labels.
+- Plan week/date range comes from backend plan week, not a generic calendar week.
+- Athlete notes are **not** rendered on coach dashboard cards.
+- Shared identity/access context stabilized (`useAuth`, `AthletePageReadyContext`) to avoid login/hard-refresh loading bugs.
 - Weekly adherence context provider added to stabilize state management.
+- Manual QA confirmed: athlete login + hard refresh load adherence; Head Coach sees all domains; specialists see only own domain; no endless Loading/Preparing state.
 
 ---
 
@@ -56,6 +61,13 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 
 ### Nutrition
 
+- **`NutritionSessionAdherencePanel`** exists separately from Skills/S&C `SessionAdherencePanel`.
+- Portion controls: **Not eaten (0)**, **Half (0.5)**, **Full (1)**, **Extra (1.25)**.
+- Shows planned item label, serving, timing, calories/macros, and available micronutrients.
+- Null micronutrients are not displayed as zero.
+- Submit becomes **Update log** after save.
+- Future days disabled; past/current days active.
+- Selected-day weekly journal layout restored.
 - Athlete can log adherence per prescribed nutrition item.
 - Item-level adherence supported.
 - `occurredAt` captured and persisted.
@@ -71,6 +83,46 @@ The sections below retain **auth password-flow** notes; **dashboard/onboarding**
 - Submit button disabled until history loads.
 - Review cards no longer auto-open unexpectedly.
 - Dashboard survives login/reload cycles.
+
+---
+
+## Coach ↔ Athlete Chat MVP (Completed — Frontend)
+
+- Minimal text-only chat UI for coach and athlete sidebars (`Chat with Athlete` / `Chat with Coach`).
+- Socket.IO realtime messaging integrated via shared `ChatPanel`.
+- Message history visible for last **96 hours** in UI; DB retains all messages.
+- Unread badge/count in sidebar; unread-count is optional badge data and **must never block** chat or page loading.
+- Unread fetches only after page readiness (`AthletePageReadyContext`); fails silently during login/navigation transitions.
+- Chat eligibility based on **ACTIVE `AthleteCoachAssignment`**, not plan release or planning context.
+- No attachments, images, audio, or video in MVP.
+
+---
+
+## Fyn Assistant History UI (Completed — Frontend)
+
+- Athlete Fyn page loads last **72 hours** of own Fyn history.
+- Coach Fyn page loads last **72 hours** of own Fyn history scoped to selected athlete.
+- History refetches after successful send; duplicate messages avoided.
+- Date/time displayed per message.
+- No `localStorage`; no frontend-side 72-hour filtering; no `conversationId`; no pagination.
+- Privacy rule: frontend must not assume visibility; backend actor-scoped history is source of truth.
+
+---
+
+## Sport Metrics v2 Frontend (Completed)
+
+- Sport Metrics UI upgraded from random logging to structured result capture.
+- Improved log-result modal; drill classification display; inline post-save summary.
+- Evidence cards and goal/progress summary improved.
+- Coach sidebar includes **Athlete Performance** page; main coach dashboard kept lighter.
+
+---
+
+## Fyn Future UI Direction (Deferred)
+
+- Fyn should become a governed coach revision assistant (not implemented).
+- Future: explain plan rationale, show valid database-backed options, help coach-selected revisions.
+- Fyn must **not** freely mutate plans, bypass approval, ignore role gates, invent unavailable items, or change locked context.
 
 ---
 

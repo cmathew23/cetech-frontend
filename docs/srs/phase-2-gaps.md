@@ -182,6 +182,48 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 
 ---
 
+## 13a. Coach ↔ Athlete Chat MVP (COMPLETED — Frontend)
+
+**Status:** **Closed** for MVP text-only chat. Do not track as active gap.
+
+**Completed:**
+
+- Minimal text-only chat UI (coach + athlete sidebars).
+- Socket.IO realtime messaging; 96-hour visible history.
+- Unread badge/count (optional; does not block page load).
+- Chat eligibility via ACTIVE `AthleteCoachAssignment`.
+- No attachments/media in MVP.
+
+**Not in MVP (future):** file attachments, images, audio, video, group chat.
+
+---
+
+## 13b. Fyn Assistant History UI (COMPLETED — Frontend)
+
+**Status:** **Closed** for 72-hour history display. Do not track as active gap.
+
+**Completed:**
+
+- Athlete + coach Fyn pages load last 72 hours of actor-scoped history.
+- Refetch after send; duplicate avoidance; date/time display.
+- No localStorage, frontend filtering, conversationId, or pagination.
+
+**Future (Phase 2):** governed coach revision assistant UX — see `IMPLEMENTATION_STATUS.md` *Fyn Future UI Direction*.
+
+---
+
+## 13c. Sport Metrics v2 Frontend (COMPLETED)
+
+**Status:** **Closed** for structured result capture UI. Do not track as active gap.
+
+**Completed:**
+
+- Structured log-result modal, drill classification, post-save summary.
+- Evidence cards and goal/progress summary improvements.
+- Coach **Athlete Performance** sidebar page.
+
+---
+
 ## 13. Session Adherence + Nutrition Adherence + Adherence State Hardening (COMPLETED)
 
 **Status:** **Closed.** Merged backend **#46** (`feature/nutrition-adherence`) and frontend **#10** (`feature/nutrition-adherence-ui`). Do **not** track the items below as active gaps.
@@ -207,11 +249,16 @@ The Nutrition revision system worked **functionally**, but one Rice catalog item
 
 **Weekly Adherence Dashboard:** **Completed** (see `docs/srs/IMPLEMENTATION_STATUS.md` — *Weekly Adherence Dashboard (Completed)*). Athlete and coach weekly adherence overview cards, domain KPI percentages, and weekly adherence context provider are implemented.
 
-**Remaining future gaps:**
+**Remaining future UI gaps:**
 
+- Adherence week navigation (prior/next plan weeks).
+- Per-day adherence drilldown.
+- Nutrition macro/micronutrient detail dashboard.
+- Coach action workflow based on adherence signals.
+- Governed Fyn revision UX (see `IMPLEMENTATION_STATUS.md` — *Fyn Future UI Direction*).
+- Wearables dashboard (after backend ingestion / source-of-truth design).
 - Nutrition nutrient drilldown dashboard.
 - Nutrition catalog QA / unit normalization (see note below).
-- Wearables integration.
 - Daily/weekly adherence trend charts.
 - AI adherence feedback (later).
 - Meal replacement / custom food logging (later).

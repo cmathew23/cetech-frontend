@@ -23,6 +23,9 @@
 - S&C Adherence
 - Nutrition Adherence
 - Weekly Adherence Dashboard
+- Coach ↔ Athlete Chat MVP (text-only, Socket.IO, unread badge)
+- Fyn Assistant History UI (72-hour actor-scoped history)
+- Sport Metrics v2 Frontend (structured result capture)
 
 **Next planned work:**
 
@@ -30,13 +33,14 @@
 - Metrics Dashboard Expansion
 - Golf Metrics Layer
 - Readiness & Recovery Foundation
+- Governed Fyn Revision Assistant UX
 - Future AI-driven athlete insights
 
 ---
 
 ## Latest completed module
 
-**Weekly Adherence Dashboard** (athlete + coach overview cards, domain KPI adherence percentages). Prior slice: **Session Adherence + Nutrition Adherence + Adherence State Hardening** (backend **#46**, frontend **#10**).
+**Coach ↔ Athlete Chat MVP** (text-only UI, Socket.IO realtime, 96-hour visible history, unread badge). Prior slices: **Weekly Adherence Dashboard**; **Fyn Assistant History UI**; **Sport Metrics v2 Frontend**; **Session Adherence + Nutrition Adherence** (backend **#46**, frontend **#10**).
 
 **Summary:** The system now supports Skills, S&C, and Nutrition adherence history.
 

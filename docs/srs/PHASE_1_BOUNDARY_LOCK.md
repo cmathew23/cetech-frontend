@@ -126,6 +126,17 @@
 
 **Weekly Adherence Dashboard:** **Completed** (see `docs/srs/IMPLEMENTATION_STATUS.md`).
 
+### F. Frontend visibility and rendering boundaries (LOCKED)
+
+- **Backend is source of truth** for permissions and domain visibility.
+- Frontend renders **only backend-returned domains** (weekly adherence, coach dashboard cards).
+- Frontend **must not** infer Head Coach / Specialist domain access from labels or role names alone.
+- Frontend **must not** calculate adherence percent; display backend `adherencePercent` only.
+- Athlete notes are **not** shown on coach dashboard adherence cards.
+- **Chat unread-count** is optional badge data; must not block page load, identity load, or chat send/receive.
+- **Fyn history:** frontend must not assume cross-actor visibility; backend actor-scoped history is source of truth.
+- Manual QA required before frontend PR merge for dashboard/adherence/chat slices.
+
 ---
 
 ## Adherence Scope Locked For Phase 1

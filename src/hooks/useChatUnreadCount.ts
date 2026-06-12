@@ -1,20 +1,16 @@
 "use client";
 
 import { getChatUnreadCount } from "@/lib/api/chat";
+import { getToken } from "@/lib/auth";
 import { getChatSocket } from "@/lib/chatSocket";
+import { isNormalizedApiError } from "@/lib/apiClient";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export const CHAT_UNREAD_REFRESH_EVENT = "chat-unread-refresh";
-export const ATHLETE_CHAT_PAGE_READY_EVENT = "athlete-chat-page-ready";
 
 export function requestChatUnreadRefresh(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(CHAT_UNREAD_REFRESH_EVENT));
-}
-
-export function requestAthleteChatPageReady(): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event(ATHLETE_CHAT_PAGE_READY_EVENT));
 }
 
 type UseChatUnreadCountOptions = {
@@ -23,23 +19,35 @@ type UseChatUnreadCountOptions = {
 };
 
 export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
-  const { enabled = true, clearOnError = false } = options;
+  const { enabled = false, clearOnError = false } = options;
   const [unreadCount, setUnreadCount] = useState(0);
   const requestSeqRef = useRef(0);
 
   const refreshUnreadCount = useCallback(async () => {
     if (!enabled) return;
+    if (!getToken()) {
+      setUnreadCount(0);
+      return;
+    }
     const seq = ++requestSeqRef.current;
     try {
       const count = await getChatUnreadCount();
       if (seq === requestSeqRef.current) {
         setUnreadCount(count);
       }
-    } catch {
+    } catch (error) {
       if (seq === requestSeqRef.current && clearOnError) {
         setUnreadCount(0);
       }
-      console.error("[ChatUnread] GET /api/chat/unread-count failed.");
+      if (
+        isNormalizedApiError(error) &&
+        (error.status === 0 || error.status === 401 || error.status === 403)
+      ) {
+        return;
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[ChatUnread] GET /api/chat/unread-count failed.", error);
+      }
     }
   }, [clearOnError, enabled]);
 
@@ -63,6 +71,11 @@ export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
     };
 
     try {
+      if (!getToken()) {
+        return () => {
+          window.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, handleRefresh);
+        };
+      }
       socket = getChatSocket();
       socket.on("chat:message", handleIncomingMessage);
       if (!socket.connected) {

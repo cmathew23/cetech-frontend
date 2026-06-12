@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import { AthleteHeaderIdentityMetadata } from "@/components/dashboard/athlete/AthleteHeaderIdentityMetadata";
+import { useAthletePageReady } from "@/components/dashboard/athlete/AthletePageReadyContext";
 import { useAuth } from "@/hooks/useAuth";
 import {
   createOrFindChatConversation,
@@ -14,10 +15,7 @@ import {
   type AthleteChatCoach,
   type ChatConversationSummary,
 } from "@/lib/api/chat";
-import {
-  requestAthleteChatPageReady,
-  requestChatUnreadRefresh,
-} from "@/hooks/useChatUnreadCount";
+import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
@@ -33,6 +31,7 @@ function formatApiError(error: unknown, fallback: string): string {
 
 export function AthleteChatPageContent() {
   const { accessContext, accessGateReady } = useAuth();
+  const { markPageReady } = useAthletePageReady();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [coaches, setCoaches] = useState<AthleteChatCoach[]>([]);
@@ -42,7 +41,7 @@ export function AthleteChatPageContent() {
   );
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [conversationLoading, setConversationLoading] = useState(false);
-  const [isChatPageReady, setIsChatPageReady] = useState(false);
+  const [hasLoadedCoachOptions, setHasLoadedCoachOptions] = useState(false);
 
   const athleteName = useMemo(() => {
     const source =
@@ -57,6 +56,8 @@ export function AthleteChatPageContent() {
   }, [accessContext?.user]);
 
   useEffect(() => {
+    if (!accessGateReady) return;
+
     let cancelled = false;
 
     async function loadCoaches() {
@@ -68,7 +69,7 @@ export function AthleteChatPageContent() {
         console.log("[AthleteChat] response:", rows);
         if (cancelled) return;
         setCoaches(Array.isArray(rows) ? rows : []);
-        setIsChatPageReady(true);
+        setHasLoadedCoachOptions(true);
       } catch (error) {
         if (cancelled) return;
         console.error("[AthleteChat] GET /api/chat/athlete/coaches error:", error);
@@ -86,13 +87,13 @@ export function AthleteChatPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessGateReady]);
 
   useEffect(() => {
-    if (!isChatPageReady) return;
-    requestAthleteChatPageReady();
+    if (!hasLoadedCoachOptions) return;
+    markPageReady();
     requestChatUnreadRefresh();
-  }, [isChatPageReady]);
+  }, [hasLoadedCoachOptions, markPageReady]);
 
   useEffect(() => {
     if (selectedCoachProfileId === "") {

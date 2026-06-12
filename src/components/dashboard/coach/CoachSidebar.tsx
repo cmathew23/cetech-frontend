@@ -11,7 +11,7 @@ import { usePathname } from "next/navigation";
 export function CoachSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
-  const { unreadCount: chatUnreadCount } = useChatUnreadCount();
+  const { unreadCount: chatUnreadCount } = useChatUnreadCount({ enabled: true });
   const coachChatRoute = "/coach/chat";
 
   return (

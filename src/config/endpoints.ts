@@ -288,6 +288,7 @@ export const paths = {
     athleteCoaches: "/api/chat/athlete/coaches",
     coachAthletes: "/api/chat/coach/athletes",
     conversations: "/api/chat/conversations",
+    unreadCount: "/api/chat/unread-count",
     conversationMessages: (conversationId: string) =>
       `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
   },

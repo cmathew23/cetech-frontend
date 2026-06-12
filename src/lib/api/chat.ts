@@ -202,3 +202,21 @@ export async function getChatMessages(
     return acc;
   }, []);
 }
+
+function readNonNegInt(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return Math.floor(value);
+}
+
+export async function getChatUnreadCount(): Promise<number> {
+  const raw = await apiRequest(paths.chat.unreadCount, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const data = adaptBackendSuccess(raw);
+  const record = asRecord(data);
+  if (!record) return 0;
+  return readNonNegInt(record.unreadCount);
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
+import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
 import { coachSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
@@ -10,6 +11,8 @@ import { usePathname } from "next/navigation";
 export function CoachSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
+  const { unreadCount: chatUnreadCount } = useChatUnreadCount();
+  const coachChatRoute = "/coach/chat";
 
   return (
     <DashboardSidebarFrame
@@ -36,8 +39,15 @@ export function CoachSidebar() {
             className={cn(link, active && linkActive)}
             aria-current={active ? "page" : undefined}
           >
-            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>{item.label}</span>
+            <span className="inline-flex min-w-0 flex-1 items-center gap-2">
+              <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{item.label}</span>
+              {item.href === coachChatRoute && chatUnreadCount > 0 ? (
+                <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1.5 text-[10px] font-semibold text-white">
+                  {chatUnreadCount}
+                </span>
+              ) : null}
+            </span>
           </Link>
         );
       })}

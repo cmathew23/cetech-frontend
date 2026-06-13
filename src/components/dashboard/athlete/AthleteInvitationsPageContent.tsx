@@ -4,12 +4,14 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { useAuth } from "@/hooks/useAuth";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatInviteDateDisplay } from "@/lib/dateTime";
 import { routeFromAccessContext } from "@/lib/accessContext";
 import { formatEnumeratedLabel } from "@/lib/textFormat";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -43,8 +45,10 @@ async function afterSuccessAlertPaint() {
 
 const EMPTY_MESSAGE = "No pending invitations.";
 
-const CARD_SURFACE =
-  "overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]";
+const CARD_SURFACE = cn(
+  "overflow-x-auto rounded-2xl border bg-white",
+  DASHBOARD_MAJOR_OUTER_CARD_CLASS,
+);
 
 export function AthleteInvitationsPageContent() {
   const router = useRouter();

@@ -2,6 +2,12 @@
 
 import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import {
+  DASHBOARD_BODY_EMPHASIS_CLASS,
+  DASHBOARD_CARD_TITLE_CLASS,
+  DASHBOARD_DETAIL_LABEL_CLASS,
+  DASHBOARD_SECTION_HEADING_CLASS,
+} from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import {
   fetchCoachMeDashboard,
@@ -21,9 +27,9 @@ const INVITATIONS_HREF = "/coach/dashboard/invitations";
 const ATHLETES_HREF = "/coach/athletes";
 const ATHLETE_PERFORMANCE_HREF = "/coach/athlete-performance";
 
-/** Matches Admin Dashboard primary invitation CTA styling. */
-const PRIMARY_ACTION_CLASS =
-  "flex w-full flex-col gap-4 rounded-xl border-2 border-primary bg-primary/10 p-6 shadow-md transition-colors hover:border-primary hover:bg-primary/[0.14] focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6";
+/** Neutral nested row inside the Workspaces outer card (no orange fill). */
+const WORKSPACE_LINK_CLASS =
+  "flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:bg-slate-50/70 focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6";
 
 function formatCoachApiError(e: unknown, fallback: string): string {
   if (isNormalizedApiError(e)) {
@@ -87,7 +93,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-      <dt className="text-xs font-medium text-textMuted sm:w-40 sm:shrink-0">
+      <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "sm:w-40 sm:shrink-0")}>
         {label}
       </dt>
       <dd className="min-w-0 text-sm text-textPrimary">{value}</dd>
@@ -147,7 +153,7 @@ export function CoachDashboardView() {
       <div className="space-y-10">
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
+            <h2 className={DASHBOARD_SECTION_HEADING_CLASS}>
               Summary
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -156,10 +162,10 @@ export function CoachDashboardView() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="space-y-1">
-              <p className="text-xs font-medium tracking-wide text-textSecondary">
+              <p className="text-xs font-normal tracking-wide text-textSecondary">
                 Assigned Athletes
               </p>
-              <p className="text-2xl font-semibold tabular-nums text-textPrimary">
+              <p className="text-2xl font-normal tabular-nums text-textPrimary">
                 {formatMetric(
                   loading,
                   error,
@@ -168,10 +174,10 @@ export function CoachDashboardView() {
               </p>
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-medium tracking-wide text-textSecondary">
+              <p className="text-xs font-normal tracking-wide text-textSecondary">
                 Academy Coach Role
               </p>
-              <p className="min-w-0 text-lg font-semibold leading-snug text-textPrimary sm:text-2xl">
+              <p className={cn("min-w-0 text-lg leading-snug sm:text-2xl", DASHBOARD_BODY_EMPHASIS_CLASS)}>
                 {formatDashboardStringField(
                   loading,
                   error,
@@ -181,10 +187,10 @@ export function CoachDashboardView() {
               </p>
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-medium tracking-wide text-textSecondary">
+              <p className="text-xs font-normal tracking-wide text-textSecondary">
                 Function Slots
               </p>
-              <p className="text-2xl font-semibold tabular-nums text-textPrimary">
+              <p className="text-2xl font-normal tabular-nums text-textPrimary">
                 {loading || error
                   ? formatMetric(loading, error, null)
                   : String(dash?.functions?.length ?? 0)}
@@ -195,7 +201,7 @@ export function CoachDashboardView() {
 
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
+            <h2 className={DASHBOARD_SECTION_HEADING_CLASS}>
               Action required
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -204,46 +210,48 @@ export function CoachDashboardView() {
           </div>
           <DashboardCardShell
             accent={false}
+            majorOuter
             title="Workspaces"
+            titleClassName={DASHBOARD_CARD_TITLE_CLASS}
             className="space-y-3"
           >
             <div className="space-y-3">
-              <Link href={INVITATIONS_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+              <Link href={INVITATIONS_HREF} className={cn(WORKSPACE_LINK_CLASS)}>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-lg font-semibold text-textPrimary">
+                  <p className={cn("text-lg", DASHBOARD_BODY_EMPHASIS_CLASS)}>
                     Invitations
                   </p>
                   <p className="text-sm text-textSecondary">
                     Accept or decline academy invitations.
                   </p>
                 </div>
-                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                <span className="shrink-0 text-sm font-normal text-textSecondary sm:text-base">
                   Open invitations →
                 </span>
               </Link>
-              <Link href={ATHLETE_PERFORMANCE_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+              <Link href={ATHLETE_PERFORMANCE_HREF} className={cn(WORKSPACE_LINK_CLASS)}>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-lg font-semibold text-textPrimary">
+                  <p className={cn("text-lg", DASHBOARD_BODY_EMPHASIS_CLASS)}>
                     Athlete Performance
                   </p>
                   <p className="text-sm text-textSecondary">
                     View weekly adherence and performance for your assigned athletes.
                   </p>
                 </div>
-                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                <span className="shrink-0 text-sm font-normal text-textSecondary sm:text-base">
                   View performance →
                 </span>
               </Link>
-              <Link href={ATHLETES_HREF} className={cn(PRIMARY_ACTION_CLASS)}>
+              <Link href={ATHLETES_HREF} className={cn(WORKSPACE_LINK_CLASS)}>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-lg font-semibold text-textPrimary">
+                  <p className={cn("text-lg", DASHBOARD_BODY_EMPHASIS_CLASS)}>
                     Assigned athletes
                   </p>
                   <p className="text-sm text-textSecondary">
                     View roster and coaching actions.
                   </p>
                 </div>
-                <span className="shrink-0 text-sm font-semibold text-primary sm:text-base">
+                <span className="shrink-0 text-sm font-normal text-textSecondary sm:text-base">
                   View athletes →
                 </span>
               </Link>
@@ -253,7 +261,7 @@ export function CoachDashboardView() {
 
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-semibold tracking-wide text-textSecondary">
+            <h2 className={DASHBOARD_SECTION_HEADING_CLASS}>
               Details
             </h2>
             <p className="mt-1 text-xs text-textMuted">
@@ -263,7 +271,9 @@ export function CoachDashboardView() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             <DashboardCardShell
               accent={false}
+              majorOuter
               title="Training entity"
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
               className="space-y-3"
             >
               <dl className="space-y-2">
@@ -281,7 +291,9 @@ export function CoachDashboardView() {
 
             <DashboardCardShell
               accent={false}
+              majorOuter
               title="Profile"
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
               className="space-y-3"
             >
               <dl className="space-y-2">
@@ -307,7 +319,9 @@ export function CoachDashboardView() {
 
             <DashboardCardShell
               accent={false}
+              majorOuter
               title="Configuration"
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
               className="space-y-3 md:col-span-2 lg:col-span-1"
             >
               <dl className="space-y-2">

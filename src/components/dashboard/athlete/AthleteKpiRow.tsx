@@ -5,62 +5,64 @@ import {
   formatAdherencePercent,
   useAthleteWeeklyAdherence,
 } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
+import type { WeeklyAdherenceDomainKey } from "@/lib/api/weeklyAdherence";
 
-const PLACEHOLDER_KPI = [
-  { title: "Training Load", value: "Placeholder", meta: "Status" },
-  { title: "Recovery Score", value: "Placeholder", meta: "Status" },
-] as const;
+const KPI_TILES: {
+  key: "overall" | WeeklyAdherenceDomainKey;
+  title: string;
+}[] = [
+  { key: "overall", title: "Overall" },
+  { key: "SKILL", title: "Skills" },
+  { key: "NUTRITION", title: "Nutrition" },
+  { key: "STRENGTH_CONDITIONING", title: "S&C" },
+];
 
-function nutritionKpiDisplay(
-  nutritionKpi: ReturnType<typeof useAthleteWeeklyAdherence>["nutritionKpi"],
+function resolveKpiValue(
+  phase: ReturnType<typeof useAthleteWeeklyAdherence>["phase"],
+  percent: number | null | undefined,
 ): string {
-  switch (nutritionKpi.status) {
+  switch (phase) {
+    case "hidden":
+      return "—";
     case "loading":
       return "Loading…";
     case "awaiting_identifiers":
       return "Preparing…";
     case "error":
       return "Unable to load";
-    case "ready":
-      return nutritionKpi.percentLabel;
-    case "empty":
-      return "No nutrition adherence yet";
+    case "loaded":
+      if (percent === null || percent === undefined) {
+        return "No data yet";
+      }
+      return formatAdherencePercent(percent);
     default:
       return "Loading…";
   }
 }
 
 export function AthleteKpiRow() {
-  const { nutritionKpi, summary } = useAthleteWeeklyAdherence();
-  const overall = summary?.overall ?? null;
+  const { phase, summary } = useAthleteWeeklyAdherence();
 
-  const nutritionValue = nutritionKpiDisplay(nutritionKpi);
-
-  let overallValue = "Placeholder";
-  if (overall) {
-    overallValue = formatAdherencePercent(overall.adherencePercent);
-  } else if (nutritionKpi.status === "loading") {
-    overallValue = "Loading…";
-  } else if (nutritionKpi.status === "awaiting_identifiers") {
-    overallValue = "Preparing…";
-  } else if (nutritionKpi.status === "error") {
-    overallValue = "Unable to load";
+  if (phase === "hidden") {
+    return null;
   }
 
   return (
     <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {PLACEHOLDER_KPI.map((item) => (
-        <DashboardCardShell key={item.title} title={item.title} className="space-y-2">
-          <p className="text-lg font-semibold text-textPrimary">{item.value}</p>
-          <p className="text-xs text-textSecondary">{item.meta}</p>
-        </DashboardCardShell>
-      ))}
-      <DashboardCardShell title="Nutrition Adherence" className="space-y-2">
-        <p className="text-lg font-semibold text-textPrimary">{nutritionValue}</p>
-      </DashboardCardShell>
-      <DashboardCardShell title="Overall Adherence" className="space-y-2">
-        <p className="text-lg font-semibold text-textPrimary">{overallValue}</p>
-      </DashboardCardShell>
+      {KPI_TILES.map((tile) => {
+        const percent =
+          tile.key === "overall"
+            ? summary?.overall?.adherencePercent
+            : summary?.domains[tile.key]?.adherencePercent;
+
+        return (
+          <DashboardCardShell key={tile.key} title={tile.title} className="space-y-2">
+            <p className="text-lg font-semibold text-textPrimary">
+              {resolveKpiValue(phase, percent)}
+            </p>
+          </DashboardCardShell>
+        );
+      })}
     </section>
   );
 }

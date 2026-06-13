@@ -13,8 +13,10 @@ import {
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchFynAssistantHistory,
@@ -200,7 +202,11 @@ export function AthleteFynAssistantPageContent() {
         subtitle="Ask Fyn for simple explanations of your plan, week, and Golf Metrics."
       />
 
-      <Card accent={false} padding="compact" className="space-y-4">
+      <Card
+        accent={false}
+        padding="compact"
+        className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      >
         <div className="space-y-3">
           <p className="text-sm text-textSecondary">
             Choose a prompt or ask a short follow-up. Fyn is read-only in this view.
@@ -223,10 +229,19 @@ export function AthleteFynAssistantPageContent() {
 
       {historyWarning ? <Alert variant="warning">{historyWarning}</Alert> : null}
 
-      <FynChatThread
-        messages={messages}
-        emptyState="Start with one of the guided prompts above to get a simple answer from Fyn."
-      />
+      <Card
+        accent={false}
+        padding="compact"
+        className={cn("space-y-3", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      >
+        {messages.length === 0 ? (
+          <p className="text-sm text-textSecondary">
+            Start with one of the guided prompts above to get a simple answer from Fyn.
+          </p>
+        ) : (
+          <FynChatThread messages={messages} emptyState="" />
+        )}
+      </Card>
     </div>
   );
 }

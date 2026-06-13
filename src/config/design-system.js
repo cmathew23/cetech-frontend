@@ -33,7 +33,7 @@ export const designSystem = {
   },
 
   typography: {
-    h1: "mb-4 text-2xl font-semibold tracking-tight text-textPrimary",
+    h1: "mb-4 text-2xl font-medium tracking-tight text-textPrimary",
     h2: "mb-4 text-lg font-semibold text-textPrimary sm:text-xl lg:text-2xl",
     h3: "mb-4 text-lg font-semibold text-textPrimary",
     body: "text-base font-normal text-textPrimary",

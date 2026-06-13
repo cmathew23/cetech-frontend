@@ -161,13 +161,13 @@ export function CoachAthleteLevelValidationModal({
       <div className="flex flex-col gap-4 px-6 py-6 sm:px-7 sm:py-7">
         <h2
           id="level-validation-modal-title"
-          className="text-lg font-semibold text-textPrimary"
+          className="text-lg font-normal text-textPrimary"
         >
           Level validation
         </h2>
         <dl className="space-y-2 text-sm">
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-            <dt className="text-xs font-medium text-textMuted sm:w-40 sm:shrink-0">
+            <dt className="text-sm font-normal text-textMuted sm:w-40 sm:shrink-0">
               Athlete
             </dt>
             <dd className="min-w-0 text-textPrimary">
@@ -175,7 +175,7 @@ export function CoachAthleteLevelValidationModal({
             </dd>
           </div>
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-            <dt className="text-xs font-medium text-textMuted sm:w-40 sm:shrink-0">
+            <dt className="text-sm font-normal text-textMuted sm:w-40 sm:shrink-0">
               Self-reported level
             </dt>
             <dd className="min-w-0 text-textPrimary">{selfReportedLevelLabel}</dd>

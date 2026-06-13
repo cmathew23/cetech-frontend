@@ -18,6 +18,7 @@ import {
   type WearablePeriodDays,
 } from "@/lib/wearablePeriod";
 import type { WearableViewerContext } from "@/components/dashboard/WearableSummaryCards";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
 function formatLoadError(e: unknown): string {
@@ -39,11 +40,15 @@ function WearableSectionCard({
   subtitle,
   actions,
   children,
+  titleClassName,
+  cardClassName,
 }: {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   return (
     <Card
@@ -52,7 +57,8 @@ function WearableSectionCard({
       actions={actions}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn("shadow-[0_10px_30px_rgba(15,23,42,0.05)]", cardClassName)}
+      titleClassName={titleClassName}
     >
       {children}
     </Card>
@@ -69,6 +75,9 @@ export function WearableSummarySection({
   subtitle,
   windowLabel,
   viewerContext = "DEFAULT",
+  hideWhenEmpty = false,
+  titleClassName,
+  cardClassName,
 }: {
   entityId: string;
   athleteId: string;
@@ -80,6 +89,10 @@ export function WearableSummarySection({
   subtitle?: string;
   windowLabel?: string;
   viewerContext?: WearableViewerContext;
+  /** When true, render nothing instead of an empty-state card after load. */
+  hideWhenEmpty?: boolean;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   const [rollingDays, setRollingDays] = useState<WearablePeriodDays>(7);
   const [summary, setSummary] = useState<WearableSummary | null>(null);
@@ -150,11 +163,16 @@ export function WearableSummarySection({
   ) : null;
 
   if (!hasIdentifiers || planWindowPending) {
+    if (hideWhenEmpty) {
+      return null;
+    }
     return (
       <WearableSectionCard
         title={title}
         subtitle={resolvedSubtitle}
         actions={periodSelector}
+        titleClassName={titleClassName}
+        cardClassName={cardClassName}
       >
         <p className="text-sm text-textSecondary">
           {planWindowPending
@@ -166,11 +184,16 @@ export function WearableSummarySection({
   }
 
   if (isLoading) {
+    if (hideWhenEmpty) {
+      return null;
+    }
     return (
       <WearableSectionCard
         title={title}
         subtitle={resolvedSubtitle}
         actions={periodSelector}
+        titleClassName={titleClassName}
+        cardClassName={cardClassName}
       >
         <p className="text-sm text-textSecondary">Loading…</p>
       </WearableSectionCard>
@@ -183,6 +206,8 @@ export function WearableSummarySection({
         title={title}
         subtitle={resolvedSubtitle}
         actions={periodSelector}
+        titleClassName={titleClassName}
+        cardClassName={cardClassName}
       >
         <div className="space-y-3">
           <Alert variant="danger">{error ?? "Unable to load wearable summary."}</Alert>
@@ -195,11 +220,16 @@ export function WearableSummarySection({
   }
 
   if (!summary || !hasWearableSummaryData(summary)) {
+    if (hideWhenEmpty) {
+      return null;
+    }
     return (
       <WearableSectionCard
         title={title}
         subtitle={resolvedSubtitle}
         actions={periodSelector}
+        titleClassName={titleClassName}
+        cardClassName={cardClassName}
       >
         <p className="text-sm text-textSecondary">
           No wearable summary data returned for this period.
@@ -218,6 +248,8 @@ export function WearableSummarySection({
         title={title}
         subtitle={resolvedSubtitle}
         viewerContext={viewerContext}
+        titleClassName={titleClassName}
+        cardClassName={cardClassName}
       />
     </div>
   );

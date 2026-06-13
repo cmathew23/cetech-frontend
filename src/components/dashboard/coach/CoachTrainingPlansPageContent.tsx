@@ -1,5 +1,8 @@
 "use client";
 
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { cn } from "@/lib/utils";
+
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -26,7 +29,6 @@ import {
   type TrainingPlanReadiness,
 } from "@/lib/trainingPlanReadiness";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
-import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -99,7 +101,7 @@ function TrainingPlanAthleteRow({
     <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-slate-900">{displayName}</span>
+          <span className="text-sm font-normal text-slate-900">{displayName}</span>
           <StatusBadge
             variant={badgeVariantForReadiness(readiness)}
             className="rounded-md px-2.5 py-1 text-xs font-medium"
@@ -245,7 +247,12 @@ export function CoachTrainingPlansPageContent() {
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
       {error ? null : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div
+          className={cn(
+            "overflow-hidden rounded-2xl border bg-white",
+            DASHBOARD_MAJOR_OUTER_CARD_CLASS,
+          )}
+        >
           {loading ? (
             <p className="px-6 py-6 text-sm text-slate-500">
               Loading athletes…

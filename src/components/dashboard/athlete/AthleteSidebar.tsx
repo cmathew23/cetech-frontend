@@ -28,7 +28,7 @@ export function AthleteSidebar() {
       navAriaLabel="Athlete sidebar"
       brand={
         <>
-          <p className="text-sm font-semibold tracking-wide text-white/90">
+          <p className="text-sm font-medium tracking-wide text-white/90">
             PEAKFLOW AMS
           </p>
           <p className="mt-1 text-xs text-gray-400">Athlete</p>
@@ -47,7 +47,9 @@ export function AthleteSidebar() {
             : pathname === item.href || pathname?.startsWith(`${item.href}/`);
         const linkClass = cn(
           link,
+          "font-normal",
           active && linkActive,
+          active && "!font-medium",
           gatedOff && "cursor-not-allowed opacity-45",
         );
         return (

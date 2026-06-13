@@ -14,6 +14,7 @@ import {
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 
 function formatLoadError(e: unknown): string {
@@ -25,9 +26,13 @@ function formatLoadError(e: unknown): string {
 function SportMetricsCardFrame({
   subtitle,
   children,
+  titleClassName,
+  cardClassName,
 }: {
   subtitle?: string;
   children: React.ReactNode;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   return (
     <Card
@@ -35,7 +40,8 @@ function SportMetricsCardFrame({
       subtitle={subtitle ?? "Sport: Golf"}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn("shadow-[0_10px_30px_rgba(15,23,42,0.05)]", cardClassName)}
+      titleClassName={titleClassName}
     >
       {children}
     </Card>
@@ -46,10 +52,14 @@ export function SportMetricsSection({
   entityId,
   athleteId,
   trainingPlanVersionId,
+  titleClassName,
+  cardClassName,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +110,7 @@ export function SportMetricsSection({
 
   if (!hasIdentifiers) {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <p className="text-sm text-textSecondary">Preparing SPORT Metrics…</p>
       </SportMetricsCardFrame>
     );
@@ -108,7 +118,7 @@ export function SportMetricsSection({
 
   if (versionId === "") {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <p className="text-sm text-textSecondary">
           No Skills plan week available for SPORT Metrics yet.
         </p>
@@ -118,7 +128,7 @@ export function SportMetricsSection({
 
   if (isLoading) {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <p className="text-sm text-textSecondary">Loading…</p>
       </SportMetricsCardFrame>
     );
@@ -126,7 +136,7 @@ export function SportMetricsSection({
 
   if (error) {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <div className="space-y-3">
           <Alert variant="danger">{error}</Alert>
           <Button type="button" variant="secondary" onClick={reload}>
@@ -139,7 +149,7 @@ export function SportMetricsSection({
 
   if (!summary) {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <p className="text-sm text-textSecondary">
           No SPORT Metrics results returned for this plan week.
         </p>
@@ -149,7 +159,7 @@ export function SportMetricsSection({
 
   if (!hasSportMetricsGolfEvidence(summary)) {
     return (
-      <SportMetricsCardFrame subtitle={subtitle}>
+      <SportMetricsCardFrame subtitle={subtitle} titleClassName={titleClassName} cardClassName={cardClassName}>
         <div className="space-y-3">
           <StatusBadge variant={sportMetricsStatusVariant(summary.status)}>
             {formatSportMetricsStatusLabel(summary.status)}
@@ -162,5 +172,11 @@ export function SportMetricsSection({
     );
   }
 
-  return <SportMetricsEvidenceCards summary={summary} />;
+  return (
+    <SportMetricsEvidenceCards
+      summary={summary}
+      titleClassName={titleClassName}
+      cardClassName={cardClassName}
+    />
+  );
 }

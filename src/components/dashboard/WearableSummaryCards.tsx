@@ -8,6 +8,8 @@ import {
 import { formatDateOnly, formatDateOrDateTime, parseToLocalDate } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 
+const WEARABLE_METRIC_NO_VALUE = "NA";
+
 function GroupMeta({
   sampleCount,
   status,
@@ -144,7 +146,7 @@ function formatMetricDisplay(
   value: unknown,
   formatter: MetricDefinition["formatter"] | undefined,
 ): string {
-  if (value === null || value === undefined) return "No data";
+  if (value === null || value === undefined) return WEARABLE_METRIC_NO_VALUE;
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number" && Number.isFinite(value)) {
     return Number.isInteger(value)
@@ -155,13 +157,13 @@ function formatMetricDisplay(
     const cleaned = value
       .map((item) => (typeof item === "string" ? item.trim() : String(item)))
       .filter((item) => item !== "");
-    return cleaned.length > 0 ? cleaned.join(", ") : "No data";
+    return cleaned.length > 0 ? cleaned.join(", ") : WEARABLE_METRIC_NO_VALUE;
   }
 
   const text = String(value).trim();
-  if (text === "") return "No data";
-  if (formatter === "date") return formatDateOnly(text, "No data");
-  if (formatter === "datetime") return formatDateOrDateTime(text, "No data");
+  if (text === "") return WEARABLE_METRIC_NO_VALUE;
+  if (formatter === "date") return formatDateOnly(text, WEARABLE_METRIC_NO_VALUE);
+  if (formatter === "datetime") return formatDateOrDateTime(text, WEARABLE_METRIC_NO_VALUE);
   if (formatter === "boolean") {
     const normalized = text.toLowerCase();
     if (normalized === "true") return "Yes";
@@ -214,19 +216,19 @@ function MetricRow({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 border-b border-border/60 py-1.5 last:border-b-0">
       <dt className="min-w-0 text-xs font-medium text-textSecondary">{label}</dt>
-      <dd className="text-right text-xs font-semibold text-textPrimary">{value}</dd>
+      <dd className="text-right text-xs font-normal text-textPrimary">{value}</dd>
     </div>
   );
 }
 
 function WearableGroupCard({ group }: { group: WearableMetricGroup }) {
   const rows = buildMetricRows(group);
-  const hasAnyRowData = rows.some((row) => row.value !== "No data");
+  const hasAnyRowData = rows.some((row) => row.value !== WEARABLE_METRIC_NO_VALUE);
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 shadow-sm">
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-textPrimary">
+        <p className="text-sm font-normal text-textPrimary">
           {group.key === "bodyHealthMetrics"
             ? "Wearable Body & Health Metrics"
             : group.title}
@@ -328,11 +330,15 @@ export function WearableSummaryCards({
   title = "Wearable Summary",
   subtitle,
   viewerContext = "DEFAULT",
+  titleClassName,
+  cardClassName,
 }: {
   summary: WearableSummary;
   title?: string;
   subtitle?: string;
   viewerContext?: WearableViewerContext;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   const resolvedSubtitle =
     subtitle ??
@@ -355,7 +361,8 @@ export function WearableSummaryCards({
       subtitle={resolvedSubtitle}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn("shadow-[0_10px_30px_rgba(15,23,42,0.05)]", cardClassName)}
+      titleClassName={titleClassName}
     >
       <div
         className={cn(

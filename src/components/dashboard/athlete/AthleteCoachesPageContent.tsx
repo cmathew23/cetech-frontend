@@ -1,14 +1,17 @@
 "use client";
 
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import type { AppContextAssignedCoach } from "@/lib/accessContext";
 import { formatEnumeratedLabel, formatPersonNameForDisplay } from "@/lib/textFormat";
 import { useMemo } from "react";
 
-/** Matches Athlete Invitations and other dashboard soft table cards. */
-const COACHES_TABLE_CARD =
-  "overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]";
+const COACHES_TABLE_CARD = cn(
+  "overflow-x-auto rounded-2xl border bg-white",
+  DASHBOARD_MAJOR_OUTER_CARD_CLASS,
+);
 
 const BADGE_SOFT = "rounded-md px-2.5 py-1 text-xs font-medium";
 
@@ -82,7 +85,7 @@ export function AthleteCoachesPageContent() {
                     <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
                       <div className="space-y-1">
                         <p
-                          className="max-w-[22rem] truncate text-sm font-semibold text-slate-900"
+                          className="max-w-[22rem] truncate text-sm font-normal text-slate-900"
                           title={name}
                         >
                           {name}

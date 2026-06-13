@@ -339,7 +339,7 @@ export function WearableConnectionsSettings() {
 
   if (!accessGateReady || planningIds.phase === "loading") {
     return (
-      <DashboardCardShell title="Wearables / Connected Devices">
+      <DashboardCardShell majorOuter title="Wearables / Connected Devices">
         <p className="text-sm text-textSecondary">Loading wearable settings…</p>
       </DashboardCardShell>
     );
@@ -347,7 +347,7 @@ export function WearableConnectionsSettings() {
 
   if (planningIds.phase === "not_ready" || entityId === "" || athleteId === "") {
     return (
-      <DashboardCardShell title="Wearables / Connected Devices">
+      <DashboardCardShell majorOuter title="Wearables / Connected Devices">
         <Alert variant="warning">
           Wearable connection settings are unavailable until your athlete profile
           and academy context are ready.
@@ -358,6 +358,7 @@ export function WearableConnectionsSettings() {
 
   return (
     <DashboardCardShell
+      majorOuter
       title="Wearables / Connected Devices"
       subtitle="Connect supported cloud providers. Mobile-only providers require the CETECH mobile app."
     >

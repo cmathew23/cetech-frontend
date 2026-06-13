@@ -16,7 +16,9 @@ import {
   type ChatConversationSummary,
 } from "@/lib/api/chat";
 import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 const EMPTY_STATE_MESSAGE =
@@ -152,7 +154,7 @@ export function AthleteChatPageContent() {
 
       {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
 
-      <Card accent={false} className="space-y-4">
+      <Card accent={false} className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}>
         {loading || !accessGateReady ? (
           <p className="text-sm text-textSecondary">Loading chat availability…</p>
         ) : coaches.length === 0 ? (
@@ -184,7 +186,7 @@ export function AthleteChatPageContent() {
       {conversationError ? <Alert variant="danger">{conversationError}</Alert> : null}
 
       {conversationLoading ? (
-        <Card accent={false}>
+        <Card accent={false} className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}>
           <p className="text-sm text-textSecondary">Opening conversation…</p>
         </Card>
       ) : conversation ? (

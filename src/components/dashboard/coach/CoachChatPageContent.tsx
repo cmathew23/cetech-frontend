@@ -14,7 +14,10 @@ import {
   type ChatConversationSummary,
   type CoachChatAthlete,
 } from "@/lib/api/chat";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DASHBOARD_PLANNING_FIELD_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 const EMPTY_STATE_MESSAGE =
@@ -151,7 +154,7 @@ export function CoachChatPageContent() {
 
       {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
 
-      <Card accent={false} className="space-y-4">
+      <Card accent={false} className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}>
         {loading || !accessGateReady ? (
           <p className="text-sm text-textSecondary">Loading chat availability…</p>
         ) : athletes.length === 0 ? (
@@ -161,6 +164,7 @@ export function CoachChatPageContent() {
             id="coach-chat-athlete"
             label="Athlete"
             helperText="Choose the athlete you want to chat with."
+            labelClassName={DASHBOARD_PLANNING_FIELD_LABEL_CLASS}
           >
             <Select
               id="coach-chat-athlete"
@@ -186,7 +190,7 @@ export function CoachChatPageContent() {
       {conversationError ? <Alert variant="danger">{conversationError}</Alert> : null}
 
       {conversationLoading ? (
-        <Card accent={false}>
+        <Card accent={false} className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}>
           <p className="text-sm text-textSecondary">Opening conversation…</p>
         </Card>
       ) : conversation ? (

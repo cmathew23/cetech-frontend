@@ -19,6 +19,8 @@ export type PageHeaderProps = {
   /** Right side on md+ (e.g. Edit, Back links). */
   actions?: ReactNode;
   className?: string;
+  /** Optional override for the page title typography. */
+  titleClassName?: string;
 };
 
 /**
@@ -31,6 +33,7 @@ export function PageHeader({
   trailing,
   actions,
   className,
+  titleClassName,
 }: PageHeaderProps) {
   const pathname = usePathname();
   const HeaderIcon = resolveDashboardHeaderIcon(pathname);
@@ -53,7 +56,12 @@ export function PageHeader({
                 "aria-hidden": true,
               })
             ) : null}
-            <h1 className="text-2xl font-semibold tracking-tight text-textPrimary sm:text-3xl">
+            <h1
+              className={cn(
+                "text-2xl font-medium tracking-tight text-textPrimary sm:text-3xl",
+                titleClassName,
+              )}
+            >
               {title}
             </h1>
           </div>

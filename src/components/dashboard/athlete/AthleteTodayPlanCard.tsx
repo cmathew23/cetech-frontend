@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -17,6 +18,7 @@ import {
   getLocalDateKey,
   normalizeDateOnlyKey,
 } from "@/lib/dateTime";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -168,7 +170,9 @@ export function AthleteTodayPlanCard() {
     <DashboardCardShell
       title="Today’s Plan"
       subtitle={formatDateWithWeekday(getLocalDateKey())}
+      majorOuter
       className="min-h-[280px]"
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
     >
       <div className="space-y-3">
         {isLoading ? (
@@ -211,7 +215,7 @@ export function AthleteTodayPlanCard() {
               return (
                 <Card key={domain.key} padding="compact" accent={false} className="bg-bg">
                   <div className="space-y-1">
-                    <p className="text-sm font-medium text-textPrimary">{domain.label}</p>
+                    <p className="text-[15px] font-medium text-textPrimary">{domain.label}</p>
                     {items.length === 0 ? (
                       <p className="text-sm text-textSecondary">{domain.emptyMessage}</p>
                     ) : (

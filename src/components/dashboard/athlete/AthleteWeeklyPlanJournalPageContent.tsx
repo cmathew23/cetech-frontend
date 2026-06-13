@@ -2784,19 +2784,19 @@ export function AthleteWeeklyPlanJournalPageContent() {
         trailing={<AthleteHeaderIdentityMetadata />}
       />
       {isLoading ? (
-        <DashboardCardShell title="Weekly Plan Journal" className="min-h-[220px]">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal" className="min-h-[220px]">
           <div className="flex min-h-[120px] items-center justify-center text-sm text-textSecondary">
             Loading weekly plan journal…
           </div>
         </DashboardCardShell>
       ) : planningIds.phase === "not_ready" ? (
-        <DashboardCardShell title="Weekly Plan Journal">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal">
           <Alert variant="warning">
             Athlete profile not ready
           </Alert>
         </DashboardCardShell>
       ) : state.phase === "error" ? (
-        <DashboardCardShell title="Weekly Plan Journal">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal">
           <div className="space-y-3">
             <Alert variant="danger">{state.message}</Alert>
             <div>
@@ -2813,7 +2813,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
             if (readyJournal === null) return null;
             return (
               <>
-          <DashboardCardShell title="Current Week" subtitle={weekSubtitle}>
+          <DashboardCardShell majorOuter title="Current Week" subtitle={weekSubtitle}>
             <div className="grid gap-3 md:grid-cols-3">
               {DOMAIN_SECTIONS.map((domain) => {
                 const summary = readyJournal.domains[domain.key];
@@ -2872,7 +2872,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
           </DashboardCardShell>
 
           {allDomainsNotReleased ? (
-            <DashboardCardShell title="Weekly Journal">
+            <DashboardCardShell majorOuter title="Weekly Journal">
               <p className="text-sm text-textSecondary">
                 Your weekly plan has not been released yet.
               </p>
@@ -2880,7 +2880,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
           ) : null}
 
           {readyJournal.days.length === 0 ? (
-            <DashboardCardShell title="Journal Days">
+            <DashboardCardShell majorOuter title="Journal Days">
               <p className="text-sm text-textSecondary">
                 No weekly journal entries are available yet.
               </p>
@@ -2902,6 +2902,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
               return (
                 <div className="space-y-3">
                   <DashboardCardShell
+                    majorOuter
                     title="Plan by day"
                     subtitle="Choose a day to view your released plan"
                     className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
@@ -2915,13 +2916,14 @@ export function AthleteWeeklyPlanJournalPageContent() {
                   </DashboardCardShell>
 
                   {selectedDay === null ? (
-                    <DashboardCardShell title="Journal Days">
+                    <DashboardCardShell majorOuter title="Journal Days">
                       <p className="text-sm text-textSecondary">
                         No weekly journal entries are available yet.
                       </p>
                     </DashboardCardShell>
                   ) : (
                     <DashboardCardShell
+                      majorOuter
                       title={
                         selectedIsToday
                           ? "Today's Plan"

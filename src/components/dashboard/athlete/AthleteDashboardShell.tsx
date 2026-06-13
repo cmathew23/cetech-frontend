@@ -1,19 +1,15 @@
 "use client";
 
-import { AthleteCoachCommunicationCard } from "@/components/dashboard/athlete/AthleteCoachCommunicationCard";
 import { AthleteDashboardHeader } from "@/components/dashboard/athlete/AthleteDashboardHeader";
-import { AthleteInsightsCard } from "@/components/dashboard/athlete/AthleteInsightsCard";
-import { AthleteKpiRow } from "@/components/dashboard/athlete/AthleteKpiRow";
+import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import {
   AthleteWeeklyAdherenceProvider,
   useAthleteWeeklyAdherence,
 } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
 import { AthleteWeeklyAdherenceSection } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceSection";
-import { AthleteNutritionCard } from "@/components/dashboard/athlete/AthleteNutritionCard";
 import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/AthletePendingInvitationCard";
-import { AthleteRecoveryStatusCard } from "@/components/dashboard/athlete/AthleteRecoveryStatusCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
-import { AthleteUpcomingScheduleCard } from "@/components/dashboard/athlete/AthleteUpcomingScheduleCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
@@ -45,6 +41,9 @@ function AthleteWearableSummaryWithPlanWindow({
       planStartDate={weekStart !== "" ? weekStart : undefined}
       planEndDate={weekEnd !== "" ? weekEnd : undefined}
       planWindowPending={planWindowPending}
+      hideWhenEmpty
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
     />
   );
 }
@@ -63,6 +62,8 @@ function AthleteSportMetricsWithPlanVersion({
       entityId={entityId}
       athleteId={athleteId}
       trainingPlanVersionId={trainingPlanVersionId}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
     />
   );
 }
@@ -106,17 +107,8 @@ export function AthleteDashboardShell() {
               }}
             />
           ) : null}
-          <AthleteKpiRow />
           <AthleteWeeklyAdherenceSection />
-
-          <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <div className="xl:col-span-8">
-              <AthleteTodayPlanCard />
-            </div>
-            <div className="xl:col-span-4">
-              <AthleteInsightsCard />
-            </div>
-          </section>
+          <AthleteTodayPlanCard />
 
           <AthleteSportMetricsWithPlanVersion
             entityId={entityId}
@@ -127,16 +119,8 @@ export function AthleteDashboardShell() {
             entityId={entityId}
             athleteId={athleteId}
           />
-
-          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <AthleteNutritionCard />
-            <AthleteCoachCommunicationCard />
-            <AthleteRecoveryStatusCard />
-            <AthleteUpcomingScheduleCard />
-          </section>
         </div>
       </AthleteWeeklyAdherenceProvider>
     </DashboardLayout>
   );
 }
-

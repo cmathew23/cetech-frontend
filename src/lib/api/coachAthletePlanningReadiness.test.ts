@@ -123,6 +123,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 60_000,
       },
     );
   });
@@ -147,6 +148,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 60_000,
       },
     );
   });
@@ -169,6 +171,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: 60_000,
       },
     );
   });
@@ -425,7 +428,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
-        timeoutMs: 30_000,
+        timeoutMs: 60_000,
       },
     );
     expect(result.upstreamPlanningContextLocked).toBe(true);
@@ -451,7 +454,7 @@ describe("parseReadinessPayload", () => {
       {
         method: "GET",
         cache: "no-store",
-        timeoutMs: 30_000,
+        timeoutMs: 60_000,
       },
     );
     expect(result.SKILLS.trainingPlanId).toBe("plan-skills");
@@ -865,7 +868,30 @@ describe("parseReadinessPayload", () => {
         allowedActions: ["SUBMIT_REVIEW", "HEAD_APPROVE", "REQUEST_REVISION", "RELEASE"],
         releaseMode: "HEAD_COACH_RELEASE",
         selectedVersionRule: "ACTIVE_VERSION",
-        days: [],
+        days: [
+          {
+            id: "day-1",
+            dayIndex: 1,
+            date: "2026-05-04",
+            sessions: [
+              {
+                id: "session-1",
+                title: "Serve practice",
+                sessionStructure: {
+                  skill: {
+                    items: [
+                      {
+                        label: "Target Serve Drill",
+                        primaryGoalId: "goal-serve-1",
+                        primaryGoalName: "Improve first serve consistency",
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
       },
     });
 
@@ -890,6 +916,11 @@ describe("parseReadinessPayload", () => {
     ]);
     expect(result.releaseMode).toBe("HEAD_COACH_RELEASE");
     expect(result.selectedVersionRule).toBe("ACTIVE_VERSION");
+    expect(result.days[0]?.sessions[0]?.sessionStructureSections[0]?.items[0]).toMatchObject({
+      label: "Target Serve Drill",
+      primaryGoalId: "goal-serve-1",
+      primaryGoalName: "Improve first serve consistency",
+    });
   });
 
   it("includes generationDomain for NUTRITION active/detail", async () => {
@@ -1097,6 +1128,51 @@ describe("training plan generation timeouts and helpers", () => {
       fat: 2,
       timing: "Pre-training",
       notes: "Pair with berries",
+    });
+  });
+
+  it("parses primary goal attribution fields on latest skills draft items", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-1",
+        trainingPlanVersionId: "version-skills-1",
+        versionNumber: 1,
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Serve practice",
+                items: [
+                  {
+                    itemType: "SERVE",
+                    label: "Target Serve Drill",
+                    summary: "Hit targets from deuce court",
+                    primaryGoalId: "goal-serve-1",
+                    primaryGoalName: "Improve first serve consistency",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      itemType: "SERVE",
+      label: "Target Serve Drill",
+      summary: "Hit targets from deuce court",
+      primaryGoalId: "goal-serve-1",
+      primaryGoalName: "Improve first serve consistency",
     });
   });
 

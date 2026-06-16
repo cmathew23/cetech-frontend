@@ -26,6 +26,7 @@ export function AthleteSidebar() {
   return (
     <DashboardSidebarFrame
       navAriaLabel="Athlete sidebar"
+      className="!bg-[#0B0F12]"
       brand={
         <>
           <p className="text-sm font-medium tracking-wide text-white/90">

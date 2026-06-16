@@ -1,6 +1,7 @@
 "use client";
 
 import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
+import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import {
   DASHBOARD_BODY_EMPHASIS_CLASS,
@@ -102,6 +103,7 @@ function DetailRow({
 }
 
 export function CoachDashboardView() {
+  const { markPageReady } = useCoachPageReady();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<CoachMeDashboardData | null>(
@@ -128,7 +130,10 @@ export function CoachDashboardView() {
           ),
         );
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          markPageReady();
+        }
       }
     }
 
@@ -136,7 +141,7 @@ export function CoachDashboardView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [markPageReady]);
 
   const dash = dashboard;
 

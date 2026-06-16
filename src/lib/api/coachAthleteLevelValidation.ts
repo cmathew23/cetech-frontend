@@ -4,6 +4,7 @@ import { apiRequest, type NormalizedApiError } from "@/lib/apiClient";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 
 type AnyRecord = Record<string, unknown>;
+const TRAINING_PLAN_LEVEL_VALIDATION_TIMEOUT_MS = 60_000;
 
 const SPORT_PERFORMANCE_LEVEL_FIELD =
   "highestCompetitionLevelReachedPast12Months";
@@ -152,6 +153,7 @@ export async function fetchCoachAthleteLevelValidation(
   const raw = await apiRequest(paths.entities.athleteTrainingPlanLevelValidation(e, a), {
     method: "GET",
     cache: "no-store",
+    timeoutMs: TRAINING_PLAN_LEVEL_VALIDATION_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   return parseLevelValidationPayload(data);
@@ -175,6 +177,7 @@ export async function postCoachAthleteLevelValidation(
 
   const raw = await apiRequest(paths.entities.athleteTrainingPlanLevelValidation(e, a), {
     method: "POST",
+    timeoutMs: TRAINING_PLAN_LEVEL_VALIDATION_TIMEOUT_MS,
     body: JSON.stringify({ validatedLevel: level }),
   });
   adaptBackendSuccess(raw);

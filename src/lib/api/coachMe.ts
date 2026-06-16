@@ -11,6 +11,9 @@ import {
 import { apiRequest } from "@/lib/apiClient";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 
+/** Shared client default is 10_000 ms; coach dashboard summary needs more time in pre-MVP environments. */
+export const COACH_ME_DASHBOARD_TIMEOUT_MS = 130_000;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -176,6 +179,7 @@ export async function fetchCoachMeDashboard(): Promise<CoachMeDashboardData> {
   const raw = await apiRequest(paths.coach.meDashboard, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: COACH_ME_DASHBOARD_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   return parseCoachMeDashboardPayload(data);

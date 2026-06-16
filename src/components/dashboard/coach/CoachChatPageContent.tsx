@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -31,6 +32,7 @@ function formatApiError(error: unknown, fallback: string): string {
 }
 
 export function CoachChatPageContent() {
+  const { markPageReady } = useCoachPageReady();
   const { accessContext, accessGateReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,10 +57,8 @@ export function CoachChatPageContent() {
   }, [accessContext?.user]);
 
   useEffect(() => {
-    requestChatUnreadRefresh();
-  }, []);
+    if (!accessGateReady) return;
 
-  useEffect(() => {
     let cancelled = false;
 
     async function loadAthletes() {
@@ -84,7 +84,11 @@ export function CoachChatPageContent() {
           formatApiError(error, "Could not load chat athletes. Try again shortly."),
         );
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          markPageReady();
+          requestChatUnreadRefresh();
+        }
       }
     }
 
@@ -93,7 +97,7 @@ export function CoachChatPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessGateReady, markPageReady]);
 
   useEffect(() => {
     if (selectedAthleteId === "") {

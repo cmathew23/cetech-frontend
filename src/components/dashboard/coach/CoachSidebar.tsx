@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
+import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
 import { coachSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
@@ -11,12 +12,17 @@ import { usePathname } from "next/navigation";
 export function CoachSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
-  const { unreadCount: chatUnreadCount } = useChatUnreadCount({ enabled: true });
+  const { isPageReady } = useCoachPageReady();
+  const { unreadCount: chatUnreadCount } = useChatUnreadCount({
+    enabled: isPageReady,
+    clearOnError: true,
+  });
   const coachChatRoute = "/coach/chat";
 
   return (
     <DashboardSidebarFrame
       navAriaLabel="Coach sidebar"
+      className="!bg-[#0B0F12]"
       brand={
         <>
           <p className="text-sm font-medium tracking-wide text-white/90">

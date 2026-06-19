@@ -461,6 +461,34 @@ describe("parseReadinessPayload", () => {
     expect(result.NUTRITION.status).toBe("ASSISTANT_COACH_APPROVED");
   });
 
+  it("parses domain plan summary status from version-oriented backend fields", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        domains: {
+          SKILLS: {
+            trainingPlanId: "plan-skills",
+            latestVersionId: "version-skills-2",
+            latestVersionStatus: "ASSISTANT_COACH_APPROVED",
+          },
+          NUTRITION: {
+            trainingPlanId: "plan-nutrition",
+            activeVersionId: "version-nutrition-3",
+            currentVersionStatus: "RELEASED",
+          },
+          S_AND_C: { trainingPlanId: null, status: null },
+        },
+      },
+    });
+
+    const result = await fetchDomainPlanSummary("entity-1", "athlete-1");
+
+    expect(result.SKILLS.latestVersionId).toBe("version-skills-2");
+    expect(result.SKILLS.status).toBe("ASSISTANT_COACH_APPROVED");
+    expect(result.NUTRITION.activeVersionId).toBe("version-nutrition-3");
+    expect(result.NUTRITION.status).toBe("RELEASED");
+  });
+
   it("locks planning context with planWindow dates", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,

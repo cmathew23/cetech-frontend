@@ -1946,7 +1946,13 @@ function parseDomainPlanSummaryItem(data: unknown): DomainPlanSummaryItem {
     approvedVersionId: readStringKey([record], ["approvedVersionId"]),
     activeVersionId: readStringKey([record], ["activeVersionId"]),
     versionNumber: readNumberKey([record], ["versionNumber"]),
-    status: readStringKey([record], ["status"]),
+    status: readStringKey([record], [
+      "status",
+      "planStatus",
+      "versionStatus",
+      "currentVersionStatus",
+      "latestVersionStatus",
+    ]),
     generationDomain: readStringKey([record], ["generationDomain"]),
   };
 }

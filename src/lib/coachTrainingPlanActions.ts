@@ -67,20 +67,47 @@ export function mergePlanGenerationOwnershipForDomain(
   readiness: PlanGenerationOwnershipFlags | undefined,
   assignedRow: AssignedAthletePlanOwnershipRow | null,
 ): PlanGenerationOwnershipFlags {
-  let canGeneratePlan = readiness?.canGeneratePlan ?? null;
-  let canGenerateCurrentDomainPlan = readiness?.canGenerateCurrentDomainPlan ?? null;
-  if (assignedRow) {
-    const rowDomain = assignedRow.currentGenerationDomain;
-    if (rowDomain === null || rowDomain === domain) {
-      if (canGeneratePlan === null) {
-        canGeneratePlan = assignedRow.canGeneratePlan;
-      }
-      if (canGenerateCurrentDomainPlan === null) {
-        canGenerateCurrentDomainPlan = assignedRow.canGenerateCurrentDomainPlan;
-      }
+  const rowApplies =
+    assignedRow !== null &&
+    (assignedRow.currentGenerationDomain === null ||
+      assignedRow.currentGenerationDomain === domain);
+
+  let canGeneratePlan: boolean | null = null;
+  let canGenerateCurrentDomainPlan: boolean | null = null;
+
+  if (rowApplies && assignedRow !== null) {
+    canGeneratePlan = assignedRow.canGeneratePlan;
+    canGenerateCurrentDomainPlan = assignedRow.canGenerateCurrentDomainPlan;
+  }
+
+  if (canGeneratePlan === null) {
+    canGeneratePlan = readiness?.canGeneratePlan ?? null;
+  }
+  if (canGenerateCurrentDomainPlan === null) {
+    canGenerateCurrentDomainPlan = readiness?.canGenerateCurrentDomainPlan ?? null;
+  }
+
+  return { canGeneratePlan, canGenerateCurrentDomainPlan };
+}
+
+/** Head Coach function-aware shell: true only when assignment allows HC to generate a assigned domain. */
+export function headCoachOwnsAssignedDomainGeneration(input: {
+  coachAssignedGenerationDomains: ReadonlyArray<CoachPlanCreationDomain>;
+  assignedAthleteRow: AssignedAthletePlanOwnershipRow | null;
+  readinessByDomain?: Partial<Record<CoachPlanCreationDomain, PlanGenerationOwnershipFlags>>;
+}): boolean {
+  if (input.coachAssignedGenerationDomains.length === 0) return false;
+  for (const domain of input.coachAssignedGenerationDomains) {
+    const flags = mergePlanGenerationOwnershipForDomain(
+      domain,
+      input.readinessByDomain?.[domain],
+      input.assignedAthleteRow,
+    );
+    if (!isPlanGenerationBlockedByOwnership(flags)) {
+      return true;
     }
   }
-  return { canGeneratePlan, canGenerateCurrentDomainPlan };
+  return false;
 }
 
 /** Assistant create is blocked until Head Coach / upstream planning context is locked. */

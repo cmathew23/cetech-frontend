@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
+import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
 import { coachSidebarNavItems } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
@@ -11,15 +12,20 @@ import { usePathname } from "next/navigation";
 export function CoachSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
-  const { unreadCount: chatUnreadCount } = useChatUnreadCount({ enabled: true });
+  const { isPageReady } = useCoachPageReady();
+  const { unreadCount: chatUnreadCount } = useChatUnreadCount({
+    enabled: isPageReady,
+    clearOnError: true,
+  });
   const coachChatRoute = "/coach/chat";
 
   return (
     <DashboardSidebarFrame
       navAriaLabel="Coach sidebar"
+      className="!bg-[#0B0F12]"
       brand={
         <>
-          <p className="text-sm font-semibold tracking-wide text-white/90">
+          <p className="text-sm font-medium tracking-wide text-white/90">
             PEAKFLOW AMS
           </p>
           <p className="mt-1 text-xs text-gray-400">Coach</p>
@@ -32,11 +38,12 @@ export function CoachSidebar() {
             ? pathname === item.href
             : pathname === item.href || pathname?.startsWith(`${item.href}/`);
         const Icon = item.icon;
+        const linkClass = cn(link, "font-normal", active && linkActive, active && "!font-medium");
         return (
           <Link
             key={item.href}
             href={item.href}
-            className={cn(link, active && linkActive)}
+            className={linkClass}
             aria-current={active ? "page" : undefined}
           >
             <span className="inline-flex min-w-0 flex-1 items-center gap-2">

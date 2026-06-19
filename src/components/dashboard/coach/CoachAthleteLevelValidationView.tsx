@@ -1,6 +1,10 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import {
+  DASHBOARD_CARD_TITLE_CLASS,
+  DASHBOARD_DETAIL_LABEL_CLASS,
+} from "@/components/dashboard/shared/dashboardTypography";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +23,7 @@ import {
   type TrainingPlanLevelValidationView as LevelValidationData,
 } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 
 const LEGACY_LEVEL_VALIDATION_ACCESS_DENIED =
@@ -66,7 +71,7 @@ function displayProvidedText(value: string | null | undefined): string {
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-      <dt className="text-xs font-medium text-textMuted sm:w-56 sm:shrink-0">
+      <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "sm:w-56 sm:shrink-0")}>
         {label}
       </dt>
       <dd className="min-w-0 text-sm text-textPrimary">{value}</dd>
@@ -287,14 +292,14 @@ export function CoachAthleteLevelValidationView({
 
       {data ? (
         <>
-          <DashboardCardShell accent={false} title="Athlete context">
+          <DashboardCardShell accent={false} majorOuter title="Athlete context" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
             <dl className="space-y-2">
               <DetailRow label="Age" value={displayValue(data.age)} />
               <DetailRow label="Age Band" value={displayValue(data.ageBand)} />
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell accent={false} title="Performance input">
+          <DashboardCardShell accent={false} majorOuter title="Performance input" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
             <dl className="space-y-2">
               <DetailRow
                 label="Highest Competition Level"
@@ -307,7 +312,7 @@ export function CoachAthleteLevelValidationView({
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell accent={false} title="System suggestion">
+          <DashboardCardShell accent={false} majorOuter title="System suggestion" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
             <dl className="space-y-2">
               <DetailRow
                 label="Base Suggested Level"
@@ -324,7 +329,7 @@ export function CoachAthleteLevelValidationView({
             </dl>
           </DashboardCardShell>
 
-          <DashboardCardShell accent={false} title="Coach decision">
+          <DashboardCardShell accent={false} majorOuter title="Coach decision" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
             <dl className="space-y-2">
               <DetailRow
                 label="Current Validated Level"
@@ -338,7 +343,7 @@ export function CoachAthleteLevelValidationView({
           </DashboardCardShell>
 
           {data.reasons.length > 0 ? (
-            <DashboardCardShell accent={false} title="Reasons">
+            <DashboardCardShell accent={false} majorOuter title="Reasons" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
               <ul className="list-inside list-disc space-y-1 text-sm text-textPrimary">
                 {data.reasons.map((r, i) => (
                   <li key={`${i}-${r}`}>{r}</li>
@@ -347,7 +352,7 @@ export function CoachAthleteLevelValidationView({
             </DashboardCardShell>
           ) : null}
 
-          <DashboardCardShell accent={false} title="Confirm level">
+          <DashboardCardShell accent={false} majorOuter title="Confirm level" titleClassName={DASHBOARD_CARD_TITLE_CLASS}>
             <div className="space-y-4">
               <FormField id="validated-level" label="Select Validated Level">
                 <Select

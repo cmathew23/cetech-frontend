@@ -189,7 +189,7 @@ export function AthleteSettingsPageContent() {
         </Alert>
       ) : null}
 
-      <DashboardCardShell title="Account / Identity">
+      <DashboardCardShell majorOuter title="Account / Identity">
         <dl className="space-y-2">
           <DetailRow label="User ID" value={displayText(user?.id)} />
           <DetailRow
@@ -207,7 +207,7 @@ export function AthleteSettingsPageContent() {
         </dl>
       </DashboardCardShell>
 
-      <DashboardCardShell title="Athlete Context">
+      <DashboardCardShell majorOuter title="Athlete Context">
         <dl className="space-y-2">
           <DetailRow
             label="Training Entity ID"
@@ -234,7 +234,7 @@ export function AthleteSettingsPageContent() {
         </dl>
       </DashboardCardShell>
 
-      <DashboardCardShell title="Registration / Profile Data">
+      <DashboardCardShell majorOuter title="Registration / Profile Data">
         <dl className="space-y-2">
           <DetailRow
             label="Name"

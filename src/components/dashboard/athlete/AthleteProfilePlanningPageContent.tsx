@@ -1,6 +1,11 @@
 "use client";
 
 import { Badge } from "@/components/ui/Badge";
+import {
+  DASHBOARD_PLANNING_CARD_TITLE_CLASS,
+  DASHBOARD_PLANNING_FIELD_LABEL_CLASS,
+  DASHBOARD_PLANNING_GROUP_HEADER_CLASS,
+} from "@/components/dashboard/shared/dashboardTypography";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -35,7 +40,24 @@ import {
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { ATHLETE_LEVELS } from "@/lib/athlete-levels";
 import { formatPlanningProfileDateDisplay } from "@/lib/dateTime";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
+
+const PLANNING_FORM_FIELD_LABEL = {
+  labelClassName: DASHBOARD_PLANNING_FIELD_LABEL_CLASS,
+} as const;
+
+function PlanningCardShell({
+  titleClassName,
+  ...props
+}: ComponentProps<typeof DashboardCardShell>) {
+  return (
+    <DashboardCardShell
+      titleClassName={cn(DASHBOARD_PLANNING_CARD_TITLE_CLASS, titleClassName)}
+      {...props}
+    />
+  );
+}
 
 type ViewState =
   | { phase: "loading" }
@@ -402,7 +424,7 @@ function orderedFieldNames(
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-      <dt className="text-xs font-medium text-textMuted sm:w-56 sm:shrink-0">
+      <dt className="text-sm font-normal text-textMuted sm:w-56 sm:shrink-0">
         {label}
       </dt>
       <dd className="min-w-0 text-sm text-textPrimary">{value}</dd>
@@ -684,7 +706,13 @@ export function AthleteProfilePlanningPageContent() {
       }
 
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Card padding="compact" accent={false} className="bg-surface">
             <div className="flex flex-wrap gap-2">
               {REGIONAL_CUISINE_OPTIONS.map((option) => (
@@ -773,11 +801,17 @@ export function AthleteProfilePlanningPageContent() {
       }
 
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Card padding="compact" accent={false} className="bg-surface">
             <div className="space-y-3">
               <div className="space-y-2">
-                <p className="text-xs font-medium tracking-wide text-textSecondary">
+                <p className={DASHBOARD_PLANNING_GROUP_HEADER_CLASS}>
                   Allergies
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -799,7 +833,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium tracking-wide text-textSecondary">
+                <p className={DASHBOARD_PLANNING_GROUP_HEADER_CLASS}>
                   Intolerances
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -821,7 +855,7 @@ export function AthleteProfilePlanningPageContent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium tracking-wide text-textSecondary">
+                <p className={DASHBOARD_PLANNING_GROUP_HEADER_CLASS}>
                   Special
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -883,7 +917,13 @@ export function AthleteProfilePlanningPageContent() {
 
     if (group === "athleteContext" && field === "sex") {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={typeof value === "string" ? value : ""}
@@ -913,7 +953,13 @@ export function AthleteProfilePlanningPageContent() {
           </option>
         ) : null;
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={rawSelected}
@@ -935,7 +981,13 @@ export function AthleteProfilePlanningPageContent() {
 
     if (group === "sportPerformance" && field === SPORT_PERFORMANCE_LEVEL_FIELD) {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={typeof value === "string" ? value : ""}
@@ -965,7 +1017,13 @@ export function AthleteProfilePlanningPageContent() {
           : "";
       const hasLevel = levelValue.trim() !== "";
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Input
             id={`${group}-${field}`}
             type="number"
@@ -985,7 +1043,13 @@ export function AthleteProfilePlanningPageContent() {
 
     if (group === "healthStatus" && field === "injuryStatus") {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={typeof value === "string" ? value : ""}
@@ -1020,7 +1084,12 @@ export function AthleteProfilePlanningPageContent() {
       if (!showInjuryDetails) return null;
       if (field === "injuryNotes") {
         return (
-          <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label}>
+          <FormField
+            key={`${group}-${field}`}
+            id={`${group}-${field}`}
+            label={label}
+            {...PLANNING_FORM_FIELD_LABEL}
+          >
             <textarea
               id={`${group}-${field}`}
               value={typeof value === "string" ? value : ""}
@@ -1036,7 +1105,13 @@ export function AthleteProfilePlanningPageContent() {
         );
       }
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Input
             id={`${group}-${field}`}
             value={typeof value === "string" ? value : ""}
@@ -1083,7 +1158,13 @@ export function AthleteProfilePlanningPageContent() {
     const scalarValue = typeof value === "string" ? value : "";
     if (field === "dateOfBirth") {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Input
             id={`${group}-${field}`}
             type="date"
@@ -1100,7 +1181,13 @@ export function AthleteProfilePlanningPageContent() {
     }
     if (field === "dietType") {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={scalarValue}
@@ -1120,7 +1207,12 @@ export function AthleteProfilePlanningPageContent() {
     }
     if (type === "boolean") {
       return (
-        <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label}>
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
           <Select
             id={`${group}-${field}`}
             value={scalarValue}
@@ -1137,7 +1229,13 @@ export function AthleteProfilePlanningPageContent() {
       );
     }
     return (
-      <FormField key={`${group}-${field}`} id={`${group}-${field}`} label={label} error={fieldError}>
+      <FormField
+        key={`${group}-${field}`}
+        id={`${group}-${field}`}
+        label={label}
+        error={fieldError}
+        {...PLANNING_FORM_FIELD_LABEL}
+      >
         <Input
           id={`${group}-${field}`}
           value={scalarValue}
@@ -1162,7 +1260,7 @@ export function AthleteProfilePlanningPageContent() {
           ? values.wearableStatus
           : "NO";
       return (
-        <DashboardCardShell
+        <PlanningCardShell
           key={group}
           title={section?.title ?? "Wearables"}
         >
@@ -1179,13 +1277,13 @@ export function AthleteProfilePlanningPageContent() {
               </p>
               <Link
                 href="/athlete/settings"
-                className="inline-flex text-sm font-medium text-primary underline-offset-2 hover:underline"
+                className="inline-flex text-sm font-normal text-primary underline-offset-2 hover:underline"
               >
                 Manage wearable connection in Settings
               </Link>
             </div>
           </div>
-        </DashboardCardShell>
+        </PlanningCardShell>
       );
     }
 
@@ -1200,7 +1298,7 @@ export function AthleteProfilePlanningPageContent() {
           ].includes(field),
       );
       return (
-        <DashboardCardShell
+        <PlanningCardShell
           key={group}
           title={section?.title ?? "Derived Planning Inputs"}
         >
@@ -1209,7 +1307,7 @@ export function AthleteProfilePlanningPageContent() {
               <p className="text-sm text-textSecondary">{section.description}</p>
             ) : null}
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-medium text-textPrimary">
+              <span className="text-sm font-normal text-textPrimary">
                 Planning Eligibility:
               </span>
               <Badge variant={statusBadgeVariant(record?.planningEligibilityStatus ?? null)}>
@@ -1217,7 +1315,7 @@ export function AthleteProfilePlanningPageContent() {
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-medium text-textPrimary">
+              <span className="text-sm font-normal text-textPrimary">
                 Planning Input Completeness:
               </span>
               <Badge variant={statusBadgeVariant(record?.planningInputCompleteness ?? null)}>
@@ -1227,7 +1325,7 @@ export function AthleteProfilePlanningPageContent() {
             {record?.missingRequiredFields.length ? (
               <Alert variant="warning">
                 <div className="space-y-2">
-                  <p className="font-medium">Missing required fields</p>
+                  <p className="font-normal">Missing required fields</p>
                   <ul className="list-inside list-disc space-y-1">
                     {record.missingRequiredFields.map((field) => (
                       <li key={field}>{toFieldLabel(field)}</li>
@@ -1252,13 +1350,13 @@ export function AthleteProfilePlanningPageContent() {
               </p>
             )}
           </div>
-        </DashboardCardShell>
+        </PlanningCardShell>
       );
     }
 
     const fields = orderedFieldNames(group, values, record);
     return (
-      <DashboardCardShell
+      <PlanningCardShell
         key={group}
         title={section?.title ?? group}
       >
@@ -1275,7 +1373,7 @@ export function AthleteProfilePlanningPageContent() {
                       key={`${group}-${field}`}
                       className="rounded-md border border-border bg-surface p-3"
                     >
-                      <p className="text-xs font-medium text-textMuted">
+                      <p className="text-sm font-normal text-textMuted">
                         {toFieldLabel(field)}
                       </p>
                       <p className="text-sm text-textPrimary">
@@ -1295,7 +1393,7 @@ export function AthleteProfilePlanningPageContent() {
             </p>
           )}
         </div>
-      </DashboardCardShell>
+      </PlanningCardShell>
     );
   }
 
@@ -1320,7 +1418,7 @@ export function AthleteProfilePlanningPageContent() {
 
   return (
     <div className="space-y-4">
-      <DashboardCardShell title="Planning Profile Form">
+      <PlanningCardShell majorOuter title="Planning Profile Form">
         {lastUpdatedText ? (
           <p className="text-xs text-textSecondary">Last updated: {lastUpdatedText}</p>
         ) : null}
@@ -1400,7 +1498,7 @@ export function AthleteProfilePlanningPageContent() {
             )}
           </div>
         </form>
-      </DashboardCardShell>
+      </PlanningCardShell>
     </div>
   );
 }

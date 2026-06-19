@@ -16,9 +16,13 @@ const TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS = 60_000;
 /** Active/detail can return large persisted plan graphs and is needed for assistant plan viewing. */
 const TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS = 60_000;
 /** Locked upstream context can aggregate season, workload, and goals after multi-domain plans exist. */
-const TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS = 30_000;
+const TRAINING_PLAN_UPSTREAM_CONTEXT_TIMEOUT_MS = 60_000;
 /** Domain summary aggregates per-domain plan status for Head Coach submitted-plan review. */
-const TRAINING_PLAN_DOMAIN_SUMMARY_TIMEOUT_MS = 30_000;
+const TRAINING_PLAN_DOMAIN_SUMMARY_TIMEOUT_MS = 60_000;
+/** Level-validation-related readiness/completeness reads should tolerate slow pre-MVP demo data assembly. */
+const TRAINING_PLAN_READINESS_TIMEOUT_MS = 60_000;
+const TRAINING_PLAN_COMPLETENESS_TIMEOUT_MS = 60_000;
+const TRAINING_PLAN_WORKLOAD_ASSESSMENT_TIMEOUT_MS = 60_000;
 /** Weekly journal and today plan on athlete/coach dashboards can be slow for large plans. */
 const ATHLETE_DASHBOARD_PLAN_FETCH_TIMEOUT_MS = 240_000;
 type WorkloadAssessmentValue =
@@ -403,6 +407,8 @@ export type CoachAthleteGeneratedDraftItem = {
   itemType: string | null;
   exerciseCatalogItemId: string | null;
   nutritionCatalogItemId: string | null;
+  primaryGoalId: string | null;
+  primaryGoalName: string | null;
   label: string | null;
   summary: string | null;
   serving: string | null;
@@ -680,6 +686,8 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     itemType: readStringKey([record], ["itemType"]),
     exerciseCatalogItemId: readStringKey([record], ["exerciseCatalogItemId"]),
     nutritionCatalogItemId: readStringKey([record], ["nutritionCatalogItemId"]),
+    primaryGoalId: readStringKey([record], ["primaryGoalId"]),
+    primaryGoalName: readStringKey([record], ["primaryGoalName"]),
     label: readStringKey([record], ["label", "name", "title"]),
     summary: readStringKey([record], ["summary", "description", "objective"]),
     serving: readStringKey([record], ["serving"]),
@@ -701,6 +709,8 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     item.itemType ||
     item.exerciseCatalogItemId ||
     item.nutritionCatalogItemId ||
+    item.primaryGoalId ||
+    item.primaryGoalName ||
     item.label ||
     item.summary ||
     item.serving ||
@@ -1902,6 +1912,7 @@ export async function fetchCoachAthleteTrainingPlanReadiness(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: TRAINING_PLAN_READINESS_TIMEOUT_MS,
     },
   );
   return parseReadinessPayload(adaptBackendSuccess(raw));
@@ -1935,7 +1946,13 @@ function parseDomainPlanSummaryItem(data: unknown): DomainPlanSummaryItem {
     approvedVersionId: readStringKey([record], ["approvedVersionId"]),
     activeVersionId: readStringKey([record], ["activeVersionId"]),
     versionNumber: readNumberKey([record], ["versionNumber"]),
-    status: readStringKey([record], ["status"]),
+    status: readStringKey([record], [
+      "status",
+      "planStatus",
+      "versionStatus",
+      "currentVersionStatus",
+      "latestVersionStatus",
+    ]),
     generationDomain: readStringKey([record], ["generationDomain"]),
   };
 }
@@ -2020,6 +2037,7 @@ export async function fetchCoachAthleteTrainingPlanWorkloadAssessment(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: TRAINING_PLAN_WORKLOAD_ASSESSMENT_TIMEOUT_MS,
     },
   );
   return parseWorkloadAssessmentPayload(adaptBackendSuccess(raw));
@@ -2043,6 +2061,7 @@ export async function fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest(
       {
         method: "GET",
         cache: "no-store",
+        timeoutMs: TRAINING_PLAN_WORKLOAD_ASSESSMENT_TIMEOUT_MS,
       },
     );
     return parseWorkloadAssessmentPayload(adaptBackendSuccess(raw));
@@ -2068,6 +2087,7 @@ export async function fetchCoachAthleteTrainingPlanCompleteness(
     {
       method: "GET",
       cache: "no-store",
+      timeoutMs: TRAINING_PLAN_COMPLETENESS_TIMEOUT_MS,
     },
   );
   return parseCompletenessPayload(adaptBackendSuccess(raw));

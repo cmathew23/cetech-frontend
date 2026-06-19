@@ -12,6 +12,7 @@ import {
   type SportMetricsGolfWeeklySummary,
 } from "@/lib/api/sportMetricsGolf";
 import { formatDateOnly, formatDateOrDateTime } from "@/lib/dateTime";
+import { cn } from "@/lib/utils";
 import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/StatusBadge";
 
 const ENUM_LABELS: Record<string, string> = {
@@ -610,7 +611,7 @@ function GoalProgressSection({
   return (
     <div className="space-y-3 rounded-md border border-border bg-card p-4">
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-textPrimary">{heading}</p>
+        <p className="text-sm font-normal text-textPrimary">{heading}</p>
         {successCriteria ? (
           <p className="text-xs text-textSecondary">
             Success criteria: {successCriteria}
@@ -673,8 +674,12 @@ export function computeLoggedResultsSummary(
 
 export function SportMetricsEvidenceCards({
   summary,
+  titleClassName,
+  cardClassName,
 }: {
   summary: SportMetricsGolfWeeklySummary;
+  titleClassName?: string;
+  cardClassName?: string;
 }) {
   const topStatus = resolveSportMetricsTopStatus(summary);
   const labels = resolveSportMetricsDisplayLabels(summary);
@@ -687,7 +692,8 @@ export function SportMetricsEvidenceCards({
       subtitle={`Sport: Golf · ${formatDateOnly(summary.weekStartDate, summary.weekStartDate)} – ${formatDateOnly(summary.weekEndDate, summary.weekEndDate)}`}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn("shadow-[0_10px_30px_rgba(15,23,42,0.05)]", cardClassName)}
+      titleClassName={titleClassName}
       actions={
         <StatusBadge variant={topStatus.variant}>{topStatus.label}</StatusBadge>
       }
@@ -700,7 +706,7 @@ export function SportMetricsEvidenceCards({
         {summary.unlinkedEvidence.length > 0 ? (
           <div className="space-y-3 rounded-md border border-dashed border-border bg-surface/40 p-4">
             <div>
-              <p className="text-sm font-semibold text-textPrimary">
+              <p className="text-sm font-normal text-textPrimary">
                 {labels.unlinkedSectionTitle}
               </p>
             </div>

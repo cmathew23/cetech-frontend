@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/Card";
 import { getChatMessages, parseChatMessage, type ChatMessage } from "@/lib/api/chat";
 import { getChatSocket } from "@/lib/chatSocket";
 import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
@@ -192,13 +194,14 @@ export function ChatPanel({
   return (
     <Card
       accent={false}
-      className="space-y-4"
+      className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
       title="Conversation"
       subtitle="Text-only chat for coach-athlete communication."
+      titleClassName={DASHBOARD_CARD_TITLE_CLASS}
     >
       <div className="space-y-1">
-        <p className="text-sm font-medium text-textPrimary">Coach: {coachName || "—"}</p>
-        <p className="text-sm font-medium text-textPrimary">Athlete: {athleteName || "—"}</p>
+        <p className="text-sm font-normal text-textPrimary">Coach: {coachName || "—"}</p>
+        <p className="text-sm font-normal text-textPrimary">Athlete: {athleteName || "—"}</p>
       </div>
 
       <p className="text-sm text-textSecondary">{HIDDEN_HISTORY_TEXT}</p>
@@ -254,7 +257,7 @@ export function ChatPanel({
       </div>
 
       <div className="space-y-2">
-        <label htmlFor="chat-message" className="text-sm font-medium text-textPrimary">
+        <label htmlFor="chat-message" className="text-sm font-normal text-textPrimary">
           Message
         </label>
         <textarea

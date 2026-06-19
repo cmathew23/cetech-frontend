@@ -63,6 +63,18 @@ function readString(source: Record<string, unknown>, key: string): string {
   return "";
 }
 
+function readFirstString(
+  source: Record<string, unknown> | null,
+  keys: string[],
+): string {
+  if (!source) return "";
+  for (const key of keys) {
+    const value = readString(source, key);
+    if (value !== "") return value;
+  }
+  return "";
+}
+
 /** Coach row may expose names on the row, under `user`, or as snake_case / displayName. */
 export function parseCoachPersonName(o: Record<string, unknown>): {
   firstName: string;
@@ -70,17 +82,26 @@ export function parseCoachPersonName(o: Record<string, unknown>): {
 } {
   const user = asRecord(o.user);
   const firstFromRow =
-    readString(o, "firstName") ||
-    readString(o, "first_name") ||
-    (user ? readString(user, "firstName") || readString(user, "first_name") : "");
+    readFirstString(o, ["firstName", "first_name", "givenName", "given_name"]) ||
+    readFirstString(user, ["firstName", "first_name", "givenName", "given_name"]);
   const lastFromRow =
-    readString(o, "lastName") ||
-    readString(o, "last_name") ||
-    (user ? readString(user, "lastName") || readString(user, "last_name") : "");
+    readFirstString(o, ["lastName", "last_name", "familyName", "family_name"]) ||
+    readFirstString(user, ["lastName", "last_name", "familyName", "family_name"]);
   const displayName =
-    readString(o, "displayName") ||
-    readString(o, "display_name") ||
-    (user ? readString(user, "displayName") || readString(user, "display_name") : "");
+    readFirstString(o, [
+      "displayName",
+      "display_name",
+      "fullName",
+      "full_name",
+      "name",
+    ]) ||
+    readFirstString(user, [
+      "displayName",
+      "display_name",
+      "fullName",
+      "full_name",
+      "name",
+    ]);
   if (firstFromRow !== "" || lastFromRow !== "") {
     return { firstName: firstFromRow, lastName: lastFromRow };
   }
@@ -154,11 +175,12 @@ function parseCoachStructureRow(raw: unknown): AcademyCoachStructureRow | null {
   const o = asRecord(raw);
   if (!o) return null;
 
+  const userRec = asRecord(o.user);
   const coachUserId =
-    readString(o, "coachUserId") || readString(o, "userId");
+    readFirstString(o, ["coachUserId", "coach_user_id", "userId", "user_id"]) ||
+    readFirstString(userRec, ["userId", "user_id", "id"]);
   if (coachUserId === "") return null;
 
-  const userRec = asRecord(o.user);
   const coachNested =
     (userRec ? asRecord(userRec.coach) : null) ?? asRecord(o.coach);
   let coachProfileId =
@@ -177,7 +199,7 @@ function parseCoachStructureRow(raw: unknown): AcademyCoachStructureRow | null {
     coachUserId,
     firstName,
     lastName,
-    email: readString(o, "email"),
+    email: readString(o, "email") || (userRec ? readString(userRec, "email") : ""),
     membershipStatus: parseMembershipStatus(o),
     joinedAt: joinedAt !== "" ? joinedAt : "—",
     role: parseRowRole(o),

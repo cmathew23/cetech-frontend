@@ -26,6 +26,9 @@ import {
   resolveWeeklyAdherencePlanRangeFromJournal,
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/shared/dashboardTypography";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 function formatLoadError(e: unknown, fallback: string): string {
@@ -161,7 +164,11 @@ export function CoachAthletePerformancePageContent() {
         subtitle="Select an assigned athlete to view their current weekly performance summary."
       />
 
-      <Card accent={false} padding="compact" className="space-y-4">
+      <Card
+        accent={false}
+        padding="compact"
+        className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      >
         <div className="space-y-2">
           <label
             htmlFor="athlete-performance-select"
@@ -210,6 +217,8 @@ export function CoachAthletePerformancePageContent() {
               summary={summary}
               athleteHeading={athleteHeading ?? undefined}
               showSectionHeader={true}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+              cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
             />
           ) : null}
 
@@ -218,6 +227,8 @@ export function CoachAthletePerformancePageContent() {
               entityId={entityId}
               athleteId={selectedAthleteId}
               trainingPlanVersionId={trainingPlanVersionId}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
             />
           ) : null}
 
@@ -229,6 +240,8 @@ export function CoachAthletePerformancePageContent() {
               planEndDate={weekRange.weekEnd}
               windowLabel={weekLabel ? `Plan window: ${weekLabel}` : undefined}
               viewerContext={wearableViewerContext}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
             />
           ) : null}
         </div>

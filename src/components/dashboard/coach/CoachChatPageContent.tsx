@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -14,7 +15,10 @@ import {
   type ChatConversationSummary,
   type CoachChatAthlete,
 } from "@/lib/api/chat";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DASHBOARD_PLANNING_FIELD_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 const EMPTY_STATE_MESSAGE =
@@ -28,6 +32,7 @@ function formatApiError(error: unknown, fallback: string): string {
 }
 
 export function CoachChatPageContent() {
+  const { markPageReady } = useCoachPageReady();
   const { accessContext, accessGateReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -52,10 +57,8 @@ export function CoachChatPageContent() {
   }, [accessContext?.user]);
 
   useEffect(() => {
-    requestChatUnreadRefresh();
-  }, []);
+    if (!accessGateReady) return;
 
-  useEffect(() => {
     let cancelled = false;
 
     async function loadAthletes() {
@@ -81,7 +84,11 @@ export function CoachChatPageContent() {
           formatApiError(error, "Could not load chat athletes. Try again shortly."),
         );
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          markPageReady();
+          requestChatUnreadRefresh();
+        }
       }
     }
 
@@ -90,7 +97,7 @@ export function CoachChatPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessGateReady, markPageReady]);
 
   useEffect(() => {
     if (selectedAthleteId === "") {
@@ -151,7 +158,7 @@ export function CoachChatPageContent() {
 
       {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
 
-      <Card accent={false} className="space-y-4">
+      <Card accent={false} className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}>
         {loading || !accessGateReady ? (
           <p className="text-sm text-textSecondary">Loading chat availability…</p>
         ) : athletes.length === 0 ? (
@@ -161,6 +168,7 @@ export function CoachChatPageContent() {
             id="coach-chat-athlete"
             label="Athlete"
             helperText="Choose the athlete you want to chat with."
+            labelClassName={DASHBOARD_PLANNING_FIELD_LABEL_CLASS}
           >
             <Select
               id="coach-chat-athlete"
@@ -186,7 +194,7 @@ export function CoachChatPageContent() {
       {conversationError ? <Alert variant="danger">{conversationError}</Alert> : null}
 
       {conversationLoading ? (
-        <Card accent={false}>
+        <Card accent={false} className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}>
           <p className="text-sm text-textSecondary">Opening conversation…</p>
         </Card>
       ) : conversation ? (

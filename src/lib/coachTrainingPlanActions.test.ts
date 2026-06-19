@@ -9,6 +9,7 @@ import {
   isAssistantGovernedDetailAlignedWithVisibleDraft,
   isCreatePlanBlockedByPlanningContextLock,
   shouldSkipAssistantDomainReadinessGate,
+  headCoachOwnsAssignedDomainGeneration,
   isPlanGenerationBlockedByOwnership,
   mergePlanGenerationOwnershipForDomain,
   PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
@@ -776,6 +777,54 @@ describe("mergePlanGenerationOwnershipForDomain", () => {
           canGenerateCurrentDomainPlan: false,
         }),
       ),
+    ).toBe(false);
+  });
+
+  it("prefers assigned-athletes row over readiness when both specify canGeneratePlan", () => {
+    expect(
+      mergePlanGenerationOwnershipForDomain(
+        "SKILLS",
+        { canGeneratePlan: true, canGenerateCurrentDomainPlan: true },
+        {
+          currentGenerationDomain: "SKILLS",
+          canGeneratePlan: false,
+          canGenerateCurrentDomainPlan: false,
+        },
+      ),
+    ).toEqual({
+      canGeneratePlan: false,
+      canGenerateCurrentDomainPlan: false,
+    });
+  });
+});
+
+describe("headCoachOwnsAssignedDomainGeneration", () => {
+  it("returns true when assignment allows Head Coach to generate an assigned domain", () => {
+    expect(
+      headCoachOwnsAssignedDomainGeneration({
+        coachAssignedGenerationDomains: ["SKILLS"],
+        assignedAthleteRow: {
+          currentGenerationDomain: "SKILLS",
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when Skills Coach owns Skills generation despite Head Coach Skills function", () => {
+    expect(
+      headCoachOwnsAssignedDomainGeneration({
+        coachAssignedGenerationDomains: ["SKILLS"],
+        assignedAthleteRow: {
+          currentGenerationDomain: "SKILLS",
+          canGeneratePlan: false,
+          canGenerateCurrentDomainPlan: false,
+        },
+        readinessByDomain: {
+          SKILLS: { canGeneratePlan: true, canGenerateCurrentDomainPlan: true },
+        },
+      }),
     ).toBe(false);
   });
 });

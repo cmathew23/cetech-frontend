@@ -8,6 +8,10 @@ import {
   type SportMetricsDrillLogContext,
 } from "@/components/dashboard/athlete/LogSportResultModal";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
+import {
+  normalizeSkillPrimaryGoalName,
+  SkillGoalAttributionText,
+} from "@/components/dashboard/SkillGoalAttribution";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -1228,6 +1232,7 @@ function renderJournalStructureSections(
   record: Record<string, unknown>,
   options?: {
     nutritionDomain?: boolean;
+    skillDomain?: boolean;
     skillsSportMetrics?: SkillsSportMetricsJournalOptions;
   },
 ) {
@@ -1235,6 +1240,7 @@ function renderJournalStructureSections(
   if (sections.length === 0) return null;
 
   const nutritionDomain = options?.nutritionDomain === true;
+  const skillDomain = options?.skillDomain === true;
 
   return (
     <div className="space-y-3 border-t border-slate-200/80 pt-2">
@@ -1276,12 +1282,20 @@ function renderJournalStructureSections(
                 if (!isRecord(rawItem)) return null;
 
                 if (!nutritionDomain) {
+                  const mergedSkillItem = mergeJournalRecordCandidateFields(rawItem);
                   const heading = structureItemHeading(rawItem, itemIndex);
                   const itemRows = collectStructureItemDetailRows(rawItem);
                   const detailRows = itemRows.filter(
                     (row) =>
-                      row.value.trim().toLowerCase() !== heading.trim().toLowerCase(),
+                      row.value.trim().toLowerCase() !== heading.trim().toLowerCase() &&
+                      !(
+                        skillDomain &&
+                        (row.label === "Primary Goal Id" || row.label === "Primary Goal Name")
+                      ),
                   );
+                  const primaryGoalName = skillDomain
+                    ? normalizeSkillPrimaryGoalName(mergedSkillItem.primaryGoalName)
+                    : null;
                   const hideGenericHeading =
                     /^Item\s+\d+$/i.test(heading.trim()) && detailRows.length > 0;
                   const skillsSportMetrics = options?.skillsSportMetrics;
@@ -1296,7 +1310,7 @@ function renderJournalStructureSections(
                           dayDate: skillsSportMetrics.dayDate,
                           sessionTitle: skillsSportMetrics.sessionTitle,
                           sectionKey: "skill",
-                          drill: mergeJournalRecordCandidateFields(rawItem),
+                          drill: mergedSkillItem,
                           itemIndex,
                         }
                       : null;
@@ -1316,6 +1330,10 @@ function renderJournalStructureSections(
                       {!hideGenericHeading ? (
                         <p className="text-sm font-medium text-textPrimary">{heading}</p>
                       ) : null}
+                      <SkillGoalAttributionText
+                        primaryGoalName={primaryGoalName}
+                        className={hideGenericHeading ? undefined : "mt-1"}
+                      />
                       {detailRows.length > 0 ? (
                         <dl
                           className={hideGenericHeading ? "space-y-0.5" : "mt-1 space-y-0.5"}
@@ -2464,6 +2482,7 @@ function renderJournalItem(
         ) : null}
         {renderJournalStructureSections(item, {
           nutritionDomain,
+          skillDomain: adherenceDomainKey === "SKILLS",
           skillsSportMetrics: options?.skillsSportMetrics,
         })}
         {!hasStructuredContent && detailRows.length === 0 ? (
@@ -2784,19 +2803,19 @@ export function AthleteWeeklyPlanJournalPageContent() {
         trailing={<AthleteHeaderIdentityMetadata />}
       />
       {isLoading ? (
-        <DashboardCardShell title="Weekly Plan Journal" className="min-h-[220px]">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal" className="min-h-[220px]">
           <div className="flex min-h-[120px] items-center justify-center text-sm text-textSecondary">
             Loading weekly plan journal…
           </div>
         </DashboardCardShell>
       ) : planningIds.phase === "not_ready" ? (
-        <DashboardCardShell title="Weekly Plan Journal">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal">
           <Alert variant="warning">
             Athlete profile not ready
           </Alert>
         </DashboardCardShell>
       ) : state.phase === "error" ? (
-        <DashboardCardShell title="Weekly Plan Journal">
+        <DashboardCardShell majorOuter title="Weekly Plan Journal">
           <div className="space-y-3">
             <Alert variant="danger">{state.message}</Alert>
             <div>
@@ -2813,7 +2832,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
             if (readyJournal === null) return null;
             return (
               <>
-          <DashboardCardShell title="Current Week" subtitle={weekSubtitle}>
+          <DashboardCardShell majorOuter title="Current Week" subtitle={weekSubtitle}>
             <div className="grid gap-3 md:grid-cols-3">
               {DOMAIN_SECTIONS.map((domain) => {
                 const summary = readyJournal.domains[domain.key];
@@ -2872,7 +2891,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
           </DashboardCardShell>
 
           {allDomainsNotReleased ? (
-            <DashboardCardShell title="Weekly Journal">
+            <DashboardCardShell majorOuter title="Weekly Journal">
               <p className="text-sm text-textSecondary">
                 Your weekly plan has not been released yet.
               </p>
@@ -2880,7 +2899,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
           ) : null}
 
           {readyJournal.days.length === 0 ? (
-            <DashboardCardShell title="Journal Days">
+            <DashboardCardShell majorOuter title="Journal Days">
               <p className="text-sm text-textSecondary">
                 No weekly journal entries are available yet.
               </p>
@@ -2902,6 +2921,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
               return (
                 <div className="space-y-3">
                   <DashboardCardShell
+                    majorOuter
                     title="Plan by day"
                     subtitle="Choose a day to view your released plan"
                     className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
@@ -2915,13 +2935,14 @@ export function AthleteWeeklyPlanJournalPageContent() {
                   </DashboardCardShell>
 
                   {selectedDay === null ? (
-                    <DashboardCardShell title="Journal Days">
+                    <DashboardCardShell majorOuter title="Journal Days">
                       <p className="text-sm text-textSecondary">
                         No weekly journal entries are available yet.
                       </p>
                     </DashboardCardShell>
                   ) : (
                     <DashboardCardShell
+                      majorOuter
                       title={
                         selectedIsToday
                           ? "Today's Plan"

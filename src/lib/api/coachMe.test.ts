@@ -1,6 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseAssignedAthleteRow } from "@/lib/api/coachMe";
+const { apiRequestMock } = vi.hoisted(() => ({
+  apiRequestMock: vi.fn(),
+}));
+
+vi.mock("@/lib/apiClient", () => ({
+  apiRequest: apiRequestMock,
+}));
+
+import {
+  COACH_ME_DASHBOARD_TIMEOUT_MS,
+  fetchCoachMeDashboard,
+  parseAssignedAthleteRow,
+} from "@/lib/api/coachMe";
+
+describe("fetchCoachMeDashboard", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("uses an extended timeout instead of the shared 10s client default", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        authority: { academyCoachRole: "HEAD_COACH", functions: ["SKILLS_COACH"] },
+        summary: { assignedAthleteCount: 3 },
+      },
+    });
+
+    await fetchCoachMeDashboard();
+
+    expect(COACH_ME_DASHBOARD_TIMEOUT_MS).toBe(130_000);
+    expect(apiRequestMock).toHaveBeenCalledWith("/coach/me/dashboard", {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: 130_000,
+    });
+  });
+});
 
 describe("parseAssignedAthleteRow", () => {
   it("parses the new domain-neutral plan fields", () => {

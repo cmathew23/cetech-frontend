@@ -3,6 +3,8 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest, type NormalizedApiError } from "@/lib/apiClient";
 import type { AthleteLevelValue } from "@/lib/athlete-levels";
 
+const TRAINING_PLAN_PROFILE_TIMEOUT_MS = 240_000;
+
 type DetailValue = string | number | boolean | Array<string | number | boolean> | null;
 type DetailGroup = Record<string, DetailValue>;
 
@@ -271,6 +273,7 @@ export async function fetchCoachAthletePlanningProfile(
   const raw = await apiRequest(paths.entities.athletePlanningProfileByAthlete(e, a), {
     method: "GET",
     cache: "no-store",
+    timeoutMs: TRAINING_PLAN_PROFILE_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   return parseCoachAthletePlanningProfile(data);

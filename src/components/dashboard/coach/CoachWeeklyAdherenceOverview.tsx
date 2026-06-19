@@ -4,6 +4,11 @@ import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection"
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
 import { Card } from "@/components/ui/Card";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  DASHBOARD_CARD_TITLE_CLASS,
+  DASHBOARD_PLANNING_FIELD_LABEL_CLASS,
+} from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,6 +29,7 @@ import {
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 
 function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
@@ -87,7 +93,8 @@ function CoachWeeklyAdherenceCard({
       subtitle={`Current plan week: ${weekLabel}`}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn(DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      titleClassName={DASHBOARD_CARD_TITLE_CLASS}
     >
       {children}
     </Card>
@@ -295,7 +302,7 @@ export function CoachWeeklyAdherenceOverview({
               >
                 {entry.error ? (
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-textPrimary">
+                    <p className="text-sm font-normal text-textPrimary">
                       {heading}
                     </p>
                     <Alert variant="danger">{entry.error}</Alert>
@@ -306,6 +313,7 @@ export function CoachWeeklyAdherenceOverview({
                     summary={entry.summary}
                     athleteHeading={heading}
                     showSectionHeader={false}
+                    cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
                   />
                 ) : null}
                 {wearableViewerContext !== "NUTRITION" &&

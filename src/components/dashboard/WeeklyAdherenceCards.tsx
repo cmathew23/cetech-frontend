@@ -291,18 +291,34 @@ function TileContextDetail({ tile }: { tile: WeeklyAdherenceMetricTile }) {
   return null;
 }
 
-function AdherenceMetricTile({ tile }: { tile: WeeklyAdherenceMetricTile }) {
+function AdherenceMetricTile({
+  tile,
+  softTileTypography = false,
+}: {
+  tile: WeeklyAdherenceMetricTile;
+  softTileTypography?: boolean;
+}) {
   const contextDetail = <TileContextDetail tile={tile} />;
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5 shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium tracking-wide text-textMuted">{tile.label}</p>
+        <p
+          className={
+            softTileTypography
+              ? "text-sm font-medium tracking-normal text-textMuted"
+              : "text-xs font-medium tracking-wide text-textMuted"
+          }
+        >
+          {tile.label}
+        </p>
         <AdherenceStatusBadge percent={tile.adherencePercent} />
       </div>
       <p
         className={cn(
-          "mt-1 text-2xl font-semibold leading-none tabular-nums",
+          softTileTypography
+            ? "mt-1 text-2xl font-medium leading-none tabular-nums"
+            : "mt-1 text-2xl font-semibold leading-none tabular-nums",
           percentToneClass(tile.adherencePercent),
         )}
       >
@@ -318,12 +334,18 @@ export type WeeklyAdherenceCardsProps = {
   summary: WeeklyAdherenceSummary;
   athleteHeading?: string;
   showSectionHeader?: boolean;
+  cardTitleClassName?: string;
+  cardClassName?: string;
+  softTileTypography?: boolean;
 };
 
 export function WeeklyAdherenceCards({
   summary,
   athleteHeading,
   showSectionHeader = true,
+  cardTitleClassName,
+  cardClassName,
+  softTileTypography = false,
 }: WeeklyAdherenceCardsProps) {
   const tiles = buildWeeklyAdherenceMetricTiles(summary);
   const weekLabel = `${formatDateOnly(summary.weekStart, summary.weekStart)} – ${formatDateOnly(summary.weekEnd, summary.weekEnd)}`;
@@ -342,7 +364,11 @@ export function WeeklyAdherenceCards({
       )}
     >
       {tiles.map((tile) => (
-        <AdherenceMetricTile key={tile.key} tile={tile} />
+        <AdherenceMetricTile
+          key={tile.key}
+          tile={tile}
+          softTileTypography={softTileTypography}
+        />
       ))}
     </div>
   );
@@ -359,7 +385,7 @@ export function WeeklyAdherenceCards({
     return (
       <div className="space-y-2">
         {athleteHeading ? (
-          <p className="text-sm font-semibold text-textPrimary">{athleteHeading}</p>
+          <p className="text-sm font-medium text-textPrimary">{athleteHeading}</p>
         ) : null}
         {grid}
       </div>
@@ -372,10 +398,11 @@ export function WeeklyAdherenceCards({
       subtitle={`Current plan week: ${weekLabel}`}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={cn("shadow-[0_10px_30px_rgba(15,23,42,0.05)]", cardClassName)}
+      titleClassName={cardTitleClassName}
     >
       {athleteHeading ? (
-        <p className="mb-3 text-sm font-semibold text-textPrimary">{athleteHeading}</p>
+        <p className="mb-3 text-sm font-medium text-textPrimary">{athleteHeading}</p>
       ) : null}
       {grid}
     </Card>

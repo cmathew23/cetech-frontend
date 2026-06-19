@@ -1,5 +1,10 @@
+"use client";
+
+import { DASHBOARD_BUTTON_TEXT_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { designSystem } from "@/config/design-system";
+import { isAthleteOrCoachRoute } from "@/lib/athleteCoachSoftTypography";
 import { cn } from "@/lib/utils";
+import { usePathname } from "next/navigation";
 
 export function Button({
   variant = "primary",
@@ -10,6 +15,8 @@ export function Button({
   children,
   ...props
 }) {
+  const pathname = usePathname();
+  const softButtonText = isAthleteOrCoachRoute(pathname);
   const v = variant ?? "primary";
   const styles = {
     primary: designSystem.button.primary,
@@ -31,6 +38,7 @@ export function Button({
       disabled={isDisabled}
       className={cn(
         designSystem.button.base,
+        softButtonText && DASHBOARD_BUTTON_TEXT_CLASS,
         styles[v],
         isDisabled && "cursor-not-allowed opacity-50",
         isDisabled && "hover:!-translate-y-0",

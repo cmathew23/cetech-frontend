@@ -10,6 +10,7 @@ export type FormFieldProps = {
   error?: string;
   children: ReactNode;
   className?: string;
+  labelClassName?: string;
 };
 
 export function FormField({
@@ -20,12 +21,13 @@ export function FormField({
   error,
   children,
   className = "",
+  labelClassName,
 }: FormFieldProps) {
   const { formField: f, typography: t } = designSystem;
 
   return (
     <div className={cn(f.root, className)}>
-      <label htmlFor={id} className={f.label}>
+      <label htmlFor={id} className={cn(f.label, labelClassName)}>
         {label}
         {required ? (
           <>

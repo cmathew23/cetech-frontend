@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
  *   actions?: import("react").ReactNode;
  *   padding?: "compact" | "default" | "spacious";
  *   accent?: boolean;
+ *   titleClassName?: string;
  * }} props
  */
 export function Card({
@@ -20,6 +21,7 @@ export function Card({
   actions = null,
   padding = "default",
   accent = true,
+  titleClassName = "",
 }) {
   const paddingClass =
     designSystem.card.padding[padding] ?? designSystem.card.padding.default;
@@ -35,7 +37,9 @@ export function Card({
         <div className={cn(designSystem.card.header.root)}>
           <div className="min-w-0">
             {title ? (
-              <h3 className={cn(designSystem.card.header.title)}>{title}</h3>
+              <h3 className={cn(designSystem.card.header.title, titleClassName)}>
+                {title}
+              </h3>
             ) : null}
             {subtitle ? (
               <p className={cn(designSystem.card.header.subtitle)}>{subtitle}</p>

@@ -4,6 +4,8 @@ import {
   buildWeeklyAdherenceMetricTiles,
   WeeklyAdherenceCards,
 } from "@/components/dashboard/WeeklyAdherenceCards";
+import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Card } from "@/components/ui/Card";
 import { useAthleteWeeklyAdherence } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
 import { formatDateOnly } from "@/lib/dateTime";
@@ -23,7 +25,8 @@ function WeeklyAdherenceSectionCard({
       subtitle={`Current plan week: ${weekLabel}`}
       accent={false}
       padding="compact"
-      className="shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+      className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
     >
       {children}
     </Card>
@@ -77,7 +80,14 @@ export function AthleteWeeklyAdherenceSection() {
   if (phase === "loaded" && summary) {
     const tiles = buildWeeklyAdherenceMetricTiles(summary);
     if (tiles.length > 0) {
-      return <WeeklyAdherenceCards summary={summary} />;
+      return (
+        <WeeklyAdherenceCards
+          summary={summary}
+          cardTitleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+          cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+          softTileTypography
+        />
+      );
     }
     return (
       <WeeklyAdherenceSectionCard weekLabel={weekLabel}>

@@ -12,8 +12,11 @@ import {
 
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DASHBOARD_PLANNING_FIELD_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/Select";
 import {
   fetchCoachAssignedAthletes,
@@ -265,9 +268,16 @@ export function CoachFynAssistantPageContent() {
         subtitle="Select an athlete, then ask Fyn for a quick coaching summary."
       />
 
-      <Card accent={false} padding="compact" className="space-y-4">
+      <Card
+        accent={false}
+        padding="compact"
+        className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      >
         <div className="space-y-2">
-          <label htmlFor="fyn-athlete-select" className="text-sm font-medium text-textPrimary">
+          <label
+            htmlFor="fyn-athlete-select"
+            className={DASHBOARD_PLANNING_FIELD_LABEL_CLASS}
+          >
             Athlete
           </label>
           <Select
@@ -322,10 +332,19 @@ export function CoachFynAssistantPageContent() {
 
       {historyWarning ? <Alert variant="warning">{historyWarning}</Alert> : null}
 
-      <FynChatThread
-        messages={messages}
-        emptyState="Choose an athlete and start with one of the guided prompts above."
-      />
+      <Card
+        accent={false}
+        padding="compact"
+        className={cn("space-y-3", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+      >
+        {messages.length === 0 ? (
+          <p className="text-sm text-textSecondary">
+            Choose an athlete and start with one of the guided prompts above.
+          </p>
+        ) : (
+          <FynChatThread messages={messages} emptyState="" />
+        )}
+      </Card>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { CoachAssignedAthleteRow } from "@/lib/api/coachMe";
 import { formatEnumeratedLabel, formatPersonNameForDisplay } from "@/lib/textFormat";
@@ -118,7 +120,12 @@ export function AssignedAthletesTable({
           No athletes match the selected filters.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div
+          className={cn(
+            "overflow-x-auto rounded-2xl border bg-white",
+            DASHBOARD_MAJOR_OUTER_CARD_CLASS,
+          )}
+        >
           <table className="w-full min-w-[460px] border-separate [border-spacing:0_6px] text-left">
             <thead className="bg-slate-50/70">
               <tr>
@@ -138,7 +145,7 @@ export function AssignedAthletesTable({
                 <tr key={`${row.email}-${index}`} className="group align-top">
                   <td className="rounded-l-xl border-y border-l border-slate-100 bg-white px-6 py-5 group-hover:bg-slate-50/70">
                     <div className="space-y-1">
-                      <span className="block text-sm font-semibold text-slate-900">
+                      <span className="block text-sm font-normal text-slate-900">
                         {row.displayName.trim() !== ""
                           ? formatPersonNameForDisplay(row.displayName)
                           : "—"}

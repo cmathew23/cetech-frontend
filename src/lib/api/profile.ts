@@ -26,6 +26,17 @@ function readProfileString(o: Record<string, unknown>, key: string): string {
   return "";
 }
 
+function readFirstProfileString(
+  o: Record<string, unknown>,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const value = readProfileString(o, key).trim();
+    if (value !== "") return value;
+  }
+  return "";
+}
+
 function parseProfileMe(data: unknown): ProfileMe {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw {
@@ -37,12 +48,31 @@ function parseProfileMe(data: unknown): ProfileMe {
   }
   const o = data as Record<string, unknown>;
   const userId =
-    readProfileString(o, "userId") || readProfileString(o, "id");
+    readFirstProfileString(o, ["userId", "user_id", "id"]);
+  const firstName = readFirstProfileString(o, [
+    "firstName",
+    "first_name",
+    "givenName",
+    "given_name",
+  ]);
+  const lastName = readFirstProfileString(o, [
+    "lastName",
+    "last_name",
+    "familyName",
+    "family_name",
+  ]);
+  const displayName = readFirstProfileString(o, [
+    "displayName",
+    "display_name",
+    "fullName",
+    "full_name",
+    "name",
+  ]);
   return {
     userId,
     email: readProfileString(o, "email"),
-    firstName: readProfileString(o, "firstName"),
-    lastName: readProfileString(o, "lastName"),
+    firstName: firstName || (lastName === "" ? displayName : ""),
+    lastName,
     phone: readProfileString(o, "phone"),
     addressLine1: readProfileString(o, "addressLine1"),
     city: readProfileString(o, "city"),

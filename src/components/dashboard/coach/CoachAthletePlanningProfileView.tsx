@@ -86,7 +86,24 @@ import {
   type CoachAthleteTrainingPlanWorkloadAssessment,
   type CoachAthleteUpstreamPlanningContext,
 } from "@/lib/api/coachAthletePlanningReadiness";
+import { getTrainingPlanWorkspace } from "@/lib/api/trainingPlanWorkspace";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import {
+  deriveWorkflowStatusFromWorkspaceDomain,
+  parseWorkspaceCurrentDomain,
+  parseWorkspaceInitialTab,
+  resolveWorkflowModeFromWorkspace,
+  workspaceAllowedActionsSet,
+  workspaceDirectReleaseAllowed,
+  workspaceHasSubmittedDomainPlans,
+  workspaceHeadCoachCanCreateSkillsPlan,
+  workspaceHeadCoachOwnsPlanningContext,
+  workspaceHeadCoachOwnsSkillsForAthlete,
+  workspacePlanningContextLocked,
+  workspaceResolvableGenerationDomains,
+  workspaceResolveReleaseMode,
+  workspaceShowsDomainSubmitReview,
+} from "@/lib/trainingPlanWorkspaceView";
 import { runTrainingPlanGenerationJob } from "@/lib/coachTrainingPlanGenerationJobs";
 import {
   formatDateOnly,
@@ -125,6 +142,7 @@ import {
 } from "@/lib/coachTrainingPlanActions";
 import { cn } from "@/lib/utils";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
+import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   type MutableRefObject,
@@ -3161,6 +3179,10 @@ export function CoachAthletePlanningProfileView({
   const [upstreamPlanningContextLoading, setUpstreamPlanningContextLoading] = useState(false);
   const [upstreamPlanningContextError, setUpstreamPlanningContextError] =
     useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<TrainingPlanWorkspace | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspaceRefreshGenRef = useRef(0);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
 
@@ -3277,17 +3299,63 @@ export function CoachAthletePlanningProfileView({
   );
   const isHeadCoachPlanningContextOwner = useMemo(
     () =>
-      setupState.hasHeadCoachConfigured &&
-      currentCoachIsHeadCoach(setupState.academyCoachRole),
-    [setupState.academyCoachRole, setupState.hasHeadCoachConfigured],
+      workspace
+        ? workspaceHeadCoachOwnsPlanningContext(workspace)
+        : setupState.hasHeadCoachConfigured &&
+          currentCoachIsHeadCoach(setupState.academyCoachRole),
+    [
+      setupState.academyCoachRole,
+      setupState.hasHeadCoachConfigured,
+      workspace,
+    ],
   );
-  const trainingPlanShellReleaseMode = resolveTrainingPlanReleaseMode({
-    hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
-    trainingPlanReleaseMode: setupState.trainingPlanReleaseMode,
-  });
-  const trainingPlanShellOwnership = useMemo(
+  const trainingPlanShellReleaseMode = useMemo(
     () =>
-      resolveTrainingPlanShellOwnership({
+      workspace
+        ? workspaceResolveReleaseMode(workspace)
+        : resolveTrainingPlanReleaseMode({
+            hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+            trainingPlanReleaseMode: setupState.trainingPlanReleaseMode,
+          }),
+    [
+      setupState.hasHeadCoachConfigured,
+      setupState.trainingPlanReleaseMode,
+      workspace,
+    ],
+  );
+  const trainingPlanShellOwnership = useMemo(
+    () => {
+      if (workspace) {
+        const releaseMode = workspaceResolveReleaseMode(workspace);
+        const flags = workspace.ownershipFlags;
+        if (flags.headCoachOwnsPlanningContext) {
+          return {
+            planningContextShellOwner: "head_coach" as const,
+            releaseMode,
+          };
+        }
+        if (
+          releaseMode === "direct_release" &&
+          flags.requesterOwnsCurrentDomain &&
+          parseWorkspaceCurrentDomain(workspace.currentDomain) === "SKILLS"
+        ) {
+          return {
+            planningContextShellOwner: "skills_coach" as const,
+            releaseMode,
+          };
+        }
+        if (releaseMode === "direct_release" && workspaceDirectReleaseAllowed(workspace)) {
+          return {
+            planningContextShellOwner: "waiting_role" as const,
+            releaseMode,
+          };
+        }
+        return {
+          planningContextShellOwner: "waiting_role" as const,
+          releaseMode,
+        };
+      }
+      return resolveTrainingPlanShellOwnership({
         isCoachSetupLoaded: !setupLoading,
         coachUserId: currentCoachUserId,
         athleteId: athleteIdTrimmed,
@@ -3302,7 +3370,8 @@ export function CoachAthletePlanningProfileView({
           !setupState.hasHeadCoachConfigured,
         academyCoachRole: setupState.academyCoachRole,
         coachAssignedGenerationDomains,
-      }),
+      });
+    },
     [
       athleteIdTrimmed,
       coachAssignedGenerationDomains,
@@ -3313,12 +3382,23 @@ export function CoachAthletePlanningProfileView({
       setupState.hasHeadCoachConfigured,
       setupState.trainingPlanReleaseMode,
       trainingPlanShellReleaseMode,
+      workspace,
     ],
   );
   const isPlanningContextShellOwner =
     trainingPlanShellOwnership.planningContextShellOwner === "head_coach" ||
     trainingPlanShellOwnership.planningContextShellOwner === "skills_coach";
   const allowedGenerationDomains = useMemo(() => {
+    if (workspace) {
+      const fromWorkspace = workspaceResolvableGenerationDomains(workspace);
+      if (fromWorkspace.length > 0) {
+        return fromWorkspace;
+      }
+      const currentDomain = parseWorkspaceCurrentDomain(workspace.currentDomain);
+      if (currentDomain) {
+        return [currentDomain];
+      }
+    }
     const fromCoach = coachAssignedGenerationDomains;
     if (isHeadCoachPlanningContextOwner) {
       return fromCoach;
@@ -3339,6 +3419,7 @@ export function CoachAthletePlanningProfileView({
     assignedAthletePlanOwnership,
     coachAssignedGenerationDomains,
     isHeadCoachPlanningContextOwner,
+    workspace,
   ]);
   const isPlanningContextAuthority = useMemo(
     () =>
@@ -3352,6 +3433,12 @@ export function CoachAthletePlanningProfileView({
     ],
   );
   const currentCoachGenerationDomain = useMemo((): TrainingPlanGenerationDomain | null => {
+    const workspaceDomain = workspace
+      ? parseWorkspaceCurrentDomain(workspace.currentDomain)
+      : null;
+    if (workspaceDomain) {
+      return workspaceDomain;
+    }
     if (isHeadCoachPlanningContextOwner && coachAssignedGenerationDomains.length === 0) {
       return null;
     }
@@ -3374,6 +3461,7 @@ export function CoachAthletePlanningProfileView({
     assignedAthletePlanOwnership,
     coachAssignedGenerationDomains.length,
     isHeadCoachPlanningContextOwner,
+    workspace,
   ]);
   const shouldSkipPlanningOwnerReadinessCalls =
     setupState.hasHeadCoachConfigured &&
@@ -3548,6 +3636,57 @@ export function CoachAthletePlanningProfileView({
       cancelled = true;
     };
   }, [accessGateReady, athleteIdTrimmed, entityId]);
+
+  const refreshTrainingPlanWorkspace = useCallback(async (): Promise<boolean> => {
+    if (!accessGateReady) {
+      return false;
+    }
+
+    if (entityId === "" || athleteIdTrimmed === "") {
+      setWorkspace(null);
+      setWorkspaceError(null);
+      setWorkspaceLoading(false);
+      return false;
+    }
+
+    workspaceRefreshGenRef.current += 1;
+    const requestGeneration = workspaceRefreshGenRef.current;
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+
+    try {
+      const data = await getTrainingPlanWorkspace(entityId, athleteIdTrimmed);
+      if (workspaceRefreshGenRef.current !== requestGeneration) {
+        return false;
+      }
+      setWorkspace(data);
+      return true;
+    } catch (e) {
+      if (workspaceRefreshGenRef.current !== requestGeneration) {
+        return false;
+      }
+      setWorkspace(null);
+      setWorkspaceError(
+        formatApiError(
+          e,
+          "Could not load training plan workspace. Please try again shortly.",
+        ),
+      );
+      return false;
+    } finally {
+      if (workspaceRefreshGenRef.current === requestGeneration) {
+        setWorkspaceLoading(false);
+      }
+    }
+  }, [accessGateReady, athleteIdTrimmed, entityId]);
+
+  useEffect(() => {
+    void refreshTrainingPlanWorkspace();
+    return () => {
+      workspaceRefreshGenRef.current += 1;
+    };
+  }, [refreshTrainingPlanWorkspace]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4272,9 +4411,19 @@ export function CoachAthletePlanningProfileView({
   );
   const upstreamContextLockedForDownstream =
     isUpstreamPlanningContextLocked(upstreamPlanningContext);
-  const isNoHeadCoachDirectReleaseWorkflow =
-    trainingPlanShellOwnership.releaseMode === "direct_release" &&
-    !setupState.hasHeadCoachConfigured;
+  const isNoHeadCoachDirectReleaseWorkflow = useMemo(
+    () =>
+      workspace
+        ? workspaceResolveReleaseMode(workspace) === "direct_release" &&
+          !workspace.ownershipFlags.hasHeadCoach
+        : trainingPlanShellOwnership.releaseMode === "direct_release" &&
+          !setupState.hasHeadCoachConfigured,
+    [
+      setupState.hasHeadCoachConfigured,
+      trainingPlanShellOwnership.releaseMode,
+      workspace,
+    ],
+  );
   const noHeadCoachDirectReleasePlanningContextLocked =
     isNoHeadCoachDirectReleaseWorkflow &&
     resolveNoHeadCoachDirectReleaseLockedPlanningContext(upstreamPlanningContext);
@@ -4297,7 +4446,7 @@ export function CoachAthletePlanningProfileView({
     );
   const submittedDomainPlansRequiredForBootstrap =
     assignmentBootstrapReady && isHeadCoachPlanningContextOwner;
-  const hasSubmittedDomainPlans = useMemo(() => {
+  const clientHasSubmittedDomainPlans = useMemo(() => {
     if (!isHeadCoachPlanningContextOwner) return false;
     return GENERATION_DOMAIN_ORDER.some((domain) => {
       const state = headCoachDomainPlanStates[domain];
@@ -4309,11 +4458,29 @@ export function CoachAthletePlanningProfileView({
       }) === "submitted_for_review";
     });
   }, [headCoachDomainPlanStates, isHeadCoachPlanningContextOwner]);
-  const planningContextLocked =
-    setupState.hasHeadCoachConfigured
-      ? upstreamPlanningContext?.planningContextLocked === true || hasSubmittedDomainPlans
-      : upstreamPlanningContext?.planningContextLocked === true ||
-        upstreamPlanningContext?.upstreamPlanningContextLocked === true;
+  const hasSubmittedDomainPlans = useMemo(
+    () =>
+      workspace
+        ? workspaceHasSubmittedDomainPlans(workspace)
+        : clientHasSubmittedDomainPlans,
+    [clientHasSubmittedDomainPlans, workspace],
+  );
+  const planningContextLocked = useMemo(
+    () =>
+      workspace
+        ? workspacePlanningContextLocked(workspace)
+        : setupState.hasHeadCoachConfigured
+          ? upstreamPlanningContext?.planningContextLocked === true ||
+            hasSubmittedDomainPlans
+          : upstreamPlanningContext?.planningContextLocked === true ||
+            upstreamPlanningContext?.upstreamPlanningContextLocked === true,
+    [
+      hasSubmittedDomainPlans,
+      setupState.hasHeadCoachConfigured,
+      upstreamPlanningContext,
+      workspace,
+    ],
+  );
   const effectiveSkillsPlanningContextLocked =
     trainingPlanShellOwnership.planningContextShellOwner === "skills_coach" &&
     isNoHeadCoachDirectReleaseWorkflow
@@ -4325,44 +4492,87 @@ export function CoachAthletePlanningProfileView({
     ((upstreamPlanningContext?.planWindow?.startDate ?? upstreamPlanningContext?.startDate ?? null) !== null) &&
     ((upstreamPlanningContext?.planWindow?.endDate ?? upstreamPlanningContext?.endDate ?? null) !== null);
   const planningContextResolved =
-    !planningContextRequiredForBootstrap ||
-    isTerminalBootstrapLoadState(planningContextBootstrapState);
+    workspace
+      ? workspace.planningContext.resolved || workspace.planningContext.locked
+      : !planningContextRequiredForBootstrap ||
+        isTerminalBootstrapLoadState(planningContextBootstrapState);
   const headCoachDomainPlansResolved = useMemo(
     () =>
-      !isHeadCoachPlanningContextOwner ||
-      isTerminalBootstrapLoadState(submittedDomainPlansBootstrapState),
-    [isHeadCoachPlanningContextOwner, submittedDomainPlansBootstrapState],
+      workspace
+        ? true
+        : !isHeadCoachPlanningContextOwner ||
+          isTerminalBootstrapLoadState(submittedDomainPlansBootstrapState),
+    [
+      isHeadCoachPlanningContextOwner,
+      submittedDomainPlansBootstrapState,
+      workspace,
+    ],
   );
   const headCoachOwnsAssignedDomainGenerationForAthlete = useMemo(
     () =>
-      headCoachOwnsAssignedDomainGeneration({
-        coachAssignedGenerationDomains,
-        assignedAthleteRow: assignedAthletePlanOwnership,
-        readinessByDomain: planGenerationOwnershipByDomain,
-      }),
+      workspace
+        ? workspaceHeadCoachOwnsSkillsForAthlete(workspace)
+        : headCoachOwnsAssignedDomainGeneration({
+            coachAssignedGenerationDomains,
+            assignedAthleteRow: assignedAthletePlanOwnership,
+            readinessByDomain: planGenerationOwnershipByDomain,
+          }),
     [
       assignedAthletePlanOwnership,
       coachAssignedGenerationDomains,
       planGenerationOwnershipByDomain,
+      workspace,
     ],
   );
-  const trainingPlanWorkflowMode = resolveTrainingPlanWorkflowMode({
-    isCoachSetupLoaded: !setupLoading,
-    coachUserId: currentCoachUserId,
-    athleteId: athleteIdTrimmed,
-    entityId,
-    academyCoachRole: setupState.academyCoachRole,
-    hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
-    trainingPlanReleaseMode: setupState.trainingPlanReleaseMode,
-    coachAssignedGenerationDomains,
-    isPlanningContextResolved: planningContextResolved,
-    areHeadCoachDomainPlansResolved: headCoachDomainPlansResolved,
-    planningContextLocked,
-    hasSubmittedDomainPlans,
-    headCoachOwnsAssignedDomainGeneration: isHeadCoachPlanningContextOwner
-      ? headCoachOwnsAssignedDomainGenerationForAthlete
-      : false,
-  });
+  const clientTrainingPlanWorkflowMode = useMemo(
+    () =>
+      resolveTrainingPlanWorkflowMode({
+        isCoachSetupLoaded: !setupLoading,
+        coachUserId: currentCoachUserId,
+        athleteId: athleteIdTrimmed,
+        entityId,
+        academyCoachRole: setupState.academyCoachRole,
+        hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+        trainingPlanReleaseMode: setupState.trainingPlanReleaseMode,
+        coachAssignedGenerationDomains,
+        isPlanningContextResolved: planningContextResolved,
+        areHeadCoachDomainPlansResolved: headCoachDomainPlansResolved,
+        planningContextLocked,
+        hasSubmittedDomainPlans,
+        headCoachOwnsAssignedDomainGeneration: isHeadCoachPlanningContextOwner
+          ? headCoachOwnsAssignedDomainGenerationForAthlete
+          : false,
+      }),
+    [
+      athleteIdTrimmed,
+      coachAssignedGenerationDomains,
+      currentCoachUserId,
+      entityId,
+      hasSubmittedDomainPlans,
+      headCoachDomainPlansResolved,
+      headCoachOwnsAssignedDomainGenerationForAthlete,
+      isHeadCoachPlanningContextOwner,
+      planningContextLocked,
+      planningContextResolved,
+      setupLoading,
+      setupState.academyCoachRole,
+      setupState.hasHeadCoachConfigured,
+      setupState.trainingPlanReleaseMode,
+    ],
+  );
+  const workspaceFetchState = useMemo(() => {
+    if (workspaceLoading) return "loading" as const;
+    if (workspaceError) return "error" as const;
+    if (workspace) return "ready" as const;
+    return "idle" as const;
+  }, [workspace, workspaceError, workspaceLoading]);
+  const trainingPlanWorkflowMode = useMemo(() => {
+    if (workspaceFetchState === "ready" && workspace) {
+      const fromWorkspace = resolveWorkflowModeFromWorkspace(workspace);
+      if (fromWorkspace) return fromWorkspace;
+    }
+    return clientTrainingPlanWorkflowMode;
+  }, [clientTrainingPlanWorkflowMode, workspace, workspaceFetchState]);
   const trainingPlanPageModel = resolveTrainingPlanPageBootstrapModel({
     identityReady: identityBootstrapReady,
     assignmentReady: assignmentBootstrapReady,
@@ -4805,17 +5015,26 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.plan.id,
     persistedSkillsPlanDetail?.version.id,
   ]);
-  const persistedGovernedAllowedActions = useMemo(
-    () => new Set(persistedSkillsPlanDetail?.allowedActions ?? []),
-    [persistedSkillsPlanDetail?.allowedActions],
-  );
+  const persistedGovernedAllowedActions = useMemo(() => {
+    if (workspace && currentCoachGenerationDomain) {
+      return workspaceAllowedActionsSet(workspace, currentCoachGenerationDomain);
+    }
+    return new Set(persistedSkillsPlanDetail?.allowedActions ?? []);
+  }, [
+    currentCoachGenerationDomain,
+    persistedSkillsPlanDetail?.allowedActions,
+    workspace,
+  ]);
   const assistantVisibleDraftForSubmit = useMemo(
     () => (latestDraftMatchesCurrentDomain ? latestSkillsDraft : null),
     [latestDraftMatchesCurrentDomain, latestSkillsDraft],
   );
   const assistantDomainShowSubmitAction = useMemo(
-    () =>
-      canShowAssistantDomainSubmitReview({
+    () => {
+      if (workspace) {
+        return workspaceShowsDomainSubmitReview(workspace, currentCoachGenerationDomain);
+      }
+      return canShowAssistantDomainSubmitReview({
         discoveryLoading: assistantPlanDiscoveryLoading,
         governedDetailRefreshing: assistantGovernedDetailRefreshing,
         hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
@@ -4826,7 +5045,8 @@ export function CoachAthletePlanningProfileView({
             : null,
         latestDraft: assistantVisibleDraftForSubmit,
         currentDomain: currentCoachGenerationDomain,
-      }),
+      });
+    },
     [
       assistantGovernedDetailRefreshing,
       assistantPlanDiscoveryLoading,
@@ -4837,6 +5057,7 @@ export function CoachAthletePlanningProfileView({
       persistedGovernedPlanContext,
       setupState.hasHeadCoachConfigured,
       shouldForceAssistantDomainWorkspace,
+      workspace,
     ],
   );
   const assistantDomainSubmitVersionMismatchNotice = useMemo(() => {
@@ -5466,20 +5687,25 @@ export function CoachAthletePlanningProfileView({
     return headCoachOwnedSkillsDraft?.trainingPlanId?.trim() ?? "";
   }, [headCoachOwnedSkillsActiveDetail?.plan.id, headCoachOwnedSkillsDraft?.trainingPlanId]);
   const headCoachSkillsCreateVisible = useMemo(
-    () =>
-      canHeadCoachCreateSkillsPlan({
+    () => {
+      if (workspace) {
+        return workspaceHeadCoachCanCreateSkillsPlan(workspace, headCoachSkillsPlanExists);
+      }
+      return canHeadCoachCreateSkillsPlan({
         isHeadCoachPlanningContextOwner,
         planningContextLocked,
         allowedGenerationDomains,
         skillsOwnershipFlags: resolveOwnershipFlagsForDomain("SKILLS"),
         skillsPlanExists: headCoachSkillsPlanExists,
-      }),
+      });
+    },
     [
       allowedGenerationDomains,
       headCoachSkillsPlanExists,
       isHeadCoachPlanningContextOwner,
       planningContextLocked,
       resolveOwnershipFlagsForDomain,
+      workspace,
     ],
   );
 
@@ -5869,6 +6095,10 @@ export function CoachAthletePlanningProfileView({
     setUpstreamPlanningContext(null);
     setUpstreamPlanningContextLoading(false);
     setUpstreamPlanningContextError(null);
+    workspaceRefreshGenRef.current += 1;
+    setWorkspace(null);
+    setWorkspaceLoading(false);
+    setWorkspaceError(null);
     setPlanningContextBootstrapState("idle");
     setCachedLockedPlanWindow(null);
     setPlanningContextLockLoading(false);
@@ -6396,22 +6626,28 @@ export function CoachAthletePlanningProfileView({
       skillsPlanExists: hasLatestOrHydratedPersistedTrainingPlanId,
       contextHasPlanWindow: skillsOwnedContextHasPlanWindow,
     });
-    const resolvedTab = skillsOwnedResolvedTab ?? resolveInitialTrainingPlanWorkflowTab({
-      workflowMode,
-      requestedPlanId: requestedPlanIdDep,
-      urlPlanCandidate: urlPlanCandidateDep,
-      planningContextLocked:
-        trainingPlanPageModel.shell === "skills_coach_planning"
-          ? effectiveSkillsPlanningContextLocked
-          : planningContextLocked,
-      hasSubmittedDomainPlans,
-      appStepComplete: appStepCompleteDep,
-      levelStepComplete: levelStepCompleteDep,
-      workloadComplete: workloadCompleteDep,
-      seasonGoalsGateComplete: seasonGoalsGateCompleteDep,
-      planDatesStepComplete: planDatesStepCompleteDep,
-      isDownstreamDomainCoach,
-    });
+    const workspaceInitialTab = workspace
+      ? parseWorkspaceInitialTab(workspace.initialTab)
+      : null;
+    const resolvedTab =
+      workspaceInitialTab ??
+      skillsOwnedResolvedTab ??
+      resolveInitialTrainingPlanWorkflowTab({
+        workflowMode,
+        requestedPlanId: requestedPlanIdDep,
+        urlPlanCandidate: urlPlanCandidateDep,
+        planningContextLocked:
+          trainingPlanPageModel.shell === "skills_coach_planning"
+            ? effectiveSkillsPlanningContextLocked
+            : planningContextLocked,
+        hasSubmittedDomainPlans,
+        appStepComplete: appStepCompleteDep,
+        levelStepComplete: levelStepCompleteDep,
+        workloadComplete: workloadCompleteDep,
+        seasonGoalsGateComplete: seasonGoalsGateCompleteDep,
+        planDatesStepComplete: planDatesStepCompleteDep,
+        isDownstreamDomainCoach,
+      });
 
     workflowInitialTabResolvedRef.current = true;
     if (resolvedTab !== selectedWorkflowTabDep) {
@@ -6437,6 +6673,7 @@ export function CoachAthletePlanningProfileView({
     urlPlanCandidateDep,
     workloadAssessmentLoadingDep,
     workloadCompleteDep,
+    workspace,
   ]);
 
   /** Downstream Nutrition/S&C: open Generate after prerequisites without walking Steps 3–5. */
@@ -7212,6 +7449,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseSkillsFeedback("");
       setReviseSkillsSuccess("Revised skills plan version generated.");
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       console.error("Skills training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
@@ -7360,6 +7598,7 @@ export function CoachAthletePlanningProfileView({
         );
       }
       setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       if (
         headCoachFunctionAwareMode &&
@@ -7372,6 +7611,7 @@ export function CoachAthletePlanningProfileView({
         );
         if (recovered) {
           setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
+          void refreshTrainingPlanWorkspace();
           return;
         }
       }
@@ -7427,6 +7667,7 @@ export function CoachAthletePlanningProfileView({
       setRequestRevisionModalOpen(false);
       const domainLabel = trainingPlanDomainLabel(actionDomain);
       setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       setGovernedPlanActionError(
         formatApiError(e, governedPlanActionErrorFallback("REQUEST_REVISION")),
@@ -7511,6 +7752,7 @@ export function CoachAthletePlanningProfileView({
       }
       if (isUpstreamPlanningContextLocked(resolvedContext)) {
         setPlanningContextLockSuccess("Planning context locked and shared with coaches.");
+        void refreshTrainingPlanWorkspace();
       } else if (isSkillsOwnedPlanningShell) {
         setPlanningContextLockError(
           "Planning context lock was submitted, but the refreshed lock state is not ready yet. Please retry.",
@@ -7518,6 +7760,7 @@ export function CoachAthletePlanningProfileView({
         setPlanningContextLockSuccess(null);
       } else {
         setPlanningContextLockSuccess("Planning context locked and shared with coaches.");
+        void refreshTrainingPlanWorkspace();
       }
     } catch (e) {
       setPlanningContextLockError(
@@ -7668,22 +7911,29 @@ export function CoachAthletePlanningProfileView({
           })
         : null;
     const workflowStatus =
-      workflow2SkillsSlotProjection?.workflowStatus ??
-      deriveHeadCoachDomainWorkflowStatus({
-        summaryStatus: state.summaryStatus,
-        summaryPlanId: state.summaryPlanId,
-        summaryVersionId: state.summaryVersionId,
-        activeDetail: state.activeDetail,
-      });
+      workspace
+        ? deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[domain])
+        : workflow2SkillsSlotProjection?.workflowStatus ??
+          deriveHeadCoachDomainWorkflowStatus({
+            summaryStatus: state.summaryStatus,
+            summaryPlanId: state.summaryPlanId,
+            summaryVersionId: state.summaryVersionId,
+            activeDetail: state.activeDetail,
+          });
     const status = headCoachDomainStatusLabel(workflowStatus);
     const activeDetail = state.activeDetail;
+    const workspaceDomainEntry = workspace?.domains[domain];
+    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
+    const workspaceVersionId = workspaceDomainEntry?.summary.versionId?.trim() ?? "";
     const planId =
       workflow2SkillsSlotProjection?.planId ??
+      (workspacePlanId !== "" ? workspacePlanId : null) ??
       state.summaryPlanId ??
       activeDetail?.plan.id?.trim() ??
       "";
     const versionId =
       workflow2SkillsSlotProjection?.versionId ??
+      (workspaceVersionId !== "" ? workspaceVersionId : null) ??
       state.summaryVersionId ??
       activeDetail?.version.id?.trim() ??
       "";
@@ -7761,7 +8011,10 @@ export function CoachAthletePlanningProfileView({
     const loadError = domainState.error;
 
     const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const allowedActions = new Set(activeDetail?.allowedActions ?? []);
+    const allowedActions =
+      workspace && headCoachSubmittedReviewDomain !== null
+        ? workspaceAllowedActionsSet(workspace, headCoachSubmittedReviewDomain)
+        : new Set(activeDetail?.allowedActions ?? []);
     const planId = activeDetail?.plan.id?.trim() ?? "";
     const versionId = activeDetail?.version.id?.trim() ?? "";
     const versionNumber = activeDetail?.version.versionNumber ?? null;
@@ -9240,6 +9493,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseNutritionFeedback("");
       setReviseNutritionSuccess("Revised nutrition plan version generated.");
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       console.error("Nutrition training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
@@ -9327,6 +9581,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseSandCFeedback("");
       setReviseSandCSuccess("Revised S&C plan version generated.");
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       console.error("S&C training plan revision failed", e);
       const errorRecord =
@@ -9926,6 +10181,7 @@ export function CoachAthletePlanningProfileView({
         ),
       );
       setGeneratePlanSuccessDomain(domain);
+      void refreshTrainingPlanWorkspace();
     } catch (e) {
       setGeneratePlanSuccess(null);
       setGeneratePlanSuccessDomain(null);

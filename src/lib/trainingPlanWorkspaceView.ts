@@ -1,0 +1,300 @@
+import type { GovernedTrainingPlanWorkflowAction } from "@/lib/api/coachAthletePlanningReadiness";
+import type { GenerationDomain } from "@/lib/coachAuthority";
+import type {
+  TrainingPlanWorkspace,
+  TrainingPlanWorkspaceDomain,
+} from "@/types/trainingPlanWorkspace";
+
+export type TrainingPlanWorkflowMode =
+  | "loading"
+  | "head_coach_planning"
+  | "head_coach_review"
+  | "head_coach_function_aware"
+  | "skills_coach_planning"
+  | "specialist_domain";
+
+export type TrainingPlanResolvedReleaseMode =
+  | "head_coach_review"
+  | "direct_release";
+
+export type GuidedWorkflowStepKey =
+  | "context-app"
+  | "level-validation"
+  | "workload"
+  | "season-goals"
+  | "plan-dates"
+  | "generate";
+
+const GENERATION_DOMAINS: GenerationDomain[] = [
+  "SKILLS",
+  "NUTRITION",
+  "S_AND_C",
+];
+
+function normalizeWorkspaceToken(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/&/g, "AND")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+export function parseWorkspaceWorkflowMode(
+  value: string | null | undefined,
+): TrainingPlanWorkflowMode | null {
+  if (!value || value.trim() === "") return null;
+  const lower = value.trim().toLowerCase();
+  if (
+    lower === "head_coach_planning" ||
+    lower === "head_coach_review" ||
+    lower === "head_coach_function_aware" ||
+    lower === "skills_coach_planning" ||
+    lower === "specialist_domain" ||
+    lower === "loading"
+  ) {
+    return lower as TrainingPlanWorkflowMode;
+  }
+  const normalized = normalizeWorkspaceToken(value);
+  const map: Record<string, TrainingPlanWorkflowMode> = {
+    HEAD_COACH_PLANNING: "head_coach_planning",
+    HEAD_COACH_REVIEW: "head_coach_review",
+    HEAD_COACH_FUNCTION_AWARE: "head_coach_function_aware",
+    SKILLS_COACH_PLANNING: "skills_coach_planning",
+    SPECIALIST_DOMAIN: "specialist_domain",
+    LOADING: "loading",
+  };
+  return map[normalized] ?? null;
+}
+
+export function resolveWorkflowModeFromWorkspace(
+  workspace: TrainingPlanWorkspace,
+): TrainingPlanWorkflowMode | null {
+  return (
+    parseWorkspaceWorkflowMode(workspace.workflowMode) ??
+    parseWorkspaceWorkflowMode(workspace.shell)
+  );
+}
+
+export function parseWorkspaceCurrentDomain(
+  value: string | null | undefined,
+): GenerationDomain | null {
+  const normalized = normalizeWorkspaceToken(value ?? "");
+  if (
+    normalized === "SKILLS" ||
+    normalized === "NUTRITION" ||
+    normalized === "S_AND_C"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+export function parseWorkspaceInitialTab(
+  value: string | null | undefined,
+): GuidedWorkflowStepKey | null {
+  if (!value || value.trim() === "") return null;
+  const lower = value.trim().toLowerCase();
+  const lowerMap: Record<string, GuidedWorkflowStepKey> = {
+    "context-app": "context-app",
+    "level-validation": "level-validation",
+    workload: "workload",
+    "season-goals": "season-goals",
+    "plan-dates": "plan-dates",
+    generate: "generate",
+    "generate-plan": "generate",
+  };
+  if (lower in lowerMap) return lowerMap[lower];
+  const normalized = normalizeWorkspaceToken(value);
+  const map: Record<string, GuidedWorkflowStepKey> = {
+    CONTEXT_APP: "context-app",
+    LEVEL_VALIDATION: "level-validation",
+    WORKLOAD: "workload",
+    WORKLOAD_ASSESSMENT: "workload",
+    SEASON_GOALS: "season-goals",
+    PLAN_DATES: "plan-dates",
+    GENERATE: "generate",
+    GENERATE_PLAN: "generate",
+  };
+  return map[normalized] ?? null;
+}
+
+export function workspaceHasSubmittedDomainPlans(
+  workspace: TrainingPlanWorkspace,
+): boolean {
+  return GENERATION_DOMAINS.some(
+    (domain) => workspace.domains[domain].submittedForReview,
+  );
+}
+
+export function workspacePlanningContextLocked(
+  workspace: TrainingPlanWorkspace,
+): boolean {
+  return workspace.planningContext.locked;
+}
+
+export function workspaceHeadCoachOwnsPlanningContext(
+  workspace: TrainingPlanWorkspace,
+): boolean {
+  return workspace.ownershipFlags.headCoachOwnsPlanningContext;
+}
+
+export function workspaceDirectReleaseAllowed(
+  workspace: TrainingPlanWorkspace,
+): boolean {
+  return workspace.ownershipFlags.directReleaseAllowed;
+}
+
+/**
+ * Workflow 2: Skills owner generation only when backend confirms athlete assignment.
+ * Never infer from requesterHasSkillsFunction alone.
+ */
+export function workspaceHeadCoachOwnsSkillsForAthlete(
+  workspace: TrainingPlanWorkspace,
+): boolean {
+  const flags = workspace.ownershipFlags;
+  if (flags.requesterOwnsSkillsForThisAthlete !== undefined) {
+    return flags.requesterOwnsSkillsForThisAthlete;
+  }
+  if (
+    flags.requesterOwnsCurrentDomain &&
+    parseWorkspaceCurrentDomain(workspace.currentDomain) === "SKILLS"
+  ) {
+    return true;
+  }
+  const skillsActions = parseWorkspaceAllowedActions(workspace.domains.SKILLS);
+  return skillsActions.some(
+    (action) =>
+      action === "SUBMIT_REVIEW" ||
+      action === "REQUEST_REVISION" ||
+      action === "RELEASE",
+  );
+}
+
+export function parseWorkspaceAllowedActions(
+  domain: TrainingPlanWorkspaceDomain,
+): GovernedTrainingPlanWorkflowAction[] {
+  const out = new Set<GovernedTrainingPlanWorkflowAction>();
+  for (const item of domain.allowedActions) {
+    const normalized = normalizeWorkspaceToken(item);
+    if (normalized === "SUBMIT_REVIEW" || normalized === "SUBMIT_FOR_REVIEW") {
+      out.add("SUBMIT_REVIEW");
+    } else if (normalized === "HEAD_APPROVE") {
+      out.add("HEAD_APPROVE");
+    } else if (
+      normalized === "REQUEST_REVISION" ||
+      normalized === "REQUEST_REVIEW_REVISION"
+    ) {
+      out.add("REQUEST_REVISION");
+    } else if (normalized === "RELEASE" || normalized === "RELEASE_TO_ATHLETE") {
+      out.add("RELEASE");
+    }
+  }
+  return Array.from(out);
+}
+
+export function workspaceAllowedActionsSet(
+  workspace: TrainingPlanWorkspace,
+  domain: GenerationDomain,
+): Set<GovernedTrainingPlanWorkflowAction> {
+  return new Set(parseWorkspaceAllowedActions(workspace.domains[domain]));
+}
+
+export function workspaceResolvableGenerationDomains(
+  workspace: TrainingPlanWorkspace,
+): GenerationDomain[] {
+  return GENERATION_DOMAINS.filter((domain) => {
+    const entry = workspace.domains[domain];
+    return (
+      entry.canOpen ||
+      entry.allowedActions.length > 0 ||
+      (entry.summary.trainingPlanId?.trim() ?? "") !== "" ||
+      entry.submittedForReview
+    );
+  });
+}
+
+export function workspaceHeadCoachCanCreateSkillsPlan(
+  workspace: TrainingPlanWorkspace,
+  skillsPlanExists: boolean,
+): boolean {
+  if (!workspaceHeadCoachOwnsSkillsForAthlete(workspace)) return false;
+  if (!workspace.planningContext.locked) return false;
+  if (skillsPlanExists) return false;
+  const skills = workspace.domains.SKILLS;
+  if (!skills.canOpen) return false;
+  const actions = parseWorkspaceAllowedActions(skills);
+  if (actions.includes("SUBMIT_REVIEW") || actions.includes("RELEASE")) {
+    return true;
+  }
+  if (skills.allowedActions.length === 0) {
+    return true;
+  }
+  const normalized = skills.allowedActions.map(normalizeWorkspaceToken);
+  return normalized.some(
+    (action) => action.includes("GENERATE") || action.includes("CREATE"),
+  );
+}
+
+export function workspaceShowsDomainSubmitReview(
+  workspace: TrainingPlanWorkspace,
+  domain: GenerationDomain | null,
+): boolean {
+  if (domain === null) return false;
+  const entry = workspace.domains[domain];
+  if (!entry.canOpen) return false;
+  return parseWorkspaceAllowedActions(entry).includes("SUBMIT_REVIEW");
+}
+
+export function workspaceResolveReleaseMode(
+  workspace: TrainingPlanWorkspace,
+): TrainingPlanResolvedReleaseMode {
+  if (workspace.ownershipFlags.directReleaseAllowed) {
+    return "direct_release";
+  }
+  const domainModes = GENERATION_DOMAINS.map(
+    (domain) => workspace.domains[domain].releaseMode,
+  )
+    .filter((mode): mode is string => typeof mode === "string" && mode.trim() !== "")
+    .map(normalizeWorkspaceToken);
+  if (domainModes.some((mode) => mode.includes("DIRECT"))) {
+    return "direct_release";
+  }
+  return "head_coach_review";
+}
+
+export type WorkspaceDomainWorkflowStatus =
+  | "not_created"
+  | "draft_generated"
+  | "submitted_for_review"
+  | "revision_requested"
+  | "approved"
+  | "released";
+
+export function deriveWorkflowStatusFromWorkspaceDomain(
+  domain: TrainingPlanWorkspaceDomain,
+): WorkspaceDomainWorkflowStatus {
+  if (domain.submittedForReview) {
+    return "submitted_for_review";
+  }
+  const actions = parseWorkspaceAllowedActions(domain);
+  const normalizedStatus = domain.summary.status?.trim().toUpperCase() ?? "";
+  if (normalizedStatus === "ACTIVE") return "released";
+  if (normalizedStatus === "HEAD_COACH_APPROVED") return "approved";
+  if (normalizedStatus === "REVISION_REQUESTED") return "revision_requested";
+  if (
+    normalizedStatus === "ASSISTANT_COACH_APPROVED" ||
+    actions.includes("HEAD_APPROVE") ||
+    actions.includes("REQUEST_REVISION")
+  ) {
+    return "submitted_for_review";
+  }
+  if (
+    normalizedStatus === "AI_GENERATED" ||
+    normalizedStatus === "DRAFT" ||
+    (domain.summary.trainingPlanId?.trim() ?? "") !== ""
+  ) {
+    return "draft_generated";
+  }
+  return "not_created";
+}

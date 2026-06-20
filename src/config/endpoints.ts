@@ -247,6 +247,8 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/fyn-assistant/history`,
     athleteTrainingPlanDomainSummary: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-management/domain-summary`,
+    athleteTrainingPlanWorkspace: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-management/workspace`,
   },
   academies: {
     root: "/academies",

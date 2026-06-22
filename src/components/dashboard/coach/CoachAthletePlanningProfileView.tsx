@@ -2116,6 +2116,52 @@ export function resolveDomainRevisePlanVisible(input: {
   });
 }
 
+export function resolveDomainSubmitForReviewVisible(input: {
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyCanSubmitForReview: boolean;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+}): boolean {
+  const hasPlanIds =
+    (input.planId?.trim() ?? "") !== "" &&
+    (input.versionId?.trim() ?? "") !== "";
+  if (!hasPlanIds) return false;
+
+  const stateAllowsSubmit =
+    input.workflowStatus === "draft_generated" ||
+    input.workflowStatus === "revision_requested";
+  if (!stateAllowsSubmit) return false;
+
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return input.legacyCanSubmitForReview;
+  }
+
+  return (
+    assignmentDomainContext.ownedByCurrentUser &&
+    assignmentDomainContext.canSubmitForReview
+  );
+}
+
+export function resolveWorkspaceDomainSubmitForReviewVisible(
+  workspace: TrainingPlanWorkspace,
+  domain: TrainingPlanGenerationDomain | null,
+): boolean {
+  if (domain === null) return false;
+  const entry = workspace.domains[domain];
+  return resolveDomainSubmitForReviewVisible({
+    assignmentDomainContext: workspace.assignmentContext?.domains[domain],
+    legacyCanSubmitForReview: workspaceShowsDomainSubmitReview(workspace, domain),
+    workflowStatus: deriveWorkflowStatusFromWorkspaceDomain(entry),
+    planId: entry.summary.trainingPlanId,
+    versionId: entry.summary.versionId,
+  });
+}
+
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   isHeadCoachPlanningContextOwner: boolean;
   currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
@@ -3400,7 +3446,7 @@ export function resolveAssistantDomainSubmitActionVisible(input: {
   latestDraft: AssistantVisibleDomainDraftIds;
 }): boolean {
   if (input.workspace !== null) {
-    return workspaceShowsDomainSubmitReview(input.workspace, input.currentDomain);
+    return resolveWorkspaceDomainSubmitForReviewVisible(input.workspace, input.currentDomain);
   }
   return canShowAssistantDomainSubmitReview({
     discoveryLoading: input.discoveryLoading,
@@ -8795,7 +8841,8 @@ export function CoachAthletePlanningProfileView({
         let submitPlanId = workspaceSubmitIds.planId;
         let submitVersionId = workspaceSubmitIds.versionId;
         const workspaceProvidesSubmitState =
-          workspace !== null && workspaceShowsDomainSubmitReview(workspace, actionDomain);
+          workspace !== null &&
+          resolveWorkspaceDomainSubmitForReviewVisible(workspace, actionDomain);
         if (
           shouldForceAssistantDomainWorkspace &&
           !isHeadCoachPlanningContextOwner &&
@@ -11051,11 +11098,20 @@ export function CoachAthletePlanningProfileView({
       );
     }
 
+    const canShowStep6SubmitReviewAction = resolveDomainSubmitForReviewVisible({
+      assignmentDomainContext:
+        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+      legacyCanSubmitForReview: persistedGovernedAllowedActions.has("SUBMIT_REVIEW"),
+      workflowStatus: assistantDomainWorkflowStatus,
+      planId: persistedGovernedPlanContext.planId,
+      versionId: persistedGovernedPlanContext.versionId,
+    });
+
     return (
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
         <h5 className="text-sm font-normal text-textPrimary">Workflow Actions</h5>
         <div className="flex flex-wrap gap-2">
-          {persistedGovernedAllowedActions.has("SUBMIT_REVIEW") ? (
+          {canShowStep6SubmitReviewAction ? (
             <Button
               type="button"
               variant="secondary"
@@ -11127,6 +11183,16 @@ export function CoachAthletePlanningProfileView({
   function renderAssistantDomainDraftActions() {
     if (!isDownstreamDomainCoach) return null;
     const workflowStatusLabel = assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
+    const canShowAssistantDraftSubmitAction =
+      persistedGovernedPlanContext !== null &&
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext:
+          workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+        legacyCanSubmitForReview: persistedGovernedAllowedActions.has("SUBMIT_REVIEW"),
+        workflowStatus: assistantDomainWorkflowStatus,
+        planId: persistedGovernedPlanContext.planId,
+        versionId: persistedGovernedPlanContext.versionId,
+      });
 
     return (
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -11152,12 +11218,7 @@ export function CoachAthletePlanningProfileView({
               {reviseSkillsLoading ? "Revising plan..." : "Revise Skills Plan"}
             </Button>
           ) : null}
-          {(assistantDomainWorkflowStatus === "draft_generated" ||
-            assistantDomainWorkflowStatus === "revision_requested" ||
-            assistantDomainWorkflowStatus === "submitted_for_review" ||
-            assistantDomainWorkflowStatus === "approved" ||
-            assistantDomainWorkflowStatus === "released") &&
-          persistedGovernedAllowedActions.has("SUBMIT_REVIEW") ? (
+          {canShowAssistantDraftSubmitAction ? (
             <Button
               type="button"
               variant="secondary"

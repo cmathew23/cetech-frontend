@@ -46,6 +46,7 @@ import {
   resolveDomainGeneratePermission,
   resolveDomainViewPlanVisible,
   resolveDomainRevisePlanVisible,
+  resolveDomainSubmitForReviewVisible,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -624,6 +625,192 @@ describe("resolveDomainRevisePlanVisible", () => {
         legacyRequesterOwnsDomain: true,
         workflowStatus: "draft_generated",
         reviseIds: null,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveDomainSubmitForReviewVisible", () => {
+  it("uses legacy submit visibility only when assignment domain context is missing", () => {
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: undefined,
+        legacyCanSubmitForReview: true,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: undefined,
+        legacyCanSubmitForReview: false,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("uses assignment canSubmitForReview and ownedByCurrentUser as source of truth when assignment domain context exists", () => {
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: false,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: false,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "other-coach",
+          ownerCoachProfileId: "profile-2",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: true,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: true,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows Workflow 2A Head Coach-owned Skills submit when assignment allows it", () => {
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "HEAD_COACH_SELF",
+          ownerUserId: "head-coach",
+          ownerCoachProfileId: "head-coach-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: false,
+        workflowStatus: "draft_generated",
+        planId: "skills-plan",
+        versionId: "skills-v1",
+      }),
+    ).toBe(true);
+  });
+
+  it("denies Workflow 2B Head Coach planning-only Skills submit when assignment is owned by another coach", () => {
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "separate-skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: true,
+        workflowStatus: "draft_generated",
+        planId: "skills-plan",
+        versionId: "skills-v1",
+      }),
+    ).toBe(false);
+  });
+
+  it("still requires existing plan state and plan/version ids after assignment permission passes", () => {
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: true,
+        workflowStatus: "submitted_for_review",
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveDomainSubmitForReviewVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanSubmitForReview: true,
+        workflowStatus: "draft_generated",
+        planId: "plan-1",
+        versionId: null,
       }),
     ).toBe(false);
   });

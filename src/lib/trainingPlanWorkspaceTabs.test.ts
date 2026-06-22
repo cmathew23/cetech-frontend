@@ -119,7 +119,7 @@ function baseWorkspace(
 
 describe("deriveTrainingPlanWorkspaceTabStates", () => {
   it("maps Workflow 1 Head Coach to planning, review, and release authority", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         domains: {
           SKILLS: domainWithPlan("SKILLS"),
@@ -135,6 +135,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.APP_READINESS).toMatchObject({ visible: true, readOnly: true });
     expect(tabs.GOALS).toMatchObject({ enabled: true, primaryAction: "MANAGE_GOALS" });
@@ -156,10 +157,17 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       primaryAction: "RELEASE_TO_ATHLETE",
       emptyState: "NONE",
     });
+    expect(result.domains).toEqual({
+      generateDomains: [],
+      reviewDomains: ["SKILLS", "NUTRITION", "S_AND_C"],
+      reviseDomains: [],
+      releaseReadyDomains: ["SKILLS", "NUTRITION", "S_AND_C"],
+      ownedDomains: [],
+    });
   });
 
   it("maps Workflow 1 domain coach to own generation and revise/submit without release", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         assignmentContext: assignmentContext({
           planningContext: {
@@ -185,6 +193,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.GOALS).toMatchObject({ enabled: false, readOnly: true });
     expect(tabs.PLANNING_CONTEXT).toMatchObject({ enabled: false, readOnly: true });
@@ -202,10 +211,17 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       readOnly: true,
       emptyState: "NO_RELEASABLE_DOMAIN",
     });
+    expect(result.domains).toEqual({
+      generateDomains: ["SKILLS"],
+      reviewDomains: [],
+      reviseDomains: ["SKILLS"],
+      releaseReadyDomains: [],
+      ownedDomains: ["SKILLS"],
+    });
   });
 
   it("maps Workflow 2A Head Coach to Skills generation and Head Coach review release", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         domains: {
           SKILLS: domainWithPlan("SKILLS", "DRAFT"),
@@ -228,6 +244,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.GENERATE_PLAN).toMatchObject({
       enabled: true,
@@ -243,10 +260,17 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       primaryAction: "RELEASE_TO_ATHLETE",
       emptyState: "NONE",
     });
+    expect(result.domains).toEqual({
+      generateDomains: ["SKILLS"],
+      reviewDomains: ["NUTRITION", "S_AND_C"],
+      reviseDomains: ["SKILLS"],
+      releaseReadyDomains: ["NUTRITION", "S_AND_C"],
+      ownedDomains: ["SKILLS"],
+    });
   });
 
   it("maps Workflow 2B Head Coach to review/release without owned generation", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         domains: {
           SKILLS: domainWithPlan("SKILLS"),
@@ -268,6 +292,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.GENERATE_PLAN).toMatchObject({
       enabled: false,
@@ -283,10 +308,17 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       primaryAction: "RELEASE_TO_ATHLETE",
       emptyState: "NONE",
     });
+    expect(result.domains).toEqual({
+      generateDomains: [],
+      reviewDomains: ["SKILLS", "NUTRITION", "S_AND_C"],
+      reviseDomains: [],
+      releaseReadyDomains: ["SKILLS", "NUTRITION", "S_AND_C"],
+      ownedDomains: [],
+    });
   });
 
   it("maps Workflow 3 Skills fallback to planning, Skills generation, revise, and direct release", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         domains: {
           SKILLS: domainWithPlan("SKILLS", "ACTIVE"),
@@ -321,6 +353,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.GOALS).toMatchObject({ enabled: true, primaryAction: "MANAGE_GOALS" });
     expect(tabs.PLANNING_CONTEXT).toMatchObject({
@@ -337,10 +370,17 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       primaryAction: "RELEASE_TO_ATHLETE",
       emptyState: "NONE",
     });
+    expect(result.domains).toEqual({
+      generateDomains: ["SKILLS"],
+      reviewDomains: [],
+      reviseDomains: ["SKILLS"],
+      releaseReadyDomains: ["SKILLS"],
+      ownedDomains: ["SKILLS"],
+    });
   });
 
   it("maps Workflow 3 Nutrition/S&C coach to own generation, revise, and direct release only", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(
+    const result = deriveTrainingPlanWorkspaceTabStates(
       baseWorkspace({
         domains: {
           SKILLS: domainWithPlan("SKILLS", "ACTIVE"),
@@ -375,6 +415,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         }),
       }),
     );
+    const tabs = result.tabs;
 
     expect(tabs.GOALS).toMatchObject({ enabled: false, readOnly: true });
     expect(tabs.PLANNING_CONTEXT).toMatchObject({ enabled: false, readOnly: true });
@@ -388,12 +429,73 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       primaryAction: "RELEASE_TO_ATHLETE",
       emptyState: "NONE",
     });
+    expect(result.domains).toEqual({
+      generateDomains: ["NUTRITION"],
+      reviewDomains: [],
+      reviseDomains: ["NUTRITION"],
+      releaseReadyDomains: ["NUTRITION"],
+      ownedDomains: ["NUTRITION"],
+    });
+  });
+
+  it("does not add domains from canOpen or workspace summary alone", () => {
+    const result = deriveTrainingPlanWorkspaceTabStates(
+      baseWorkspace({
+        domains: {
+          SKILLS: domainWithPlan("SKILLS", "ACTIVE"),
+          NUTRITION: {
+            ...domainWithPlan("NUTRITION", "ACTIVE"),
+            canOpen: true,
+          },
+          S_AND_C: {
+            ...domainWithPlan("S_AND_C", "ACTIVE"),
+            canOpen: true,
+          },
+        },
+        assignmentContext: assignmentContext({
+          domains: {
+            SKILLS: assignmentDomain({ canOpen: true }),
+            NUTRITION: assignmentDomain({ canOpen: true }),
+            S_AND_C: assignmentDomain({ canOpen: true }),
+          },
+        }),
+      }),
+    );
+
+    expect(result.domains).toEqual({
+      generateDomains: [],
+      reviewDomains: [],
+      reviseDomains: [],
+      releaseReadyDomains: [],
+      ownedDomains: [],
+    });
+  });
+
+  it("does not add releaseReadyDomains from release permission without a plan summary", () => {
+    const result = deriveTrainingPlanWorkspaceTabStates(
+      baseWorkspace({
+        assignmentContext: assignmentContext({
+          domains: {
+            SKILLS: assignmentDomain({ canRelease: true }),
+            NUTRITION: assignmentDomain({ canRelease: true }),
+            S_AND_C: assignmentDomain({ canRelease: true }),
+          },
+        }),
+      }),
+    );
+
+    expect(result.domains.releaseReadyDomains).toEqual([]);
+    expect(result.tabs.RELEASE).toMatchObject({
+      enabled: false,
+      readOnly: true,
+      emptyState: "NO_RELEASE_PLAN",
+    });
   });
 
   it("returns conservative read-only defaults when assignmentContext is missing", () => {
-    const tabs = deriveTrainingPlanWorkspaceTabStates(baseWorkspace());
+    const result = deriveTrainingPlanWorkspaceTabStates(baseWorkspace());
 
-    for (const tab of Object.values(tabs)) {
+    for (const tab of Object.values(result.tabs)) {
       expect(tab).toMatchObject({
         visible: true,
         enabled: false,
@@ -402,5 +504,12 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
         source: "ASSIGNMENT_CONTEXT_MISSING",
       });
     }
+    expect(result.domains).toEqual({
+      generateDomains: [],
+      reviewDomains: [],
+      reviseDomains: [],
+      releaseReadyDomains: [],
+      ownedDomains: [],
+    });
   });
 });

@@ -64,6 +64,19 @@ export type TrainingPlanWorkspaceTabStates = Record<
   TrainingPlanWorkspaceTabState
 >;
 
+export type TrainingPlanWorkspaceTabDomainMetadata = {
+  generateDomains: GenerationDomain[];
+  reviewDomains: GenerationDomain[];
+  reviseDomains: GenerationDomain[];
+  releaseReadyDomains: GenerationDomain[];
+  ownedDomains: GenerationDomain[];
+};
+
+export type TrainingPlanWorkspaceTabModel = {
+  tabs: TrainingPlanWorkspaceTabStates;
+  domains: TrainingPlanWorkspaceTabDomainMetadata;
+};
+
 function hasPlanSummary(workspace: TrainingPlanWorkspace, domain: GenerationDomain): boolean {
   const summary = workspace.domains[domain].summary;
   return (
@@ -94,32 +107,49 @@ function allReadOnlyFallback(): TrainingPlanWorkspaceTabStates {
   };
 }
 
+function emptyDomainMetadata(): TrainingPlanWorkspaceTabDomainMetadata {
+  return {
+    generateDomains: [],
+    reviewDomains: [],
+    reviseDomains: [],
+    releaseReadyDomains: [],
+    ownedDomains: [],
+  };
+}
+
 export function deriveTrainingPlanWorkspaceTabStates(
   workspace: TrainingPlanWorkspace,
-): TrainingPlanWorkspaceTabStates {
+): TrainingPlanWorkspaceTabModel {
   const assignmentContext = workspace.assignmentContext;
   if (assignmentContext === undefined) {
-    return allReadOnlyFallback();
+    return {
+      tabs: allReadOnlyFallback(),
+      domains: emptyDomainMetadata(),
+    };
   }
 
   const planningContext = assignmentContext.planningContext;
   const planningContextCanEdit =
     planningContext.canCreate || planningContext.canLock || planningContext.canManage;
-  const ownedGenerateDomains = GENERATION_DOMAINS.filter((domain) => {
+  const generateDomains = GENERATION_DOMAINS.filter((domain) => {
     const domainContext = assignmentContext.domains[domain];
     return domainContext.ownedByCurrentUser && domainContext.canGenerate;
   });
-  const ownedReviewReviseDomains = GENERATION_DOMAINS.filter((domain) => {
+  const reviseDomains = GENERATION_DOMAINS.filter((domain) => {
     const domainContext = assignmentContext.domains[domain];
     return (
       domainContext.ownedByCurrentUser &&
       (domainContext.canRevise || domainContext.canSubmitForReview)
     );
   });
-  const headCoachReviewDomains = GENERATION_DOMAINS.filter(
-    (domain) => assignmentContext.domains[domain].canApprove,
-  );
-  const releasableDomains = GENERATION_DOMAINS.filter((domain) => {
+  const headCoachOwnsSkills =
+    assignmentContext.domains.SKILLS.ownerType === "HEAD_COACH_SELF" &&
+    assignmentContext.domains.SKILLS.ownedByCurrentUser;
+  const reviewDomains = GENERATION_DOMAINS.filter((domain) => {
+    if (domain === "SKILLS" && headCoachOwnsSkills) return false;
+    return assignmentContext.domains[domain].canApprove;
+  });
+  const releaseReadyDomains = GENERATION_DOMAINS.filter((domain) => {
     const domainContext = assignmentContext.domains[domain];
     return (
       domainContext.canRelease &&
@@ -127,14 +157,19 @@ export function deriveTrainingPlanWorkspaceTabStates(
       hasPlanSummary(workspace, domain)
     );
   });
-  const ownedGeneratePlanExists = ownedGenerateDomains.some((domain) =>
+  const ownedDomains = GENERATION_DOMAINS.filter((domain) => {
+    const domainContext = assignmentContext.domains[domain];
+    return domainContext.ownedByCurrentUser && domainContext.ownerType !== "NONE";
+  });
+  const ownedGeneratePlanExists = generateDomains.some((domain) =>
     hasPlanSummary(workspace, domain),
   );
-  const reviewPlanExists = [...headCoachReviewDomains, ...ownedReviewReviseDomains].some(
+  const reviewPlanExists = [...reviewDomains, ...reviseDomains].some(
     (domain) => hasPlanSummary(workspace, domain),
   );
 
   return {
+    tabs: {
     APP_READINESS: {
       visible: true,
       enabled: false,
@@ -175,14 +210,14 @@ export function deriveTrainingPlanWorkspaceTabStates(
     },
     GENERATE_PLAN: {
       visible: true,
-      enabled: ownedGenerateDomains.length > 0,
-      readOnly: ownedGenerateDomains.length === 0,
+      enabled: generateDomains.length > 0,
+      readOnly: generateDomains.length === 0,
       primaryAction:
-        ownedGenerateDomains.length > 0
+        generateDomains.length > 0
           ? "GENERATE_OWN_DOMAIN_PLAN"
           : "VIEW_GENERATION_STATUS",
       emptyState:
-        ownedGenerateDomains.length === 0
+        generateDomains.length === 0
           ? "NO_OWNED_GENERATION_DOMAIN"
           : ownedGeneratePlanExists
             ? "NONE"
@@ -191,16 +226,16 @@ export function deriveTrainingPlanWorkspaceTabStates(
     },
     REVIEW_REVISE: {
       visible: true,
-      enabled: headCoachReviewDomains.length > 0 || ownedReviewReviseDomains.length > 0,
-      readOnly: headCoachReviewDomains.length === 0 && ownedReviewReviseDomains.length === 0,
+      enabled: reviewDomains.length > 0 || reviseDomains.length > 0,
+      readOnly: reviewDomains.length === 0 && reviseDomains.length === 0,
       primaryAction:
-        headCoachReviewDomains.length > 0
+        reviewDomains.length > 0
           ? "REVIEW_DOMAIN_PLANS"
-          : ownedReviewReviseDomains.length > 0
+          : reviseDomains.length > 0
             ? "REVISE_OR_SUBMIT_OWN_DOMAIN_PLAN"
             : "VIEW_REVIEW_STATUS",
       emptyState:
-        headCoachReviewDomains.length === 0 && ownedReviewReviseDomains.length === 0
+        reviewDomains.length === 0 && reviseDomains.length === 0
           ? "NO_REVIEW_OR_REVISE_DOMAIN"
           : reviewPlanExists
             ? "NONE"
@@ -209,17 +244,25 @@ export function deriveTrainingPlanWorkspaceTabStates(
     },
     RELEASE: {
       visible: true,
-      enabled: releasableDomains.length > 0,
-      readOnly: releasableDomains.length === 0,
+      enabled: releaseReadyDomains.length > 0,
+      readOnly: releaseReadyDomains.length === 0,
       primaryAction:
-        releasableDomains.length > 0 ? "RELEASE_TO_ATHLETE" : "VIEW_RELEASE_STATUS",
+        releaseReadyDomains.length > 0 ? "RELEASE_TO_ATHLETE" : "VIEW_RELEASE_STATUS",
       emptyState:
-        releasableDomains.length > 0
+        releaseReadyDomains.length > 0
           ? "NONE"
           : GENERATION_DOMAINS.some((domain) => assignmentContext.domains[domain].canRelease)
           ? "NO_RELEASE_PLAN"
           : "NO_RELEASABLE_DOMAIN",
       source: "ASSIGNMENT_DOMAIN_RELEASE",
+    },
+    },
+    domains: {
+      generateDomains,
+      reviewDomains,
+      reviseDomains,
+      releaseReadyDomains,
+      ownedDomains,
     },
   };
 }

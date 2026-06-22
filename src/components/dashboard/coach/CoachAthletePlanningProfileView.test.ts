@@ -42,6 +42,7 @@ import {
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
   resolveWorkspaceTrainingPlanShellOwnership,
+  resolveHeadCoachOwnedSkillsGrouping,
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
@@ -333,6 +334,137 @@ describe("resolveWorkspaceTrainingPlanShellOwnership", () => {
       planningContextShellOwner: "skills_coach",
       releaseMode: "direct_release",
     });
+  });
+});
+
+describe("resolveHeadCoachOwnedSkillsGrouping", () => {
+  it("treats Workflow 2A Skills as Head Coach-owned only for HEAD_COACH_SELF ownership", () => {
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "HEAD_COACH_SELF",
+                ownedByCurrentUser: true,
+                canGenerate: true,
+              }),
+              NUTRITION: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+              S_AND_C: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+            },
+          }),
+        }),
+        legacyHeadCoachOwnsSkills: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat Workflow 2B assigned Skills coach ownership as Head Coach-owned", () => {
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: false,
+                canGenerate: false,
+              }),
+              NUTRITION: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+              S_AND_C: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+            },
+          }),
+        }),
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat Workflow 1 assigned domain coach Skills as Head Coach-owned", () => {
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: false,
+              }),
+              NUTRITION: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+              S_AND_C: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+              }),
+            },
+          }),
+        }),
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat Workflow 3 direct-release Skills as Head Coach-owned", () => {
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: false,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+            planningContext: {
+              ownerType: "SKILLS_FALLBACK",
+              ownerUserId: "skills-coach",
+              ownerCoachProfileId: "skills-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: true,
+                canGenerate: true,
+                releaseMode: "DIRECT_DOMAIN_RELEASE",
+              }),
+              NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+            },
+          }),
+        }),
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves legacy fallback when assignmentContext is missing", () => {
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace(),
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace(),
+        legacyHeadCoachOwnsSkills: false,
+      }),
+    ).toBe(false);
   });
 });
 

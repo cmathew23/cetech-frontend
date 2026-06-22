@@ -1798,6 +1798,20 @@ export function headCoachSubmittedReviewDomains(input: {
   return GENERATION_DOMAIN_ORDER;
 }
 
+export function resolveHeadCoachOwnedSkillsGrouping(input: {
+  workspace: TrainingPlanWorkspace | null;
+  legacyHeadCoachOwnsSkills: boolean;
+}): boolean {
+  const assignmentSkillsContext = input.workspace?.assignmentContext?.domains.SKILLS;
+  if (assignmentSkillsContext !== undefined) {
+    return (
+      assignmentSkillsContext.ownerType === "HEAD_COACH_SELF" &&
+      assignmentSkillsContext.ownedByCurrentUser === true
+    );
+  }
+  return input.legacyHeadCoachOwnsSkills;
+}
+
 function trainingPlanRenderedShellBranchName(shell: TrainingPlanPageShell): string {
   if (shell === "head_coach_function_aware") {
     return "function-aware domain owner";
@@ -6863,9 +6877,13 @@ export function CoachAthletePlanningProfileView({
       }),
     [headCoachOwnedSkillsActiveDetail, headCoachOwnedSkillsDraft],
   );
-  const workspaceHeadCoachOwnsSkills = useMemo(
-    () => (workspace !== null ? workspaceHeadCoachOwnsSkillsForAthlete(workspace) : false),
-    [workspace],
+  const headCoachOwnedSkillsGrouping = useMemo(
+    () =>
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace,
+        legacyHeadCoachOwnsSkills: headCoachOwnsAssignedDomainGenerationForAthlete,
+      }),
+    [headCoachOwnsAssignedDomainGenerationForAthlete, workspace],
   );
   const headCoachSkillsPlanExists = useMemo(() => {
     if (workspace !== null) {
@@ -9669,7 +9687,7 @@ export function CoachAthletePlanningProfileView({
     const locked = upstreamPlanningContext?.planningContextLocked === true;
     const reviewDomains = headCoachSubmittedReviewDomains({
       shell: trainingPlanShellModel.shell,
-      headCoachOwnsSkills: workspaceHeadCoachOwnsSkills,
+      headCoachOwnsSkills: headCoachOwnedSkillsGrouping,
     });
     return (
       <div className="space-y-4">
@@ -9971,7 +9989,11 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderHeadCoachOwnedSkillsPlanPanel() {
-    if (!headCoachSkillsPlanExists || isHeadCoachReviewerOnlyForDomain("SKILLS")) {
+    if (
+      !headCoachOwnedSkillsGrouping ||
+      !headCoachSkillsPlanExists ||
+      isHeadCoachReviewerOnlyForDomain("SKILLS")
+    ) {
       return null;
     }
 

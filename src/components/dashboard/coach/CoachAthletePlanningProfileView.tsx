@@ -2074,6 +2074,26 @@ export function resolveDomainGeneratePermission(input: {
   };
 }
 
+export function resolveDomainViewPlanVisible(input: {
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyCanOpen: boolean;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+}): boolean {
+  const hasPlanIds =
+    (input.planId?.trim() ?? "") !== "" &&
+    (input.versionId?.trim() ?? "") !== "";
+  if (!hasPlanIds) return false;
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return input.legacyCanOpen;
+  }
+  return assignmentDomainContext.canOpen === true;
+}
+
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   isHeadCoachPlanningContextOwner: boolean;
   currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
@@ -6722,8 +6742,8 @@ export function CoachAthletePlanningProfileView({
     headCoachOwnedSkillsDraft?.trainingPlanVersionId?.trim() ??
     "";
   const headCoachSkillsViewPlanContext = useMemo(
-    () =>
-      resolveWorkspaceDomainViewPlanContext({
+    () => {
+      const context = resolveWorkspaceDomainViewPlanContext({
         workspace,
         domain: "SKILLS",
         fallbackPlanId: headCoachSkillsFallbackPlanId,
@@ -6735,7 +6755,19 @@ export function CoachAthletePlanningProfileView({
             : headCoachOwnedSkillsDraft !== null
               ? "headCoachOwnedSkillsDraft"
               : undefined,
-      }),
+      });
+      if (
+        !resolveDomainViewPlanVisible({
+          assignmentDomainContext: workspace?.assignmentContext?.domains.SKILLS,
+          legacyCanOpen: context !== null,
+          planId: context?.planId,
+          versionId: context?.versionId,
+        })
+      ) {
+        return null;
+      }
+      return context;
+    },
     [
       headCoachOwnedSkillsActiveDetail,
       headCoachOwnedSkillsDraft,
@@ -7597,6 +7629,20 @@ export function CoachAthletePlanningProfileView({
     if (context === null || context.planId.trim() === "") {
       setPersistedSkillsPlanError(
         `Could not open ${trainingPlanDomainLabel(domain)} because no saved plan id is available.`,
+      );
+      setPersistedPlanErrorDomain(domain);
+      return;
+    }
+    if (
+      !resolveDomainViewPlanVisible({
+        assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+        legacyCanOpen: true,
+        planId: context.planId,
+        versionId: context.versionId,
+      })
+    ) {
+      setPersistedSkillsPlanError(
+        `Could not open ${trainingPlanDomainLabel(domain)} because plan access is unavailable.`,
       );
       setPersistedPlanErrorDomain(domain);
       return;
@@ -9169,6 +9215,12 @@ export function CoachAthletePlanningProfileView({
             generationDomain: domain,
           }
         : null;
+    const canShowViewPlan = resolveDomainViewPlanVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+      legacyCanOpen: planContext !== null,
+      planId,
+      versionId,
+    });
     const isCurrentReviewPlan = headCoachSubmittedReviewDomain === domain;
     const isNotCreated = workflowStatus === "not_created";
     const showWorkflow2DraftPendingNotice =
@@ -9201,7 +9253,7 @@ export function CoachAthletePlanningProfileView({
             No plan submitted yet for this domain.
           </div>
         ) : null}
-        {planContext !== null && !isCurrentReviewPlan ? (
+        {planContext !== null && canShowViewPlan && !isCurrentReviewPlan ? (
           <Button
             type="button"
             variant="secondary"
@@ -10034,7 +10086,6 @@ export function CoachAthletePlanningProfileView({
       upstreamPlanningContext?.phase ??
       null;
     const validatedLevel = lockedPlanningContextCardFields.validatedLevel;
-    const canViewPlan = resolvedWorkflowPlanId.trim() !== "";
     const currentDomainGeneratePermission =
       resolveGeneratePermissionForDomain(currentCoachGenerationDomain);
     const showCreateAction =
@@ -10179,6 +10230,12 @@ export function CoachAthletePlanningProfileView({
         : latestDraftMatchesCurrentDomain
           ? latestSkillsDraft?.trainingPlanVersionId ?? null
           : null;
+    const canViewPlan = resolveDomainViewPlanVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[currentCoachGenerationDomain],
+      legacyCanOpen: resolvedWorkflowPlanId.trim() !== "",
+      planId: resolvedWorkflowPlanId,
+      versionId: assistantPlanVersionId,
+    });
     const assistantPlanVersionLabel =
       requestedPlanId !== null && persistedDetailMatchesCurrentDomain
         ? persistedSkillsPlanDetail?.version.versionNumber ?? null
@@ -10492,7 +10549,7 @@ export function CoachAthletePlanningProfileView({
                   disabled={false}
                   onClick={() => {
                     const planIdToOpen = resolvedWorkflowPlanId.trim();
-                    if (planIdToOpen === "") return;
+                    if (!canViewPlan || planIdToOpen === "") return;
                     void refreshPersistedPlanDetail(planIdToOpen, currentCoachGenerationDomain, {
                       updateWorkflowRequestedPlanId: true,
                     });
@@ -10629,6 +10686,7 @@ export function CoachAthletePlanningProfileView({
 
             {!assistantPlanDiscoveryLoading &&
             requestedPlanId !== null &&
+            canViewPlan &&
             persistedDetailMatchesCurrentDomain &&
             persistedSkillsPlanDetail ? (
               <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">

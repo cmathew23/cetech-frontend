@@ -44,6 +44,7 @@ import {
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
+  resolveDomainViewPlanVisible,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -376,6 +377,95 @@ describe("resolveDomainGeneratePermission", () => {
           canGenerateCurrentDomainPlan: true,
         },
       }).canShowGenerate,
+    ).toBe(false);
+  });
+});
+
+describe("resolveDomainViewPlanVisible", () => {
+  it("uses legacy open visibility only when assignment domain context is missing", () => {
+    expect(
+      resolveDomainViewPlanVisible({
+        assignmentDomainContext: undefined,
+        legacyCanOpen: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainViewPlanVisible({
+        assignmentDomainContext: undefined,
+        legacyCanOpen: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("uses assignment canOpen as source of truth when assignment domain context exists", () => {
+    expect(
+      resolveDomainViewPlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanOpen: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainViewPlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "other-coach",
+          ownerCoachProfileId: "profile-2",
+          ownedByCurrentUser: false,
+          canOpen: false,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanOpen: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("requires both plan and version ids before showing View Plan", () => {
+    expect(
+      resolveDomainViewPlanVisible({
+        assignmentDomainContext: {
+          ownerType: "HEAD_COACH_SELF",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: true,
+          canRelease: true,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        },
+        legacyCanOpen: true,
+        planId: "plan-1",
+        versionId: null,
+      }),
     ).toBe(false);
   });
 });

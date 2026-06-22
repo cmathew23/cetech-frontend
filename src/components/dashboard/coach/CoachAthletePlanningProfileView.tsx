@@ -156,6 +156,7 @@ import type {
   TrainingPlanWorkspace,
   TrainingPlanWorkspaceAssignmentDomainContext,
   TrainingPlanWorkspaceAssignmentPlanningContext,
+  TrainingPlanWorkspaceAssignmentReleaseMode,
 } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -2182,6 +2183,47 @@ export function resolveDomainHeadCoachReviewActionVisible(input: {
   }
 
   return assignmentDomainContext.canApprove && input.legacyCanShowReviewAction;
+}
+
+export function resolveDomainReleaseVisible(input: {
+  assignmentReleaseMode:
+    | TrainingPlanWorkspaceAssignmentReleaseMode
+    | null
+    | undefined;
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  requiredReleaseMode?:
+    | TrainingPlanWorkspaceAssignmentReleaseMode
+    | null
+    | undefined;
+  legacyCanRelease: boolean;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+}): boolean {
+  const hasPlanIds =
+    (input.planId?.trim() ?? "") !== "" &&
+    (input.versionId?.trim() ?? "") !== "";
+  if (!hasPlanIds) return false;
+
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (
+    input.assignmentReleaseMode === null ||
+    input.assignmentReleaseMode === undefined ||
+    assignmentDomainContext === null ||
+    assignmentDomainContext === undefined
+  ) {
+    return input.legacyCanRelease;
+  }
+
+  const releaseModeMatches =
+    input.requiredReleaseMode !== null && input.requiredReleaseMode !== undefined
+      ? input.assignmentReleaseMode === input.requiredReleaseMode &&
+        assignmentDomainContext.releaseMode === input.requiredReleaseMode
+      : input.assignmentReleaseMode === assignmentDomainContext.releaseMode;
+
+  return releaseModeMatches && assignmentDomainContext.canRelease && input.legacyCanRelease;
 }
 
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
@@ -9409,6 +9451,17 @@ export function CoachAthletePlanningProfileView({
       planId,
       versionId,
     });
+    const canShowReleaseAction = resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      requiredReleaseMode: "HEAD_COACH_APPROVAL",
+      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
+        allowedActions,
+        status,
+      }),
+      planId,
+      versionId,
+    });
 
     return (
       <section className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -9481,10 +9534,7 @@ export function CoachAthletePlanningProfileView({
                   Request Revision
                 </Button>
               ) : null}
-              {canShowHeadCoachReviewReleaseAction({
-                allowedActions,
-                status,
-              }) ? (
+              {canShowReleaseAction ? (
                 <Button
                   type="button"
                   variant="primary"
@@ -10217,9 +10267,18 @@ export function CoachAthletePlanningProfileView({
     const showSubmitAction = assistantDomainShowSubmitAction;
     const showDirectReleaseAction =
       !assistantPlanDiscoveryLoading &&
-      !setupState.hasHeadCoachConfigured &&
-      persistedGovernedAllowedActions.has("RELEASE") &&
-      persistedGovernedPlanContext !== null;
+      persistedGovernedPlanContext !== null &&
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+        assignmentDomainContext:
+          workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease:
+          !setupState.hasHeadCoachConfigured &&
+          persistedGovernedAllowedActions.has("RELEASE"),
+        planId: persistedGovernedPlanContext.planId,
+        versionId: persistedGovernedPlanContext.versionId,
+      });
     const canReviseSkills =
       currentCoachGenerationDomain === "SKILLS" &&
       resolveDomainRevisePlanVisible({
@@ -11154,6 +11213,14 @@ export function CoachAthletePlanningProfileView({
       planId: persistedGovernedPlanContext.planId,
       versionId: persistedGovernedPlanContext.versionId,
     });
+    const canShowStep6ReleaseAction = resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext:
+        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+      legacyCanRelease: persistedGovernedAllowedActions.has("RELEASE"),
+      planId: persistedGovernedPlanContext.planId,
+      versionId: persistedGovernedPlanContext.versionId,
+    });
 
     return (
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -11197,7 +11264,7 @@ export function CoachAthletePlanningProfileView({
               {governedPlanActionButtonLabel("REQUEST_REVISION")}
             </Button>
           ) : null}
-          {persistedGovernedAllowedActions.has("RELEASE") ? (
+          {canShowStep6ReleaseAction ? (
             <Button
               type="button"
               variant="secondary"

@@ -48,6 +48,7 @@ import {
   resolveDomainRevisePlanVisible,
   resolveDomainSubmitForReviewVisible,
   resolveDomainHeadCoachReviewActionVisible,
+  resolveDomainReleaseVisible,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -947,6 +948,199 @@ describe("resolveDomainHeadCoachReviewActionVisible", () => {
         legacyCanShowReviewAction: true,
         planId: "plan-1",
         versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveDomainReleaseVisible", () => {
+  it("uses legacy release visibility only when assignment context is missing", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: undefined,
+        assignmentDomainContext: undefined,
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: undefined,
+        assignmentDomainContext: undefined,
+        legacyCanRelease: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows Head Coach approval release only when assignment mode and canRelease allow it", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: true,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows direct domain release only when assignment mode and canRelease allow it", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: true,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        },
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: true,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides Workflow 3 non-owned domain release when assignment denies canRelease", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "other-domain-coach",
+          ownerCoachProfileId: "other-domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        },
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("still requires existing release state and plan/version ids after assignment permission passes", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: true,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: true,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        },
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "plan-1",
+        versionId: null,
       }),
     ).toBe(false);
   });

@@ -42,6 +42,7 @@ import {
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
   workflow2SkillsSubmitReviewReconciled,
+  resolvePlanningContextAuthority,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -187,6 +188,80 @@ describe("shouldUseSpecialistTrainingPlanWorkspace", () => {
         isCoachSetupLoaded: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolvePlanningContextAuthority", () => {
+  it("uses legacy authority only when assignment planning context is missing", () => {
+    expect(
+      resolvePlanningContextAuthority({
+        assignmentPlanningContext: undefined,
+        legacyAuthority: true,
+      }),
+    ).toEqual({
+      canShowPlanningContextControls: true,
+      canLockPlanningContext: true,
+    });
+  });
+
+  it("does not infer authority from legacy flags when assignment planning context exists", () => {
+    expect(
+      resolvePlanningContextAuthority({
+        assignmentPlanningContext: {
+          ownerType: "HEAD_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          canRead: true,
+          canCreate: false,
+          canLock: false,
+          canManage: false,
+        },
+        legacyAuthority: true,
+      }),
+    ).toEqual({
+      canShowPlanningContextControls: false,
+      canLockPlanningContext: false,
+    });
+  });
+
+  it("shows planning controls for assignment create/manage permission but locks only with canLock", () => {
+    expect(
+      resolvePlanningContextAuthority({
+        assignmentPlanningContext: {
+          ownerType: "SKILLS_FALLBACK",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          canRead: true,
+          canCreate: true,
+          canLock: false,
+          canManage: true,
+        },
+        legacyAuthority: false,
+      }),
+    ).toEqual({
+      canShowPlanningContextControls: true,
+      canLockPlanningContext: false,
+    });
+  });
+
+  it("requires a non-NONE assignment owner type for planning authority", () => {
+    expect(
+      resolvePlanningContextAuthority({
+        assignmentPlanningContext: {
+          ownerType: "NONE",
+          ownerUserId: null,
+          ownerCoachProfileId: null,
+          canRead: true,
+          canCreate: true,
+          canLock: true,
+          canManage: true,
+        },
+        legacyAuthority: true,
+      }),
+    ).toEqual({
+      canShowPlanningContextControls: false,
+      canLockPlanningContext: false,
+    });
   });
 });
 

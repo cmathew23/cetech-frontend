@@ -152,7 +152,10 @@ import {
 } from "@/lib/coachTrainingPlanActions";
 import { cn } from "@/lib/utils";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
-import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
+import type {
+  TrainingPlanWorkspace,
+  TrainingPlanWorkspaceAssignmentPlanningContext,
+} from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   type MutableRefObject,
@@ -2007,6 +2010,35 @@ export function shouldBlockWorkflowRenderForWorkspace(input: {
     return true;
   }
   return !input.hasRenderableWorkflowFallback;
+}
+
+export function resolvePlanningContextAuthority(input: {
+  assignmentPlanningContext:
+    | TrainingPlanWorkspaceAssignmentPlanningContext
+    | null
+    | undefined;
+  legacyAuthority: boolean;
+}): {
+  canShowPlanningContextControls: boolean;
+  canLockPlanningContext: boolean;
+} {
+  const assignmentPlanningContext = input.assignmentPlanningContext;
+  if (assignmentPlanningContext === null || assignmentPlanningContext === undefined) {
+    return {
+      canShowPlanningContextControls: input.legacyAuthority,
+      canLockPlanningContext: input.legacyAuthority,
+    };
+  }
+
+  const hasPlanningOwner = assignmentPlanningContext.ownerType !== "NONE";
+  return {
+    canShowPlanningContextControls:
+      hasPlanningOwner &&
+      (assignmentPlanningContext.canCreate ||
+        assignmentPlanningContext.canLock ||
+        assignmentPlanningContext.canManage),
+    canLockPlanningContext: hasPlanningOwner && assignmentPlanningContext.canLock,
+  };
 }
 
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
@@ -4044,7 +4076,7 @@ export function CoachAthletePlanningProfileView({
     isHeadCoachPlanningContextOwner,
     workspace,
   ]);
-  const isPlanningContextAuthority = useMemo(
+  const legacyPlanningContextAuthority = useMemo(
     () =>
       isPlanningContextShellOwner ||
       (trainingPlanShellOwnership.releaseMode === "direct_release" &&
@@ -4055,6 +4087,21 @@ export function CoachAthletePlanningProfileView({
       trainingPlanShellOwnership.releaseMode,
     ],
   );
+  const planningContextAuthority = useMemo(
+    () =>
+      resolvePlanningContextAuthority({
+        assignmentPlanningContext: workspace?.assignmentContext?.planningContext,
+        legacyAuthority: legacyPlanningContextAuthority,
+      }),
+    [
+      legacyPlanningContextAuthority,
+      workspace?.assignmentContext?.planningContext,
+    ],
+  );
+  const isPlanningContextAuthority =
+    planningContextAuthority.canShowPlanningContextControls;
+  const canLockPlanningContext =
+    planningContextAuthority.canLockPlanningContext;
   const currentCoachGenerationDomain = useMemo((): TrainingPlanGenerationDomain | null => {
     if (!isHeadCoachPlanningContextOwner) {
       const rowDomain = assignedAthletePlanOwnership?.currentGenerationDomain;
@@ -8793,7 +8840,7 @@ export function CoachAthletePlanningProfileView({
   async function handleLockPlanningContext() {
     if (
       planningContextLockLoading ||
-      !isPlanningContextAuthority ||
+      !canLockPlanningContext ||
       entityId === "" ||
       athleteIdTrimmed === ""
     ) {
@@ -8982,6 +9029,7 @@ export function CoachAthletePlanningProfileView({
               planningContextLockLoading ||
               upstreamPlanningContextLoading ||
               apiConfirmedLocked ||
+              !canLockPlanningContext ||
               !planDatesWindowComplete
             }
             onClick={() => {

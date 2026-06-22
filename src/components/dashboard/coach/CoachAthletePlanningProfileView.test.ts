@@ -41,6 +41,7 @@ import {
   shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent,
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
+  resolveWorkspaceTrainingPlanShellOwnership,
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
@@ -194,6 +195,144 @@ describe("shouldUseSpecialistTrainingPlanWorkspace", () => {
         isCoachSetupLoaded: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveWorkspaceTrainingPlanShellOwnership", () => {
+  it("uses assignmentContext HEAD_COACH planning owner instead of legacy planning flags", () => {
+    expect(
+      resolveWorkspaceTrainingPlanShellOwnership(
+        workflow1OwnedSkillsWorkspace({
+          ownershipFlags: {
+            hasHeadCoach: true,
+            requesterIsHeadCoach: true,
+            requesterHasSkillsFunction: false,
+            requesterOwnsCurrentDomain: false,
+            headCoachOwnsPlanningContext: false,
+            directReleaseAllowed: false,
+          },
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            planningContext: {
+              ownerType: "HEAD_COACH",
+              ownerUserId: "head-coach",
+              ownerCoachProfileId: "head-coach-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+          }),
+        }),
+      ),
+    ).toEqual({
+      planningContextShellOwner: "head_coach",
+      releaseMode: "head_coach_review",
+    });
+  });
+
+  it("uses assignmentContext SKILLS_FALLBACK for Workflow 3 Skills planning shell", () => {
+    expect(
+      resolveWorkspaceTrainingPlanShellOwnership(
+        workflow1OwnedSkillsWorkspace({
+          currentDomain: "NUTRITION",
+          ownershipFlags: {
+            hasHeadCoach: true,
+            requesterIsHeadCoach: false,
+            requesterHasSkillsFunction: false,
+            requesterOwnsCurrentDomain: false,
+            headCoachOwnsPlanningContext: true,
+            directReleaseAllowed: false,
+          },
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: false,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+            planningContext: {
+              ownerType: "SKILLS_FALLBACK",
+              ownerUserId: "skills-coach",
+              ownerCoachProfileId: "skills-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: true,
+                releaseMode: "DIRECT_DOMAIN_RELEASE",
+              }),
+              NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+            },
+          }),
+        }),
+      ),
+    ).toEqual({
+      planningContextShellOwner: "skills_coach",
+      releaseMode: "direct_release",
+    });
+  });
+
+  it("does not infer Workflow 3 Skills fallback from currentDomain when assignmentContext exists", () => {
+    expect(
+      resolveWorkspaceTrainingPlanShellOwnership(
+        workflow1OwnedSkillsWorkspace({
+          currentDomain: "SKILLS",
+          ownershipFlags: {
+            hasHeadCoach: false,
+            requesterIsHeadCoach: false,
+            requesterHasSkillsFunction: true,
+            requesterOwnsCurrentDomain: true,
+            headCoachOwnsPlanningContext: false,
+            directReleaseAllowed: true,
+          },
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: false,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+            planningContext: {
+              ownerType: "NONE",
+              ownerUserId: null,
+              ownerCoachProfileId: null,
+              canRead: true,
+              canCreate: false,
+              canLock: false,
+              canManage: false,
+            },
+            domains: {
+              SKILLS: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+            },
+          }),
+        }),
+      ),
+    ).toEqual({
+      planningContextShellOwner: "waiting_role",
+      releaseMode: "direct_release",
+    });
+  });
+
+  it("keeps legacy workspace shell ownership fallback when assignmentContext is missing", () => {
+    expect(
+      resolveWorkspaceTrainingPlanShellOwnership(
+        workflow1OwnedSkillsWorkspace({
+          currentDomain: "SKILLS",
+          ownershipFlags: {
+            hasHeadCoach: false,
+            requesterIsHeadCoach: false,
+            requesterHasSkillsFunction: true,
+            requesterOwnsCurrentDomain: true,
+            headCoachOwnsPlanningContext: false,
+            directReleaseAllowed: true,
+          },
+        }),
+      ),
+    ).toEqual({
+      planningContextShellOwner: "skills_coach",
+      releaseMode: "direct_release",
+    });
   });
 });
 
@@ -2645,6 +2784,51 @@ describe("shouldShowStep6PreGenerationReadiness", () => {
     ).toBe(false);
   });
 });
+
+function shellAssignmentDomain(
+  overrides: Partial<
+    NonNullable<TrainingPlanWorkspace["assignmentContext"]>["domains"]["SKILLS"]
+  > = {},
+): NonNullable<TrainingPlanWorkspace["assignmentContext"]>["domains"]["SKILLS"] {
+  return {
+    ownerType: "NONE",
+    ownerUserId: null,
+    ownerCoachProfileId: null,
+    ownedByCurrentUser: false,
+    canOpen: false,
+    canGenerate: false,
+    canRevise: false,
+    canSubmitForReview: false,
+    canApprove: false,
+    canRelease: false,
+    releaseMode: "HEAD_COACH_APPROVAL",
+    ...overrides,
+  };
+}
+
+function shellAssignmentContext(
+  overrides: Partial<NonNullable<TrainingPlanWorkspace["assignmentContext"]>> = {},
+): NonNullable<TrainingPlanWorkspace["assignmentContext"]> {
+  return {
+    hasHeadCoach: true,
+    releaseMode: "HEAD_COACH_APPROVAL",
+    planningContext: {
+      ownerType: "HEAD_COACH",
+      ownerUserId: "head-coach",
+      ownerCoachProfileId: "head-coach-profile",
+      canRead: true,
+      canCreate: true,
+      canLock: true,
+      canManage: true,
+    },
+    domains: {
+      SKILLS: shellAssignmentDomain(),
+      NUTRITION: shellAssignmentDomain(),
+      S_AND_C: shellAssignmentDomain(),
+    },
+    ...overrides,
+  };
+}
 
 function workflow1OwnedSkillsWorkspace(
   overrides: Partial<TrainingPlanWorkspace> = {},

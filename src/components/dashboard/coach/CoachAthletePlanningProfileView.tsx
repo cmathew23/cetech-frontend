@@ -2236,6 +2236,64 @@ export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   return input.isCoachSetupLoaded === true;
 }
 
+export function resolveWorkspaceTrainingPlanShellOwnership(
+  workspace: TrainingPlanWorkspace,
+): TrainingPlanShellOwnershipResolution {
+  const releaseMode = workspaceResolveReleaseMode(workspace);
+  const assignmentContext = workspace.assignmentContext;
+
+  if (assignmentContext !== undefined) {
+    if (workspaceHeadCoachOwnsPlanningContext(workspace)) {
+      return {
+        planningContextShellOwner: "head_coach",
+        releaseMode,
+      };
+    }
+    if (
+      releaseMode === "direct_release" &&
+      assignmentContext.hasHeadCoach === false &&
+      assignmentContext.planningContext.ownerType === "SKILLS_FALLBACK"
+    ) {
+      return {
+        planningContextShellOwner: "skills_coach",
+        releaseMode,
+      };
+    }
+    return {
+      planningContextShellOwner: "waiting_role",
+      releaseMode,
+    };
+  }
+
+  const flags = workspace.ownershipFlags;
+  if (flags.headCoachOwnsPlanningContext) {
+    return {
+      planningContextShellOwner: "head_coach",
+      releaseMode,
+    };
+  }
+  if (
+    releaseMode === "direct_release" &&
+    flags.requesterOwnsCurrentDomain &&
+    parseWorkspaceCurrentDomain(workspace.currentDomain) === "SKILLS"
+  ) {
+    return {
+      planningContextShellOwner: "skills_coach",
+      releaseMode,
+    };
+  }
+  if (releaseMode === "direct_release" && workspaceDirectReleaseAllowed(workspace)) {
+    return {
+      planningContextShellOwner: "waiting_role",
+      releaseMode,
+    };
+  }
+  return {
+    planningContextShellOwner: "waiting_role",
+    releaseMode,
+  };
+}
+
 function resolveTrainingPlanReleaseMode(input: {
   hasHeadCoachConfigured: boolean;
   trainingPlanReleaseMode: string | null | undefined;
@@ -4156,34 +4214,7 @@ export function CoachAthletePlanningProfileView({
   const trainingPlanShellOwnership = useMemo(
     () => {
       if (workspace) {
-        const releaseMode = workspaceResolveReleaseMode(workspace);
-        const flags = workspace.ownershipFlags;
-        if (flags.headCoachOwnsPlanningContext) {
-          return {
-            planningContextShellOwner: "head_coach" as const,
-            releaseMode,
-          };
-        }
-        if (
-          releaseMode === "direct_release" &&
-          flags.requesterOwnsCurrentDomain &&
-          parseWorkspaceCurrentDomain(workspace.currentDomain) === "SKILLS"
-        ) {
-          return {
-            planningContextShellOwner: "skills_coach" as const,
-            releaseMode,
-          };
-        }
-        if (releaseMode === "direct_release" && workspaceDirectReleaseAllowed(workspace)) {
-          return {
-            planningContextShellOwner: "waiting_role" as const,
-            releaseMode,
-          };
-        }
-        return {
-          planningContextShellOwner: "waiting_role" as const,
-          releaseMode,
-        };
+        return resolveWorkspaceTrainingPlanShellOwnership(workspace);
       }
       return resolveTrainingPlanShellOwnership({
         isCoachSetupLoaded: !setupLoading,

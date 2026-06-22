@@ -214,7 +214,9 @@ export function deriveTrainingPlanWorkspaceTabStates(
       primaryAction:
         releasableDomains.length > 0 ? "RELEASE_TO_ATHLETE" : "VIEW_RELEASE_STATUS",
       emptyState:
-        GENERATION_DOMAINS.some((domain) => assignmentContext.domains[domain].canRelease)
+        releasableDomains.length > 0
+          ? "NONE"
+          : GENERATION_DOMAINS.some((domain) => assignmentContext.domains[domain].canRelease)
           ? "NO_RELEASE_PLAN"
           : "NO_RELEASABLE_DOMAIN",
       source: "ASSIGNMENT_DOMAIN_RELEASE",

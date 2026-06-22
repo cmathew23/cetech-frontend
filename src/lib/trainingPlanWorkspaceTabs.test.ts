@@ -154,6 +154,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
     expect(tabs.RELEASE).toMatchObject({
       enabled: true,
       primaryAction: "RELEASE_TO_ATHLETE",
+      emptyState: "NONE",
     });
   });
 
@@ -240,6 +241,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
     expect(tabs.RELEASE).toMatchObject({
       enabled: true,
       primaryAction: "RELEASE_TO_ATHLETE",
+      emptyState: "NONE",
     });
   });
 
@@ -276,7 +278,11 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
       enabled: true,
       primaryAction: "REVIEW_DOMAIN_PLANS",
     });
-    expect(tabs.RELEASE).toMatchObject({ enabled: true });
+    expect(tabs.RELEASE).toMatchObject({
+      enabled: true,
+      primaryAction: "RELEASE_TO_ATHLETE",
+      emptyState: "NONE",
+    });
   });
 
   it("maps Workflow 3 Skills fallback to planning, Skills generation, revise, and direct release", () => {
@@ -329,6 +335,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
     expect(tabs.RELEASE).toMatchObject({
       enabled: true,
       primaryAction: "RELEASE_TO_ATHLETE",
+      emptyState: "NONE",
     });
   });
 
@@ -379,6 +386,7 @@ describe("deriveTrainingPlanWorkspaceTabStates", () => {
     expect(tabs.RELEASE).toMatchObject({
       enabled: true,
       primaryAction: "RELEASE_TO_ATHLETE",
+      emptyState: "NONE",
     });
   });
 

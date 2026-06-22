@@ -45,6 +45,7 @@ import {
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
   resolveDomainViewPlanVisible,
+  resolveDomainRevisePlanVisible,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -465,6 +466,164 @@ describe("resolveDomainViewPlanVisible", () => {
         legacyCanOpen: true,
         planId: "plan-1",
         versionId: null,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveDomainRevisePlanVisible", () => {
+  const reviseIds = { trainingPlanId: "plan-1", versionId: "version-1" };
+
+  it("uses legacy ownership only when assignment domain context is missing", () => {
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: undefined,
+        legacyRequesterOwnsDomain: true,
+        workflowStatus: "draft_generated",
+        reviseIds,
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: undefined,
+        legacyRequesterOwnsDomain: false,
+        workflowStatus: "draft_generated",
+        reviseIds,
+      }),
+    ).toBe(false);
+  });
+
+  it("uses assignment canRevise and ownedByCurrentUser as source of truth when assignment domain context exists", () => {
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: false,
+          canGenerate: false,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyRequesterOwnsDomain: false,
+        workflowStatus: "draft_generated",
+        reviseIds,
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "other-coach",
+          ownerCoachProfileId: "profile-2",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyRequesterOwnsDomain: true,
+        workflowStatus: "draft_generated",
+        reviseIds,
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: false,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyRequesterOwnsDomain: true,
+        workflowStatus: "draft_generated",
+        reviseIds,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves revised editable drafts as revisable when assignment allows it", () => {
+    for (const versionId of ["version-v2", "version-v3"]) {
+      expect(
+        resolveDomainRevisePlanVisible({
+          assignmentDomainContext: {
+            ownerType: "HEAD_COACH_SELF",
+            ownerUserId: "coach-1",
+            ownerCoachProfileId: "profile-1",
+            ownedByCurrentUser: true,
+            canOpen: true,
+            canGenerate: true,
+            canRevise: true,
+            canSubmitForReview: true,
+            canApprove: false,
+            canRelease: false,
+            releaseMode: "HEAD_COACH_APPROVAL",
+          },
+          legacyRequesterOwnsDomain: false,
+          workflowStatus: "draft_generated",
+          reviseIds: { trainingPlanId: "plan-1", versionId },
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("still requires existing plan state and revise ids after assignment permission passes", () => {
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyRequesterOwnsDomain: true,
+        workflowStatus: "submitted_for_review",
+        reviseIds,
+      }),
+    ).toBe(false);
+
+    expect(
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyRequesterOwnsDomain: true,
+        workflowStatus: "draft_generated",
+        reviseIds: null,
       }),
     ).toBe(false);
   });

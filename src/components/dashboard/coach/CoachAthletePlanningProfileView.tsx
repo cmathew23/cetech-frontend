@@ -2094,6 +2094,28 @@ export function resolveDomainViewPlanVisible(input: {
   return assignmentDomainContext.canOpen === true;
 }
 
+export function resolveDomainRevisePlanVisible(input: {
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyRequesterOwnsDomain: boolean;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  reviseIds: DomainRevisePlanIds | null;
+}): boolean {
+  const assignmentDomainContext = input.assignmentDomainContext;
+  const requesterOwnsDomain =
+    assignmentDomainContext === null || assignmentDomainContext === undefined
+      ? input.legacyRequesterOwnsDomain
+      : assignmentDomainContext.ownedByCurrentUser && assignmentDomainContext.canRevise;
+
+  return canShowDomainReviseAction({
+    workflowStatus: input.workflowStatus,
+    reviseIds: input.reviseIds,
+    requesterOwnsDomain,
+  });
+}
+
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   isHeadCoachPlanningContextOwner: boolean;
   currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
@@ -9808,9 +9830,12 @@ export function CoachAthletePlanningProfileView({
           : 0;
     const skillsWorkflowLabel = assistantWorkflowStatusLabelForKind(headCoachSkillsWorkflowStatus);
     const canReviseHeadCoachSkills =
-      (headCoachSkillsWorkflowStatus === "draft_generated" ||
-        headCoachSkillsWorkflowStatus === "revision_requested") &&
-      Boolean(skillsReviseIds);
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: workspace?.assignmentContext?.domains.SKILLS,
+        legacyRequesterOwnsDomain: !isHeadCoachReviewerOnlyForDomain("SKILLS"),
+        workflowStatus: headCoachSkillsWorkflowStatus,
+        reviseIds: skillsReviseIds,
+      });
     const headCoachSkillsRevisePanelOpen = assistantRevisePanelDomain === "SKILLS";
     const visibleSkillsPlanDetail = shouldRenderWorkspaceDomainPlanContent({
       shell: trainingPlanShellModel.shell,
@@ -10116,24 +10141,27 @@ export function CoachAthletePlanningProfileView({
       persistedGovernedPlanContext !== null;
     const canReviseSkills =
       currentCoachGenerationDomain === "SKILLS" &&
-      canShowDomainReviseAction({
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: workspace?.assignmentContext?.domains.SKILLS,
+        legacyRequesterOwnsDomain: true,
         workflowStatus: assistantDomainWorkflowStatus,
         reviseIds: skillsReviseIds,
-        requesterOwnsDomain: true,
       });
     const canReviseNutrition =
       currentCoachGenerationDomain === "NUTRITION" &&
-      canShowDomainReviseAction({
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: workspace?.assignmentContext?.domains.NUTRITION,
+        legacyRequesterOwnsDomain: true,
         workflowStatus: assistantDomainWorkflowStatus,
         reviseIds: nutritionReviseIds,
-        requesterOwnsDomain: true,
       });
     const canReviseSandC =
       currentCoachGenerationDomain === "S_AND_C" &&
-      canShowDomainReviseAction({
+      resolveDomainRevisePlanVisible({
+        assignmentDomainContext: workspace?.assignmentContext?.domains.S_AND_C,
+        legacyRequesterOwnsDomain: true,
         workflowStatus: assistantDomainWorkflowStatus,
         reviseIds: sandCReviseIds,
-        requesterOwnsDomain: true,
       });
     const canReviseCurrentDomain = canReviseSkills || canReviseNutrition || canReviseSandC;
     const currentDomainReviseIds =

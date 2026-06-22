@@ -59,6 +59,11 @@ export function parseWorkspaceWorkflowMode(
   const map: Record<string, TrainingPlanWorkflowMode> = {
     HEAD_COACH_PLANNING: "head_coach_planning",
     HEAD_COACH_REVIEW: "head_coach_review",
+    REVIEW_REQUIRED: "head_coach_review",
+    HEAD_COACH_REVIEW_REQUIRED: "head_coach_review",
+    RELEASE_READY: "head_coach_review",
+    READY_FOR_RELEASE: "head_coach_review",
+    RELEASED: "head_coach_review",
     HEAD_COACH_FUNCTION_AWARE: "head_coach_function_aware",
     SKILLS_COACH_PLANNING: "skills_coach_planning",
     SPECIALIST_DOMAIN: "specialist_domain",
@@ -71,8 +76,8 @@ export function resolveWorkflowModeFromWorkspace(
   workspace: TrainingPlanWorkspace,
 ): TrainingPlanWorkflowMode | null {
   return (
-    parseWorkspaceWorkflowMode(workspace.workflowMode) ??
-    parseWorkspaceWorkflowMode(workspace.shell)
+    parseWorkspaceWorkflowMode(workspace.shell) ??
+    parseWorkspaceWorkflowMode(workspace.workflowMode)
   );
 }
 
@@ -101,6 +106,7 @@ export function parseWorkspaceInitialTab(
     workload: "workload",
     "season-goals": "season-goals",
     "plan-dates": "plan-dates",
+    domain: "generate",
     generate: "generate",
     "generate-plan": "generate",
   };
@@ -113,6 +119,9 @@ export function parseWorkspaceInitialTab(
     WORKLOAD_ASSESSMENT: "workload",
     SEASON_GOALS: "season-goals",
     PLAN_DATES: "plan-dates",
+    DOMAIN: "generate",
+    DOMAIN_PLAN: "generate",
+    DOMAIN_WORKSPACE: "generate",
     GENERATE: "generate",
     GENERATE_PLAN: "generate",
   };
@@ -236,6 +245,55 @@ export function workspaceHeadCoachCanCreateSkillsPlan(
   );
 }
 
+export function workspaceDomainHasPersistedPlanIds(
+  domain: TrainingPlanWorkspaceDomain,
+): boolean {
+  return (
+    (domain.summary.trainingPlanId?.trim() ?? "") !== "" &&
+    (domain.summary.versionId?.trim() ?? "") !== ""
+  );
+}
+
+export function resolveLegacyPlanningContextLocked(input: {
+  hasHeadCoachConfigured: boolean;
+  upstreamPlanningContextLocked: boolean;
+  upstreamPlanningContextUpstreamLocked: boolean;
+  clientHasSubmittedDomainPlans: boolean;
+}): boolean {
+  return input.hasHeadCoachConfigured
+    ? input.upstreamPlanningContextLocked || input.clientHasSubmittedDomainPlans
+    : input.upstreamPlanningContextLocked || input.upstreamPlanningContextUpstreamLocked;
+}
+
+/** Legacy lock state is primary; workspace lock is additive only. */
+export function resolvePlanningContextLocked(input: {
+  legacyLocked: boolean;
+  workspace: TrainingPlanWorkspace | null;
+}): boolean {
+  return (
+    input.legacyLocked ||
+    (input.workspace !== null && workspacePlanningContextLocked(input.workspace))
+  );
+}
+
+export function resolveEffectiveDownstreamPlanningContextLocked(input: {
+  workspace: TrainingPlanWorkspace | null;
+  noHeadCoachDirectReleaseLocked: boolean;
+  upstreamContextLockedForDownstream: boolean;
+}): boolean {
+  if (input.workspace !== null && workspacePlanningContextLocked(input.workspace)) {
+    return true;
+  }
+  return input.noHeadCoachDirectReleaseLocked || input.upstreamContextLockedForDownstream;
+}
+
+export function resolveLegacyAssistantCreateButtonDisabled(input: {
+  generatePlanActionDisabled: boolean;
+  localError: string | null;
+}): boolean {
+  return input.generatePlanActionDisabled || input.localError !== null;
+}
+
 export function workspaceShowsDomainSubmitReview(
   workspace: TrainingPlanWorkspace,
   domain: GenerationDomain | null,
@@ -243,7 +301,15 @@ export function workspaceShowsDomainSubmitReview(
   if (domain === null) return false;
   const entry = workspace.domains[domain];
   if (!entry.canOpen) return false;
-  return parseWorkspaceAllowedActions(entry).includes("SUBMIT_REVIEW");
+  if (!workspaceDomainHasPersistedPlanIds(entry)) return false;
+  if (!parseWorkspaceAllowedActions(entry).includes("SUBMIT_REVIEW")) {
+    return false;
+  }
+  const workflowStatus = deriveWorkflowStatusFromWorkspaceDomain(entry);
+  return (
+    workflowStatus === "draft_generated" ||
+    workflowStatus === "revision_requested"
+  );
 }
 
 export function workspaceResolveReleaseMode(

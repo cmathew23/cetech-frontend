@@ -2134,6 +2134,10 @@ export async function startCoachAthleteTrainingPlanGenerationJob(
     sportCode: string;
     durationDays: 7 | 15 | 30;
     generationDomain: TrainingPlanGenerationDomain;
+    seasonCycleId?: string | null;
+    planStartDate?: string | null;
+    planEndDate?: string | null;
+    goalIds?: string[];
   },
 ): Promise<CoachAthleteTrainingPlanGenerationJob> {
   const ids = assertIds(entityId, athleteId);
@@ -2155,6 +2159,18 @@ export async function startCoachAthleteTrainingPlanGenerationJob(
         sportCode,
         durationDays: payload.durationDays,
         generationDomain,
+        ...(payload.seasonCycleId?.trim()
+          ? { seasonCycleId: payload.seasonCycleId.trim() }
+          : {}),
+        ...(payload.planStartDate?.trim()
+          ? { planStartDate: payload.planStartDate.trim() }
+          : {}),
+        ...(payload.planEndDate?.trim()
+          ? { planEndDate: payload.planEndDate.trim() }
+          : {}),
+        ...(payload.goalIds && payload.goalIds.length > 0
+          ? { goalIds: payload.goalIds }
+          : {}),
       }),
     },
   );

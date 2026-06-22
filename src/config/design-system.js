@@ -79,7 +79,7 @@ export const designSystem = {
     /** Shared athlete / coach / academy-admin dashboard sidebar (single spacing system). */
     sidebar: {
       root:
-        "flex h-full w-full min-w-0 flex-col overflow-y-auto border-r border-border bg-sidebar px-3 py-5",
+        "flex h-full w-full min-w-0 flex-col overflow-y-auto border-r border-border bg-sidebar px-3 py-5 font-sans",
       brand: "mb-4 border-b border-white/10 pb-4",
       nav: "flex flex-col gap-2",
       link:

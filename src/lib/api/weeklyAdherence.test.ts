@@ -170,6 +170,70 @@ describe("parseWeeklyAdherenceSummaryPayload", () => {
     });
   });
 
+  it("parses backend overall summary aliases without frontend recalculation", () => {
+    const parsed = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-06-22",
+      weekEnd: "2026-06-28",
+      summary: {
+        adherencePercent: 25,
+        completedItems: 3,
+        plannedItems: 12,
+      },
+      domains: {
+        SKILL: { adherencePercent: 100 },
+        NUTRITION: { adherencePercent: 0 },
+        STRENGTH_CONDITIONING: { adherencePercent: 0 },
+      },
+      visibleDomains: ["SKILL", "NUTRITION", "STRENGTH_CONDITIONING"],
+    });
+
+    expect(parsed.overall).toMatchObject({
+      adherencePercent: 25,
+      completedItems: 3,
+      plannedItems: 12,
+    });
+  });
+
+  it("parses zero overall adherence only when the backend explicitly returns zero", () => {
+    const parsed = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-06-22",
+      weekEnd: "2026-06-28",
+      overallSummary: {
+        adherencePercent: 0,
+        completedItems: 0,
+        plannedItems: 9,
+      },
+      domains: {
+        SKILL: { adherencePercent: 0 },
+      },
+      visibleDomains: ["SKILL"],
+    });
+
+    expect(parsed.overall?.adherencePercent).toBe(0);
+    expect(parsed.overall?.completedItems).toBe(0);
+    expect(parsed.overall?.plannedItems).toBe(9);
+  });
+
+  it("does not fabricate overall adherence when the overall percent is missing", () => {
+    const parsed = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-06-22",
+      weekEnd: "2026-06-28",
+      summary: {
+        completedItems: 0,
+        plannedItems: 9,
+      },
+      domains: {
+        SKILL: { adherencePercent: 0 },
+      },
+      visibleDomains: ["SKILL"],
+    });
+
+    expect(parsed.overall).toBeNull();
+  });
+
   it("parses nutrition aliases: totalPrescribedItems, plannedCalories, string completionCredit", () => {
     const parsed = parseWeeklyAdherenceSummaryPayload({
       athleteId: "801",

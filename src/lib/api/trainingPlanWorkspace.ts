@@ -137,10 +137,24 @@ function parseWorkspaceDomain(
 function parsePlanningContext(value: unknown): TrainingPlanWorkspacePlanningContext {
   const record = asRecord(value) ?? {};
   return {
-    locked: readBoolean(record.locked),
+    locked: readBoolean(record.locked) || readBoolean(record.planningContextLocked),
     resolved: readBoolean(record.resolved),
     lockId: readString(record.lockId),
     snapshotId: readString(record.snapshotId),
+    seasonCycleId: readString(record.seasonCycleId),
+    selectedSeasonCycleId: readString(record.selectedSeasonCycleId),
+    seasonId: readString(record.seasonId),
+    selectedSeasonId: readString(record.selectedSeasonId),
+    phase: readString(record.phase),
+    startDate: readString(record.startDate),
+    endDate: readString(record.endDate),
+    planStartDate: readString(record.planStartDate),
+    planEndDate: readString(record.planEndDate),
+    durationDays: readNumber(record.durationDays),
+    goalIds: readStringList(record.goalIds),
+    lockedGoalIds: readStringList(record.lockedGoalIds),
+    selectedGoalsSnapshot: record.selectedGoalsSnapshot,
+    athletePlanningContextSnapshot: record.athletePlanningContextSnapshot,
   };
 }
 
@@ -157,6 +171,16 @@ function parseOwnershipFlags(value: unknown): TrainingPlanWorkspaceOwnershipFlag
   if ("requesterOwnsSkillsForThisAthlete" in record) {
     flags.requesterOwnsSkillsForThisAthlete = readBoolean(
       record.requesterOwnsSkillsForThisAthlete,
+    );
+  }
+  if ("requesterOwnsNutritionForThisAthlete" in record) {
+    flags.requesterOwnsNutritionForThisAthlete = readBoolean(
+      record.requesterOwnsNutritionForThisAthlete,
+    );
+  }
+  if ("requesterOwnsStrengthForThisAthlete" in record) {
+    flags.requesterOwnsStrengthForThisAthlete = readBoolean(
+      record.requesterOwnsStrengthForThisAthlete,
     );
   }
   return flags;

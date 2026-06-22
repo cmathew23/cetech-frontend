@@ -205,6 +205,76 @@ export function isAssistantDomainGeneratePlanDisabled(input: {
   return input.baseBusy || !input.generationReadinessFromApis;
 }
 
+export function shouldUseWorkflow1SpecialistCreateGate(input: {
+  hasHeadCoachConfigured: boolean;
+  isHeadCoachPlanningContextOwner: boolean;
+  domain: CoachPlanCreationDomain | null;
+  effectiveDownstreamPlanningContextLocked: boolean;
+  ownershipFlags: PlanGenerationOwnershipFlags;
+}): boolean {
+  if (!input.hasHeadCoachConfigured) return false;
+  if (input.isHeadCoachPlanningContextOwner) return false;
+  if (input.domain === null) return false;
+  if (!input.effectiveDownstreamPlanningContextLocked) return false;
+  return !isPlanGenerationBlockedByOwnership(input.ownershipFlags);
+}
+
+export function shouldUseLockedDownstreamGenerationContext(input: {
+  hasHeadCoachConfigured: boolean;
+  isHeadCoachPlanningContextOwner: boolean;
+  domain: CoachPlanCreationDomain | null;
+  effectiveDownstreamPlanningContextLocked: boolean;
+}): boolean {
+  return (
+    input.hasHeadCoachConfigured &&
+    !input.isHeadCoachPlanningContextOwner &&
+    input.domain !== null &&
+    input.effectiveDownstreamPlanningContextLocked
+  );
+}
+
+export const LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE =
+  "Locked planning context is missing generation details. Refresh the page or ask the Head Coach to relock planning context.";
+
+export function resolveLockedDownstreamGenerationContextError(input: {
+  usesLockedDownstreamContext: boolean;
+  entityId: string;
+  athleteId: string;
+  generationDomain: CoachPlanCreationDomain | null;
+  sportCode: string | null | undefined;
+  seasonCycleId: string | null | undefined;
+  planStartDate: string | null | undefined;
+  planEndDate: string | null | undefined;
+}): string | null {
+  if (!input.usesLockedDownstreamContext) return null;
+  if (input.entityId.trim() === "" || input.athleteId.trim() === "") {
+    return "Athlete route not available.";
+  }
+  if (input.generationDomain === null) {
+    return "Plan generation domain is unavailable for this coach.";
+  }
+  if ((input.sportCode ?? "").trim() === "") {
+    return LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+  }
+  if ((input.seasonCycleId ?? "").trim() === "") {
+    return LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+  }
+  if (
+    (input.planStartDate ?? "").trim() === "" ||
+    (input.planEndDate ?? "").trim() === ""
+  ) {
+    return LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+  }
+  return null;
+}
+
+export function resolveWorkflow1SpecialistCreateDisabled(input: {
+  generationJobRunning: boolean;
+  planOwnershipLoading: boolean;
+}): boolean {
+  return input.generationJobRunning || input.planOwnershipLoading;
+}
+
 export type AssistantGovernedPlanContext = {
   planId: string;
   versionId: string;

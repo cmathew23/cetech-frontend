@@ -16,6 +16,20 @@ export type TrainingPlanWorkspacePlanningContext = {
   resolved: boolean;
   lockId: string | null;
   snapshotId: string | null;
+  seasonCycleId?: string | null;
+  selectedSeasonCycleId?: string | null;
+  seasonId?: string | null;
+  selectedSeasonId?: string | null;
+  phase?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  planStartDate?: string | null;
+  planEndDate?: string | null;
+  durationDays?: number | null;
+  goalIds?: string[];
+  lockedGoalIds?: string[];
+  selectedGoalsSnapshot?: unknown;
+  athletePlanningContextSnapshot?: unknown;
 };
 
 export type TrainingPlanWorkspaceOwnershipFlags = {
@@ -24,6 +38,8 @@ export type TrainingPlanWorkspaceOwnershipFlags = {
   requesterHasSkillsFunction: boolean;
   requesterOwnsCurrentDomain: boolean;
   requesterOwnsSkillsForThisAthlete?: boolean;
+  requesterOwnsNutritionForThisAthlete?: boolean;
+  requesterOwnsStrengthForThisAthlete?: boolean;
   headCoachOwnsPlanningContext: boolean;
   directReleaseAllowed: boolean;
 };

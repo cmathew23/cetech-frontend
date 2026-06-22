@@ -79,6 +79,7 @@ import {
   type CoachPersistedTrainingPlanActiveDetail,
   type CoachPersistedTrainingPlanVersion,
   type DomainPlanSummary,
+  type DomainPlanSummaryItem,
   type GovernedTrainingPlanWorkflowAction,
   type CoachAthleteTrainingPlanPersistDraftResult,
   type CoachAthleteTrainingPlanReadiness,
@@ -92,6 +93,10 @@ import {
   deriveWorkflowStatusFromWorkspaceDomain,
   parseWorkspaceCurrentDomain,
   parseWorkspaceInitialTab,
+  resolveLegacyPlanningContextLocked,
+  resolvePlanningContextLocked,
+  resolveEffectiveDownstreamPlanningContextLocked,
+  resolveLegacyAssistantCreateButtonDisabled,
   resolveWorkflowModeFromWorkspace,
   workspaceAllowedActionsSet,
   workspaceDirectReleaseAllowed,
@@ -99,7 +104,6 @@ import {
   workspaceHeadCoachCanCreateSkillsPlan,
   workspaceHeadCoachOwnsPlanningContext,
   workspaceHeadCoachOwnsSkillsForAthlete,
-  workspacePlanningContextLocked,
   workspaceResolvableGenerationDomains,
   workspaceResolveReleaseMode,
   workspaceShowsDomainSubmitReview,
@@ -124,6 +128,7 @@ import {
   normalizeCoachFunctionValue,
 } from "@/lib/coachAuthority";
 import {
+  LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE,
   planningProfileHrefForAthlete,
   PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
   canHeadCoachCreateSkillsPlan,
@@ -133,11 +138,16 @@ import {
   isAssistantGovernedDetailAlignedWithVisibleDraft,
   isCreatePlanBlockedByPlanningContextLock,
   shouldSkipAssistantDomainReadinessGate,
+  shouldUseLockedDownstreamGenerationContext,
+  shouldUseWorkflow1SpecialistCreateGate,
   isGeneratePlanDisabledForDomain,
   isPlanGenerationBlockedByOwnership,
   headCoachOwnsAssignedDomainGeneration,
   mergePlanGenerationOwnershipForDomain,
   PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL,
+  resolveWorkflow1SpecialistCreateDisabled,
+  type AssistantGovernedPlanContext,
+  type AssistantVisibleDomainDraftIds,
   type PlanGenerationOwnershipFlags,
 } from "@/lib/coachTrainingPlanActions";
 import { cn } from "@/lib/utils";
@@ -223,6 +233,10 @@ function collectObjectRecords(value: unknown): Record<string, unknown>[] {
   const seen = new Set<Record<string, unknown>>();
 
   function visit(node: unknown): void {
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
     const record = objectRecord(node);
     if (!record || seen.has(record)) return;
     seen.add(record);
@@ -271,6 +285,62 @@ function readStringListFromRecords(
     }
   }
   return [];
+}
+
+export function readGoalIdsFromSnapshot(snapshot: unknown): string[] {
+  const records = collectObjectRecords(snapshot);
+  const goalIds = readStringListFromRecords(records, [
+    "goalIds",
+    "selectedGoalIds",
+    "lockedGoalIds",
+    "trainingGoalIds",
+  ]);
+  if (goalIds.length > 0) return goalIds;
+
+  return records
+    .map((record) => readStringFromRecords([record], ["goalId", "trainingGoalId", "id"]))
+    .filter((goalId): goalId is string => goalId !== null);
+}
+
+function readArrayLengthFromRecords(records: Record<string, unknown>[], keys: string[]): number {
+  for (const key of keys) {
+    for (const record of records) {
+      const value = record[key];
+      if (Array.isArray(value)) return value.length;
+    }
+  }
+  return 0;
+}
+
+export function readWorkspaceSnapshotGoalCount(snapshot: unknown): number {
+  if (Array.isArray(snapshot)) return snapshot.length;
+  const records = collectObjectRecords(snapshot);
+  const nestedGoalCount = readArrayLengthFromRecords(records, ["goals", "selectedGoals"]);
+  if (nestedGoalCount > 0) return nestedGoalCount;
+  return readGoalIdsFromSnapshot(snapshot).length;
+}
+
+export function readLockedWorkspaceGoalIds(input: {
+  selectedGoalsSnapshot: unknown;
+  athletePlanningContextSnapshot: unknown;
+  goalIds?: string[];
+  lockedGoalIds?: string[];
+  fallbackGoalIds?: string[];
+}): string[] {
+  const fromSelectedSnapshot = readGoalIdsFromSnapshot(input.selectedGoalsSnapshot);
+  const fromAthleteSnapshot = readGoalIdsFromSnapshot(input.athletePlanningContextSnapshot);
+  const candidates = [
+    fromSelectedSnapshot,
+    fromAthleteSnapshot,
+    input.goalIds ?? [],
+    input.lockedGoalIds ?? [],
+    input.fallbackGoalIds ?? [],
+  ];
+  return (
+    candidates.find((goalIds) =>
+      goalIds.some((goalId) => typeof goalId === "string" && goalId.trim() !== ""),
+    ) ?? []
+  ).filter((goalId) => typeof goalId === "string" && goalId.trim() !== "");
 }
 
 function extractPersistenceContextFromSnapshot(
@@ -819,6 +889,53 @@ function resolveHeadCoachDomainSummaryVersionId(input: {
   ) || null;
 }
 
+export function resolveHeadCoachReviewSummarySource(input: {
+  workspace: TrainingPlanWorkspace | null;
+  domain: TrainingPlanGenerationDomain;
+  legacySummary: DomainPlanSummaryItem;
+}): {
+  planId: string | null;
+  versionId: string | null;
+  status: string | null;
+  hasWorkspaceIds: boolean;
+} {
+  const workspaceSummary = input.workspace?.domains[input.domain]?.summary ?? null;
+  const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
+  const workspaceVersionId = workspaceSummary?.versionId?.trim() ?? "";
+  const legacyPlanId = input.legacySummary.trainingPlanId?.trim() ?? "";
+  const legacyVersionId = resolveHeadCoachDomainSummaryVersionId(input.legacySummary);
+  return {
+    planId: workspacePlanId !== "" ? workspacePlanId : legacyPlanId !== "" ? legacyPlanId : null,
+    versionId:
+      workspaceVersionId !== ""
+        ? workspaceVersionId
+        : legacyVersionId !== null && legacyVersionId !== ""
+          ? legacyVersionId
+          : null,
+    status:
+      (workspaceSummary?.status?.trim() ?? "") !== ""
+        ? (workspaceSummary?.status?.trim() ?? null)
+        : input.legacySummary.status?.trim() || null,
+    hasWorkspaceIds: workspacePlanId !== "" && workspaceVersionId !== "",
+  };
+}
+
+export function shouldShowHeadCoachReviewEmptyState(input: {
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  workspacePlanId: string | null;
+  workspaceVersionId: string | null;
+  isLoading: boolean;
+  loadError: string | null;
+}): boolean {
+  if (input.isLoading || input.loadError !== null || input.activeDetail !== null) {
+    return false;
+  }
+  return (
+    (input.workspacePlanId?.trim() ?? "") === "" &&
+    (input.workspaceVersionId?.trim() ?? "") === ""
+  );
+}
+
 function resolveHeadCoachDomainSummaryStatus(input: {
   summaryStatus: string | null;
   activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
@@ -885,7 +1002,7 @@ function assistantWorkflowStatusLabelForKind(kind: AssistantDomainWorkflowStatus
   return "Not Created";
 }
 
-function deriveAssistantDomainWorkflowStatus(input: {
+export function deriveAssistantDomainWorkflowStatus(input: {
   latestDraft: CoachAthleteLatestDomainDraft | null;
   activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
 }): AssistantDomainWorkflowStatus {
@@ -915,14 +1032,32 @@ function deriveAssistantDomainWorkflowStatus(input: {
     return "submitted_for_review";
   }
   if (
-    normalizedStatus === "AI_GENERATED" ||
-    normalizedStatus === "DRAFT" ||
-    hasPlanVersion ||
-    input.latestDraft !== null
+    ((normalizedStatus === "AI_GENERATED" || normalizedStatus === "DRAFT") && hasPlanVersion) ||
+    hasPlanVersion
   ) {
     return "draft_generated";
   }
   return "not_created";
+}
+
+export function shouldShowGeneratedPlanSyncingNotice(input: {
+  generateResultMatchesCurrentDomain: boolean;
+  currentDomainHasPersistedIds: boolean;
+}): boolean {
+  return input.generateResultMatchesCurrentDomain && !input.currentDomainHasPersistedIds;
+}
+
+export function canShowDomainReviseAction(input: {
+  workflowStatus: AssistantDomainWorkflowStatus;
+  reviseIds: DomainRevisePlanIds | null;
+  requesterOwnsDomain: boolean;
+}): boolean {
+  if (!input.requesterOwnsDomain) return false;
+  if (input.reviseIds === null) return false;
+  return (
+    input.workflowStatus === "draft_generated" ||
+    input.workflowStatus === "revision_requested"
+  );
 }
 
 export type Workflow2SubmittedDomainSkillsSlotProjection = {
@@ -1619,6 +1754,261 @@ export function buildCoachWorkflowResetScopeKey(input: {
   return `${athlete}|${entity}|${coachUserId}|${activeRole}|${domain}|${workflowMode}`;
 }
 
+export function resolveWorkflowResetScopeMode(input: {
+  workspace: TrainingPlanWorkspace | null;
+  isHeadCoachPlanningContextOwner: boolean;
+  planningContextLocked: boolean;
+  workflowMode: TrainingPlanWorkflowMode;
+}): TrainingPlanWorkflowMode {
+  if (input.workspace !== null) {
+    const workspaceMode = resolveWorkflowModeFromWorkspace(input.workspace);
+    if (workspaceMode !== null) return workspaceMode;
+  }
+  if (
+    input.workspace !== null &&
+    input.isHeadCoachPlanningContextOwner &&
+    input.planningContextLocked
+  ) {
+    return "head_coach_review";
+  }
+  return input.workflowMode;
+}
+
+export function workflow2AHeadCoachStep6Intro(
+  shell: TrainingPlanPageShell,
+): string {
+  if (shell === "head_coach_function_aware") {
+    return "Create the Skills plan you own, then review submitted Nutrition and S&C plans when they arrive.";
+  }
+  return "Head Coach mode focuses on locking planning context and reviewing submitted domain plans.";
+}
+
+export function headCoachSubmittedReviewDomains(input: {
+  shell: TrainingPlanPageShell;
+  headCoachOwnsSkills: boolean;
+}): TrainingPlanGenerationDomain[] {
+  if (input.shell === "head_coach_function_aware" && input.headCoachOwnsSkills) {
+    return GENERATION_DOMAIN_ORDER.filter((domain) => domain !== "SKILLS");
+  }
+  return GENERATION_DOMAIN_ORDER;
+}
+
+function trainingPlanRenderedShellBranchName(shell: TrainingPlanPageShell): string {
+  if (shell === "head_coach_function_aware") {
+    return "function-aware domain owner";
+  }
+  if (shell === "head_coach_review") {
+    return "pure head coach review";
+  }
+  if (shell === "head_coach_planning") {
+    return "head coach planning";
+  }
+  if (shell === "skills_coach_planning") {
+    return "skills coach planning";
+  }
+  if (shell === "specialist_domain") {
+    return "specialist domain";
+  }
+  return "loading";
+}
+
+function logTrainingPlanWorkspaceShellDiagnostic(input: {
+  label: string;
+  workspace: TrainingPlanWorkspace | null;
+  selectedShell?: TrainingPlanPageShell | TrainingPlanWorkflowMode | null;
+  renderedBranch?: string;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  const workspace = input.workspace;
+  const skills = workspace?.domains.SKILLS;
+  console.info("[TrainingPlanWorkspace shell diagnostic]", {
+    label: input.label,
+    workflowShape: workspace?.workflowShape ?? null,
+    shell: workspace?.shell ?? null,
+    currentDomain: workspace?.currentDomain ?? null,
+    initialTab: workspace?.initialTab ?? null,
+    requesterIsHeadCoach:
+      workspace?.ownershipFlags.requesterIsHeadCoach ?? null,
+    requesterOwnsCurrentDomain:
+      workspace?.ownershipFlags.requesterOwnsCurrentDomain ?? null,
+    requesterOwnsSkillsForThisAthlete:
+      workspace?.ownershipFlags.requesterOwnsSkillsForThisAthlete ?? null,
+    skillsCanOpen: skills?.canOpen ?? null,
+    skillsTrainingPlanId: skills?.summary.trainingPlanId ?? null,
+    skillsVersionId: skills?.summary.versionId ?? null,
+    selectedShell: input.selectedShell ?? null,
+    renderedShellBranchName: input.renderedBranch ?? null,
+  });
+}
+
+function logTrainingPlanGenerationBlockerDiagnostic(input: {
+  workspacePlanningContext: TrainingPlanWorkspace["planningContext"] | null;
+  localSelectedGoalCount: number;
+  blockerReason: string | null;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  const context = input.workspacePlanningContext;
+  console.info("[TrainingPlanWorkspace generation blocker diagnostic]", {
+    planningContextLocked: context?.locked ?? null,
+    selectedGoalsSnapshotLength: readWorkspaceSnapshotGoalCount(
+      context?.selectedGoalsSnapshot,
+    ),
+    athletePlanningContextSnapshotGoalsLength: readWorkspaceSnapshotGoalCount(
+      context?.athletePlanningContextSnapshot,
+    ),
+    localSelectedGoalsLength: input.localSelectedGoalCount,
+    blockerReasonSelected: input.blockerReason,
+  });
+}
+
+function logTrainingPlanViewPlanDiagnostic(input: {
+  clickedDomain: TrainingPlanGenerationDomain;
+  workspace: TrainingPlanWorkspace | null;
+  context: WorkspaceDomainViewPlanContext | null;
+  fetchUrl?: string;
+  resultStatus?: string | number | null;
+  responseBodyShape?: Record<string, unknown>;
+  stateUpdated?: string | null;
+  rendererBranch?: string | null;
+  error?: unknown;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  const summary = input.workspace?.domains[input.clickedDomain]?.summary ?? null;
+  console.info("[TrainingPlanWorkspace view plan diagnostic]", {
+    clickedDomain: input.clickedDomain,
+    workspaceShell: input.workspace?.shell ?? null,
+    workspaceCurrentDomain: input.workspace?.currentDomain ?? null,
+    summaryTrainingPlanId: summary?.trainingPlanId ?? null,
+    summaryVersionId: summary?.versionId ?? null,
+    selectedTrainingPlanId: input.context?.planId ?? null,
+    selectedVersionId: input.context?.versionId ?? null,
+    sourceObjectUsedByHandler: input.context?.source ?? null,
+    status: input.context?.status ?? null,
+    fetchUrl: input.fetchUrl ?? null,
+    resultStatus: input.resultStatus ?? null,
+    responseBodyShape: input.responseBodyShape ?? null,
+    stateUpdated: input.stateUpdated ?? null,
+    rendererBranch: input.rendererBranch ?? null,
+    error: input.error ?? null,
+  });
+}
+
+export function domainDraftLoadErrorMessage(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Unable to load Skills plan. Please retry.";
+  if (domain === "NUTRITION") return "Unable to load Nutrition plan. Please retry.";
+  return "Unable to load S&C plan. Please retry.";
+}
+
+export function errorForRenderedDomain(input: {
+  error: string | null;
+  errorDomain: TrainingPlanGenerationDomain | null;
+  renderedDomain: TrainingPlanGenerationDomain | null;
+}): string | null {
+  if (input.error === null) return null;
+  if (input.errorDomain === null || input.renderedDomain === null) return null;
+  return input.errorDomain === input.renderedDomain ? input.error : null;
+}
+
+function logTrainingPlanDomainDetailDiagnostic(input: {
+  currentDomain: TrainingPlanGenerationDomain | null;
+  clickedDomain?: TrainingPlanGenerationDomain | null;
+  workspace: TrainingPlanWorkspace | null;
+  renderedPlanDomain: TrainingPlanGenerationDomain | null;
+  requestedDetailDomain: TrainingPlanGenerationDomain | null;
+  trainingPlanId: string | null;
+  versionId: string | null;
+  loadStatus: string;
+  loadError: string | null;
+  rendererBranch: string;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  console.info("[TrainingPlanWorkspace domain detail diagnostic]", {
+    currentDomain: input.currentDomain,
+    clickedDomain: input.clickedDomain ?? null,
+    workspaceCurrentDomain: input.workspace?.currentDomain ?? null,
+    renderedPlanDomain: input.renderedPlanDomain,
+    requestedDetailDomain: input.requestedDetailDomain,
+    trainingPlanId: input.trainingPlanId,
+    versionId: input.versionId,
+    loadStatus: input.loadStatus,
+    loadError: input.loadError,
+    rendererBranch: input.rendererBranch,
+    summaryStatus: {
+      SKILLS: input.workspace?.domains.SKILLS.summary.status ?? null,
+      NUTRITION: input.workspace?.domains.NUTRITION.summary.status ?? null,
+      STRENGTH_CONDITIONING: input.workspace?.domains.S_AND_C.summary.status ?? null,
+    },
+  });
+}
+
+function logTrainingPlanGenerationAutoLoadDiagnostic(input: {
+  generatedDomain: TrainingPlanGenerationDomain;
+  generationResponsePlanId: string | null;
+  generationResponseVersionId: string | null;
+  workspaceRefreshStatus: string;
+  workspaceSummaryStatus: string | null;
+  workspaceSummaryPlanId: string | null;
+  workspaceSummaryVersionId: string | null;
+  selectedDetailDomain: TrainingPlanGenerationDomain | null;
+  detailFetchUrl: string | null;
+  detailFetchStatus: string | number | null;
+  rendererBranch: string;
+  noPlanCreatedReason?: string | null;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  console.info("[TrainingPlanWorkspace generation auto-load diagnostic]", input);
+}
+
+function logTrainingPlanActionVisibilityDiagnostic(input: {
+  renderedDomain: TrainingPlanGenerationDomain | null;
+  currentDomain: TrainingPlanGenerationDomain | null;
+  workspace: TrainingPlanWorkspace | null;
+  versionNumber: number | null;
+  allowedActions: string[];
+  persistedDetailStatus: string | null;
+  isEditableDraft: boolean;
+  canRevise: boolean;
+  hiddenReason: string | null;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  const summary =
+    input.renderedDomain !== null
+      ? input.workspace?.domains[input.renderedDomain]?.summary
+      : null;
+  console.info("[TrainingPlanWorkspace action visibility diagnostic]", {
+    renderedDomain: input.renderedDomain,
+    currentDomain: input.currentDomain,
+    requesterOwnershipFlags: input.workspace?.ownershipFlags ?? null,
+    workspaceShell: input.workspace?.shell ?? null,
+    domainSummaryStatus: summary?.status ?? null,
+    trainingPlanId: summary?.trainingPlanId ?? null,
+    versionId: summary?.versionId ?? null,
+    versionNumber: input.versionNumber,
+    allowedActions: input.allowedActions,
+    persistedDetailStatus: input.persistedDetailStatus,
+    isEditableDraft: input.isEditableDraft,
+    canRevise: input.canRevise,
+    hiddenReason: input.hiddenReason,
+  });
+}
+
+export function shouldBlockWorkflowRenderForWorkspace(input: {
+  workspaceLoading: boolean;
+  workspaceRefreshing: boolean;
+  workspace: TrainingPlanWorkspace | null;
+  isHeadCoachPlanningContextOwner: boolean;
+  planningContextLocked: boolean;
+  hasRenderableWorkflowFallback: boolean;
+}): boolean {
+  if (!input.workspaceLoading || input.workspaceRefreshing || input.workspace !== null) {
+    return false;
+  }
+  if (input.isHeadCoachPlanningContextOwner && input.planningContextLocked) {
+    return true;
+  }
+  return !input.hasRenderableWorkflowFallback;
+}
+
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   isHeadCoachPlanningContextOwner: boolean;
   currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
@@ -1909,6 +2299,16 @@ function governedPlanActionButtonLabel(
   if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
   return "Release to Athlete";
+}
+
+export function canShowHeadCoachReviewReleaseAction(input: {
+  allowedActions: ReadonlySet<GovernedTrainingPlanWorkflowAction>;
+  status: string | null;
+}): boolean {
+  return (
+    input.allowedActions.has("RELEASE") &&
+    (input.status?.trim().toUpperCase() ?? "") === "HEAD_COACH_APPROVED"
+  );
 }
 
 function governedPlanActionSuccessMessage(
@@ -2555,9 +2955,9 @@ function readSafeGenerationJobError(job: CoachAthleteTrainingPlanGenerationJob):
   );
 }
 
-function renderGenerationJobButtonLabel(
+export function renderGenerationJobButtonLabel(
   domain: TrainingPlanGenerationDomain,
-  job: CoachAthleteTrainingPlanGenerationJob | null,
+  job: Pick<CoachAthleteTrainingPlanGenerationJob, "domain" | "status"> | null,
 ): string {
   if (!job || job.domain !== domain) return generationButtonLabel(domain);
   if (job.status === "COMPLETED") return "Draft ready";
@@ -2566,7 +2966,7 @@ function renderGenerationJobButtonLabel(
 }
 
 function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob | null) {
-  if (!job || (job.status !== "QUEUED" && job.status !== "RUNNING")) return null;
+  if (!isGenerationJobInProgress(job)) return null;
   const progressPercent = Math.max(0, Math.min(100, job.progressPercent ?? 0));
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
@@ -2592,6 +2992,27 @@ function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob 
       </div>
     </div>
   );
+}
+
+export function isGenerationJobInProgress(
+  job: Pick<CoachAthleteTrainingPlanGenerationJob, "status"> | null,
+): boolean {
+  return job?.status === "QUEUED" || job?.status === "RUNNING";
+}
+
+export function shouldShowGeneratedDraftEmptyState(input: {
+  draftMissing: boolean;
+  generationInProgress: boolean;
+}): boolean {
+  return input.draftMissing && !input.generationInProgress;
+}
+
+export function shouldShowDomainButtonProgress(input: {
+  domain: TrainingPlanGenerationDomain;
+  currentDomain: TrainingPlanGenerationDomain | null;
+  generationInProgress: boolean;
+}): boolean {
+  return !(input.generationInProgress && input.domain === input.currentDomain);
 }
 
 function coachFunctionToGenerationDomain(
@@ -2774,7 +3195,7 @@ function deriveAssistantLockedUpstreamFields(input: {
   };
 }
 
-function resolveGeneratePlanLocalError(input: {
+export function resolveGeneratePlanLocalError(input: {
   entityId: string;
   athleteId: string;
   generationDomain: TrainingPlanGenerationDomain | null;
@@ -2785,6 +3206,10 @@ function resolveGeneratePlanLocalError(input: {
   currentPhase: SeasonPhaseSummary | null;
   planStartDate: string;
   planEndDate: string;
+  canUseLockedPlanningContextForGeneration?: boolean;
+  lockedSeasonCycleId?: string | null;
+  lockedPlanWindowStart?: string | null;
+  lockedPlanWindowEnd?: string | null;
 }): string | null {
   if (input.entityId.trim() === "" || input.athleteId.trim() === "") {
     return "Athlete route not available.";
@@ -2794,6 +3219,22 @@ function resolveGeneratePlanLocalError(input: {
   }
   if ((input.sportCode ?? "").trim() === "") {
     return "Sport code is missing for this athlete. Complete the Athlete Planning Profile before generation.";
+  }
+  if (input.canUseLockedPlanningContextForGeneration === true) {
+    const lockedSeasonCycleId = input.lockedSeasonCycleId?.trim() ?? "";
+    const lockedPlanWindowStart = input.lockedPlanWindowStart?.trim() ?? "";
+    const lockedPlanWindowEnd = input.lockedPlanWindowEnd?.trim() ?? "";
+    if (
+      lockedSeasonCycleId === "" ||
+      lockedPlanWindowStart === "" ||
+      lockedPlanWindowEnd === ""
+    ) {
+      return LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+    }
+    if (input.selectedGoalCount === 0) {
+      return "Select at least one active goal before generating a plan.";
+    }
+    return null;
   }
   if (input.selectedSeasonCycleId == null || input.selectedSeason === null) {
     return "Select a season before generating a plan.";
@@ -2820,6 +3261,172 @@ function resolveGeneratePlanLocalError(input: {
     return "Plan dates must be within the selected season.";
   }
   return null;
+}
+
+export function canGenerateFromLockedPlanningContextForDomain(input: {
+  domain: TrainingPlanGenerationDomain | null;
+  effectiveDownstreamPlanningContextLocked: boolean;
+  ownershipFlags: PlanGenerationOwnershipFlags;
+  lockedSeasonCycleId: string | null | undefined;
+  lockedPlanWindowStart: string | null | undefined;
+  lockedPlanWindowEnd: string | null | undefined;
+  lockedSportCode: string | null | undefined;
+}): boolean {
+  if (input.domain === null) return false;
+  if (!input.effectiveDownstreamPlanningContextLocked) return false;
+  if (isPlanGenerationBlockedByOwnership(input.ownershipFlags)) return false;
+  if ((input.lockedSeasonCycleId ?? "").trim() === "") return false;
+  if ((input.lockedPlanWindowStart ?? "").trim() === "") return false;
+  if ((input.lockedPlanWindowEnd ?? "").trim() === "") return false;
+  if ((input.lockedSportCode ?? "").trim() === "") return false;
+  return true;
+}
+
+export function resolveAssistantDomainSubmitActionVisible(input: {
+  workspace: TrainingPlanWorkspace | null;
+  currentDomain: TrainingPlanGenerationDomain | null;
+  discoveryLoading: boolean;
+  governedDetailRefreshing: boolean;
+  hasHeadCoachConfigured: boolean;
+  allowedActionsHasSubmitReview: boolean;
+  governedContext: AssistantGovernedPlanContext | null;
+  latestDraft: AssistantVisibleDomainDraftIds;
+}): boolean {
+  if (input.workspace !== null) {
+    return workspaceShowsDomainSubmitReview(input.workspace, input.currentDomain);
+  }
+  return canShowAssistantDomainSubmitReview({
+    discoveryLoading: input.discoveryLoading,
+    governedDetailRefreshing: input.governedDetailRefreshing,
+    hasHeadCoachConfigured: input.hasHeadCoachConfigured,
+    allowedActionsHasSubmitReview: input.allowedActionsHasSubmitReview,
+    governedContext: input.governedContext,
+    latestDraft: input.latestDraft,
+    currentDomain: input.currentDomain,
+  });
+}
+
+export function resolveSubmitReviewPlanVersionIds(input: {
+  workspace: TrainingPlanWorkspace | null;
+  domain: TrainingPlanGenerationDomain;
+  fallbackPlanId: string;
+  fallbackVersionId: string;
+}): { planId: string; versionId: string } {
+  const summary = input.workspace?.domains[input.domain]?.summary ?? null;
+  const workspacePlanId = summary?.trainingPlanId?.trim() ?? "";
+  const workspaceVersionId = summary?.versionId?.trim() ?? "";
+  return {
+    planId: workspacePlanId !== "" ? workspacePlanId : input.fallbackPlanId,
+    versionId: workspaceVersionId !== "" ? workspaceVersionId : input.fallbackVersionId,
+  };
+}
+
+export type WorkspaceDomainViewPlanContext = {
+  planId: string;
+  versionId: string;
+  status: string | null;
+  source: string;
+};
+
+export function resolveWorkspaceDomainViewPlanContext(input: {
+  workspace: TrainingPlanWorkspace | null;
+  domain: TrainingPlanGenerationDomain;
+  fallbackPlanId?: string | null;
+  fallbackVersionId?: string | null;
+  fallbackStatus?: string | null;
+  fallbackSource?: string;
+}): WorkspaceDomainViewPlanContext | null {
+  const summary = input.workspace?.domains[input.domain]?.summary ?? null;
+  const workspacePlanId = summary?.trainingPlanId?.trim() ?? "";
+  const workspaceVersionId = summary?.versionId?.trim() ?? "";
+  if (workspacePlanId !== "") {
+    return {
+      planId: workspacePlanId,
+      versionId: workspaceVersionId,
+      status: summary?.status?.trim() || null,
+      source: `workspace.domains.${input.domain}.summary`,
+    };
+  }
+
+  const fallbackPlanId = input.fallbackPlanId?.trim() ?? "";
+  if (fallbackPlanId === "") return null;
+  return {
+    planId: fallbackPlanId,
+    versionId: input.fallbackVersionId?.trim() ?? "",
+    status: input.fallbackStatus?.trim() || null,
+    source: input.fallbackSource ?? "legacy fallback",
+  };
+}
+
+export type DomainRevisePlanIds = {
+  trainingPlanId: string;
+  versionId: string;
+};
+
+export function resolveDomainRevisePlanIds(input: {
+  domain: TrainingPlanGenerationDomain;
+  workspace: TrainingPlanWorkspace | null;
+  persistedDetailDomain: TrainingPlanGenerationDomain | null;
+  persistedPlanId: string | null | undefined;
+  persistedVersionId: string | null | undefined;
+  latestDraftDomain: TrainingPlanGenerationDomain | null;
+  latestDraftPlanId: string | null | undefined;
+  latestDraftVersionId: string | null | undefined;
+}): DomainRevisePlanIds | null {
+  const workspaceSummary = input.workspace?.domains[input.domain]?.summary ?? null;
+  const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
+  const workspaceVersionId = workspaceSummary?.versionId?.trim() ?? "";
+  if (workspacePlanId !== "" && workspaceVersionId !== "") {
+    return { trainingPlanId: workspacePlanId, versionId: workspaceVersionId };
+  }
+
+  const persistedPlanId = input.persistedPlanId?.trim() ?? "";
+  const persistedVersionId = input.persistedVersionId?.trim() ?? "";
+  if (
+    input.persistedDetailDomain === input.domain &&
+    persistedPlanId !== "" &&
+    persistedVersionId !== ""
+  ) {
+    return { trainingPlanId: persistedPlanId, versionId: persistedVersionId };
+  }
+
+  const latestDraftPlanId = input.latestDraftPlanId?.trim() ?? "";
+  const latestDraftVersionId = input.latestDraftVersionId?.trim() ?? "";
+  if (
+    input.latestDraftDomain === input.domain &&
+    latestDraftPlanId !== "" &&
+    latestDraftVersionId !== ""
+  ) {
+    return { trainingPlanId: latestDraftPlanId, versionId: latestDraftVersionId };
+  }
+
+  return null;
+}
+
+export function shouldRenderWorkspaceDomainPlanContent(input: {
+  shell: TrainingPlanPageShell;
+  clickedDomain: TrainingPlanGenerationDomain;
+  detailDomain: TrainingPlanGenerationDomain | null;
+  hasDetail: boolean;
+}): boolean {
+  return (
+    input.shell === "head_coach_function_aware" &&
+    input.hasDetail &&
+    input.detailDomain === input.clickedDomain
+  );
+}
+
+export function shouldRenderPersistedDetailForDomain(input: {
+  detailDomain: TrainingPlanGenerationDomain | null;
+  renderedDomain: TrainingPlanGenerationDomain | null;
+  hasDetail: boolean;
+}): boolean {
+  return (
+    input.hasDetail &&
+    input.detailDomain !== null &&
+    input.renderedDomain !== null &&
+    input.detailDomain === input.renderedDomain
+  );
 }
 
 function draftSessionTitleLabel(domain: TrainingPlanGenerationDomain | null | undefined): string {
@@ -3174,6 +3781,8 @@ export function CoachAthletePlanningProfileView({
   >("idle");
   const [latestSkillsDraftMissing, setLatestSkillsDraftMissing] = useState(false);
   const [latestSkillsDraftError, setLatestSkillsDraftError] = useState<string | null>(null);
+  const [latestSkillsDraftErrorDomain, setLatestSkillsDraftErrorDomain] =
+    useState<TrainingPlanGenerationDomain | null>(null);
   const [upstreamPlanningContext, setUpstreamPlanningContext] =
     useState<CoachAthleteUpstreamPlanningContext | null>(null);
   const [upstreamPlanningContextLoading, setUpstreamPlanningContextLoading] = useState(false);
@@ -3181,8 +3790,10 @@ export function CoachAthletePlanningProfileView({
     useState<string | null>(null);
   const [workspace, setWorkspace] = useState<TrainingPlanWorkspace | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRefreshGenRef = useRef(0);
+  const workspaceHasLoadedRef = useRef(false);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
 
@@ -3228,6 +3839,8 @@ export function CoachAthletePlanningProfileView({
   const [persistedSkillsPlanError, setPersistedSkillsPlanError] = useState<string | null>(
     null,
   );
+  const [persistedPlanErrorDomain, setPersistedPlanErrorDomain] =
+    useState<TrainingPlanGenerationDomain | null>(null);
   const [persistedSkillsPlanDetail, setPersistedSkillsPlanDetail] =
     useState<CoachPersistedTrainingPlanActiveDetail | null>(null);
   const persistedPlanVersionIdDep = persistedSkillsPlanDetail?.version.id ?? null;
@@ -3389,6 +4002,31 @@ export function CoachAthletePlanningProfileView({
     trainingPlanShellOwnership.planningContextShellOwner === "head_coach" ||
     trainingPlanShellOwnership.planningContextShellOwner === "skills_coach";
   const allowedGenerationDomains = useMemo(() => {
+    const mergeLegacyAssignedDomains = (): TrainingPlanGenerationDomain[] => {
+      const fromCoach = coachAssignedGenerationDomains;
+      if (isHeadCoachPlanningContextOwner) {
+        return fromCoach;
+      }
+      const merged = new Set<TrainingPlanGenerationDomain>();
+      for (const domain of fromCoach) {
+        merged.add(domain);
+      }
+      for (const domain of deriveGenerationDomains(
+        assignedAthletePlanOwnership?.assignedFunctions ?? [],
+      )) {
+        merged.add(domain);
+      }
+      const rowDomain = assignedAthletePlanOwnership?.currentGenerationDomain;
+      if (rowDomain) merged.add(rowDomain);
+      return GENERATION_DOMAIN_ORDER.filter((domain) => merged.has(domain));
+    };
+
+    const legacyDomains = mergeLegacyAssignedDomains();
+
+    if (!isHeadCoachPlanningContextOwner) {
+      return legacyDomains;
+    }
+
     if (workspace) {
       const fromWorkspace = workspaceResolvableGenerationDomains(workspace);
       if (fromWorkspace.length > 0) {
@@ -3399,22 +4037,7 @@ export function CoachAthletePlanningProfileView({
         return [currentDomain];
       }
     }
-    const fromCoach = coachAssignedGenerationDomains;
-    if (isHeadCoachPlanningContextOwner) {
-      return fromCoach;
-    }
-    const merged = new Set<TrainingPlanGenerationDomain>();
-    for (const domain of fromCoach) {
-      merged.add(domain);
-    }
-    for (const domain of deriveGenerationDomains(
-      assignedAthletePlanOwnership?.assignedFunctions ?? [],
-    )) {
-      merged.add(domain);
-    }
-    const rowDomain = assignedAthletePlanOwnership?.currentGenerationDomain;
-    if (rowDomain) merged.add(rowDomain);
-    return GENERATION_DOMAIN_ORDER.filter((domain) => merged.has(domain));
+    return legacyDomains;
   }, [
     assignedAthletePlanOwnership,
     coachAssignedGenerationDomains,
@@ -3433,13 +4056,30 @@ export function CoachAthletePlanningProfileView({
     ],
   );
   const currentCoachGenerationDomain = useMemo((): TrainingPlanGenerationDomain | null => {
+    if (!isHeadCoachPlanningContextOwner) {
+      const rowDomain = assignedAthletePlanOwnership?.currentGenerationDomain;
+      if (rowDomain && allowedGenerationDomains.includes(rowDomain)) {
+        return rowDomain;
+      }
+      const fromAssignment = derivePrimaryCoachPlanDomain(
+        assignedAthletePlanOwnership?.assignedFunctions ?? [],
+      );
+      if (
+        fromAssignment !== null &&
+        allowedGenerationDomains.includes(fromAssignment)
+      ) {
+        return fromAssignment;
+      }
+      return allowedGenerationDomains[0] ?? null;
+    }
+
     const workspaceDomain = workspace
       ? parseWorkspaceCurrentDomain(workspace.currentDomain)
       : null;
     if (workspaceDomain) {
       return workspaceDomain;
     }
-    if (isHeadCoachPlanningContextOwner && coachAssignedGenerationDomains.length === 0) {
+    if (coachAssignedGenerationDomains.length === 0) {
       return null;
     }
     const rowDomain = assignedAthletePlanOwnership?.currentGenerationDomain;
@@ -3637,7 +4277,9 @@ export function CoachAthletePlanningProfileView({
     };
   }, [accessGateReady, athleteIdTrimmed, entityId]);
 
-  const refreshTrainingPlanWorkspace = useCallback(async (): Promise<boolean> => {
+  const refreshTrainingPlanWorkspace = useCallback(async (
+    options?: { background?: boolean },
+  ): Promise<boolean> => {
     if (!accessGateReady) {
       return false;
     }
@@ -3646,14 +4288,24 @@ export function CoachAthletePlanningProfileView({
       setWorkspace(null);
       setWorkspaceError(null);
       setWorkspaceLoading(false);
+      setWorkspaceRefreshing(false);
+      workspaceHasLoadedRef.current = false;
       return false;
     }
+
+    const background = options?.background ?? workspaceHasLoadedRef.current;
 
     workspaceRefreshGenRef.current += 1;
     const requestGeneration = workspaceRefreshGenRef.current;
 
-    setWorkspaceLoading(true);
-    setWorkspaceError(null);
+    if (background) {
+      setWorkspaceRefreshing(true);
+    } else {
+      setWorkspaceLoading(true);
+    }
+    if (!background) {
+      setWorkspaceError(null);
+    }
 
     try {
       const data = await getTrainingPlanWorkspace(entityId, athleteIdTrimmed);
@@ -3661,12 +4313,16 @@ export function CoachAthletePlanningProfileView({
         return false;
       }
       setWorkspace(data);
+      workspaceHasLoadedRef.current = true;
+      setWorkspaceError(null);
       return true;
     } catch (e) {
       if (workspaceRefreshGenRef.current !== requestGeneration) {
         return false;
       }
-      setWorkspace(null);
+      if (!background) {
+        setWorkspace(null);
+      }
       setWorkspaceError(
         formatApiError(
           e,
@@ -3676,15 +4332,21 @@ export function CoachAthletePlanningProfileView({
       return false;
     } finally {
       if (workspaceRefreshGenRef.current === requestGeneration) {
-        setWorkspaceLoading(false);
+        if (background) {
+          setWorkspaceRefreshing(false);
+        } else {
+          setWorkspaceLoading(false);
+        }
       }
     }
   }, [accessGateReady, athleteIdTrimmed, entityId]);
 
   useEffect(() => {
-    void refreshTrainingPlanWorkspace();
+    void refreshTrainingPlanWorkspace({ background: false });
     return () => {
       workspaceRefreshGenRef.current += 1;
+      setWorkspaceLoading(false);
+      setWorkspaceRefreshing(false);
     };
   }, [refreshTrainingPlanWorkspace]);
 
@@ -4428,9 +5090,14 @@ export function CoachAthletePlanningProfileView({
     isNoHeadCoachDirectReleaseWorkflow &&
     resolveNoHeadCoachDirectReleaseLockedPlanningContext(upstreamPlanningContext);
   const effectiveDownstreamPlanningContextLocked =
-    isNoHeadCoachDirectReleaseWorkflow && isDownstreamDomainCoach
-      ? noHeadCoachDirectReleasePlanningContextLocked
-      : upstreamContextLockedForDownstream;
+    resolveEffectiveDownstreamPlanningContextLocked({
+      workspace,
+      noHeadCoachDirectReleaseLocked:
+        isNoHeadCoachDirectReleaseWorkflow &&
+        isDownstreamDomainCoach &&
+        noHeadCoachDirectReleasePlanningContextLocked,
+      upstreamContextLockedForDownstream,
+    });
   const identityBootstrapReady =
     accessGateReady &&
     currentCoachUserId.trim() !== "" &&
@@ -4465,21 +5132,30 @@ export function CoachAthletePlanningProfileView({
         : clientHasSubmittedDomainPlans,
     [clientHasSubmittedDomainPlans, workspace],
   );
+  const legacyPlanningContextLocked = useMemo(
+    () =>
+      resolveLegacyPlanningContextLocked({
+        hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+        upstreamPlanningContextLocked:
+          upstreamPlanningContext?.planningContextLocked === true,
+        upstreamPlanningContextUpstreamLocked:
+          upstreamPlanningContext?.upstreamPlanningContextLocked === true,
+        clientHasSubmittedDomainPlans,
+      }),
+    [
+      clientHasSubmittedDomainPlans,
+      setupState.hasHeadCoachConfigured,
+      upstreamPlanningContext?.planningContextLocked,
+      upstreamPlanningContext?.upstreamPlanningContextLocked,
+    ],
+  );
   const planningContextLocked = useMemo(
     () =>
-      workspace
-        ? workspacePlanningContextLocked(workspace)
-        : setupState.hasHeadCoachConfigured
-          ? upstreamPlanningContext?.planningContextLocked === true ||
-            hasSubmittedDomainPlans
-          : upstreamPlanningContext?.planningContextLocked === true ||
-            upstreamPlanningContext?.upstreamPlanningContextLocked === true,
-    [
-      hasSubmittedDomainPlans,
-      setupState.hasHeadCoachConfigured,
-      upstreamPlanningContext,
-      workspace,
-    ],
+      resolvePlanningContextLocked({
+        legacyLocked: legacyPlanningContextLocked,
+        workspace,
+      }),
+    [legacyPlanningContextLocked, workspace],
   );
   const effectiveSkillsPlanningContextLocked =
     trainingPlanShellOwnership.planningContextShellOwner === "skills_coach" &&
@@ -4560,19 +5236,18 @@ export function CoachAthletePlanningProfileView({
       setupState.trainingPlanReleaseMode,
     ],
   );
-  const workspaceFetchState = useMemo(() => {
-    if (workspaceLoading) return "loading" as const;
-    if (workspaceError) return "error" as const;
-    if (workspace) return "ready" as const;
-    return "idle" as const;
-  }, [workspace, workspaceError, workspaceLoading]);
   const trainingPlanWorkflowMode = useMemo(() => {
-    if (workspaceFetchState === "ready" && workspace) {
+    if (workspace) {
       const fromWorkspace = resolveWorkflowModeFromWorkspace(workspace);
+      logTrainingPlanWorkspaceShellDiagnostic({
+        label: "before shell selection",
+        workspace,
+        selectedShell: fromWorkspace,
+      });
       if (fromWorkspace) return fromWorkspace;
     }
     return clientTrainingPlanWorkflowMode;
-  }, [clientTrainingPlanWorkflowMode, workspace, workspaceFetchState]);
+  }, [clientTrainingPlanWorkflowMode, workspace]);
   const trainingPlanPageModel = resolveTrainingPlanPageBootstrapModel({
     identityReady: identityBootstrapReady,
     assignmentReady: assignmentBootstrapReady,
@@ -4582,17 +5257,141 @@ export function CoachAthletePlanningProfileView({
     submittedDomainPlansRequired: submittedDomainPlansRequiredForBootstrap,
     submittedDomainPlansLoadState: submittedDomainPlansBootstrapState,
   });
+  const hasRenderableWorkflowFallback = useMemo(
+    () =>
+      identityBootstrapReady &&
+      assignmentBootstrapReady &&
+      !setupLoading &&
+      profile !== null,
+    [
+      assignmentBootstrapReady,
+      identityBootstrapReady,
+      profile,
+      setupLoading,
+    ],
+  );
+  const fallbackWorkflowShell = useMemo((): TrainingPlanPageShell | null => {
+    if (!hasRenderableWorkflowFallback) return null;
+    if (clientTrainingPlanWorkflowMode !== "loading") {
+      return clientTrainingPlanWorkflowMode;
+    }
+    if (isHeadCoachPlanningContextOwner) {
+      return planningContextLocked || hasSubmittedDomainPlans
+        ? "head_coach_review"
+        : "head_coach_planning";
+    }
+    if (allowedGenerationDomains.length > 0) {
+      return "specialist_domain";
+    }
+    if (trainingPlanShellReleaseMode === "direct_release") {
+      return "skills_coach_planning";
+    }
+    return null;
+  }, [
+    allowedGenerationDomains.length,
+    clientTrainingPlanWorkflowMode,
+    hasRenderableWorkflowFallback,
+    hasSubmittedDomainPlans,
+    isHeadCoachPlanningContextOwner,
+    planningContextLocked,
+    trainingPlanShellReleaseMode,
+  ]);
+  const trainingPlanShellModel = useMemo((): TrainingPlanPageBootstrapModel => {
+    if (trainingPlanPageModel.ready) {
+      return trainingPlanPageModel;
+    }
+    if (workspace) {
+      const mode = trainingPlanWorkflowMode;
+      if (mode !== "loading") {
+        return {
+          ready: true,
+          shell: mode,
+          workflowMode: mode,
+          waitingFor: null,
+        };
+      }
+    }
+    if (fallbackWorkflowShell) {
+      return {
+        ready: true,
+        shell: fallbackWorkflowShell,
+        workflowMode: fallbackWorkflowShell,
+        waitingFor: null,
+      };
+    }
+    return trainingPlanPageModel;
+  }, [
+    fallbackWorkflowShell,
+    trainingPlanPageModel,
+    trainingPlanWorkflowMode,
+    workspace,
+  ]);
   useEffect(() => {
-    if (loading || !trainingPlanPageModel.ready) return;
+    if (!workspace) return;
+    logTrainingPlanWorkspaceShellDiagnostic({
+      label: "rendered Step 6 shell branch",
+      workspace,
+      selectedShell: trainingPlanShellModel.shell,
+      renderedBranch: trainingPlanRenderedShellBranchName(trainingPlanShellModel.shell),
+    });
+  }, [trainingPlanShellModel.shell, workspace]);
+  useEffect(() => {
+    logTrainingPlanDomainDetailDiagnostic({
+      currentDomain: currentCoachGenerationDomain,
+      workspace,
+      renderedPlanDomain: persistedVerifiedDomain,
+      requestedDetailDomain: persistedVerifiedDomain,
+      trainingPlanId: persistedSkillsPlanDetail?.plan.id?.trim() ?? null,
+      versionId: persistedSkillsPlanDetail?.version.id?.trim() ?? null,
+      loadStatus: persistedSkillsPlanLoading
+        ? "loading"
+        : persistedSkillsPlanDetail !== null
+          ? "loaded"
+          : persistedSkillsPlanError !== null
+            ? "error"
+            : "idle",
+      loadError: persistedSkillsPlanError,
+      rendererBranch: trainingPlanRenderedShellBranchName(trainingPlanShellModel.shell),
+    });
+  }, [
+    currentCoachGenerationDomain,
+    persistedSkillsPlanDetail,
+    persistedSkillsPlanError,
+    persistedSkillsPlanLoading,
+    persistedVerifiedDomain,
+    trainingPlanShellModel.shell,
+    workspace,
+  ]);
+  const shouldShowBlockingWorkspaceLoading = useMemo(
+    () =>
+      shouldBlockWorkflowRenderForWorkspace({
+        workspaceLoading,
+        workspaceRefreshing,
+        workspace,
+        isHeadCoachPlanningContextOwner,
+        planningContextLocked,
+        hasRenderableWorkflowFallback,
+      }),
+    [
+      hasRenderableWorkflowFallback,
+      isHeadCoachPlanningContextOwner,
+      planningContextLocked,
+      workspace,
+      workspaceLoading,
+      workspaceRefreshing,
+    ],
+  );
+  useEffect(() => {
+    if (loading || !trainingPlanShellModel.ready) return;
     markPageReady();
-  }, [loading, markPageReady, trainingPlanPageModel.ready]);
+  }, [loading, markPageReady, trainingPlanShellModel.ready]);
   const headCoachReviewMode =
-    trainingPlanPageModel.shell === "head_coach_review" ||
-    trainingPlanPageModel.shell === "head_coach_function_aware";
+    trainingPlanShellModel.shell === "head_coach_review" ||
+    trainingPlanShellModel.shell === "head_coach_function_aware";
   const headCoachFunctionAwareMode =
-    trainingPlanPageModel.shell === "head_coach_function_aware";
+    trainingPlanShellModel.shell === "head_coach_function_aware";
   const shouldResolveSpecialistDomainWorkspace =
-    trainingPlanPageModel.shell === "specialist_domain";
+    trainingPlanShellModel.shell === "specialist_domain";
   const shouldForceAssistantDomainWorkspace = shouldResolveSpecialistDomainWorkspace;
   const specialistDomainResolutionPending =
     shouldResolveSpecialistDomainWorkspace && currentCoachGenerationDomain === null;
@@ -4603,13 +5402,26 @@ export function CoachAthletePlanningProfileView({
   /** Specialist/domain coaches always get the domain workspace shell; lock state gates create/actions inside. */
   const shouldRenderAssistantDomainWorkspace = shouldForceAssistantDomainWorkspace;
   const workflowViewSelectionLoading =
-    !trainingPlanPageModel.ready ||
-    specialistDomainResolutionPending ||
-    (shouldResolveSpecialistDomainWorkspace &&
+    shouldShowBlockingWorkspaceLoading ||
+    (
+      !trainingPlanShellModel.ready &&
+      !workspace &&
+      !hasRenderableWorkflowFallback
+    ) ||
+    (
+      specialistDomainResolutionPending &&
+      !workspace &&
+      !hasRenderableWorkflowFallback
+    ) ||
+    (
+      shouldResolveSpecialistDomainWorkspace &&
+      !workspace &&
+      !hasRenderableWorkflowFallback &&
       (
         upstreamPlanningContextLoading ||
         (upstreamPlanningContext === null && upstreamPlanningContextError === null)
-      ));
+      )
+    );
   const effectiveCoachGenerationDomain =
     currentCoachGenerationDomain ?? readinessGenerationDomain;
   const persistedPlanQueryDomain = useMemo<TrainingPlanGenerationDomain | null>(() => {
@@ -4898,7 +5710,9 @@ export function CoachAthletePlanningProfileView({
     requestedPlanId !== null ? persistedTrainingDaysCount : draftTrainingDaysCount;
   const assistantPlanDiscoveryLoading = useMemo(() => {
     if (!shouldRenderAssistantDomainWorkspace) return false;
-    if (upstreamPlanningContextLoading) return true;
+    if (upstreamPlanningContextLoading && !effectiveDownstreamPlanningContextLocked) {
+      return true;
+    }
     if (latestSkillsDraftRequestState === "idle" || latestSkillsDraftRequestState === "loading") {
       return true;
     }
@@ -4906,6 +5720,7 @@ export function CoachAthletePlanningProfileView({
     return false;
   }, [
     assistantDomainSummaryHydrationPending,
+    effectiveDownstreamPlanningContextLocked,
     latestSkillsDraftRequestState,
     shouldRenderAssistantDomainWorkspace,
     upstreamPlanningContextLoading,
@@ -4943,6 +5758,15 @@ export function CoachAthletePlanningProfileView({
   const assistantDomainWorkflowStatus = useMemo(
     () => {
       if (assistantPlanDiscoveryLoading) return "not_created";
+      if (workspace !== null && currentCoachGenerationDomain !== null) {
+        const summary = workspace.domains[currentCoachGenerationDomain].summary;
+        const workspacePlanId = summary.trainingPlanId?.trim() ?? "";
+        const workspaceVersionId = summary.versionId?.trim() ?? "";
+        if (workspacePlanId === "" || workspaceVersionId === "") {
+          return "not_created";
+        }
+        return deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[currentCoachGenerationDomain]);
+      }
       return (
       deriveAssistantDomainWorkflowStatus({
         latestDraft: latestDraftMatchesCurrentDomain ? latestSkillsDraft : null,
@@ -4952,10 +5776,12 @@ export function CoachAthletePlanningProfileView({
     },
     [
       assistantPlanDiscoveryLoading,
+      currentCoachGenerationDomain,
       latestDraftMatchesCurrentDomain,
       latestSkillsDraft,
       persistedDetailMatchesCurrentDomain,
       persistedSkillsPlanDetail,
+      workspace,
     ],
   );
   const hasExistingCurrentDomainPlan =
@@ -5030,11 +5856,10 @@ export function CoachAthletePlanningProfileView({
     [latestDraftMatchesCurrentDomain, latestSkillsDraft],
   );
   const assistantDomainShowSubmitAction = useMemo(
-    () => {
-      if (workspace) {
-        return workspaceShowsDomainSubmitReview(workspace, currentCoachGenerationDomain);
-      }
-      return canShowAssistantDomainSubmitReview({
+    () =>
+      resolveAssistantDomainSubmitActionVisible({
+        workspace,
+        currentDomain: currentCoachGenerationDomain,
         discoveryLoading: assistantPlanDiscoveryLoading,
         governedDetailRefreshing: assistantGovernedDetailRefreshing,
         hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
@@ -5044,9 +5869,7 @@ export function CoachAthletePlanningProfileView({
             ? persistedGovernedPlanContext
             : null,
         latestDraft: assistantVisibleDraftForSubmit,
-        currentDomain: currentCoachGenerationDomain,
-      });
-    },
+      }),
     [
       assistantGovernedDetailRefreshing,
       assistantPlanDiscoveryLoading,
@@ -5226,111 +6049,64 @@ export function CoachAthletePlanningProfileView({
     Boolean(latestSkillsDraft?.revision?.changeSummary?.length);
   const isHeadCoachRevisionRequested = assistantDomainWorkflowStatus === "revision_requested";
   const skillsReviseIds = useMemo(() => {
-    const persistedPlanIdRaw = persistedSkillsPlanDetail?.plan?.id ?? null;
-    const persistedPlanId =
-      typeof persistedPlanIdRaw === "string"
-        ? persistedPlanIdRaw.trim()
-        : persistedPlanIdRaw !== null && persistedPlanIdRaw !== undefined
-          ? String(persistedPlanIdRaw).trim()
-          : "";
-    const persistedVersionIdRaw = persistedSkillsPlanDetail?.version?.id ?? null;
-    const persistedVersionId =
-      typeof persistedVersionIdRaw === "string"
-        ? persistedVersionIdRaw.trim()
-        : persistedVersionIdRaw !== null && persistedVersionIdRaw !== undefined
-          ? String(persistedVersionIdRaw).trim()
-          : "";
-    const isViewingPersistedSkills =
-      requestedPlanId !== null &&
-      persistedPlanDisplayDomain === "SKILLS" &&
-      persistedPlanId !== "" &&
-      requestedPlanId.trim() === persistedPlanId;
-
-    if (isViewingPersistedSkills && persistedVersionId !== "") {
-      return {
-        trainingPlanId: persistedPlanId,
-        versionId: persistedVersionId,
-      };
-    }
-
-    const draftPlanId = latestSkillsDraft?.trainingPlanId?.trim() ?? "";
-    const draftVersionId = latestSkillsDraft?.trainingPlanVersionId?.trim() ?? "";
-    if (draftPlanId !== "" && draftVersionId !== "") {
-      return { trainingPlanId: draftPlanId, versionId: draftVersionId };
-    }
-
-    if (
-      persistedPlanDisplayDomain === "SKILLS" &&
-      persistedPlanId !== "" &&
-      persistedVersionId !== ""
-    ) {
-      return { trainingPlanId: persistedPlanId, versionId: persistedVersionId };
-    }
-
-    return null;
-  }, [
-    latestSkillsDraft?.trainingPlanId,
-    latestSkillsDraft?.trainingPlanVersionId,
-    persistedPlanDisplayDomain,
-    persistedSkillsPlanDetail?.plan?.id,
-    persistedSkillsPlanDetail?.version?.id,
-    requestedPlanId,
-  ]);
-  const nutritionReviseIds = useMemo(() => {
-    const persistedPlanIdRaw = persistedSkillsPlanDetail?.plan?.id ?? null;
-    const persistedPlanId =
-      typeof persistedPlanIdRaw === "string"
-        ? persistedPlanIdRaw.trim()
-        : persistedPlanIdRaw !== null && persistedPlanIdRaw !== undefined
-          ? String(persistedPlanIdRaw).trim()
-          : "";
-    const persistedVersionIdRaw = persistedSkillsPlanDetail?.version?.id ?? null;
-    const persistedVersionId =
-      typeof persistedVersionIdRaw === "string"
-        ? persistedVersionIdRaw.trim()
-        : persistedVersionIdRaw !== null && persistedVersionIdRaw !== undefined
-          ? String(persistedVersionIdRaw).trim()
-          : "";
-    const isViewingPersistedNutrition =
-      requestedPlanId !== null &&
-      persistedPlanDisplayDomain === "NUTRITION" &&
-      persistedPlanId !== "" &&
-      requestedPlanId.trim() === persistedPlanId;
-
-    if (isViewingPersistedNutrition && persistedVersionId !== "") {
-      return {
-        trainingPlanId: persistedPlanId,
-        versionId: persistedVersionId,
-      };
-    }
-
-    const draftPlanId = latestSkillsDraft?.trainingPlanId?.trim() ?? "";
-    const draftVersionId = latestSkillsDraft?.trainingPlanVersionId?.trim() ?? "";
-    if (
-      latestDraftDisplayDomain === "NUTRITION" &&
-      draftPlanId !== "" &&
-      draftVersionId !== ""
-    ) {
-      return { trainingPlanId: draftPlanId, versionId: draftVersionId };
-    }
-
-    if (
-      persistedPlanDisplayDomain === "NUTRITION" &&
-      persistedPlanId !== "" &&
-      persistedVersionId !== ""
-    ) {
-      return { trainingPlanId: persistedPlanId, versionId: persistedVersionId };
-    }
-
-    return null;
+    return resolveDomainRevisePlanIds({
+      domain: "SKILLS",
+      workspace,
+      persistedDetailDomain,
+      persistedPlanId: persistedSkillsPlanDetail?.plan?.id,
+      persistedVersionId: persistedSkillsPlanDetail?.version?.id,
+      latestDraftDomain: latestDraftDisplayDomain,
+      latestDraftPlanId: latestSkillsDraft?.trainingPlanId,
+      latestDraftVersionId: latestSkillsDraft?.trainingPlanVersionId,
+    });
   }, [
     latestDraftDisplayDomain,
     latestSkillsDraft?.trainingPlanId,
     latestSkillsDraft?.trainingPlanVersionId,
-    persistedPlanDisplayDomain,
+    persistedDetailDomain,
     persistedSkillsPlanDetail?.plan?.id,
     persistedSkillsPlanDetail?.version?.id,
-    requestedPlanId,
+    workspace,
+  ]);
+  const nutritionReviseIds = useMemo(() => {
+    return resolveDomainRevisePlanIds({
+      domain: "NUTRITION",
+      workspace,
+      persistedDetailDomain,
+      persistedPlanId: persistedSkillsPlanDetail?.plan?.id,
+      persistedVersionId: persistedSkillsPlanDetail?.version?.id,
+      latestDraftDomain: latestDraftDisplayDomain,
+      latestDraftPlanId: latestSkillsDraft?.trainingPlanId,
+      latestDraftVersionId: latestSkillsDraft?.trainingPlanVersionId,
+    });
+  }, [
+    latestDraftDisplayDomain,
+    latestSkillsDraft?.trainingPlanId,
+    latestSkillsDraft?.trainingPlanVersionId,
+    persistedDetailDomain,
+    persistedSkillsPlanDetail?.plan?.id,
+    persistedSkillsPlanDetail?.version?.id,
+    workspace,
+  ]);
+  const sandCReviseIds = useMemo(() => {
+    return resolveDomainRevisePlanIds({
+      domain: "S_AND_C",
+      workspace,
+      persistedDetailDomain,
+      persistedPlanId: persistedSkillsPlanDetail?.plan?.id,
+      persistedVersionId: persistedSkillsPlanDetail?.version?.id,
+      latestDraftDomain: latestDraftDisplayDomain,
+      latestDraftPlanId: latestSkillsDraft?.trainingPlanId,
+      latestDraftVersionId: latestSkillsDraft?.trainingPlanVersionId,
+    });
+  }, [
+    latestDraftDisplayDomain,
+    latestSkillsDraft?.trainingPlanId,
+    latestSkillsDraft?.trainingPlanVersionId,
+    persistedDetailDomain,
+    persistedSkillsPlanDetail?.plan?.id,
+    persistedSkillsPlanDetail?.version?.id,
+    workspace,
   ]);
   const showValidateLevel = useMemo(
     () =>
@@ -5427,31 +6203,64 @@ export function CoachAthletePlanningProfileView({
         ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
         : null;
     };
+    const usesLockedDownstreamContextForDomain = (
+      domain: TrainingPlanGenerationDomain,
+    ): boolean =>
+      shouldUseLockedDownstreamGenerationContext({
+        hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+        isHeadCoachPlanningContextOwner,
+        domain,
+        effectiveDownstreamPlanningContextLocked,
+      });
+    const workspacePlanningContext = workspace?.planningContext ?? null;
+    const workspaceLockedPlanningContext = workspacePlanningContext?.locked === true;
+    const lockedGoalIds = readLockedWorkspaceGoalIds({
+      selectedGoalsSnapshot: workspacePlanningContext?.selectedGoalsSnapshot,
+      athletePlanningContextSnapshot:
+        workspacePlanningContext?.athletePlanningContextSnapshot,
+      goalIds: workspacePlanningContext?.goalIds,
+      lockedGoalIds: workspacePlanningContext?.lockedGoalIds,
+      fallbackGoalIds:
+        upstreamPlanningContext?.planningContext.lockedGoalIds ??
+        upstreamPlanningContext?.planningContext.goalIds ??
+        upstreamPlanningContext?.goalIds ??
+        [],
+    });
+    const lockedGoalCount = lockedGoalIds.filter(
+      (goalId) => typeof goalId === "string" && goalId.trim() !== "",
+    ).length;
+    const lockedSeasonCycleId = trimmedNonEmpty(
+      workspacePlanningContext?.selectedSeasonCycleId,
+      workspacePlanningContext?.seasonCycleId,
+      workspacePlanningContext?.selectedSeasonId,
+      workspacePlanningContext?.seasonId,
+      assistantLockedUpstreamDerived.lockedSeasonCycleId,
+    );
+    const lockedPlanWindowStart = trimmedNonEmpty(
+      workspacePlanningContext?.planStartDate,
+      workspacePlanningContext?.startDate,
+      assistantLockedUpstreamDerived.lockedPlanWindowStart,
+    );
+    const lockedPlanWindowEnd = trimmedNonEmpty(
+      workspacePlanningContext?.planEndDate,
+      workspacePlanningContext?.endDate,
+      assistantLockedUpstreamDerived.lockedPlanWindowEnd,
+    );
+    const lockedSportCode = assistantLockedUpstreamDerived.lockedSportCode;
 
     if (requiresPlanningContextLockForGeneration) {
-      if (upstreamPlanningContextLoading) {
-        return Object.fromEntries(
-          allowedGenerationDomains.map((domain) => {
-            const blocked = ownershipErrorForDomain(domain);
-            return [
-              domain,
-              blocked ?? "Loading upstream planning context.",
-            ] as const;
-          }),
-        ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
-      }
-      if (upstreamPlanningContextError !== null) {
-        return Object.fromEntries(
-          allowedGenerationDomains.map((domain) => {
-            const blocked = ownershipErrorForDomain(domain);
-            return [domain, blocked ?? upstreamPlanningContextError] as const;
-          }),
-        ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
-      }
       return Object.fromEntries(
         allowedGenerationDomains.map((domain) => {
           const blocked = ownershipErrorForDomain(domain);
           if (blocked !== null) return [domain, blocked] as const;
+          if (!effectiveDownstreamPlanningContextLocked) {
+            if (upstreamPlanningContextLoading) {
+              return [domain, "Loading upstream planning context."] as const;
+            }
+            if (upstreamPlanningContextError !== null) {
+              return [domain, upstreamPlanningContextError] as const;
+            }
+          }
           if (
             isCreatePlanBlockedByPlanningContextLock({
               domain,
@@ -5469,18 +6278,23 @@ export function CoachAthletePlanningProfileView({
     }
     if (isDownstreamDomainCoach && allowedGenerationDomains.length === 1) {
       const only = allowedGenerationDomains[0];
-      const ownBlock = ownershipErrorForDomain(only);
+      const ownershipFlags = resolveOwnershipFlagsForDomain(only);
+      const ownBlock = planOwnershipLoading
+        ? "Loading plan generation permissions."
+        : isPlanGenerationBlockedByOwnership(ownershipFlags)
+          ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
+          : null;
       if (ownBlock !== null) {
         return { [only]: ownBlock } as Partial<
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
-      if (upstreamPlanningContextLoading) {
+      if (!effectiveDownstreamPlanningContextLocked && upstreamPlanningContextLoading) {
         return { [only]: "Loading upstream planning context." } as Partial<
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
-      if (upstreamPlanningContextError !== null) {
+      if (!effectiveDownstreamPlanningContextLocked && upstreamPlanningContextError !== null) {
         return { [only]: upstreamPlanningContextError } as Partial<
           Record<TrainingPlanGenerationDomain, string | null>
         >;
@@ -5503,39 +6317,116 @@ export function CoachAthletePlanningProfileView({
           Record<TrainingPlanGenerationDomain, string | null>
         >;
       }
+      const shouldUseLockedPlanningContextForGeneration =
+        usesLockedDownstreamContextForDomain(only);
+      const canUseLockedPlanningContextForGeneration =
+        canGenerateFromLockedPlanningContextForDomain({
+          domain: only,
+          effectiveDownstreamPlanningContextLocked,
+          ownershipFlags,
+          lockedSeasonCycleId,
+          lockedPlanWindowStart,
+          lockedPlanWindowEnd,
+          lockedSportCode,
+        });
+      if (shouldUseLockedPlanningContextForGeneration) {
+        const effectiveDurationDays = generationDurationDaysForDomain(only, durationDays);
+        const effectivePlanEndDate = addDaysToDateString(
+          planStartDate,
+          effectiveDurationDays - 1,
+        );
+        return {
+          [only]: resolveGeneratePlanLocalError({
+            entityId,
+            athleteId: athleteIdTrimmed,
+            generationDomain: only,
+            selectedSeasonCycleId,
+            selectedGoalCount: lockedGoalCount,
+            sportCode: lockedSportCode,
+            selectedSeason,
+            currentPhase: activePhaseForSelectedSeason,
+            planStartDate,
+            planEndDate: effectivePlanEndDate,
+            canUseLockedPlanningContextForGeneration:
+              canUseLockedPlanningContextForGeneration ||
+              shouldUseLockedPlanningContextForGeneration,
+            lockedSeasonCycleId,
+            lockedPlanWindowStart,
+            lockedPlanWindowEnd,
+          }),
+        } as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
+      }
       return { [only]: null } as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
     }
     return Object.fromEntries(
       allowedGenerationDomains.map((domain) => {
-        const ownBlock = ownershipErrorForDomain(domain);
+        const ownershipFlags = resolveOwnershipFlagsForDomain(domain);
+        const ownBlock = planOwnershipLoading
+          ? "Loading plan generation permissions."
+          : isPlanGenerationBlockedByOwnership(ownershipFlags)
+            ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
+            : null;
         if (ownBlock !== null) {
           return [domain, ownBlock] as const;
         }
+        const canUseLockedPlanningContextForGeneration =
+          canGenerateFromLockedPlanningContextForDomain({
+            domain,
+            effectiveDownstreamPlanningContextLocked:
+              workspaceLockedPlanningContext || effectiveDownstreamPlanningContextLocked,
+            ownershipFlags,
+            lockedSeasonCycleId,
+            lockedPlanWindowStart,
+            lockedPlanWindowEnd,
+            lockedSportCode,
+          });
+        const shouldUseLockedPlanningContextForGeneration =
+          workspaceLockedPlanningContext || usesLockedDownstreamContextForDomain(domain);
         const effectiveDurationDays = generationDurationDaysForDomain(domain, durationDays);
         const effectivePlanEndDate = addDaysToDateString(
           planStartDate,
           effectiveDurationDays - 1,
         );
+        const blockerReason = resolveGeneratePlanLocalError({
+          entityId,
+          athleteId: athleteIdTrimmed,
+          generationDomain: domain,
+          selectedSeasonCycleId,
+          selectedGoalCount: shouldUseLockedPlanningContextForGeneration
+            ? lockedGoalCount
+            : selectedActiveGoals.length,
+          sportCode: shouldUseLockedPlanningContextForGeneration
+            ? lockedSportCode
+            : athleteSportCode,
+          selectedSeason,
+          currentPhase: activePhaseForSelectedSeason,
+          planStartDate,
+          planEndDate: effectivePlanEndDate,
+          canUseLockedPlanningContextForGeneration:
+            canUseLockedPlanningContextForGeneration ||
+            shouldUseLockedPlanningContextForGeneration,
+          lockedSeasonCycleId,
+          lockedPlanWindowStart,
+          lockedPlanWindowEnd,
+        });
+        logTrainingPlanGenerationBlockerDiagnostic({
+          workspacePlanningContext,
+          localSelectedGoalCount: selectedActiveGoals.length,
+          blockerReason,
+        });
         return [
           domain,
-          resolveGeneratePlanLocalError({
-            entityId,
-            athleteId: athleteIdTrimmed,
-            generationDomain: domain,
-            selectedSeasonCycleId,
-            selectedGoalCount: selectedActiveGoals.length,
-            sportCode: athleteSportCode,
-            selectedSeason,
-            currentPhase: activePhaseForSelectedSeason,
-            planStartDate,
-            planEndDate: effectivePlanEndDate,
-          }),
+          blockerReason,
         ] as const;
       }),
     ) as Partial<Record<TrainingPlanGenerationDomain, string | null>>;
   }, [
     activePhaseForSelectedSeason,
     allowedGenerationDomains,
+    assistantLockedUpstreamDerived.lockedPlanWindowEnd,
+    assistantLockedUpstreamDerived.lockedPlanWindowStart,
+    assistantLockedUpstreamDerived.lockedSeasonCycleId,
+    assistantLockedUpstreamDerived.lockedSportCode,
     athleteIdTrimmed,
     effectiveDownstreamPlanningContextLocked,
     athleteSportCode,
@@ -5552,8 +6443,12 @@ export function CoachAthletePlanningProfileView({
     selectedActiveGoals.length,
     selectedSeason,
     selectedSeasonCycleId,
+    upstreamPlanningContext?.goalIds,
+    upstreamPlanningContext?.planningContext.goalIds,
+    upstreamPlanningContext?.planningContext.lockedGoalIds,
     upstreamPlanningContextError,
     upstreamPlanningContextLoading,
+    workspace?.planningContext,
   ]);
 
   const skipMainReadinessForAssistantCreateGate = useMemo(
@@ -5581,23 +6476,38 @@ export function CoachAthletePlanningProfileView({
       currentCoachGenerationDomain === null
         ? null
         : (generatePlanJobsByDomain[currentCoachGenerationDomain] ?? null);
+    const generationJobRunning = isGenerationJobInProgress(domainJob);
+    const domain = currentCoachGenerationDomain;
+    const ownershipFlags =
+      domain === null
+        ? { canGeneratePlan: null, canGenerateCurrentDomainPlan: null }
+        : resolveOwnershipFlagsForDomain(domain);
+    if (
+      shouldUseWorkflow1SpecialistCreateGate({
+        hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+        isHeadCoachPlanningContextOwner,
+        domain,
+        effectiveDownstreamPlanningContextLocked,
+        ownershipFlags,
+      })
+    ) {
+      return resolveWorkflow1SpecialistCreateDisabled({
+        generationJobRunning,
+        planOwnershipLoading,
+      });
+    }
     const baseBusy =
       readinessLoading ||
       upstreamPlanningContextLoading ||
       workloadAssessmentLoading ||
-      domainJob?.status === "QUEUED" ||
-      domainJob?.status === "RUNNING" ||
+      generationJobRunning ||
       planOwnershipLoading;
-    const domain = currentCoachGenerationDomain;
     return isAssistantDomainGeneratePlanDisabled({
       domain,
       baseBusy,
       skipMainReadinessForGenerationGate: skipMainReadinessForAssistantCreateGate,
       generationReadinessFromApis,
-      ownershipFlags:
-        domain === null
-          ? { canGeneratePlan: null, canGenerateCurrentDomainPlan: null }
-          : resolveOwnershipFlagsForDomain(domain),
+      ownershipFlags,
       hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
       isHeadCoachPlanningContextOwner,
       planningContextLocked,
@@ -5680,12 +6590,56 @@ export function CoachAthletePlanningProfileView({
       }),
     [headCoachOwnedSkillsActiveDetail, headCoachOwnedSkillsDraft],
   );
-  const headCoachSkillsPlanExists = headCoachSkillsWorkflowStatus !== "not_created";
-  const headCoachSkillsResolvedPlanId = useMemo(() => {
+  const workspaceHeadCoachOwnsSkills = useMemo(
+    () => (workspace !== null ? workspaceHeadCoachOwnsSkillsForAthlete(workspace) : false),
+    [workspace],
+  );
+  const headCoachSkillsPlanExists = useMemo(() => {
+    if (workspace !== null) {
+      return deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS) !== "not_created";
+    }
+    return headCoachSkillsWorkflowStatus !== "not_created";
+  }, [headCoachSkillsWorkflowStatus, workspace]);
+  const workspaceHeadCoachSkillsCanCreate = useMemo(
+    () =>
+      workspace !== null
+        ? workspaceHeadCoachCanCreateSkillsPlan(workspace, headCoachSkillsPlanExists)
+        : false,
+    [headCoachSkillsPlanExists, workspace],
+  );
+  const headCoachSkillsFallbackPlanId = useMemo(() => {
     const fromDetail = headCoachOwnedSkillsActiveDetail?.plan.id?.trim() ?? "";
     if (fromDetail !== "") return fromDetail;
     return headCoachOwnedSkillsDraft?.trainingPlanId?.trim() ?? "";
   }, [headCoachOwnedSkillsActiveDetail?.plan.id, headCoachOwnedSkillsDraft?.trainingPlanId]);
+  const headCoachSkillsFallbackVersionId =
+    headCoachOwnedSkillsActiveDetail?.version.id?.trim() ??
+    headCoachOwnedSkillsDraft?.trainingPlanVersionId?.trim() ??
+    "";
+  const headCoachSkillsViewPlanContext = useMemo(
+    () =>
+      resolveWorkspaceDomainViewPlanContext({
+        workspace,
+        domain: "SKILLS",
+        fallbackPlanId: headCoachSkillsFallbackPlanId,
+        fallbackVersionId: headCoachSkillsFallbackVersionId,
+        fallbackStatus: headCoachSkillsWorkflowStatus,
+        fallbackSource:
+          headCoachOwnedSkillsActiveDetail !== null
+            ? "headCoachOwnedSkillsActiveDetail"
+            : headCoachOwnedSkillsDraft !== null
+              ? "headCoachOwnedSkillsDraft"
+              : undefined,
+      }),
+    [
+      headCoachOwnedSkillsActiveDetail,
+      headCoachOwnedSkillsDraft,
+      headCoachSkillsFallbackPlanId,
+      headCoachSkillsFallbackVersionId,
+      headCoachSkillsWorkflowStatus,
+      workspace,
+    ],
+  );
   const headCoachSkillsCreateVisible = useMemo(
     () => {
       if (workspace) {
@@ -5715,9 +6669,11 @@ export function CoachAthletePlanningProfileView({
       readinessLoading ||
       upstreamPlanningContextLoading ||
       workloadAssessmentLoading ||
-      skillsJob?.status === "QUEUED" ||
-      skillsJob?.status === "RUNNING" ||
+      isGenerationJobInProgress(skillsJob) ||
       planOwnershipLoading;
+    if (workspaceHeadCoachSkillsCanCreate) {
+      return baseBusy;
+    }
     return isGeneratePlanDisabledForDomain({
       domain: "SKILLS",
       baseBusy,
@@ -5739,6 +6695,7 @@ export function CoachAthletePlanningProfileView({
     setupState.hasHeadCoachConfigured,
     upstreamContextLockedForDownstream,
     upstreamPlanningContextLoading,
+    workspaceHeadCoachSkillsCanCreate,
     workloadAssessmentLoading,
   ]);
   const currentDomainGenerationJob = useMemo(
@@ -5749,10 +6706,8 @@ export function CoachAthletePlanningProfileView({
     [currentCoachGenerationDomain, generatePlanJobsByDomain],
   );
   const step6GenerationInProgress = useMemo(
-    () =>
-      currentDomainGenerationJob?.status === "QUEUED" ||
-      currentDomainGenerationJob?.status === "RUNNING",
-    [currentDomainGenerationJob?.status],
+    () => isGenerationJobInProgress(currentDomainGenerationJob),
+    [currentDomainGenerationJob],
   );
   const step6GenerationLifecyclePhase = useMemo(
     () =>
@@ -5825,7 +6780,7 @@ export function CoachAthletePlanningProfileView({
   const headCoachLockedContextStepComplete =
     headCoachReviewMode === true && planningContextLocked === true;
   const skillsCoachLockedContextStepComplete =
-    trainingPlanPageModel.shell === "skills_coach_planning" &&
+    trainingPlanShellModel.shell === "skills_coach_planning" &&
     effectiveSkillsPlanningContextLocked === true;
   const planningContextSetCase =
     headCoachLockedContextStepComplete === true ||
@@ -5994,6 +6949,9 @@ export function CoachAthletePlanningProfileView({
     if (!step6WorkflowOrchestrationActive) {
       return { kind: "inactive" as const };
     }
+    if (step6GenerationInProgress) {
+      return { kind: "generating" as const };
+    }
     const planId = resolvedWorkflowPlanId;
     const domain = resolvedWorkflowGenerationDomain;
     if (planId === "") {
@@ -6061,6 +7019,7 @@ export function CoachAthletePlanningProfileView({
     resolvedWorkflowGenerationDomain,
     resolvedWorkflowPlanId,
     setupLoading,
+    step6GenerationInProgress,
     step6WorkflowInternalError,
     step6WorkflowInternalLoading,
     step6WorkflowOrchestrationActive,
@@ -6096,6 +7055,9 @@ export function CoachAthletePlanningProfileView({
     setUpstreamPlanningContextLoading(false);
     setUpstreamPlanningContextError(null);
     workspaceRefreshGenRef.current += 1;
+    setWorkspaceLoading(false);
+    setWorkspaceRefreshing(false);
+    workspaceHasLoadedRef.current = false;
     setWorkspace(null);
     setWorkspaceLoading(false);
     setWorkspaceError(null);
@@ -6129,14 +7091,20 @@ export function CoachAthletePlanningProfileView({
   }, [athleteIdTrimmed, entityId]);
 
   useEffect(() => {
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
+    const resetScopeWorkflowMode = resolveWorkflowResetScopeMode({
+      workspace,
+      isHeadCoachPlanningContextOwner,
+      planningContextLocked,
+      workflowMode: trainingPlanShellModel.workflowMode,
+    });
     const scopedKey = buildCoachWorkflowResetScopeKey({
       athleteId: athleteIdTrimmed,
       entityId,
       coachUserId: currentCoachUserId,
       activeRole: currentActiveRole,
       domain: currentCoachGenerationDomain,
-      workflowMode: trainingPlanPageModel.workflowMode,
+      workflowMode: resetScopeWorkflowMode,
     });
     if (coachDomainStateResetRef.current === null) {
       coachDomainStateResetRef.current = scopedKey;
@@ -6186,8 +7154,11 @@ export function CoachAthletePlanningProfileView({
     currentCoachGenerationDomain,
     currentCoachUserId,
     entityId,
-    trainingPlanPageModel.ready,
-    trainingPlanPageModel.workflowMode,
+    isHeadCoachPlanningContextOwner,
+    planningContextLocked,
+    trainingPlanShellModel.ready,
+    trainingPlanShellModel.workflowMode,
+    workspace,
   ]);
 
   useEffect(() => {
@@ -6262,7 +7233,7 @@ export function CoachAthletePlanningProfileView({
   ]);
 
   useEffect(() => {
-    if (trainingPlanPageModel.shell !== "skills_coach_planning") return;
+    if (trainingPlanShellModel.shell !== "skills_coach_planning") return;
     if (!skillsOwnedContextHasPlanWindow) return;
     const contextStart =
       upstreamPlanningContext?.planWindow?.startDate ??
@@ -6280,7 +7251,7 @@ export function CoachAthletePlanningProfileView({
   }, [
     planStartDate,
     skillsOwnedContextHasPlanWindow,
-    trainingPlanPageModel.shell,
+    trainingPlanShellModel.shell,
     upstreamPlanningContext?.planWindow?.startDate,
     upstreamPlanningContext?.planWindow?.endDate,
     upstreamPlanningContext?.startDate,
@@ -6305,11 +7276,11 @@ export function CoachAthletePlanningProfileView({
 
     let cancelled = false;
     setSubmittedDomainPlansBootstrapState("loading");
-    setHeadCoachDomainPlanStates({
-      SKILLS: { loading: true, error: null, latestDraft: null, activeDetail: null, summaryStatus: null, summaryPlanId: null, summaryVersionId: null },
-      NUTRITION: { loading: true, error: null, latestDraft: null, activeDetail: null, summaryStatus: null, summaryPlanId: null, summaryVersionId: null },
-      S_AND_C: { loading: true, error: null, latestDraft: null, activeDetail: null, summaryStatus: null, summaryPlanId: null, summaryVersionId: null },
-    });
+    setHeadCoachDomainPlanStates((prev) => ({
+      SKILLS: { ...prev.SKILLS, loading: true, error: null },
+      NUTRITION: { ...prev.NUTRITION, loading: true, error: null },
+      S_AND_C: { ...prev.S_AND_C, loading: true, error: null },
+    }));
 
     void (async () => {
       const nextStates = createEmptyHeadCoachDomainPlanStates();
@@ -6324,56 +7295,99 @@ export function CoachAthletePlanningProfileView({
         }
       }
 
-      if (domainSummary !== null) {
-        await Promise.all(
-          GENERATION_DOMAIN_ORDER.map(async (domain) => {
-            const summary = domainSummary![domain];
-            const summaryVersionId = resolveHeadCoachDomainSummaryVersionId(summary);
-            const summaryPlanId = summary.trainingPlanId?.trim() ?? null;
-            let activeDetail: CoachPersistedTrainingPlanActiveDetail | null = null;
-            let versions: CoachPersistedTrainingPlanVersion[] = [];
+      await Promise.all(
+        GENERATION_DOMAIN_ORDER.map(async (domain) => {
+          const legacySummary = domainSummary?.[domain] ?? {
+            trainingPlanId: null,
+            versionId: null,
+            latestVersionId: null,
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: null,
+            status: null,
+            generationDomain: domain,
+          };
+          const summarySource = resolveHeadCoachReviewSummarySource({
+            workspace,
+            domain,
+            legacySummary,
+          });
+          const summaryVersionId = summarySource.versionId;
+          const summaryPlanId = summarySource.planId;
+          let activeDetail: CoachPersistedTrainingPlanActiveDetail | null = null;
+          let versions: CoachPersistedTrainingPlanVersion[] = [];
 
-            nextStates[domain].summaryPlanId = summaryPlanId;
-            nextStates[domain].summaryVersionId = summaryVersionId;
+          nextStates[domain].summaryPlanId = summaryPlanId;
+          nextStates[domain].summaryVersionId = summaryVersionId;
 
-            if (summaryPlanId !== null && summaryPlanId !== "") {
-              knownDomainPlanIdsRef.current[domain] = summaryPlanId;
+          if (summaryPlanId !== null && summaryPlanId !== "") {
+            knownDomainPlanIdsRef.current[domain] = summaryPlanId;
+            try {
+              activeDetail = await fetchPersistedTrainingPlanActiveDetail(summaryPlanId, domain);
+              nextStates[domain].activeDetail = activeDetail;
+            } catch (e) {
+              if (!(isNormalizedApiError(e) && e.status === 404)) {
+                nextStates[domain].error = formatApiError(
+                  e,
+                  `Could not load review details for ${trainingPlanDomainLabel(domain)}.`,
+                );
+              }
+            }
+            if (summaryVersionId !== null || (summarySource.status?.trim() ?? "") === "") {
               try {
-                activeDetail = await fetchPersistedTrainingPlanActiveDetail(summaryPlanId, domain);
-                nextStates[domain].activeDetail = activeDetail;
+                versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
               } catch (e) {
-                if (!(isNormalizedApiError(e) && e.status === 404)) {
+                if (nextStates[domain].error === null) {
                   nextStates[domain].error = formatApiError(
                     e,
-                    `Could not load review details for ${trainingPlanDomainLabel(domain)}.`,
+                    `Could not load persisted versions for ${trainingPlanDomainLabel(domain)}.`,
                   );
                 }
               }
-              if (summaryVersionId !== null || (summary.status?.trim() ?? "") === "") {
-                try {
-                  versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
-                } catch (e) {
-                  if (nextStates[domain].error === null) {
-                    nextStates[domain].error = formatApiError(
-                      e,
-                      `Could not load persisted versions for ${trainingPlanDomainLabel(domain)}.`,
-                    );
-                  }
-                }
-              }
             }
-            nextStates[domain].summaryStatus = resolveHeadCoachDomainSummaryStatus({
-              summaryStatus: summary.status,
-              activeDetail,
-              versions,
-              summaryVersionId,
-            });
-          }),
-        );
-      }
+          }
+          nextStates[domain].summaryStatus = resolveHeadCoachDomainSummaryStatus({
+            summaryStatus: summarySource.status,
+            activeDetail,
+            versions,
+            summaryVersionId,
+          });
+        }),
+      );
 
       if (!cancelled) {
-        setHeadCoachDomainPlanStates(nextStates);
+        setHeadCoachDomainPlanStates((prev) => ({
+          SKILLS: {
+            ...nextStates.SKILLS,
+            latestDraft: nextStates.SKILLS.latestDraft ?? prev.SKILLS.latestDraft,
+            activeDetail:
+              nextStates.SKILLS.activeDetail ??
+              (nextStates.SKILLS.summaryPlanId !== null &&
+              prev.SKILLS.activeDetail?.plan.id?.trim() === nextStates.SKILLS.summaryPlanId
+                ? prev.SKILLS.activeDetail
+                : null),
+          },
+          NUTRITION: {
+            ...nextStates.NUTRITION,
+            latestDraft: nextStates.NUTRITION.latestDraft ?? prev.NUTRITION.latestDraft,
+            activeDetail:
+              nextStates.NUTRITION.activeDetail ??
+              (nextStates.NUTRITION.summaryPlanId !== null &&
+              prev.NUTRITION.activeDetail?.plan.id?.trim() === nextStates.NUTRITION.summaryPlanId
+                ? prev.NUTRITION.activeDetail
+                : null),
+          },
+          S_AND_C: {
+            ...nextStates.S_AND_C,
+            latestDraft: nextStates.S_AND_C.latestDraft ?? prev.S_AND_C.latestDraft,
+            activeDetail:
+              nextStates.S_AND_C.activeDetail ??
+              (nextStates.S_AND_C.summaryPlanId !== null &&
+              prev.S_AND_C.activeDetail?.plan.id?.trim() === nextStates.S_AND_C.summaryPlanId
+                ? prev.S_AND_C.activeDetail
+                : null),
+          },
+        }));
         setSubmittedDomainPlansBootstrapState("loaded");
       }
     })();
@@ -6387,6 +7401,7 @@ export function CoachAthletePlanningProfileView({
     entityId,
     isHeadCoachPlanningContextOwner,
     planningContextBootstrapState,
+    workspace,
   ]);
 
   useEffect(() => {
@@ -6410,7 +7425,7 @@ export function CoachAthletePlanningProfileView({
 
   /** Existing plan/context entry (`planId` or locked planning context) → Tab 6 (Generate). */
   useEffect(() => {
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
     if (shouldResolveSpecialistDomainWorkspace) return;
     if (
       requestedPlanIdDep !== null ||
@@ -6423,7 +7438,7 @@ export function CoachAthletePlanningProfileView({
     planningContextSetCaseDep,
     requestedPlanIdDep,
     shouldResolveSpecialistDomainWorkspace,
-    trainingPlanPageModel.ready,
+    trainingPlanShellModel.ready,
     urlPlanCandidateDep,
   ]);
 
@@ -6443,6 +7458,7 @@ export function CoachAthletePlanningProfileView({
         setWorkflowRequestedPlanId(null);
         setPersistedSkillsPlanDetail(null);
         setPersistedSkillsPlanError(null);
+        setPersistedPlanErrorDomain(null);
         router.replace(planningProfileHrefForAthlete(athleteIdTrimmed));
         return null;
       }
@@ -6452,11 +7468,80 @@ export function CoachAthletePlanningProfileView({
       setPersistedSkillsPlanDetail(detail);
       setPersistedVerifiedDomain(generationDomain);
       setPersistedSkillsPlanError(null);
+      setPersistedPlanErrorDomain(null);
       setGeneratePlanError(null);
       return detail;
     },
     [athleteIdTrimmed, router],
   );
+
+  async function handleViewWorkspaceDomainPlan(
+    domain: TrainingPlanGenerationDomain,
+    context: WorkspaceDomainViewPlanContext | null,
+  ) {
+    logTrainingPlanViewPlanDiagnostic({
+      clickedDomain: domain,
+      workspace,
+      context,
+    });
+    if (context === null || context.planId.trim() === "") {
+      setPersistedSkillsPlanError(
+        `Could not open ${trainingPlanDomainLabel(domain)} because no saved plan id is available.`,
+      );
+      setPersistedPlanErrorDomain(domain);
+      return;
+    }
+
+    const fetchUrl = `/training-plan-management/${encodeURIComponent(
+      context.planId,
+    )}/active/detail?generationDomain=${encodeURIComponent(domain)}`;
+    try {
+      const detail = await refreshPersistedPlanDetail(context.planId, domain, {
+        updateWorkflowRequestedPlanId: true,
+      });
+      logTrainingPlanViewPlanDiagnostic({
+        clickedDomain: domain,
+        workspace,
+        context,
+        fetchUrl,
+        resultStatus: detail === null ? "empty" : "ok",
+        responseBodyShape:
+          detail === null
+            ? null
+            : {
+                hasPlan: detail.plan !== null,
+                hasVersion: detail.version !== null,
+                days: detail.days.length,
+                sessions: detail.days.reduce((sum, day) => sum + day.sessions.length, 0),
+                allowedActions: detail.allowedActions,
+              },
+        stateUpdated:
+          detail === null
+            ? null
+            : "persistedSkillsPlanDetail, persistedVerifiedDomain, workflowRequestedPlanId",
+        rendererBranch:
+          trainingPlanShellModel.shell === "head_coach_function_aware" && domain === "SKILLS"
+            ? "renderHeadCoachOwnedSkillsPlanPanel"
+            : "persisted plan detail panel",
+      });
+      if (detail !== null) {
+        router.replace(planningProfileHrefForAthlete(athleteIdTrimmed, context.planId));
+      }
+    } catch (e) {
+      logTrainingPlanViewPlanDiagnostic({
+        clickedDomain: domain,
+        workspace,
+        context,
+        fetchUrl,
+        resultStatus: isNormalizedApiError(e) ? e.status : "error",
+        error: e,
+      });
+      setPersistedSkillsPlanError(
+        formatApiError(e, `Could not open ${trainingPlanDomainLabel(domain)}.`),
+      );
+      setPersistedPlanErrorDomain(domain);
+    }
+  }
 
   const refreshAssistantGovernedDetailFromLatestDraft = useCallback(
     async (
@@ -6502,9 +7587,13 @@ export function CoachAthletePlanningProfileView({
 
       try {
         const domainSummary = await fetchDomainPlanSummary(entityId, athleteIdTrimmed);
-        const summary = domainSummary[domain];
-        const resolvedSummaryVersionId = resolveHeadCoachDomainSummaryVersionId(summary);
-        summaryPlanId = summary.trainingPlanId?.trim() ?? null;
+        const summarySource = resolveHeadCoachReviewSummarySource({
+          workspace,
+          domain,
+          legacySummary: domainSummary[domain],
+        });
+        const resolvedSummaryVersionId = summarySource.versionId;
+        summaryPlanId = summarySource.planId;
         let versions: CoachPersistedTrainingPlanVersion[] = [];
         summaryVersionId = resolvedSummaryVersionId;
 
@@ -6517,7 +7606,7 @@ export function CoachAthletePlanningProfileView({
               error = formatApiError(e, `Could not load review details for ${trainingPlanDomainLabel(domain)}.`);
             }
           }
-          if (resolvedSummaryVersionId !== null || (summary.status?.trim() ?? "") === "") {
+          if (resolvedSummaryVersionId !== null || (summarySource.status?.trim() ?? "") === "") {
             try {
               versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
             } catch (e) {
@@ -6531,7 +7620,7 @@ export function CoachAthletePlanningProfileView({
           }
         }
         summaryStatus = resolveHeadCoachDomainSummaryStatus({
-          summaryStatus: summary.status,
+          summaryStatus: summarySource.status,
           activeDetail,
           versions,
           summaryVersionId: resolvedSummaryVersionId,
@@ -6546,19 +7635,24 @@ export function CoachAthletePlanningProfileView({
           loading: false,
           error,
           latestDraft: prev[domain].latestDraft,
-          activeDetail,
+          activeDetail:
+            activeDetail ??
+            (summaryPlanId !== null &&
+            prev[domain].activeDetail?.plan.id?.trim() === summaryPlanId
+              ? prev[domain].activeDetail
+              : null),
           summaryStatus,
           summaryPlanId,
           summaryVersionId,
         },
       }));
     },
-    [athleteIdTrimmed, entityId, headCoachReviewMode],
+    [athleteIdTrimmed, entityId, headCoachReviewMode, workspace],
   );
 
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
   useEffect(() => {
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
     if (isDownstreamDomainCoach) {
       prevWorkflowCompletionRef.current = {
         app: appStepCompleteDep,
@@ -6607,7 +7701,7 @@ export function CoachAthletePlanningProfileView({
     planDatesStepCompleteDep,
     requestedPlanIdDep,
     seasonGoalsGateCompleteDep,
-    trainingPlanPageModel.ready,
+    trainingPlanShellModel.ready,
     urlPlanCandidateDep,
     workloadCompleteDep,
   ]);
@@ -6615,9 +7709,9 @@ export function CoachAthletePlanningProfileView({
   /** Restore the current workflow tab from completed state once async readiness/workload data has loaded. */
   useEffect(() => {
     if (workflowInitialTabResolvedRef.current) return;
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
     if (readinessLoadingDep || workloadAssessmentLoadingDep) return;
-    const workflowMode = trainingPlanPageModel.workflowMode;
+    const workflowMode = trainingPlanShellModel.workflowMode;
     const skillsOwnedResolvedTab = resolveSkillsOwnedDirectReleaseCurrentStep({
       workflowMode,
       requestedPlanId: requestedPlanIdDep,
@@ -6637,7 +7731,7 @@ export function CoachAthletePlanningProfileView({
         requestedPlanId: requestedPlanIdDep,
         urlPlanCandidate: urlPlanCandidateDep,
         planningContextLocked:
-          trainingPlanPageModel.shell === "skills_coach_planning"
+          trainingPlanShellModel.shell === "skills_coach_planning"
             ? effectiveSkillsPlanningContextLocked
             : planningContextLocked,
         hasSubmittedDomainPlans,
@@ -6667,9 +7761,9 @@ export function CoachAthletePlanningProfileView({
     requestedPlanIdDep,
     seasonGoalsGateCompleteDep,
     selectedWorkflowTabDep,
-    trainingPlanPageModel.shell,
-    trainingPlanPageModel.ready,
-    trainingPlanPageModel.workflowMode,
+    trainingPlanShellModel.shell,
+    trainingPlanShellModel.ready,
+    trainingPlanShellModel.workflowMode,
     urlPlanCandidateDep,
     workloadAssessmentLoadingDep,
     workloadCompleteDep,
@@ -6678,7 +7772,7 @@ export function CoachAthletePlanningProfileView({
 
   /** Downstream Nutrition/S&C: open Generate after prerequisites without walking Steps 3–5. */
   useEffect(() => {
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
     if (shouldResolveSpecialistDomainWorkspace) return;
     if (!accessGateReady || !isDownstreamDomainCoach) return;
     if (!appStepComplete || !levelStepComplete) return;
@@ -6694,7 +7788,7 @@ export function CoachAthletePlanningProfileView({
     isDownstreamDomainCoach,
     levelStepComplete,
     shouldResolveSpecialistDomainWorkspace,
-    trainingPlanPageModel.ready,
+    trainingPlanShellModel.ready,
   ]);
 
   /**
@@ -6702,13 +7796,13 @@ export function CoachAthletePlanningProfileView({
    * satisfied; once a draft plan id or hydrated persisted detail exists, jump once to Step 6.
    */
   useEffect(() => {
-    if (!trainingPlanPageModel.ready) return;
+    if (!trainingPlanShellModel.ready) return;
     if (shouldResolveSpecialistDomainWorkspace) return;
     if (!accessGateReady) return;
     if (!generateTabPrecSatisfied) return;
     if (
-      trainingPlanPageModel.shell === "head_coach_review" ||
-      trainingPlanPageModel.shell === "head_coach_planning"
+      trainingPlanShellModel.shell === "head_coach_review" ||
+      trainingPlanShellModel.shell === "head_coach_planning"
     ) {
       return;
     }
@@ -6742,8 +7836,8 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.plan.id,
     requestedPlanId,
     shouldResolveSpecialistDomainWorkspace,
-    trainingPlanPageModel.shell,
-    trainingPlanPageModel.ready,
+    trainingPlanShellModel.shell,
+    trainingPlanShellModel.ready,
     urlPlanCandidate,
   ]);
 
@@ -6891,6 +7985,7 @@ export function CoachAthletePlanningProfileView({
       setLatestSkillsDraftRequestState("idle");
       setLatestSkillsDraftMissing(false);
       setLatestSkillsDraftError(null);
+      setLatestSkillsDraftErrorDomain(null);
       return;
     }
 
@@ -6929,6 +8024,7 @@ export function CoachAthletePlanningProfileView({
         setLatestSkillsDraftRequestState("success");
         setLatestSkillsDraftMissing(false);
         setLatestSkillsDraftError(null);
+        setLatestSkillsDraftErrorDomain(null);
         setGeneratePlanError(null);
         if (shouldRenderAssistantDomainWorkspace) {
           await refreshAssistantGovernedDetailFromLatestDraft(generationDomain, result);
@@ -6950,17 +8046,15 @@ export function CoachAthletePlanningProfileView({
           setLatestSkillsDraftRequestState("missing");
           setLatestSkillsDraftMissing(true);
           setLatestSkillsDraftError(null);
+          setLatestSkillsDraftErrorDomain(null);
           return;
         }
         setLatestSkillsDraft(null);
         setLatestDraftDomain(generationDomain);
         setLatestSkillsDraftRequestState("error");
         setLatestSkillsDraftMissing(false);
-        setLatestSkillsDraftError(
-          generationDomain === "SKILLS"
-            ? "Unable to load Skills plan. Please retry."
-            : "Unable to load draft. Please try again.",
-        );
+        setLatestSkillsDraftError(domainDraftLoadErrorMessage(generationDomain));
+        setLatestSkillsDraftErrorDomain(generationDomain);
         return;
       }
     }
@@ -7164,6 +8258,7 @@ export function CoachAthletePlanningProfileView({
           setPersistedSkillsPlanDetail(detail);
           setPersistedVerifiedDomain(currentCoachGenerationDomain);
           setPersistedSkillsPlanError(null);
+          setPersistedPlanErrorDomain(null);
         } catch (e) {
           if (cancelled || assistantDomainSummaryHydrationGenRef.current !== gen) return;
           if (!(isNormalizedApiError(e) && e.status === 404)) {
@@ -7173,6 +8268,7 @@ export function CoachAthletePlanningProfileView({
                 `Could not load ${trainingPlanDomainLabel(currentCoachGenerationDomain)}.`,
               ),
             );
+            setPersistedPlanErrorDomain(currentCoachGenerationDomain);
           }
         }
       } catch (e) {
@@ -7180,6 +8276,7 @@ export function CoachAthletePlanningProfileView({
         setPersistedSkillsPlanError(
           formatApiError(e, "Could not load domain plan summary for this athlete."),
         );
+        setPersistedPlanErrorDomain(currentCoachGenerationDomain);
       } finally {
         if (!cancelled && assistantDomainSummaryHydrationGenRef.current === gen) {
           setAssistantDomainSummaryHydrationPending(false);
@@ -7449,7 +8546,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseSkillsFeedback("");
       setReviseSkillsSuccess("Revised skills plan version generated.");
-      void refreshTrainingPlanWorkspace();
+      void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       console.error("Skills training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
@@ -7511,9 +8608,21 @@ export function CoachAthletePlanningProfileView({
 
     try {
       if (action === "SUBMIT_REVIEW") {
-        let submitPlanId = persistedGovernedPlanContext.planId;
-        let submitVersionId = persistedGovernedPlanContext.versionId;
-        if (shouldForceAssistantDomainWorkspace && !isHeadCoachPlanningContextOwner) {
+        const workspaceSubmitIds = resolveSubmitReviewPlanVersionIds({
+          workspace,
+          domain: actionDomain,
+          fallbackPlanId: persistedGovernedPlanContext.planId,
+          fallbackVersionId: persistedGovernedPlanContext.versionId,
+        });
+        let submitPlanId = workspaceSubmitIds.planId;
+        let submitVersionId = workspaceSubmitIds.versionId;
+        const workspaceProvidesSubmitState =
+          workspace !== null && workspaceShowsDomainSubmitReview(workspace, actionDomain);
+        if (
+          shouldForceAssistantDomainWorkspace &&
+          !isHeadCoachPlanningContextOwner &&
+          !workspaceProvidesSubmitState
+        ) {
           const visibleDraft = latestDraftMatchesCurrentDomain ? latestSkillsDraft : null;
           let submitContext = persistedGovernedPlanContext;
           if (
@@ -7597,8 +8706,12 @@ export function CoachAthletePlanningProfileView({
           { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
         );
       }
+      if (isHeadCoachPlanningContextOwner) {
+        setSelectedWorkflowTab("generate");
+        setHeadCoachSubmittedReviewDomain(actionDomain);
+      }
       setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
-      void refreshTrainingPlanWorkspace();
+      void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       if (
         headCoachFunctionAwareMode &&
@@ -7611,7 +8724,7 @@ export function CoachAthletePlanningProfileView({
         );
         if (recovered) {
           setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
-          void refreshTrainingPlanWorkspace();
+          void refreshTrainingPlanWorkspace({ background: true });
           return;
         }
       }
@@ -7667,7 +8780,7 @@ export function CoachAthletePlanningProfileView({
       setRequestRevisionModalOpen(false);
       const domainLabel = trainingPlanDomainLabel(actionDomain);
       setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
-      void refreshTrainingPlanWorkspace();
+      void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       setGovernedPlanActionError(
         formatApiError(e, governedPlanActionErrorFallback("REQUEST_REVISION")),
@@ -7705,7 +8818,7 @@ export function CoachAthletePlanningProfileView({
         },
       });
       const isSkillsOwnedPlanningShell =
-        trainingPlanPageModel.shell === "skills_coach_planning";
+        trainingPlanShellModel.shell === "skills_coach_planning";
       if (isSkillsOwnedPlanningShell && isUpstreamPlanningContextLocked(lockedContext)) {
         setUpstreamPlanningContext(lockedContext);
         setPlanningContextBootstrapState("loaded");
@@ -7752,7 +8865,7 @@ export function CoachAthletePlanningProfileView({
       }
       if (isUpstreamPlanningContextLocked(resolvedContext)) {
         setPlanningContextLockSuccess("Planning context locked and shared with coaches.");
-        void refreshTrainingPlanWorkspace();
+        void refreshTrainingPlanWorkspace({ background: true });
       } else if (isSkillsOwnedPlanningShell) {
         setPlanningContextLockError(
           "Planning context lock was submitted, but the refreshed lock state is not ready yet. Please retry.",
@@ -7760,7 +8873,7 @@ export function CoachAthletePlanningProfileView({
         setPlanningContextLockSuccess(null);
       } else {
         setPlanningContextLockSuccess("Planning context locked and shared with coaches.");
-        void refreshTrainingPlanWorkspace();
+        void refreshTrainingPlanWorkspace({ background: true });
       }
     } catch (e) {
       setPlanningContextLockError(
@@ -8009,6 +9122,9 @@ export function CoachAthletePlanningProfileView({
     const activeDetail = domainState.activeDetail;
     const isLoading = domainState.loading;
     const loadError = domainState.error;
+    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
+    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? null;
+    const workspaceVersionId = workspaceDomainEntry?.summary.versionId?.trim() ?? null;
 
     const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
     const allowedActions =
@@ -8018,7 +9134,12 @@ export function CoachAthletePlanningProfileView({
     const planId = activeDetail?.plan.id?.trim() ?? "";
     const versionId = activeDetail?.version.id?.trim() ?? "";
     const versionNumber = activeDetail?.version.versionNumber ?? null;
-    const status = activeDetail?.version.status ?? activeDetail?.plan.status ?? "";
+    const status =
+      workspaceDomainEntry?.summary.status?.trim() ??
+      domainState.summaryStatus ??
+      activeDetail?.version.status ??
+      activeDetail?.plan.status ??
+      "";
     const normalizedStatus = status.trim().toUpperCase();
     const isAssistantApproved = normalizedStatus === "ASSISTANT_COACH_APPROVED";
     const isHeadCoachApproved = normalizedStatus === "HEAD_COACH_APPROVED";
@@ -8094,7 +9215,10 @@ export function CoachAthletePlanningProfileView({
                   Request Revision
                 </Button>
               ) : null}
-              {allowedActions.has("RELEASE") && isHeadCoachApproved ? (
+              {canShowHeadCoachReviewReleaseAction({
+                allowedActions,
+                status,
+              }) ? (
                 <Button
                   type="button"
                   variant="primary"
@@ -8179,7 +9303,13 @@ export function CoachAthletePlanningProfileView({
               <div className="text-sm text-textSecondary">No training days in this plan.</div>
             )}
           </>
-        ) : !isLoading && !loadError ? (
+        ) : shouldShowHeadCoachReviewEmptyState({
+          activeDetail,
+          workspacePlanId,
+          workspaceVersionId,
+          isLoading,
+          loadError,
+        }) ? (
           <div className="text-sm text-textSecondary">No submitted plan data available for this domain.</div>
         ) : null}
       </section>
@@ -8190,6 +9320,10 @@ export function CoachAthletePlanningProfileView({
   function renderHeadCoachSubmittedDomainPlansSection() {
     if (!headCoachReviewMode) return null;
     const locked = upstreamPlanningContext?.planningContextLocked === true;
+    const reviewDomains = headCoachSubmittedReviewDomains({
+      shell: trainingPlanShellModel.shell,
+      headCoachOwnsSkills: workspaceHeadCoachOwnsSkills,
+    });
     return (
       <div className="space-y-4">
         {renderHeadCoachPlanReviewPanel()}
@@ -8203,9 +9337,288 @@ export function CoachAthletePlanningProfileView({
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            {GENERATION_DOMAIN_ORDER.map(renderHeadCoachDomainPlanCard)}
+            {reviewDomains.map(renderHeadCoachDomainPlanCard)}
           </div>
         </section>
+      </div>
+    );
+  }
+
+  function renderPersistedSkillsPlanDetail(
+    detail: CoachPersistedTrainingPlanActiveDetail,
+    options: {
+      title?: string;
+      showRevisePanel?: boolean;
+    } = {},
+  ) {
+    const goalNames =
+      detail.plan.goals
+        .map((goal) => goal.goalName?.trim() ?? "")
+        .filter((goalName) => goalName !== "") ?? [];
+    const hasSessions = detail.days.some((day) => day.sessions.length > 0);
+
+    return (
+      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+        <h4 className="text-sm font-normal text-textPrimary">
+          {options.title ?? "Persisted Skills Plan"}
+        </h4>
+        <dl className="space-y-1">
+          <DetailRow label="Training Plan ID" value={displayValue(detail.plan.id)} />
+          {hasRenderableValue(detail.plan.name) ? (
+            <DetailRow label="Name" value={displayValue(detail.plan.name)} />
+          ) : null}
+          {hasRenderableValue(detail.plan.status) ? (
+            <DetailRow label="Status" value={displayValue(detail.plan.status)} />
+          ) : null}
+          {hasRenderableValue(detail.generationDomain) ? (
+            <DetailRow
+              label="Generation Domain"
+              value={displayValue(detail.generationDomain)}
+            />
+          ) : null}
+          {hasRenderableValue(detail.version.versionNumber) ? (
+            <DetailRow
+              label="Selected Version Number"
+              value={displayValue(detail.version.versionNumber)}
+            />
+          ) : null}
+          {hasRenderableValue(detail.version.status) ? (
+            <DetailRow
+              label="Selected Version Status"
+              value={displayValue(detail.version.status)}
+            />
+          ) : null}
+          {hasRenderableValue(detail.version.id) ? (
+            <DetailRow label="Selected Version ID" value={displayValue(detail.version.id)} />
+          ) : null}
+          {hasRenderableValue(detail.version.source) ? (
+            <DetailRow
+              label="Selected Version Source"
+              value={displayValue(detail.version.source)}
+            />
+          ) : null}
+          {detail.version.startDate || detail.version.endDate ? (
+            <DetailRow
+              label="Selected Version Window"
+              value={formatDateRange(detail.version.startDate, detail.version.endDate)}
+            />
+          ) : null}
+          {hasRenderableValue(detail.selectedVersionRule) ? (
+            <DetailRow
+              label="Selected Version Rule"
+              value={displayValue(detail.selectedVersionRule)}
+            />
+          ) : null}
+        </dl>
+        {goalNames.length > 0 ? (
+          <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <h5 className="text-sm font-normal text-textPrimary">Associated Goals</h5>
+            <p className="text-sm text-textPrimary">{goalNames.join(", ")}</p>
+          </div>
+        ) : null}
+        {!hasSessions ? (
+          <div className="text-sm text-textSecondary">
+            Persisted plan found, but no sessions available.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {detail.days.map((day, dayOffset) => (
+              <div
+                key={day.id}
+                className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+              >
+                <div className="text-sm font-normal text-textPrimary">
+                  {hasRenderableValue(day.date)
+                    ? `Day ${day.dayIndex ?? dayOffset + 1} — ${formatDateWithWeekday(String(day.date))}`
+                    : `Day ${day.dayIndex ?? dayOffset + 1}`}
+                </div>
+                <dl className="space-y-1">
+                  {hasRenderableValue(day.date) ? (
+                    <DetailRow label="Date" value={formatDateWithWeekday(String(day.date))} />
+                  ) : null}
+                  {hasRenderableValue(day.weekNumber) ? (
+                    <DetailRow label="Week Number" value={displayValue(day.weekNumber)} />
+                  ) : null}
+                  <DetailRow label="Rest Day" value={displayValue(day.isRestDay)} />
+                  {hasRenderableValue(day.plannedLoadMinutes) ? (
+                    <DetailRow
+                      label="Planned Load Minutes"
+                      value={displayValue(day.plannedLoadMinutes)}
+                    />
+                  ) : null}
+                  {hasRenderableValue(day.notes) ? (
+                    <DetailRow label="Notes" value={displayValue(day.notes)} />
+                  ) : null}
+                </dl>
+                {day.sessions.length === 0 ? (
+                  <div className="text-sm text-textSecondary">
+                    No sessions scheduled for this day.
+                  </div>
+                ) : (
+                  day.sessions.map((session) => {
+                    const sessionNotes = (session as { notes?: unknown }).notes;
+                    return (
+                      <div
+                        key={session.id}
+                        className="space-y-2 rounded-md border border-slate-200 bg-white p-3"
+                      >
+                        <dl className="space-y-1">
+                          <DetailRow
+                            label="Session"
+                            value={displayLabelTitleCase(session.title)}
+                          />
+                          {hasRenderableValue(session.description) ? (
+                            <DetailRow
+                              label="Description"
+                              value={displayValue(session.description)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(session.sessionType) ? (
+                            <DetailRow
+                              label="Session Type"
+                              value={displayValue(session.sessionType)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(session.sessionOrder) ? (
+                            <DetailRow
+                              label="Session Order"
+                              value={displayValue(session.sessionOrder)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(session.plannedDurationMinutes) ? (
+                            <DetailRow
+                              label="Planned Duration Minutes"
+                              value={displayValue(session.plannedDurationMinutes)}
+                            />
+                          ) : null}
+                          {hasRenderableValue(session.objective) ? (
+                            <DetailRow label="Objective" value={displayValue(session.objective)} />
+                          ) : null}
+                          {hasRenderableValue(session.intensity) ? (
+                            <DetailRow label="Intensity" value={displayValue(session.intensity)} />
+                          ) : null}
+                          {hasRenderableValue(sessionNotes) ? (
+                            <DetailRow label="Notes" value={displayValue(sessionNotes)} />
+                          ) : null}
+                        </dl>
+                        {session.sessionStructureSections.length === 0 ? (
+                          <div className="text-sm text-textSecondary">
+                            No session structure content available.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {session.sessionStructureSections.map((section) => (
+                              <div
+                                key={`${session.id}-${section.key}`}
+                                className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+                              >
+                                <div className="text-sm font-medium text-textPrimary">
+                                  Session Structure: {persistedSessionStructureLabel(section.key)}
+                                </div>
+                                {section.items.map((item, itemOffset) => {
+                                  const title = (item as { title?: unknown }).title;
+                                  const instructions = (item as { instructions?: unknown }).instructions;
+                                  const balls = (item as { balls?: unknown }).balls;
+                                  const sets = (item as { sets?: unknown }).sets;
+                                  return (
+                                    <div
+                                      key={`${item.label ?? item.summary ?? "item"}-${itemOffset}`}
+                                      className="space-y-1 rounded-md border border-slate-200 bg-white p-3"
+                                    >
+                                      <dl className="space-y-1">
+                                        {hasRenderableValue(item.label) ? (
+                                          <DetailRow
+                                            label="Label"
+                                            value={displayLabelTitleCase(item.label)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(title) ? (
+                                          <DetailRow label="Title" value={displayValue(title)} />
+                                        ) : null}
+                                        {hasRenderableValue(item.summary) ? (
+                                          <DetailRow
+                                            label="Summary"
+                                            value={displayValue(item.summary)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(instructions) ? (
+                                          <DetailRow
+                                            label="Instructions"
+                                            value={displayValue(instructions)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.reps) ? (
+                                          <DetailRow label="Reps" value={displayValue(item.reps)} />
+                                        ) : null}
+                                        {hasRenderableValue(balls) ? (
+                                          <DetailRow label="Balls" value={displayValue(balls)} />
+                                        ) : null}
+                                        {hasRenderableValue(sets) ? (
+                                          <DetailRow label="Sets" value={displayValue(sets)} />
+                                        ) : null}
+                                        {hasRenderableValue(item.durationMinutes) ? (
+                                          <DetailRow
+                                            label="Duration Minutes"
+                                            value={displayValue(item.durationMinutes)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.intensity) ? (
+                                          <DetailRow
+                                            label="Intensity"
+                                            value={displayValue(item.intensity)}
+                                          />
+                                        ) : null}
+                                        {hasRenderableValue(item.notes) ? (
+                                          <DetailRow label="Notes" value={displayValue(item.notes)} />
+                                        ) : null}
+                                      </dl>
+                                      <SkillGoalAttributionText
+                                        primaryGoalName={item.primaryGoalName}
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {options.showRevisePanel ? (
+          <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
+            {reviseSkillsError ? <Alert variant="danger">{reviseSkillsError}</Alert> : null}
+            {reviseSkillsSuccess ? (
+              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+            ) : null}
+            <label className="space-y-1 text-sm text-textPrimary">
+              <span className="font-medium">Coach Feedback</span>
+              <textarea
+                rows={4}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                value={reviseSkillsFeedback}
+                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
+                placeholder="Describe what should change in the skills plan."
+              />
+            </label>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={reviseSkillsLoading || !skillsReviseIds}
+              onClick={() => {
+                void handleReviseSkillsPlan();
+              }}
+            >
+              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+            </Button>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -8236,6 +9649,19 @@ export function CoachAthletePlanningProfileView({
         headCoachSkillsWorkflowStatus === "revision_requested") &&
       Boolean(skillsReviseIds);
     const headCoachSkillsRevisePanelOpen = assistantRevisePanelDomain === "SKILLS";
+    const visibleSkillsPlanDetail = shouldRenderWorkspaceDomainPlanContent({
+      shell: trainingPlanShellModel.shell,
+      clickedDomain: "SKILLS",
+      detailDomain: persistedDetailDomain,
+      hasDetail: persistedSkillsPlanDetail !== null,
+    })
+      ? persistedSkillsPlanDetail
+      : null;
+    const persistedSkillsErrorForSkillsPanel = errorForRenderedDomain({
+      error: persistedSkillsPlanError,
+      errorDomain: persistedPlanErrorDomain,
+      renderedDomain: "SKILLS",
+    });
 
     return (
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -8259,21 +9685,19 @@ export function CoachAthletePlanningProfileView({
           />
         </dl>
         {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
+        {persistedSkillsErrorForSkillsPanel ? (
+          <Alert variant="danger">{persistedSkillsErrorForSkillsPanel}</Alert>
+        ) : null}
         {reviseSkillsSuccess ? (
           <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          {headCoachSkillsResolvedPlanId !== "" ? (
+          {headCoachSkillsViewPlanContext !== null ? (
             <Button
               type="button"
               variant="secondary"
               onClick={() => {
-                void refreshPersistedPlanDetail(headCoachSkillsResolvedPlanId, "SKILLS", {
-                  updateWorkflowRequestedPlanId: true,
-                });
-                router.replace(
-                  planningProfileHrefForAthlete(athleteIdTrimmed, headCoachSkillsResolvedPlanId),
-                );
+                void handleViewWorkspaceDomainPlan("SKILLS", headCoachSkillsViewPlanContext);
               }}
             >
               {assistantViewPlanLabel("SKILLS")}
@@ -8292,6 +9716,9 @@ export function CoachAthletePlanningProfileView({
             </Button>
           ) : null}
         </div>
+        {visibleSkillsPlanDetail !== null
+          ? renderPersistedSkillsPlanDetail(visibleSkillsPlanDetail)
+          : null}
         {headCoachSkillsRevisePanelOpen ? (
           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
@@ -8502,6 +9929,20 @@ export function CoachAthletePlanningProfileView({
       assistantDomainWorkflowStatus === "not_created" &&
       (currentCoachGenerationDomain === null ||
         !isHeadCoachReviewerOnlyForDomain(currentCoachGenerationDomain));
+    const workflow1LockedContextDomainCoachCanCreate =
+      setupState.hasHeadCoachConfigured &&
+      currentCoachGenerationDomain !== null &&
+      effectiveDownstreamPlanningContextLocked &&
+      !planOwnershipLoading &&
+      !isPlanGenerationBlockedByOwnership(
+        resolveOwnershipFlagsForDomain(currentCoachGenerationDomain),
+      ) &&
+      currentDomainGenerationJob?.status !== "QUEUED" &&
+      currentDomainGenerationJob?.status !== "RUNNING";
+    const createPlanLocalError =
+      workflow1LockedContextDomainCoachCanCreate
+        ? null
+        : (generatePlanLocalErrorsByDomain[currentCoachGenerationDomain] ?? null);
     const showReviseAction =
       !assistantPlanDiscoveryLoading && (
       assistantDomainWorkflowStatus === "draft_generated" ||
@@ -8513,16 +9954,67 @@ export function CoachAthletePlanningProfileView({
       persistedGovernedAllowedActions.has("RELEASE") &&
       persistedGovernedPlanContext !== null;
     const canReviseSkills =
-      showReviseAction && currentCoachGenerationDomain === "SKILLS" && Boolean(skillsReviseIds);
+      currentCoachGenerationDomain === "SKILLS" &&
+      canShowDomainReviseAction({
+        workflowStatus: assistantDomainWorkflowStatus,
+        reviseIds: skillsReviseIds,
+        requesterOwnsDomain: true,
+      });
     const canReviseNutrition =
-      showReviseAction &&
       currentCoachGenerationDomain === "NUTRITION" &&
-      Boolean(nutritionReviseIds);
+      canShowDomainReviseAction({
+        workflowStatus: assistantDomainWorkflowStatus,
+        reviseIds: nutritionReviseIds,
+        requesterOwnsDomain: true,
+      });
     const canReviseSandC =
-      showReviseAction &&
       currentCoachGenerationDomain === "S_AND_C" &&
-      Boolean(latestSkillsDraft?.trainingPlanId && latestSkillsDraft?.trainingPlanVersionId);
+      canShowDomainReviseAction({
+        workflowStatus: assistantDomainWorkflowStatus,
+        reviseIds: sandCReviseIds,
+        requesterOwnsDomain: true,
+      });
     const canReviseCurrentDomain = canReviseSkills || canReviseNutrition || canReviseSandC;
+    const currentDomainReviseIds =
+      currentCoachGenerationDomain === "SKILLS"
+        ? skillsReviseIds
+        : currentCoachGenerationDomain === "NUTRITION"
+          ? nutritionReviseIds
+          : currentCoachGenerationDomain === "S_AND_C"
+            ? sandCReviseIds
+            : null;
+    logTrainingPlanActionVisibilityDiagnostic({
+      renderedDomain: currentCoachGenerationDomain,
+      currentDomain: currentCoachGenerationDomain,
+      workspace,
+      versionNumber:
+        persistedDetailMatchesCurrentDomain
+          ? persistedSkillsPlanDetail?.version.versionNumber ?? null
+          : latestDraftMatchesCurrentDomain
+            ? latestSkillsDraft?.versionNumber ?? null
+            : null,
+      allowedActions:
+        currentCoachGenerationDomain !== null
+          ? workspace?.domains[currentCoachGenerationDomain]?.allowedActions ?? []
+          : [],
+      persistedDetailStatus:
+        persistedDetailMatchesCurrentDomain
+          ? persistedSkillsPlanDetail?.version.status ??
+            persistedSkillsPlanDetail?.plan.status ??
+            null
+          : null,
+      isEditableDraft:
+        assistantDomainWorkflowStatus === "draft_generated" ||
+        assistantDomainWorkflowStatus === "revision_requested",
+      canRevise: canReviseCurrentDomain,
+      hiddenReason: canReviseCurrentDomain
+        ? null
+        : currentDomainReviseIds === null
+          ? "missing revise plan/version ids"
+          : !showReviseAction
+            ? `workflow status ${assistantDomainWorkflowStatus} is not editable`
+            : null,
+    });
     const assistantRevisePanelOpen =
       canReviseCurrentDomain && assistantRevisePanelDomain === currentCoachGenerationDomain;
 
@@ -8550,14 +10042,29 @@ export function CoachAthletePlanningProfileView({
         : currentCoachGenerationDomain === "NUTRITION"
           ? reviseNutritionLoading
           : reviseSandCLoading;
+    const currentWorkspaceSummary =
+      workspace?.domains[currentCoachGenerationDomain]?.summary ?? null;
+    const currentWorkspacePlanId = currentWorkspaceSummary?.trainingPlanId?.trim() ?? "";
+    const currentWorkspaceVersionId = currentWorkspaceSummary?.versionId?.trim() ?? "";
+    const currentDomainHasPersistedIds =
+      currentWorkspacePlanId !== "" &&
+      currentWorkspaceVersionId !== "";
+    const generatedDomainAwaitingWorkspaceIds = shouldShowGeneratedPlanSyncingNotice({
+      generateResultMatchesCurrentDomain,
+      currentDomainHasPersistedIds,
+    });
     const assistantPlanTrainingPlanId =
-      requestedPlanId !== null && persistedDetailMatchesCurrentDomain
+      currentWorkspacePlanId !== ""
+        ? currentWorkspacePlanId
+        : requestedPlanId !== null && persistedDetailMatchesCurrentDomain
         ? persistedSkillsPlanDetail?.plan.id ?? null
         : latestDraftMatchesCurrentDomain
           ? latestSkillsDraft?.trainingPlanId ?? null
           : null;
     const assistantPlanVersionId =
-      requestedPlanId !== null && persistedDetailMatchesCurrentDomain
+      currentWorkspaceVersionId !== ""
+        ? currentWorkspaceVersionId
+        : requestedPlanId !== null && persistedDetailMatchesCurrentDomain
         ? persistedSkillsPlanDetail?.version.id ?? null
         : latestDraftMatchesCurrentDomain
           ? latestSkillsDraft?.trainingPlanVersionId ?? null
@@ -8568,7 +10075,16 @@ export function CoachAthletePlanningProfileView({
         : latestDraftMatchesCurrentDomain
           ? latestSkillsDraft?.versionNumber ?? null
           : null;
-
+    const persistedPlanErrorForCurrentDomain = errorForRenderedDomain({
+      error: persistedSkillsPlanError,
+      errorDomain: persistedPlanErrorDomain,
+      renderedDomain: currentCoachGenerationDomain,
+    });
+    const latestDraftErrorForCurrentDomain = errorForRenderedDomain({
+      error: latestSkillsDraftError,
+      errorDomain: latestSkillsDraftErrorDomain,
+      renderedDomain: currentCoachGenerationDomain,
+    });
     const renderAssistantNutritionTotals = (
       label: string,
       items: AssistantNutritionItem[],
@@ -8806,11 +10322,11 @@ export function CoachAthletePlanningProfileView({
             </div>
 
             {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
-            {!assistantPlanDiscoveryLoading && persistedSkillsPlanError ? (
-              <Alert variant="danger">{persistedSkillsPlanError}</Alert>
+            {!assistantPlanDiscoveryLoading && persistedPlanErrorForCurrentDomain ? (
+              <Alert variant="danger">{persistedPlanErrorForCurrentDomain}</Alert>
             ) : null}
-            {!assistantPlanDiscoveryLoading && latestSkillsDraftError ? (
-              <Alert variant="danger">{latestSkillsDraftError}</Alert>
+            {!assistantPlanDiscoveryLoading && latestDraftErrorForCurrentDomain ? (
+              <Alert variant="danger">{latestDraftErrorForCurrentDomain}</Alert>
             ) : null}
             {governedPlanActionError ? <Alert variant="danger">{governedPlanActionError}</Alert> : null}
             {governedPlanActionSuccess ? (
@@ -8838,15 +10354,18 @@ export function CoachAthletePlanningProfileView({
                   type="button"
                   variant="primary"
                   disabled={
-                    generatePlanActionDisabled ||
-                    (generatePlanLocalErrorsByDomain[currentCoachGenerationDomain] ?? null) !== null
+                    workflow1LockedContextDomainCoachCanCreate
+                      ? false
+                      : resolveLegacyAssistantCreateButtonDisabled({
+                          generatePlanActionDisabled,
+                          localError: createPlanLocalError,
+                        })
                   }
                   onClick={() => {
                     void handleGenerateTrainingPlan(currentCoachGenerationDomain);
                   }}
                 >
-                  {(generatePlanLocalErrorsByDomain[currentCoachGenerationDomain] ??
-                      null) === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
+                  {createPlanLocalError === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
                     && currentDomainGenerationJob === null
                       ? PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL
                       : renderGenerationJobButtonLabel(
@@ -9105,6 +10624,11 @@ export function CoachAthletePlanningProfileView({
                   <div className="text-sm text-textSecondary">Persisted plan found, but no sessions available.</div>
                 )}
               </div>
+            ) : !assistantPlanDiscoveryLoading && generatedDomainAwaitingWorkspaceIds ? (
+              <WorkflowNeutralNotice>
+                Generated plan is syncing to the training plan workspace. Plan content will load
+                when the saved plan and version IDs are available.
+              </WorkflowNeutralNotice>
             ) : !assistantPlanDiscoveryLoading && latestSkillsDraft ? (
               <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
                 <h4 className="text-sm font-normal text-textPrimary">
@@ -9241,6 +10765,18 @@ export function CoachAthletePlanningProfileView({
             {isDownstreamDomainCoach
               ? generationDraftEmptyState(resolvedWorkflowGenerationDomain)
               : "No training plan id is available yet for workflow actions. Generate a plan, load a draft with a saved plan id, or open a saved plan from the URL, then return to this step."}
+          </p>
+        </div>
+      );
+    }
+
+    if (model.kind === "generating") {
+      return (
+        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h5 className="text-sm font-normal text-textPrimary">Workflow Actions</h5>
+          <p className="text-sm text-textSecondary">
+            Workflow actions will become available after plan generation finishes and the latest
+            workspace state refreshes.
           </p>
         </div>
       );
@@ -9493,7 +11029,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseNutritionFeedback("");
       setReviseNutritionSuccess("Revised nutrition plan version generated.");
-      void refreshTrainingPlanWorkspace();
+      void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       console.error("Nutrition training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
@@ -9536,8 +11072,7 @@ export function CoachAthletePlanningProfileView({
       reviseSandCLoading ||
       entityId === "" ||
       athleteIdTrimmed === "" ||
-      !latestSkillsDraft?.trainingPlanId ||
-      !latestSkillsDraft.trainingPlanVersionId
+      !sandCReviseIds
     ) {
       return;
     }
@@ -9549,15 +11084,15 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
-    const trainingPlanIdForReload = latestSkillsDraft.trainingPlanId.trim();
+    const trainingPlanIdForReload = sandCReviseIds.trainingPlanId.trim();
 
     setReviseSandCLoading(true);
     setReviseSandCError(null);
     setReviseSandCSuccess(null);
     try {
       await reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, {
-        trainingPlanId: latestSkillsDraft.trainingPlanId,
-        versionId: latestSkillsDraft.trainingPlanVersionId,
+        trainingPlanId: sandCReviseIds.trainingPlanId,
+        versionId: sandCReviseIds.versionId,
         coachFeedback,
       });
       await loadLatestSkillsDraft("S_AND_C", true);
@@ -9581,7 +11116,7 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseSandCFeedback("");
       setReviseSandCSuccess("Revised S&C plan version generated.");
-      void refreshTrainingPlanWorkspace();
+      void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       console.error("S&C training plan revision failed", e);
       const errorRecord =
@@ -10057,30 +11592,108 @@ export function CoachAthletePlanningProfileView({
   }
 
   async function handleGenerateTrainingPlan(domain: TrainingPlanGenerationDomain) {
-    const effectiveDurationDays = generationDurationDaysForDomain(domain, durationDays);
+    const usesLockedDownstreamContext = shouldUseLockedDownstreamGenerationContext({
+      hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
+      isHeadCoachPlanningContextOwner,
+      domain,
+      effectiveDownstreamPlanningContextLocked,
+    });
+    const workspacePlanningContext = workspace?.planningContext ?? null;
+    const workspaceLockedPlanningContext = workspacePlanningContext?.locked === true;
+    const lockedGenerationSeasonCycleId = trimmedNonEmpty(
+      workspacePlanningContext?.selectedSeasonCycleId,
+      workspacePlanningContext?.seasonCycleId,
+      workspacePlanningContext?.selectedSeasonId,
+      workspacePlanningContext?.seasonId,
+      assistantLockedUpstreamDerived.lockedSeasonCycleId,
+    );
+    const lockedGenerationPlanStartDate = trimmedNonEmpty(
+      workspacePlanningContext?.planStartDate,
+      workspacePlanningContext?.startDate,
+      assistantLockedUpstreamDerived.lockedPlanWindowStart,
+    );
+    const lockedGenerationPlanEndDate = trimmedNonEmpty(
+      workspacePlanningContext?.planEndDate,
+      workspacePlanningContext?.endDate,
+      assistantLockedUpstreamDerived.lockedPlanWindowEnd,
+    );
+    const lockedGenerationSportCode = assistantLockedUpstreamDerived.lockedSportCode;
+    const lockedGoalIds = readLockedWorkspaceGoalIds({
+      selectedGoalsSnapshot: workspacePlanningContext?.selectedGoalsSnapshot,
+      athletePlanningContextSnapshot:
+        workspacePlanningContext?.athletePlanningContextSnapshot,
+      goalIds: workspacePlanningContext?.goalIds,
+      lockedGoalIds: workspacePlanningContext?.lockedGoalIds,
+      fallbackGoalIds:
+        upstreamPlanningContext?.planningContext.lockedGoalIds ??
+        upstreamPlanningContext?.planningContext.goalIds ??
+        upstreamPlanningContext?.goalIds ??
+        [],
+    });
+    const normalizedLockedGoalIds = lockedGoalIds.filter(
+      (goalId): goalId is string => typeof goalId === "string" && goalId.trim() !== "",
+    );
+    const handlerOwnershipFlags = resolveOwnershipFlagsForDomain(domain);
+    const lockedContextExpectedForDomain =
+      domain !== null &&
+      (workspaceLockedPlanningContext || effectiveDownstreamPlanningContextLocked) &&
+      !planOwnershipLoading &&
+      !isPlanGenerationBlockedByOwnership(handlerOwnershipFlags);
+    const lockedContextDetailsComplete =
+      canGenerateFromLockedPlanningContextForDomain({
+        domain,
+        effectiveDownstreamPlanningContextLocked:
+          workspaceLockedPlanningContext || effectiveDownstreamPlanningContextLocked,
+        ownershipFlags: handlerOwnershipFlags,
+        lockedSeasonCycleId: lockedGenerationSeasonCycleId,
+        lockedPlanWindowStart: lockedGenerationPlanStartDate,
+        lockedPlanWindowEnd: lockedGenerationPlanEndDate,
+        lockedSportCode: lockedGenerationSportCode,
+      }) && normalizedLockedGoalIds.length > 0;
+    const canGenerateFromLockedPlanningContext = lockedContextDetailsComplete;
+    const workspaceDurationDays = workspacePlanningContext?.durationDays ?? null;
+    const effectiveDurationDays =
+      canGenerateFromLockedPlanningContext &&
+      (workspaceDurationDays === 7 || workspaceDurationDays === 15 || workspaceDurationDays === 30)
+        ? workspaceDurationDays
+        : generationDurationDaysForDomain(domain, durationDays);
     const effectivePlanEndDate = addDaysToDateString(
       planStartDate,
       effectiveDurationDays - 1,
     );
     const isSkillsOwnedLockedContext =
-      trainingPlanPageModel.shell === "skills_coach_planning" &&
+      trainingPlanShellModel.shell === "skills_coach_planning" &&
       effectiveSkillsPlanningContextLocked;
-    const localGenerationError = isDownstreamDomainCoach
-      ? (generatePlanLocalErrorsByDomain[domain] ?? null)
-      : isSkillsOwnedLockedContext
-        ? null
-        : resolveGeneratePlanLocalError({
-            entityId,
-            athleteId: athleteIdTrimmed,
-            generationDomain: domain,
-            selectedSeasonCycleId,
-            selectedGoalCount: selectedActiveGoals.length,
-            sportCode: athleteSportCode,
-            selectedSeason,
-            currentPhase: activePhaseForSelectedSeason,
-            planStartDate,
-            planEndDate: effectivePlanEndDate,
-          });
+    const lockedContextOwnershipError = planOwnershipLoading
+      ? "Loading plan generation permissions."
+      : isPlanGenerationBlockedByOwnership(handlerOwnershipFlags)
+        ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
+        : null;
+    let localGenerationError: string | null = null;
+    if (lockedContextOwnershipError !== null) {
+      localGenerationError = lockedContextOwnershipError;
+    } else if (canGenerateFromLockedPlanningContext) {
+      localGenerationError = null;
+    } else if (lockedContextExpectedForDomain) {
+      localGenerationError = LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+    } else if (isDownstreamDomainCoach) {
+      localGenerationError = generatePlanLocalErrorsByDomain[domain] ?? null;
+    } else if (isSkillsOwnedLockedContext) {
+      localGenerationError = null;
+    } else {
+      localGenerationError = resolveGeneratePlanLocalError({
+        entityId,
+        athleteId: athleteIdTrimmed,
+        generationDomain: domain,
+        selectedSeasonCycleId,
+        selectedGoalCount: selectedActiveGoals.length,
+        sportCode: athleteSportCode,
+        selectedSeason,
+        currentPhase: activePhaseForSelectedSeason,
+        planStartDate,
+        planEndDate: effectivePlanEndDate,
+      });
+    }
     const readinessBlockedMessage = formatBackendReadinessBlockers(readinessPanel.blockers);
     if (
       readinessLoading ||
@@ -10091,11 +11704,11 @@ export function CoachAthletePlanningProfileView({
       return;
     }
     const currentJob = generatePlanJobsByDomain[domain] ?? null;
-    if (currentJob?.status === "QUEUED" || currentJob?.status === "RUNNING") {
+    if (isGenerationJobInProgress(currentJob)) {
       return;
     }
 
-    if (!isDownstreamDomainCoach && !generationReadinessFromApis) {
+    if (!isDownstreamDomainCoach && !usesLockedDownstreamContext && !generationReadinessFromApis) {
       setGeneratePlanError(
         readinessBlockedMessage ??
           "Training plan generation is blocked until backend readiness is complete.",
@@ -10114,11 +11727,15 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
-    const seasonCycleId = selectedSeasonCycleId;
-    const goalIds = selectedActiveGoals.map((goal) => goal.goalId);
+    const seasonCycleId = canGenerateFromLockedPlanningContext
+      ? lockedGenerationSeasonCycleId
+      : selectedSeasonCycleId;
+    const goalIds = canGenerateFromLockedPlanningContext
+      ? normalizedLockedGoalIds
+      : selectedActiveGoals.map((goal) => goal.goalId);
     const normalizedSportCode = (
-      isDownstreamDomainCoach
-        ? assistantLockedUpstreamDerived.lockedSportCode
+      isDownstreamDomainCoach || canGenerateFromLockedPlanningContext
+        ? lockedGenerationSportCode
         : athleteSportCode
     )
       ?.trim() ?? "";
@@ -10145,6 +11762,14 @@ export function CoachAthletePlanningProfileView({
         sportCode: normalizedSportCode,
         durationDays: effectiveDurationDays,
         generationDomain: domain,
+        seasonCycleId,
+        planStartDate: canGenerateFromLockedPlanningContext
+          ? lockedGenerationPlanStartDate
+          : planStartDate,
+        planEndDate: canGenerateFromLockedPlanningContext
+          ? lockedGenerationPlanEndDate
+          : effectivePlanEndDate,
+        goalIds,
         onUpdate: (job) => {
           if (
             generatePlanJobRequestGenRef.current[domain] !== requestGeneration ||
@@ -10175,13 +11800,97 @@ export function CoachAthletePlanningProfileView({
         return;
       }
       await loadLatestSkillsDraft(domain, true);
-      setGeneratePlanSuccess(
-        persistDraftResultFromLatestDomainDraft(
-          await fetchLatestCoachAthleteDomainDraft(entityId, athleteIdTrimmed, domain),
-        ),
+      const latestDomainDraft = await fetchLatestCoachAthleteDomainDraft(
+        entityId,
+        athleteIdTrimmed,
+        domain,
       );
+      const persistedGenerateResult = persistDraftResultFromLatestDomainDraft(latestDomainDraft);
+      setGeneratePlanSuccess(persistedGenerateResult);
       setGeneratePlanSuccessDomain(domain);
-      void refreshTrainingPlanWorkspace();
+      let generatedPlanId = persistedGenerateResult.trainingPlanId?.trim() ?? "";
+      let generatedVersionId = persistedGenerateResult.trainingPlanVersionId?.trim() ?? "";
+      let refreshedWorkspace: TrainingPlanWorkspace | null = null;
+      let workspaceRefreshStatus = "not_started";
+      try {
+        workspaceRefreshStatus = "started";
+        refreshedWorkspace = await getTrainingPlanWorkspace(entityId, athleteIdTrimmed);
+        setWorkspace(refreshedWorkspace);
+        workspaceHasLoadedRef.current = true;
+        setWorkspaceError(null);
+        workspaceRefreshStatus = "completed";
+      } catch (e) {
+        workspaceRefreshStatus = "failed";
+        setWorkspaceError(
+          formatApiError(
+            e,
+            "Could not refresh generated training plan workspace. Please retry.",
+          ),
+        );
+      }
+      const workspaceSummary = refreshedWorkspace?.domains[domain]?.summary ?? null;
+      const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
+      const workspaceVersionId = workspaceSummary?.versionId?.trim() ?? "";
+      if (generatedPlanId === "" && workspacePlanId !== "") {
+        generatedPlanId = workspacePlanId;
+      }
+      if (generatedVersionId === "" && workspaceVersionId !== "") {
+        generatedVersionId = workspaceVersionId;
+      }
+      const detailFetchUrl =
+        generatedPlanId !== ""
+          ? `/training-plan-management/${encodeURIComponent(generatedPlanId)}/active/detail?generationDomain=${encodeURIComponent(domain)}`
+          : null;
+      let detailFetchStatus: string | number | null = null;
+      if (generatedPlanId !== "") {
+        try {
+          await refreshPersistedPlanDetail(generatedPlanId, domain, {
+            updateWorkflowRequestedPlanId: true,
+          });
+          detailFetchStatus = "ok";
+        } catch (e) {
+          detailFetchStatus = isNormalizedApiError(e) ? e.status : "error";
+          setPersistedSkillsPlanError(
+            formatApiError(e, `Could not load ${trainingPlanDomainLabel(domain)}.`),
+          );
+          setPersistedPlanErrorDomain(domain);
+        }
+      } else {
+        detailFetchStatus = "missing_plan_id";
+      }
+      logTrainingPlanGenerationAutoLoadDiagnostic({
+        generatedDomain: domain,
+        generationResponsePlanId: persistedGenerateResult.trainingPlanId?.trim() || null,
+        generationResponseVersionId:
+          persistedGenerateResult.trainingPlanVersionId?.trim() || null,
+        workspaceRefreshStatus,
+        workspaceSummaryStatus: workspaceSummary?.status ?? null,
+        workspaceSummaryPlanId: workspacePlanId || null,
+        workspaceSummaryVersionId: workspaceVersionId || null,
+        selectedDetailDomain: generatedPlanId !== "" ? domain : null,
+        detailFetchUrl,
+        detailFetchStatus,
+        rendererBranch:
+          trainingPlanShellModel.shell === "head_coach_function_aware"
+            ? "head_coach_function_aware"
+            : "assistant_domain_workspace",
+        noPlanCreatedReason:
+          generatedPlanId === "" ? "generated result and workspace summary missing plan id" : null,
+      });
+      if (generatedPlanId !== "") {
+        setGeneratePlanSuccess({
+          ...persistedGenerateResult,
+          trainingPlanId: generatedPlanId,
+          trainingPlanVersionId: generatedVersionId || persistedGenerateResult.trainingPlanVersionId,
+        });
+      } else {
+        setGeneratePlanRecoveryMessage(
+          "Generation completed. Refreshing the saved plan summary before showing the draft.",
+        );
+      }
+      if (refreshedWorkspace === null) {
+        void refreshTrainingPlanWorkspace({ background: true });
+      }
     } catch (e) {
       setGeneratePlanSuccess(null);
       setGeneratePlanSuccessDomain(null);
@@ -10257,12 +11966,12 @@ export function CoachAthletePlanningProfileView({
                 Loading training plan workspace...
               </div>
             </Card>
-          ) : trainingPlanPageModel.shell === "specialist_domain" ? (
+          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
             renderAssistantDomainWorkspace()
-          ) : trainingPlanPageModel.shell === "head_coach_review" ||
-            trainingPlanPageModel.shell === "head_coach_function_aware" ||
-            trainingPlanPageModel.shell === "head_coach_planning" ||
-            trainingPlanPageModel.shell === "skills_coach_planning" ? (
+          ) : trainingPlanShellModel.shell === "head_coach_review" ||
+            trainingPlanShellModel.shell === "head_coach_function_aware" ||
+            trainingPlanShellModel.shell === "head_coach_planning" ||
+            trainingPlanShellModel.shell === "skills_coach_planning" ? (
           <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
             <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
               <TrainingPlanWorkflowProgressRail
@@ -11486,7 +13195,7 @@ export function CoachAthletePlanningProfileView({
                     </h3>
                     <p className="text-sm text-textSecondary">
                       {headCoachReviewMode
-                        ? "Head Coach mode focuses on locking planning context and reviewing submitted domain plans."
+                        ? workflow2AHeadCoachStep6Intro(trainingPlanShellModel.shell)
                         : step6GenerationLifecyclePhase === "generated_draft"
                           ? "Review the generated plan below and continue with workflow actions when ready."
                           : step6GenerationLifecyclePhase === "generating"
@@ -11578,7 +13287,7 @@ export function CoachAthletePlanningProfileView({
                         </Alert>
                       ) : null}
                       {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
-                      {(trainingPlanPageModel.shell !== "skills_coach_planning" ||
+                      {(trainingPlanShellModel.shell !== "skills_coach_planning" ||
                         step6GenerationLifecyclePhase === "generating") &&
                       currentDomainGenerationJob !== null
                         ? renderGenerationJobProgress(currentDomainGenerationJob)
@@ -11634,13 +13343,27 @@ export function CoachAthletePlanningProfileView({
                               Viewing the saved Skills plan for this athlete.
                             </div>
                           </WorkflowNeutralNotice>
-                        ) : persistedSkillsPlanError ? (
-                          <Alert variant="danger">{persistedSkillsPlanError}</Alert>
+                        ) : errorForRenderedDomain({
+                            error: persistedSkillsPlanError,
+                            errorDomain: persistedPlanErrorDomain,
+                            renderedDomain: persistedPlanDisplayDomain,
+                          }) ? (
+                          <Alert variant="danger">
+                            {errorForRenderedDomain({
+                              error: persistedSkillsPlanError,
+                              errorDomain: persistedPlanErrorDomain,
+                              renderedDomain: persistedPlanDisplayDomain,
+                            })}
+                          </Alert>
                         ) : persistedSkillsPlanLoading ? (
                           <div className="text-sm text-textSecondary">
                             Loading persisted Skills plan…
                           </div>
-                        ) : persistedSkillsPlanDetail && !shouldHidePersistedGeneratorPanel ? (
+                        ) : shouldRenderPersistedDetailForDomain({
+                            detailDomain: persistedDetailDomain,
+                            renderedDomain: persistedPlanDisplayDomain,
+                            hasDetail: persistedSkillsPlanDetail !== null,
+                          }) && !shouldHidePersistedGeneratorPanel && persistedSkillsPlanDetail ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
                         <h4 className="text-sm font-normal text-textPrimary">
                           Persisted Skills Plan
@@ -11969,9 +13692,22 @@ export function CoachAthletePlanningProfileView({
                   !isHeadCoachReviewerOnlyForDomain(
                     latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
                   ) ? (
-                    latestSkillsDraftError ? (
-                      <Alert variant="danger">{latestSkillsDraftError}</Alert>
-                    ) : latestSkillsDraftMissing ? (
+                    errorForRenderedDomain({
+                      error: latestSkillsDraftError,
+                      errorDomain: latestSkillsDraftErrorDomain,
+                      renderedDomain: latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
+                    }) ? (
+                      <Alert variant="danger">
+                        {errorForRenderedDomain({
+                          error: latestSkillsDraftError,
+                          errorDomain: latestSkillsDraftErrorDomain,
+                          renderedDomain: latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
+                        })}
+                      </Alert>
+                    ) : shouldShowGeneratedDraftEmptyState({
+                        draftMissing: latestSkillsDraftMissing,
+                        generationInProgress: step6GenerationInProgress,
+                      }) ? (
                       <div className="text-sm text-textSecondary">
                         {generationDraftEmptyState(latestDraftDisplayDomain ?? "SKILLS")}
                       </div>
@@ -12253,8 +13989,7 @@ export function CoachAthletePlanningProfileView({
                               variant="secondary"
                               disabled={
                                 reviseSandCLoading ||
-                                !latestSkillsDraft.trainingPlanId ||
-                                !latestSkillsDraft.trainingPlanVersionId
+                                !sandCReviseIds
                               }
                               onClick={() => {
                                 void handleReviseSandCPlan();
@@ -12275,7 +14010,7 @@ export function CoachAthletePlanningProfileView({
                         </Button>
                       </div>
                     ) : null
-                  ) : trainingPlanPageModel.shell === "head_coach_planning" ? (
+                  ) : trainingPlanShellModel.shell === "head_coach_planning" ? (
                     <div className="space-y-3">
                       {renderHeadCoachPlanningContextLockAction()}
                       <div className="text-sm text-textSecondary">
@@ -12294,7 +14029,7 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : isDownstreamDomainCoach && hasExistingCurrentDomainPlan ? (
                     renderAssistantDomainDraftActions()
-                  ) : trainingPlanPageModel.shell === "skills_coach_planning" &&
+                  ) : trainingPlanShellModel.shell === "skills_coach_planning" &&
                     !step6ShowsGenerateCreateActions ? null : !showHeadCoachDomainGeneratorCreateActions ? null : (
                     <div className="space-y-2">
                       {hasPersistedPlanForLatestDraftToDiscourageGenerate ? (
@@ -12308,12 +14043,16 @@ export function CoachAthletePlanningProfileView({
                       ) : null}
                       {allowedGenerationDomains.map((domain) => {
                         const domainJob = generatePlanJobsByDomain[domain] ?? null;
-                        const domainGenerationInProgress =
-                          domainJob?.status === "QUEUED" ||
-                          domainJob?.status === "RUNNING";
+                        const domainGenerationInProgress = isGenerationJobInProgress(domainJob);
                         return (
                           <div key={domain} className="space-y-2">
-                            {renderGenerationJobProgress(domainJob)}
+                            {shouldShowDomainButtonProgress({
+                              domain,
+                              currentDomain: currentCoachGenerationDomain,
+                              generationInProgress: step6GenerationInProgress,
+                            })
+                              ? renderGenerationJobProgress(domainJob)
+                              : null}
                             <Button
                               type="button"
                               variant="primary"
@@ -12333,7 +14072,7 @@ export function CoachAthletePlanningProfileView({
                       })}
                     </div>
                   )}
-                  {trainingPlanPageModel.shell !== "head_coach_planning" &&
+                  {trainingPlanShellModel.shell !== "head_coach_planning" &&
                   !isHeadCoachReviewerOnlyForDomain(resolvedWorkflowGenerationDomain)
                     ? renderStep6WorkflowActionsStrip()
                     : null}

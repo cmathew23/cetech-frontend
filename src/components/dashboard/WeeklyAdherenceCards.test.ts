@@ -27,6 +27,8 @@ function buildItemBasedSummary(
       plannedSessions: 42,
       loggedSessions: 30,
       adherencePercent: 72.5,
+      plannedItems: null,
+      completedItems: null,
     },
     visibleDomains: ["SKILL", "NUTRITION", "STRENGTH_CONDITIONING"],
     domains: {
@@ -87,6 +89,37 @@ describe("buildWeeklyAdherenceMetricTiles", () => {
     expect(overall?.adherencePercent).toBe(72.5);
     expect(overall?.percentMeaning).toBe(ADHERENCE_PERCENT_MEANING.overall);
     expect(formatAdherencePercentDisplay(overall!.adherencePercent)).toBe("72.5%");
+  });
+
+  it("renders Overall before Skills, Nutrition, and S&C when backend overall is available", () => {
+    const tiles = buildWeeklyAdherenceMetricTiles(buildItemBasedSummary());
+
+    expect(tiles.map((tile) => tile.label)).toEqual([
+      "Overall",
+      "Skills",
+      "Nutrition",
+      "S&C",
+    ]);
+  });
+
+  it("keeps backend zero overall and item counts for released plans with no completions", () => {
+    const tiles = buildWeeklyAdherenceMetricTiles(
+      buildItemBasedSummary({
+        overall: {
+          plannedSessions: 3,
+          loggedSessions: 0,
+          adherencePercent: 0,
+          plannedItems: 12,
+          completedItems: 0,
+        },
+      }),
+    );
+    const overall = tiles[0];
+
+    expect(overall?.key).toBe("overall");
+    expect(overall?.adherencePercent).toBe(0);
+    expect(overall?.overallPlannedItems).toBe(12);
+    expect(overall?.completedItems).toBe(0);
   });
 
   it("uses backend nutrition percent, not calorie ratio", () => {

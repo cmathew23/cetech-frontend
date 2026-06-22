@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/StatusBadge";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
+import { useEffect } from "react";
 import {
   isNutritionContext,
   isSessionContext,
@@ -49,6 +50,8 @@ export type WeeklyAdherenceMetricTile = {
   adherencePercent: number;
   context: WeeklyAdherenceDomainContext | null;
   plannedItems: number;
+  overallPlannedItems: number | null;
+  completedItems: number | null;
   isOverall: boolean;
 };
 
@@ -66,6 +69,8 @@ export function buildWeeklyAdherenceMetricTiles(
       adherencePercent: summary.overall.adherencePercent,
       context: null,
       plannedItems: 0,
+      overallPlannedItems: summary.overall.plannedItems,
+      completedItems: summary.overall.completedItems,
       isOverall: true,
     });
   }
@@ -81,6 +86,8 @@ export function buildWeeklyAdherenceMetricTiles(
         adherencePercent: domain.adherencePercent,
         context: domain.context,
         plannedItems: domain.plannedSessions,
+        overallPlannedItems: null,
+        completedItems: null,
         isOverall: false,
       });
     }
@@ -263,17 +270,26 @@ function NutritionContextLines({ ctx }: { ctx: NutritionDomainContext }) {
   );
 }
 
-function OverallContextLines() {
+function OverallContextLines({ tile }: { tile: WeeklyAdherenceMetricTile }) {
+  if (tile.completedItems !== null && tile.overallPlannedItems !== null) {
+    return (
+      <p className="text-[11px] leading-tight text-textSecondary">
+        {formatCompletionCredit(tile.completedItems)} of{" "}
+        {formatCompletionCredit(tile.overallPlannedItems)} planned items completed
+      </p>
+    );
+  }
+
   return (
     <p className="text-[11px] leading-tight text-textSecondary">
-      Combined item-based adherence across visible plan domains
+      Combined adherence across released plan items
     </p>
   );
 }
 
 function TileContextDetail({ tile }: { tile: WeeklyAdherenceMetricTile }) {
   if (tile.isOverall) {
-    return <OverallContextLines />;
+    return <OverallContextLines tile={tile} />;
   }
   if (tile.context === null) return null;
   if (isSessionContext(tile.context)) {
@@ -349,6 +365,19 @@ export function WeeklyAdherenceCards({
 }: WeeklyAdherenceCardsProps) {
   const tiles = buildWeeklyAdherenceMetricTiles(summary);
   const weekLabel = `${formatDateOnly(summary.weekStart, summary.weekStart)} – ${formatDateOnly(summary.weekEnd, summary.weekEnd)}`;
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    console.info("[WeeklyAdherence overall diagnostic]", {
+      component: "WeeklyAdherenceCards",
+      receivedOverall: summary.overall,
+      parsedDomainKeys: Object.keys(summary.domains),
+      shouldRenderOverall: tiles.some((tile) => tile.isOverall),
+      hiddenReason: tiles.some((tile) => tile.isOverall)
+        ? null
+        : "WeeklyAdherenceCards received no overall object.",
+    });
+  }, [summary, tiles]);
 
   const grid = (
     <div

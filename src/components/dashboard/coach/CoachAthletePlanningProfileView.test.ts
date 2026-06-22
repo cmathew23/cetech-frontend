@@ -3,20 +3,63 @@ import { describe, expect, it } from "vitest";
 import {
   buildCoachWorkflowResetScopeKey,
   deriveHeadCoachDomainWorkflowStatus,
+  deriveAssistantDomainWorkflowStatus,
   resolveNoHeadCoachDirectReleaseLockedPlanningContext,
   resolveInitialTrainingPlanWorkflowTab,
   resolveSkillsOwnedDirectReleaseCurrentStep,
+  renderGenerationJobButtonLabel,
   resolveStep6GenerationLifecyclePhase,
   resolveTrainingPlanShellOwnership,
   resolveTrainingPlanPageBootstrapModel,
   resolveTrainingPlanWorkflowMode,
+  resolveWorkspaceDomainViewPlanContext,
+  shouldRenderPersistedDetailForDomain,
+  shouldRenderWorkspaceDomainPlanContent,
+  shouldShowGeneratedPlanSyncingNotice,
+  workflow2AHeadCoachStep6Intro,
+  resolveAssistantDomainSubmitActionVisible,
+  resolveSubmitReviewPlanVersionIds,
+  resolveHeadCoachReviewSummarySource,
+  shouldShowHeadCoachReviewEmptyState,
+  canShowHeadCoachReviewReleaseAction,
+  readLockedWorkspaceGoalIds,
+  readWorkspaceSnapshotGoalCount,
+  domainDraftLoadErrorMessage,
+  errorForRenderedDomain,
+  canShowDomainReviseAction,
+  resolveDomainRevisePlanIds,
+  resolveWorkflowResetScopeMode,
+  headCoachSubmittedReviewDomains,
+  shouldBlockWorkflowRenderForWorkspace,
+  canGenerateFromLockedPlanningContextForDomain,
+  isGenerationJobInProgress,
+  resolveGeneratePlanLocalError,
   resolveWorkflow2SubmittedDomainSkillsSlotProjection,
   shouldClearWorkflow2SkillsSubmitSlotError,
+  shouldShowDomainButtonProgress,
+  shouldShowGeneratedDraftEmptyState,
   shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent,
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
   workflow2SkillsSubmitReviewReconciled,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
+import {
+  resolveLegacyAssistantCreateButtonDisabled,
+  resolveLegacyPlanningContextLocked,
+  resolvePlanningContextLocked,
+  parseWorkspaceInitialTab,
+  resolveWorkflowModeFromWorkspace,
+  workspaceHeadCoachCanCreateSkillsPlan,
+  workspaceHeadCoachOwnsSkillsForAthlete,
+  workspaceShowsDomainSubmitReview,
+} from "@/lib/trainingPlanWorkspaceView";
+import {
+  LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE,
+  resolveWorkflow1SpecialistCreateDisabled,
+  shouldUseLockedDownstreamGenerationContext,
+  shouldUseWorkflow1SpecialistCreateGate,
+} from "@/lib/coachTrainingPlanActions";
+import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
 
 describe("buildCoachWorkflowResetScopeKey", () => {
   it("changes when the authenticated coach user changes", () => {
@@ -500,6 +543,451 @@ describe("resolveTrainingPlanWorkflowMode", () => {
     ).toBe("head_coach_review");
   });
 
+  it("keeps Workflow 2A Head Coach plus Skills owner on the function-aware Skills shell after lock", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const headCoachOwnsSkills = workspaceHeadCoachOwnsSkillsForAthlete(workspace);
+
+    expect(workspace.workflowShape).toBe("HEAD_COACH_SKILLS_OWNER");
+    expect(workspace.shell).toBe("HEAD_COACH_FUNCTION_AWARE");
+    const staleWorkflowModeWorkspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      workflowMode: "HEAD_COACH_REVIEW",
+    });
+    expect(resolveWorkflowModeFromWorkspace(staleWorkflowModeWorkspace)).toBe(
+      "head_coach_function_aware",
+    );
+    expect(workspace.currentDomain).toBe("SKILLS");
+    expect(workspace.initialTab).toBe("DOMAIN");
+    expect(parseWorkspaceInitialTab(workspace.initialTab)).toBe("generate");
+    expect(workspace.ownershipFlags.requesterIsHeadCoach).toBe(true);
+    expect(workspace.ownershipFlags.requesterOwnsCurrentDomain).toBe(true);
+    expect(workspace.ownershipFlags.requesterOwnsSkillsForThisAthlete).toBe(true);
+    expect(workspace.ownershipFlags.requesterOwnsNutritionForThisAthlete).toBe(false);
+    expect(workspace.ownershipFlags.requesterOwnsStrengthForThisAthlete).toBe(false);
+    expect(headCoachOwnsSkills).toBe(true);
+    expect(workspace.domains.SKILLS.reviewAccess).toBe("HEAD_COACH");
+    expect(workspace.domains.SKILLS.canOpen).toBe(true);
+    expect(workspace.domains.SKILLS.allowedActions).toEqual([]);
+    expect(workspace.domains.SKILLS.summary.status).toBeNull();
+    expect(workspace.domains.SKILLS.summary.trainingPlanId).toBeNull();
+    expect(workspace.domains.SKILLS.summary.versionId).toBeNull();
+
+    expect(
+      resolveWorkflowResetScopeMode({
+        workspace: staleWorkflowModeWorkspace,
+        isHeadCoachPlanningContextOwner: true,
+        planningContextLocked: true,
+        workflowMode: "head_coach_review",
+      }),
+    ).toBe("head_coach_function_aware");
+    expect(workspaceHeadCoachCanCreateSkillsPlan(workspace, false)).toBe(true);
+    expect(workflow2AHeadCoachStep6Intro("head_coach_function_aware")).not.toBe(
+      "Head Coach mode focuses on locking planning context and reviewing submitted domain plans.",
+    );
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills,
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
+  });
+
+  it("uses locked workspace goals for Workflow 2A Skills generation when local goals are stale", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      planningContext: {
+        locked: true,
+        resolved: true,
+        lockId: "lock-1",
+        snapshotId: "snapshot-1",
+        selectedSeasonCycleId: "season-1",
+        planStartDate: "2026-06-20",
+        planEndDate: "2026-06-26",
+        selectedGoalsSnapshot: [
+          {
+            goalId: "goal-1",
+            goalName: "Improve first touch",
+            status: "ACTIVE",
+            domain: "SKILLS",
+          },
+        ],
+        athletePlanningContextSnapshot: {
+          goals: [],
+        },
+      },
+    });
+    const lockedGoalIds = readLockedWorkspaceGoalIds({
+      selectedGoalsSnapshot: workspace.planningContext.selectedGoalsSnapshot,
+      athletePlanningContextSnapshot:
+        workspace.planningContext.athletePlanningContextSnapshot,
+      goalIds: workspace.planningContext.goalIds,
+      lockedGoalIds: workspace.planningContext.lockedGoalIds,
+    });
+    const canUseLockedContext = canGenerateFromLockedPlanningContextForDomain({
+      domain: "SKILLS",
+      effectiveDownstreamPlanningContextLocked: workspace.planningContext.locked,
+      ownershipFlags: {
+        canGeneratePlan: true,
+        canGenerateCurrentDomainPlan: true,
+      },
+      lockedSeasonCycleId: workspace.planningContext.selectedSeasonCycleId,
+      lockedPlanWindowStart: workspace.planningContext.planStartDate,
+      lockedPlanWindowEnd: workspace.planningContext.planEndDate,
+      lockedSportCode: "TENNIS",
+    });
+    const localSelectedGoalsLength = 0;
+
+    expect(readWorkspaceSnapshotGoalCount(workspace.planningContext.selectedGoalsSnapshot)).toBe(1);
+    expect(lockedGoalIds).toEqual(["goal-1"]);
+    expect(workspaceHeadCoachCanCreateSkillsPlan(workspace, false)).toBe(true);
+    expect(
+      resolveGeneratePlanLocalError({
+        entityId: "entity-1",
+        athleteId: "athlete-24",
+        generationDomain: "SKILLS",
+        selectedSeasonCycleId: null,
+        selectedGoalCount: lockedGoalIds.length,
+        sportCode: "TENNIS",
+        selectedSeason: null,
+        currentPhase: null,
+        planStartDate: "",
+        planEndDate: "",
+        canUseLockedPlanningContextForGeneration: canUseLockedContext,
+        lockedSeasonCycleId: workspace.planningContext.selectedSeasonCycleId,
+        lockedPlanWindowStart: workspace.planningContext.planStartDate,
+        lockedPlanWindowEnd: workspace.planningContext.planEndDate,
+      }),
+    ).toBeNull();
+    expect(localSelectedGoalsLength).toBe(0);
+  });
+
+  it("shows the active-goal blocker only when locked workspace context has no goals", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      planningContext: {
+        locked: true,
+        resolved: true,
+        lockId: "lock-1",
+        snapshotId: "snapshot-1",
+        selectedSeasonCycleId: "season-1",
+        planStartDate: "2026-06-20",
+        planEndDate: "2026-06-26",
+        selectedGoalsSnapshot: [],
+        athletePlanningContextSnapshot: {
+          goals: [],
+        },
+      },
+    });
+    const lockedGoalIds = readLockedWorkspaceGoalIds({
+      selectedGoalsSnapshot: workspace.planningContext.selectedGoalsSnapshot,
+      athletePlanningContextSnapshot:
+        workspace.planningContext.athletePlanningContextSnapshot,
+      goalIds: workspace.planningContext.goalIds,
+      lockedGoalIds: workspace.planningContext.lockedGoalIds,
+    });
+
+    expect(readWorkspaceSnapshotGoalCount(workspace.planningContext.selectedGoalsSnapshot)).toBe(0);
+    expect(
+      readWorkspaceSnapshotGoalCount(
+        workspace.planningContext.athletePlanningContextSnapshot,
+      ),
+    ).toBe(0);
+    expect(lockedGoalIds).toEqual([]);
+    expect(
+      resolveGeneratePlanLocalError({
+        entityId: "entity-1",
+        athleteId: "athlete-24",
+        generationDomain: "SKILLS",
+        selectedSeasonCycleId: null,
+        selectedGoalCount: lockedGoalIds.length,
+        sportCode: "TENNIS",
+        selectedSeason: null,
+        currentPhase: null,
+        planStartDate: "",
+        planEndDate: "",
+        canUseLockedPlanningContextForGeneration: true,
+        lockedSeasonCycleId: workspace.planningContext.selectedSeasonCycleId,
+        lockedPlanWindowStart: workspace.planningContext.planStartDate,
+        lockedPlanWindowEnd: workspace.planningContext.planEndDate,
+      }),
+    ).toBe("Select at least one active goal before generating a plan.");
+  });
+
+  it("resolves Workflow 2 Head Coach Skills View Plan from workspace summary ids", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      domains: {
+        ...workflow2AHeadCoachOwnedSkillsWorkspace().domains,
+        SKILLS: {
+          ...workflow2AHeadCoachOwnedSkillsWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "workspace-skills-plan",
+            versionId: "workspace-skills-version",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveWorkspaceDomainViewPlanContext({
+        workspace,
+        domain: "SKILLS",
+        fallbackPlanId: null,
+        fallbackVersionId: null,
+      }),
+    ).toEqual({
+      planId: "workspace-skills-plan",
+      versionId: "workspace-skills-version",
+      status: "AI_GENERATED",
+      source: "workspace.domains.SKILLS.summary",
+    });
+    expect(
+      shouldRenderWorkspaceDomainPlanContent({
+        shell: "head_coach_function_aware",
+        clickedDomain: "SKILLS",
+        detailDomain: "SKILLS",
+        hasDetail: true,
+      }),
+    ).toBe(true);
+    expect(resolveWorkflowModeFromWorkspace({
+      ...workspace,
+      workflowMode: "HEAD_COACH_REVIEW",
+    })).toBe("head_coach_function_aware");
+  });
+
+  it("falls back to legacy ids for non-workspace View Plan behavior", () => {
+    expect(
+      resolveWorkspaceDomainViewPlanContext({
+        workspace: null,
+        domain: "NUTRITION",
+        fallbackPlanId: "legacy-nutrition-plan",
+        fallbackVersionId: "legacy-nutrition-version",
+        fallbackStatus: "AI_GENERATED",
+        fallbackSource: "legacy activeDetail",
+      }),
+    ).toEqual({
+      planId: "legacy-nutrition-plan",
+      versionId: "legacy-nutrition-version",
+      status: "AI_GENERATED",
+      source: "legacy activeDetail",
+    });
+  });
+
+  it("resolves Nutrition View Plan from workspace summary ids after generation", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      currentDomain: "NUTRITION",
+      domains: {
+        ...workflow1OwnedSkillsWorkspace().domains,
+        NUTRITION: {
+          ...workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+          summary: {
+            trainingPlanId: "nutrition-plan-1",
+            versionId: "nutrition-version-1",
+            generationDomain: "NUTRITION",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveWorkspaceDomainViewPlanContext({
+        workspace,
+        domain: "NUTRITION",
+        fallbackPlanId: null,
+        fallbackVersionId: null,
+      }),
+    ).toEqual({
+      planId: "nutrition-plan-1",
+      versionId: "nutrition-version-1",
+      status: "AI_GENERATED",
+      source: "workspace.domains.NUTRITION.summary",
+    });
+  });
+
+  it("does not mark local generated Nutrition draft as persisted without plan and version ids", () => {
+    expect(
+      deriveAssistantDomainWorkflowStatus({
+        latestDraft: {
+          status: "AI_GENERATED",
+          trainingPlanId: null,
+          trainingPlanVersionId: null,
+        } as never,
+        activeDetail: null,
+      }),
+    ).toBe("not_created");
+    expect(
+      shouldShowGeneratedPlanSyncingNotice({
+        generateResultMatchesCurrentDomain: true,
+        currentDomainHasPersistedIds: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not render Skills plan load errors inside Nutrition domain panels", () => {
+    const skillsError = domainDraftLoadErrorMessage("SKILLS");
+
+    expect(skillsError).toBe("Unable to load Skills plan. Please retry.");
+    expect(
+      errorForRenderedDomain({
+        error: skillsError,
+        errorDomain: "SKILLS",
+        renderedDomain: "NUTRITION",
+      }),
+    ).toBeNull();
+    expect(
+      errorForRenderedDomain({
+        error: skillsError,
+        errorDomain: "SKILLS",
+        renderedDomain: "SKILLS",
+      }),
+    ).toBe(skillsError);
+  });
+
+  it("does not render loaded Skills detail inside Nutrition domain panels", () => {
+    expect(
+      shouldRenderPersistedDetailForDomain({
+        detailDomain: "SKILLS",
+        renderedDomain: "NUTRITION",
+        hasDetail: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderPersistedDetailForDomain({
+        detailDomain: "NUTRITION",
+        renderedDomain: "NUTRITION",
+        hasDetail: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRenderPersistedDetailForDomain({
+        detailDomain: "S_AND_C",
+        renderedDomain: "SKILLS",
+        hasDetail: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Nutrition and S&C load errors domain-specific", () => {
+    const nutritionError = domainDraftLoadErrorMessage("NUTRITION");
+    const sandCError = domainDraftLoadErrorMessage("S_AND_C");
+
+    expect(nutritionError).toBe("Unable to load Nutrition plan. Please retry.");
+    expect(sandCError).toBe("Unable to load S&C plan. Please retry.");
+    expect(
+      errorForRenderedDomain({
+        error: nutritionError,
+        errorDomain: "NUTRITION",
+        renderedDomain: "S_AND_C",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps S&C revise visible for v1 and v2 editable drafts", () => {
+    const v1 = resolveDomainRevisePlanIds({
+      domain: "S_AND_C",
+      workspace: workflow1OwnedSkillsWorkspace({
+        domains: {
+          ...workflow1OwnedSkillsWorkspace().domains,
+          S_AND_C: {
+            ...workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+            summary: {
+              trainingPlanId: "sandc-plan",
+              versionId: "sandc-v1",
+              generationDomain: "S_AND_C",
+              status: "AI_GENERATED",
+              versionNumber: 1,
+            },
+          },
+        },
+      }),
+      persistedDetailDomain: null,
+      persistedPlanId: null,
+      persistedVersionId: null,
+      latestDraftDomain: null,
+      latestDraftPlanId: null,
+      latestDraftVersionId: null,
+    });
+    const v2 = resolveDomainRevisePlanIds({
+      domain: "S_AND_C",
+      workspace: workflow1OwnedSkillsWorkspace({
+        domains: {
+          ...workflow1OwnedSkillsWorkspace().domains,
+          S_AND_C: {
+            ...workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+            summary: {
+              trainingPlanId: "sandc-plan",
+              versionId: "sandc-v2",
+              generationDomain: "S_AND_C",
+              status: "AI_GENERATED",
+              versionNumber: 2,
+            },
+          },
+        },
+      }),
+      persistedDetailDomain: null,
+      persistedPlanId: null,
+      persistedVersionId: null,
+      latestDraftDomain: null,
+      latestDraftPlanId: null,
+      latestDraftVersionId: null,
+    });
+
+    expect(v1).toEqual({ trainingPlanId: "sandc-plan", versionId: "sandc-v1" });
+    expect(v2).toEqual({ trainingPlanId: "sandc-plan", versionId: "sandc-v2" });
+    expect(
+      canShowDomainReviseAction({
+        workflowStatus: "draft_generated",
+        reviseIds: v1,
+        requesterOwnsDomain: true,
+      }),
+    ).toBe(true);
+    expect(
+      canShowDomainReviseAction({
+        workflowStatus: "draft_generated",
+        reviseIds: v2,
+        requesterOwnsDomain: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps Nutrition and Skills revise visible for revised editable v2 drafts", () => {
+    for (const domain of ["NUTRITION", "SKILLS"] as const) {
+      const ids = resolveDomainRevisePlanIds({
+        domain,
+        workspace: null,
+        persistedDetailDomain: domain,
+        persistedPlanId: `${domain.toLowerCase()}-plan`,
+        persistedVersionId: `${domain.toLowerCase()}-v2`,
+        latestDraftDomain: null,
+        latestDraftPlanId: null,
+        latestDraftVersionId: null,
+      });
+
+      expect(
+        canShowDomainReviseAction({
+          workflowStatus: "draft_generated",
+          reviseIds: ids,
+          requesterOwnsDomain: true,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("hides domain-owner Revise Plan after submit, approval, or release", () => {
+    const ids = { trainingPlanId: "plan-1", versionId: "version-1" };
+
+    for (const workflowStatus of ["submitted_for_review", "approved", "released"] as const) {
+      expect(
+        canShowDomainReviseAction({
+          workflowStatus,
+          reviseIds: ids,
+          requesterOwnsDomain: true,
+        }),
+      ).toBe(false);
+    }
+  });
+
   it("uses the Skills-owned planning-context tab shell in Direct Release without a Head Coach", () => {
     expect(
       resolveTrainingPlanWorkflowMode({
@@ -884,6 +1372,148 @@ describe("deriveHeadCoachDomainWorkflowStatus", () => {
       }),
     ).toBe("draft_generated");
   });
+
+  it("uses workspace summary as the Head Coach review source after approval", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "workspace-plan-skills",
+            versionId: "workspace-version-approved",
+            generationDomain: "SKILLS",
+            status: "HEAD_COACH_APPROVED",
+            versionNumber: 2,
+          },
+          reviewAccess: "HEAD_COACH",
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: [],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(
+      resolveHeadCoachReviewSummarySource({
+        workspace,
+        domain: "SKILLS",
+        legacySummary: {
+          trainingPlanId: null,
+          versionId: null,
+          latestVersionId: null,
+          approvedVersionId: null,
+          activeVersionId: null,
+          versionNumber: null,
+          status: null,
+          generationDomain: "SKILLS",
+        },
+      }),
+    ).toEqual({
+      planId: "workspace-plan-skills",
+      versionId: "workspace-version-approved",
+      status: "HEAD_COACH_APPROVED",
+      hasWorkspaceIds: true,
+    });
+  });
+
+  it("does not show no-data empty state when workspace summary has review ids", () => {
+    expect(
+      shouldShowHeadCoachReviewEmptyState({
+        activeDetail: null,
+        workspacePlanId: "workspace-plan-skills",
+        workspaceVersionId: "workspace-version-approved",
+        isLoading: false,
+        loadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows no-data empty state only when no detail or workspace ids exist", () => {
+    expect(
+      shouldShowHeadCoachReviewEmptyState({
+        activeDetail: null,
+        workspacePlanId: null,
+        workspaceVersionId: null,
+        isLoading: false,
+        loadError: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps release hidden while other required domains are still submitted", () => {
+    expect(
+      canShowHeadCoachReviewReleaseAction({
+        allowedActions: new Set(["HEAD_APPROVE", "REQUEST_REVISION"]),
+        status: "HEAD_COACH_APPROVED",
+      }),
+    ).toBe(false);
+  });
+
+  it("shows release when backend exposes RELEASE for an approved review plan", () => {
+    expect(
+      canShowHeadCoachReviewReleaseAction({
+        allowedActions: new Set(["RELEASE"]),
+        status: "HEAD_COACH_APPROVED",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("Workflow 1 Step 6 workspace state transitions", () => {
+  it("keeps the reset scope stable across workspace review/release mode changes", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      workflowMode: "REVIEW_REQUIRED",
+      shell: "HEAD_COACH_REVIEW",
+    });
+
+    expect(
+      resolveWorkflowResetScopeMode({
+        workspace,
+        isHeadCoachPlanningContextOwner: true,
+        planningContextLocked: true,
+        workflowMode: "head_coach_planning",
+      }),
+    ).toBe("head_coach_review");
+    expect(
+      resolveWorkflowResetScopeMode({
+        workspace: {
+          ...workspace,
+          workflowMode: "RELEASE_READY",
+        },
+        isHeadCoachPlanningContextOwner: true,
+        planningContextLocked: true,
+        workflowMode: "head_coach_review",
+      }),
+    ).toBe("head_coach_review");
+  });
+
+  it("does not block workspace refreshes after Step 6 is already loaded", () => {
+    expect(
+      shouldBlockWorkflowRenderForWorkspace({
+        workspaceLoading: true,
+        workspaceRefreshing: true,
+        workspace: workflow1OwnedSkillsWorkspace(),
+        isHeadCoachPlanningContextOwner: true,
+        planningContextLocked: true,
+        hasRenderableWorkflowFallback: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks stale legacy shell while initial locked Head Coach workspace is loading", () => {
+    expect(
+      shouldBlockWorkflowRenderForWorkspace({
+        workspaceLoading: true,
+        workspaceRefreshing: false,
+        workspace: null,
+        isHeadCoachPlanningContextOwner: true,
+        planningContextLocked: true,
+        hasRenderableWorkflowFallback: true,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("resolveWorkflow2SubmittedDomainSkillsSlotProjection", () => {
@@ -1057,5 +1687,706 @@ describe("shouldShowStep6PreGenerationReadiness", () => {
         lifecyclePhase: "pre_generation",
       }),
     ).toBe(false);
+  });
+});
+
+function workflow1OwnedSkillsWorkspace(
+  overrides: Partial<TrainingPlanWorkspace> = {},
+): TrainingPlanWorkspace {
+  return {
+    entityId: "entity-1",
+    athleteId: "athlete-1",
+    workflowShape: "WORKFLOW_1",
+    shell: "specialist_domain",
+    workflowMode: "specialist_domain",
+    currentDomain: "SKILLS",
+    initialTab: null,
+    planningContext: {
+      locked: true,
+      resolved: true,
+      lockId: "lock-1",
+      snapshotId: null,
+    },
+    ownershipFlags: {
+      hasHeadCoach: true,
+      requesterIsHeadCoach: false,
+      requesterHasSkillsFunction: true,
+      requesterOwnsCurrentDomain: true,
+      headCoachOwnsPlanningContext: true,
+      directReleaseAllowed: false,
+    },
+    blockers: [],
+    domains: {
+      SKILLS: {
+        summary: {
+          trainingPlanId: null,
+          versionId: null,
+          generationDomain: "SKILLS",
+          status: null,
+          versionNumber: null,
+        },
+        reviewAccess: null,
+        releaseMode: null,
+        submittedForReview: false,
+        canOpen: true,
+        allowedActions: ["SUBMIT_REVIEW"],
+      },
+      NUTRITION: {
+        summary: {
+          trainingPlanId: null,
+          versionId: null,
+          generationDomain: "NUTRITION",
+          status: null,
+          versionNumber: null,
+        },
+        reviewAccess: null,
+        releaseMode: null,
+        submittedForReview: false,
+        canOpen: false,
+        allowedActions: [],
+      },
+      S_AND_C: {
+        summary: {
+          trainingPlanId: null,
+          versionId: null,
+          generationDomain: "S_AND_C",
+          status: null,
+          versionNumber: null,
+        },
+        reviewAccess: null,
+        releaseMode: null,
+        submittedForReview: false,
+        canOpen: false,
+        allowedActions: [],
+      },
+    },
+    ...overrides,
+  };
+}
+
+function workflow2AHeadCoachOwnedSkillsWorkspace(
+  overrides: Partial<TrainingPlanWorkspace> = {},
+): TrainingPlanWorkspace {
+  const base = workflow1OwnedSkillsWorkspace();
+  return {
+    ...base,
+    workflowShape: "HEAD_COACH_SKILLS_OWNER",
+    shell: "HEAD_COACH_FUNCTION_AWARE",
+    workflowMode: "HEAD_COACH_FUNCTION_AWARE",
+    currentDomain: "SKILLS",
+    initialTab: "DOMAIN",
+    ownershipFlags: {
+      ...base.ownershipFlags,
+      hasHeadCoach: true,
+      requesterIsHeadCoach: true,
+      requesterHasSkillsFunction: true,
+      requesterOwnsCurrentDomain: true,
+      requesterOwnsSkillsForThisAthlete: true,
+      requesterOwnsNutritionForThisAthlete: false,
+      requesterOwnsStrengthForThisAthlete: false,
+      headCoachOwnsPlanningContext: true,
+      directReleaseAllowed: false,
+    },
+    domains: {
+      SKILLS: {
+        ...base.domains.SKILLS,
+        reviewAccess: "HEAD_COACH",
+        releaseMode: null,
+        submittedForReview: false,
+        canOpen: true,
+        allowedActions: [],
+      },
+      NUTRITION: {
+        ...base.domains.NUTRITION,
+        reviewAccess: "HEAD_COACH",
+        canOpen: true,
+        allowedActions: [],
+      },
+      S_AND_C: {
+        ...base.domains.S_AND_C,
+        reviewAccess: "HEAD_COACH",
+        canOpen: true,
+        allowedActions: [],
+      },
+    },
+    ...overrides,
+  };
+}
+
+describe("Workflow 1 assistant domain action visibility", () => {
+  it("enables create for assigned Skills coach with effective locked context and no plan", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          ...workflow1OwnedSkillsWorkspace().domains.SKILLS,
+          canOpen: false,
+          allowedActions: [],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+    const useWorkflow1Gate = shouldUseWorkflow1SpecialistCreateGate({
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: false,
+      domain: "SKILLS",
+      effectiveDownstreamPlanningContextLocked: true,
+      ownershipFlags: {
+        canGeneratePlan: true,
+        canGenerateCurrentDomainPlan: true,
+      },
+    });
+    const generatePlanActionDisabled = useWorkflow1Gate
+      ? resolveWorkflow1SpecialistCreateDisabled({
+          generationJobRunning: false,
+          planOwnershipLoading: false,
+        })
+      : true;
+    const hasHeadCoachConfigured = true;
+    const currentCoachGenerationDomain: "SKILLS" | null = "SKILLS";
+    const effectiveDownstreamPlanningContextLocked = true;
+    const planOwnershipLoading = false;
+    const ownershipBlocked = false;
+    const currentDomainGenerationJobStatus: "QUEUED" | "RUNNING" | null = null;
+    const workflow1LockedContextDomainCoachCanCreate =
+      hasHeadCoachConfigured &&
+      currentCoachGenerationDomain !== null &&
+      effectiveDownstreamPlanningContextLocked &&
+      !planOwnershipLoading &&
+      !ownershipBlocked &&
+      currentDomainGenerationJobStatus !== "QUEUED" &&
+      currentDomainGenerationJobStatus !== "RUNNING";
+    const staleLocalError = "Select a season before generating a plan.";
+    const localError = workflow1LockedContextDomainCoachCanCreate
+      ? null
+      : staleLocalError;
+
+    expect(workspace.domains.SKILLS.canOpen).toBe(false);
+    expect(workspace.domains.SKILLS.allowedActions).toEqual([]);
+    expect(useWorkflow1Gate).toBe(true);
+    expect(workflow1LockedContextDomainCoachCanCreate).toBe(true);
+    expect(generatePlanActionDisabled).toBe(false);
+    expect(localError).toBeNull();
+    expect(
+      workflow1LockedContextDomainCoachCanCreate
+        ? false
+        : resolveLegacyAssistantCreateButtonDisabled({
+            generatePlanActionDisabled,
+            localError,
+          }),
+    ).toBe(false);
+    expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(false);
+  });
+
+  it("uses locked downstream context instead of local season selection", () => {
+    const usesLockedContext = shouldUseLockedDownstreamGenerationContext({
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: false,
+      domain: "SKILLS",
+      effectiveDownstreamPlanningContextLocked: true,
+    });
+
+    const localError = usesLockedContext
+      ? resolveGeneratePlanLocalError({
+          entityId: "entity-1",
+          athleteId: "athlete-1",
+          generationDomain: "SKILLS",
+          selectedSeasonCycleId: null,
+          selectedGoalCount: 1,
+          sportCode: "TENNIS",
+          selectedSeason: null,
+          currentPhase: null,
+          planStartDate: "",
+          planEndDate: "",
+          canUseLockedPlanningContextForGeneration: true,
+          lockedSeasonCycleId: "season-1",
+          lockedPlanWindowStart: "2026-06-20",
+          lockedPlanWindowEnd: "2026-06-26",
+        })
+      : resolveGeneratePlanLocalError({
+          entityId: "entity-1",
+          athleteId: "athlete-1",
+          generationDomain: "SKILLS",
+          selectedSeasonCycleId: null,
+          selectedGoalCount: 0,
+          sportCode: "TENNIS",
+          selectedSeason: null,
+          currentPhase: null,
+          planStartDate: "",
+          planEndDate: "",
+        });
+
+    expect(usesLockedContext).toBe(true);
+    expect(localError).toBeNull();
+  });
+
+  it("allows Workflow 1 Skills coach locked-context generation without local selected season", () => {
+    const canGenerateFromLockedPlanningContext =
+      canGenerateFromLockedPlanningContextForDomain({
+        domain: "SKILLS",
+        effectiveDownstreamPlanningContextLocked: true,
+        ownershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+        lockedSeasonCycleId: "locked-season-cycle-1",
+        lockedPlanWindowStart: "2026-06-20",
+        lockedPlanWindowEnd: "2026-06-26",
+        lockedSportCode: "TENNIS",
+      });
+
+    expect(canGenerateFromLockedPlanningContext).toBe(true);
+    expect(
+      resolveGeneratePlanLocalError({
+        entityId: "entity-1",
+        athleteId: "athlete-1",
+        generationDomain: "SKILLS",
+        selectedSeasonCycleId: null,
+        selectedGoalCount: 1,
+        sportCode: "TENNIS",
+        selectedSeason: null,
+        currentPhase: null,
+        planStartDate: "",
+        planEndDate: "",
+        canUseLockedPlanningContextForGeneration: canGenerateFromLockedPlanningContext,
+        lockedSeasonCycleId: "locked-season-cycle-1",
+        lockedPlanWindowStart: "2026-06-20",
+        lockedPlanWindowEnd: "2026-06-26",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not fall back to selected-season validation when locked context is expected", () => {
+    const usesLockedDownstreamContext = false;
+    const lockedContextExpectedForDomain = true;
+    const canGenerateFromLockedPlanningContext = true;
+    const localSeasonError = resolveGeneratePlanLocalError({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      generationDomain: "SKILLS",
+      selectedSeasonCycleId: null,
+      selectedGoalCount: 0,
+      sportCode: "TENNIS",
+      selectedSeason: null,
+      currentPhase: null,
+      planStartDate: "",
+      planEndDate: "",
+    });
+    let localGenerationError: string | null = null;
+
+    if (canGenerateFromLockedPlanningContext) {
+      localGenerationError = null;
+    } else if (lockedContextExpectedForDomain) {
+      localGenerationError = LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE;
+    } else if (!usesLockedDownstreamContext) {
+      localGenerationError = localSeasonError;
+    }
+
+    expect(localSeasonError).toBe("Select a season before generating a plan.");
+    expect(localGenerationError).toBeNull();
+  });
+
+  it("returns locked-context missing details when locked context is expected but incomplete", () => {
+    const lockedContextExpectedForDomain = true;
+    const canGenerateFromLockedPlanningContext = false;
+    const localSeasonError = resolveGeneratePlanLocalError({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      generationDomain: "SKILLS",
+      selectedSeasonCycleId: null,
+      selectedGoalCount: 0,
+      sportCode: "TENNIS",
+      selectedSeason: null,
+      currentPhase: null,
+      planStartDate: "",
+      planEndDate: "",
+    });
+    const localGenerationError = canGenerateFromLockedPlanningContext
+      ? null
+      : lockedContextExpectedForDomain
+        ? LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE
+        : localSeasonError;
+
+    expect(localSeasonError).toBe("Select a season before generating a plan.");
+    expect(localGenerationError).toBe(LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE);
+  });
+
+  it("uses locked season, window, and goals for Workflow 1 locked-context payload", () => {
+    const lockedGenerationSeasonCycleId = "locked-season-cycle-1";
+    const lockedGenerationPlanStartDate = "2026-06-20";
+    const lockedGenerationPlanEndDate = "2026-06-26";
+    const lockedGenerationSportCode = "TENNIS";
+    const lockedGoalIds = ["goal-1", "goal-2"];
+    const canGenerateFromLockedPlanningContext =
+      canGenerateFromLockedPlanningContextForDomain({
+        domain: "SKILLS",
+        effectiveDownstreamPlanningContextLocked: true,
+        ownershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+        lockedSeasonCycleId: lockedGenerationSeasonCycleId,
+        lockedPlanWindowStart: lockedGenerationPlanStartDate,
+        lockedPlanWindowEnd: lockedGenerationPlanEndDate,
+        lockedSportCode: lockedGenerationSportCode,
+      });
+    const generationPayload = {
+      seasonCycleId: canGenerateFromLockedPlanningContext
+        ? lockedGenerationSeasonCycleId
+        : null,
+      planStartDate: canGenerateFromLockedPlanningContext
+        ? lockedGenerationPlanStartDate
+        : "local-start",
+      planEndDate: canGenerateFromLockedPlanningContext
+        ? lockedGenerationPlanEndDate
+        : "local-end",
+      sportCode: canGenerateFromLockedPlanningContext
+        ? lockedGenerationSportCode
+        : "LOCAL",
+      goalIds: canGenerateFromLockedPlanningContext
+        ? lockedGoalIds
+        : ["local-goal"],
+    };
+
+    expect(generationPayload).toEqual({
+      seasonCycleId: "locked-season-cycle-1",
+      planStartDate: "2026-06-20",
+      planEndDate: "2026-06-26",
+      sportCode: "TENNIS",
+      goalIds: ["goal-1", "goal-2"],
+    });
+  });
+
+  it("keeps Workflow 3 Skills generation to one progress card without empty draft copy", () => {
+    const skillsGenerationJob = {
+      status: "RUNNING" as const,
+      domain: "SKILLS" as const,
+      progressStage: "BUILDING_DOMAIN_CONTEXT",
+    };
+    const generationInProgress = isGenerationJobInProgress(skillsGenerationJob);
+    const canonicalStep6ProgressCards = generationInProgress ? 1 : 0;
+    const buttonProgressCards = shouldShowDomainButtonProgress({
+      domain: "SKILLS",
+      currentDomain: "SKILLS",
+      generationInProgress,
+    })
+      ? 1
+      : 0;
+
+    expect(generationInProgress).toBe(true);
+    expect(canonicalStep6ProgressCards + buttonProgressCards).toBe(1);
+    expect(skillsGenerationJob.progressStage).toBe("BUILDING_DOMAIN_CONTEXT");
+    expect(
+      shouldShowGeneratedDraftEmptyState({
+        draftMissing: true,
+        generationInProgress,
+      }),
+    ).toBe(false);
+    expect(
+      resolveLegacyAssistantCreateButtonDisabled({
+        generatePlanActionDisabled: true,
+        localError: null,
+      }),
+    ).toBe(true);
+    expect(renderGenerationJobButtonLabel("SKILLS", skillsGenerationJob)).toBe(
+      "Generating plan...",
+    );
+  });
+
+  it("shows locked-context missing details instead of season error for incomplete locked context", () => {
+    expect(
+      canGenerateFromLockedPlanningContextForDomain({
+        domain: "SKILLS",
+        effectiveDownstreamPlanningContextLocked: true,
+        ownershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+        lockedSeasonCycleId: null,
+        lockedPlanWindowStart: "2026-06-20",
+        lockedPlanWindowEnd: "2026-06-26",
+        lockedSportCode: "TENNIS",
+      }),
+    ).toBe(false);
+    expect(
+      resolveGeneratePlanLocalError({
+        entityId: "entity-1",
+        athleteId: "athlete-1",
+        generationDomain: "SKILLS",
+        selectedSeasonCycleId: null,
+        selectedGoalCount: 1,
+        sportCode: "TENNIS",
+        selectedSeason: null,
+        currentPhase: null,
+        planStartDate: "",
+        planEndDate: "",
+        canUseLockedPlanningContextForGeneration: true,
+        lockedSeasonCycleId: null,
+        lockedPlanWindowStart: "2026-06-20",
+        lockedPlanWindowEnd: "2026-06-26",
+      }),
+    ).toBe(LOCKED_CONTEXT_MISSING_GENERATION_DETAILS_MESSAGE);
+  });
+
+  it("keeps season selection required for planning context owner before lock", () => {
+    expect(
+      resolveGeneratePlanLocalError({
+        entityId: "entity-1",
+        athleteId: "athlete-1",
+        generationDomain: "SKILLS",
+        selectedSeasonCycleId: null,
+        selectedGoalCount: 0,
+        sportCode: "TENNIS",
+        selectedSeason: null,
+        currentPhase: null,
+        planStartDate: "",
+        planEndDate: "",
+      }),
+    ).toBe("Select a season before generating a plan.");
+  });
+
+  it("blocks downstream coach without locked planning context", () => {
+    expect(
+      shouldUseLockedDownstreamGenerationContext({
+        hasHeadCoachConfigured: true,
+        isHeadCoachPlanningContextOwner: false,
+        domain: "SKILLS",
+        effectiveDownstreamPlanningContextLocked: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("legacy create enabled when upstream planning context is locked and no local error", () => {
+    expect(
+      resolveLegacyPlanningContextLocked({
+        hasHeadCoachConfigured: true,
+        upstreamPlanningContextLocked: true,
+        upstreamPlanningContextUpstreamLocked: false,
+        clientHasSubmittedDomainPlans: false,
+      }),
+    ).toBe(true);
+    expect(
+      resolveLegacyAssistantCreateButtonDisabled({
+        generatePlanActionDisabled: false,
+        localError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps planning context locked when workspace is stale but upstream is locked", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      planningContext: {
+        locked: false,
+        resolved: false,
+        lockId: null,
+        snapshotId: null,
+      },
+    });
+
+    expect(
+      resolvePlanningContextLocked({
+        legacyLocked: true,
+        workspace,
+      }),
+    ).toBe(true);
+  });
+
+  it("owned Skills domain with no created plan hides submit", () => {
+    const workspace = workflow1OwnedSkillsWorkspace();
+
+    expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(false);
+  });
+
+  it("owned Skills domain with created draft and SUBMIT_REVIEW shows submit", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "tp-1",
+            versionId: "ver-1",
+            generationDomain: "SKILLS",
+            status: "DRAFT",
+            versionNumber: 1,
+          },
+          reviewAccess: null,
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: ["SUBMIT_REVIEW"],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(true);
+  });
+
+  it("shows submit from workspace even when latest visible draft version is stale", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "tp-1",
+            versionId: "workspace-ver-1",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+          reviewAccess: "SPECIALIST_COACH",
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: ["SUBMIT_REVIEW"],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(
+      resolveAssistantDomainSubmitActionVisible({
+        workspace,
+        currentDomain: "SKILLS",
+        discoveryLoading: false,
+        governedDetailRefreshing: false,
+        hasHeadCoachConfigured: true,
+        allowedActionsHasSubmitReview: true,
+        governedContext: {
+          planId: "tp-1",
+          versionId: "workspace-ver-1",
+          generationDomain: "SKILLS",
+        },
+        latestDraft: {
+          trainingPlanId: "tp-1",
+          trainingPlanVersionId: "stale-draft-ver",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("uses workspace summary ids for submit instead of stale latest draft ids", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "workspace-plan-1",
+            versionId: "workspace-ver-1",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+          reviewAccess: "SPECIALIST_COACH",
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: ["SUBMIT_REVIEW"],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(
+      resolveSubmitReviewPlanVersionIds({
+        workspace,
+        domain: "SKILLS",
+        fallbackPlanId: "workspace-plan-1",
+        fallbackVersionId: "stale-draft-ver",
+      }),
+    ).toEqual({
+      planId: "workspace-plan-1",
+      versionId: "workspace-ver-1",
+    });
+  });
+
+  it("hides submit when workspace submit state is false", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "tp-1",
+            versionId: "ver-1",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+          reviewAccess: "SPECIALIST_COACH",
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: [],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(
+      resolveAssistantDomainSubmitActionVisible({
+        workspace,
+        currentDomain: "SKILLS",
+        discoveryLoading: false,
+        governedDetailRefreshing: false,
+        hasHeadCoachConfigured: true,
+        allowedActionsHasSubmitReview: true,
+        governedContext: {
+          planId: "tp-1",
+          versionId: "ver-1",
+          generationDomain: "SKILLS",
+        },
+        latestDraft: {
+          trainingPlanId: "tp-1",
+          trainingPlanVersionId: "ver-1",
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to legacy submit visibility when workspace is unavailable", () => {
+    expect(
+      resolveAssistantDomainSubmitActionVisible({
+        workspace: null,
+        currentDomain: "SKILLS",
+        discoveryLoading: false,
+        governedDetailRefreshing: false,
+        hasHeadCoachConfigured: true,
+        allowedActionsHasSubmitReview: true,
+        governedContext: {
+          planId: "tp-1",
+          versionId: "ver-1",
+          generationDomain: "SKILLS",
+        },
+        latestDraft: {
+          trainingPlanId: "tp-1",
+          trainingPlanVersionId: "ver-1",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("never shows submit review when plan or version id is missing", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: null,
+            versionId: null,
+            generationDomain: "SKILLS",
+            status: null,
+            versionNumber: null,
+          },
+          reviewAccess: null,
+          releaseMode: null,
+          submittedForReview: false,
+          canOpen: true,
+          allowedActions: ["SUBMIT_REVIEW"],
+        },
+        NUTRITION: workflow1OwnedSkillsWorkspace().domains.NUTRITION,
+        S_AND_C: workflow1OwnedSkillsWorkspace().domains.S_AND_C,
+      },
+    });
+
+    expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(false);
   });
 });

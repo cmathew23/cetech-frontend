@@ -43,6 +43,7 @@ import {
   shouldUseSpecialistTrainingPlanWorkspace,
   resolveWorkspaceTrainingPlanShellOwnership,
   resolveHeadCoachOwnedSkillsGrouping,
+  resolveHeadCoachSubmittedReviewCardDomains,
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
@@ -613,6 +614,155 @@ describe("headCoachSubmittedReviewDomains", () => {
         workspace: workflow1OwnedSkillsWorkspace(),
       }),
     ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+});
+
+describe("resolveHeadCoachSubmittedReviewCardDomains", () => {
+  it("uses tab model reviewDomains for assignment-backed Workflow 1 Head Coach cards", () => {
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({ canApprove: true }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+
+  it("does not include domains from canOpen or workspace summary alone", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          domains: {
+            SKILLS: {
+              ...base.domains.SKILLS,
+              summary: {
+                trainingPlanId: "skills-plan",
+                versionId: "skills-version",
+                generationDomain: "SKILLS",
+                status: "ACTIVE",
+                versionNumber: 1,
+              },
+              canOpen: true,
+            },
+            NUTRITION: {
+              ...base.domains.NUTRITION,
+              summary: {
+                trainingPlanId: "nutrition-plan",
+                versionId: "nutrition-version",
+                generationDomain: "NUTRITION",
+                status: "ACTIVE",
+                versionNumber: 1,
+              },
+              canOpen: true,
+            },
+            S_AND_C: {
+              ...base.domains.S_AND_C,
+              summary: {
+                trainingPlanId: "sandc-plan",
+                versionId: "sandc-version",
+                generationDomain: "S_AND_C",
+                status: "ACTIVE",
+                versionNumber: 1,
+              },
+              canOpen: true,
+            },
+          },
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({ canOpen: true }),
+              NUTRITION: shellAssignmentDomain({ canOpen: true }),
+              S_AND_C: shellAssignmentDomain({ canOpen: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not show Head Coach review card domains for Workflow 3 direct release", () => {
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: false,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+            planningContext: {
+              ownerType: "SKILLS_FALLBACK",
+              ownerUserId: "skills-coach",
+              ownerCoachProfileId: "skills-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+            domains: {
+              SKILLS: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+              S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps Workflow 2B Skills as review-only when assignment canApprove allows it", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+          }),
+          NUTRITION: shellAssignmentDomain({ canApprove: true }),
+          S_AND_C: shellAssignmentDomain({ canApprove: true }),
+        },
+      }),
+    });
+
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace,
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(false);
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace,
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+
+  it("preserves legacy fallback for missing assignmentContext", () => {
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace(),
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
   });
 });
 

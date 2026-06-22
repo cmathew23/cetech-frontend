@@ -108,6 +108,7 @@ import {
   workspaceResolveReleaseMode,
   workspaceShowsDomainSubmitReview,
 } from "@/lib/trainingPlanWorkspaceView";
+import { deriveTrainingPlanWorkspaceTabStates } from "@/lib/trainingPlanWorkspaceTabs";
 import { runTrainingPlanGenerationJob } from "@/lib/coachTrainingPlanGenerationJobs";
 import {
   formatDateOnly,
@@ -1804,6 +1805,17 @@ export function headCoachSubmittedReviewDomains(input: {
     return GENERATION_DOMAIN_ORDER.filter((domain) => domain !== "SKILLS");
   }
   return GENERATION_DOMAIN_ORDER;
+}
+
+export function resolveHeadCoachSubmittedReviewCardDomains(input: {
+  shell: TrainingPlanPageShell;
+  headCoachOwnsSkills: boolean;
+  workspace: TrainingPlanWorkspace | null;
+}): TrainingPlanGenerationDomain[] {
+  if (input.workspace?.assignmentContext !== undefined) {
+    return deriveTrainingPlanWorkspaceTabStates(input.workspace).domains.reviewDomains;
+  }
+  return headCoachSubmittedReviewDomains(input);
 }
 
 export function resolveHeadCoachOwnedSkillsGrouping(input: {
@@ -9693,7 +9705,7 @@ export function CoachAthletePlanningProfileView({
   function renderHeadCoachSubmittedDomainPlansSection() {
     if (!headCoachReviewMode) return null;
     const locked = upstreamPlanningContext?.planningContextLocked === true;
-    const reviewDomains = headCoachSubmittedReviewDomains({
+    const reviewDomains = resolveHeadCoachSubmittedReviewCardDomains({
       shell: trainingPlanShellModel.shell,
       headCoachOwnsSkills: headCoachOwnedSkillsGrouping,
       workspace,

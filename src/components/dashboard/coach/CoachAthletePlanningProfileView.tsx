@@ -1791,7 +1791,15 @@ export function workflow2AHeadCoachStep6Intro(
 export function headCoachSubmittedReviewDomains(input: {
   shell: TrainingPlanPageShell;
   headCoachOwnsSkills: boolean;
+  workspace?: TrainingPlanWorkspace | null;
 }): TrainingPlanGenerationDomain[] {
+  const assignmentDomains = input.workspace?.assignmentContext?.domains;
+  if (assignmentDomains !== undefined) {
+    return GENERATION_DOMAIN_ORDER.filter((domain) => {
+      if (domain === "SKILLS" && input.headCoachOwnsSkills) return false;
+      return assignmentDomains[domain].canApprove === true;
+    });
+  }
   if (input.shell === "head_coach_function_aware" && input.headCoachOwnsSkills) {
     return GENERATION_DOMAIN_ORDER.filter((domain) => domain !== "SKILLS");
   }
@@ -9688,6 +9696,7 @@ export function CoachAthletePlanningProfileView({
     const reviewDomains = headCoachSubmittedReviewDomains({
       shell: trainingPlanShellModel.shell,
       headCoachOwnsSkills: headCoachOwnedSkillsGrouping,
+      workspace,
     });
     return (
       <div className="space-y-4">

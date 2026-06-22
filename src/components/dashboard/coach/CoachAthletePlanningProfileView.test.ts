@@ -468,6 +468,154 @@ describe("resolveHeadCoachOwnedSkillsGrouping", () => {
   });
 });
 
+describe("headCoachSubmittedReviewDomains", () => {
+  it("includes all Workflow 1 review domains when assignment allows Head Coach approval", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({ canApprove: true }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+
+  it("excludes Workflow 2A Head Coach-owned Skills while keeping approvable Nutrition and S&C", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "HEAD_COACH_SELF",
+                ownedByCurrentUser: true,
+                canApprove: false,
+              }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
+  });
+
+  it("includes all Workflow 2B review domains when Skills is separately assigned and approvable", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: false,
+                canApprove: true,
+              }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+
+  it("does not infer Workflow 3 direct-release domains as Head Coach review domains", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: false,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+            planningContext: {
+              ownerType: "SKILLS_FALLBACK",
+              ownerUserId: "skills-coach",
+              ownerCoachProfileId: "skills-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: true,
+                canApprove: false,
+                releaseMode: "DIRECT_DOMAIN_RELEASE",
+              }),
+              NUTRITION: shellAssignmentDomain({
+                canApprove: false,
+                releaseMode: "DIRECT_DOMAIN_RELEASE",
+              }),
+              S_AND_C: shellAssignmentDomain({
+                canApprove: false,
+                releaseMode: "DIRECT_DOMAIN_RELEASE",
+              }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual([]);
+  });
+
+  it("excludes individual domains when assignment denies canApprove", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({ canApprove: true }),
+              NUTRITION: shellAssignmentDomain({ canApprove: false }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["SKILLS", "S_AND_C"]);
+  });
+
+  it("preserves legacy fallback when assignmentContext is missing", () => {
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace(),
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
+
+    expect(
+      headCoachSubmittedReviewDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace: workflow1OwnedSkillsWorkspace(),
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+  });
+});
+
 describe("resolvePlanningContextAuthority", () => {
   it("uses legacy authority only when assignment planning context is missing", () => {
     expect(

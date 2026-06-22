@@ -44,6 +44,7 @@ import {
   resolveWorkspaceTrainingPlanShellOwnership,
   resolveHeadCoachOwnedSkillsGrouping,
   resolveHeadCoachSubmittedReviewCardDomains,
+  resolveReviewReviseStepLabelFromWorkspace,
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
   resolveDomainGeneratePermission,
@@ -763,6 +764,120 @@ describe("resolveHeadCoachSubmittedReviewCardDomains", () => {
         workspace: workflow2AHeadCoachOwnedSkillsWorkspace(),
       }),
     ).toEqual(["NUTRITION", "S_AND_C"]);
+  });
+});
+
+describe("resolveReviewReviseStepLabelFromWorkspace", () => {
+  it("uses Head Coach review wording for Workflow 1 Head Coach", () => {
+    expect(
+      resolveReviewReviseStepLabelFromWorkspace({
+        workspace: workflow1OwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({ canApprove: true }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+        fallbackLabel: "Generate",
+      }),
+    ).toBe("Review Plans");
+  });
+
+  it("uses Head Coach review wording for Workflow 2B Head Coach", () => {
+    expect(
+      resolveReviewReviseStepLabelFromWorkspace({
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "ASSIGNED_DOMAIN_COACH",
+                ownedByCurrentUser: false,
+                canApprove: true,
+              }),
+              NUTRITION: shellAssignmentDomain({ canApprove: true }),
+              S_AND_C: shellAssignmentDomain({ canApprove: true }),
+            },
+          }),
+        }),
+        fallbackLabel: "Generate",
+      }),
+    ).toBe("Review Plans");
+  });
+
+  it("uses Head Coach review wording for Workflow 2A Head Coach-owned Skills", () => {
+    const label = resolveReviewReviseStepLabelFromWorkspace({
+      workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+        assignmentContext: shellAssignmentContext({
+          hasHeadCoach: true,
+          releaseMode: "HEAD_COACH_APPROVAL",
+          domains: {
+            SKILLS: shellAssignmentDomain({
+              ownerType: "HEAD_COACH_SELF",
+              ownedByCurrentUser: true,
+              canGenerate: true,
+              canRevise: true,
+              canSubmitForReview: true,
+            }),
+            NUTRITION: shellAssignmentDomain({ canApprove: true }),
+            S_AND_C: shellAssignmentDomain({ canApprove: true }),
+          },
+        }),
+      }),
+      fallbackLabel: "Generate",
+    });
+
+    expect(label).toBe("Review Plans");
+    expect(label).not.toBe("Revise / Submit Plan");
+  });
+
+  it("uses domain-owner wording for Workflow 3 instead of Head Coach review language", () => {
+    const label = resolveReviewReviseStepLabelFromWorkspace({
+      workspace: workflow1OwnedSkillsWorkspace({
+        assignmentContext: shellAssignmentContext({
+          hasHeadCoach: false,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+          planningContext: {
+            ownerType: "SKILLS_FALLBACK",
+            ownerUserId: "skills-coach",
+            ownerCoachProfileId: "skills-profile",
+            canRead: true,
+            canCreate: true,
+            canLock: true,
+            canManage: true,
+          },
+          domains: {
+            SKILLS: shellAssignmentDomain({
+              ownerType: "ASSIGNED_DOMAIN_COACH",
+              ownedByCurrentUser: true,
+              canRevise: true,
+              canSubmitForReview: true,
+              releaseMode: "DIRECT_DOMAIN_RELEASE",
+            }),
+            NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+            S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+          },
+        }),
+      }),
+      fallbackLabel: "Review Plans",
+    });
+
+    expect(label).toBe("Revise / Submit Plan");
+    expect(label).not.toBe("Review Plans");
+  });
+
+  it("preserves fallback copy when assignmentContext is missing", () => {
+    expect(
+      resolveReviewReviseStepLabelFromWorkspace({
+        workspace: workflow1OwnedSkillsWorkspace(),
+        fallbackLabel: "Review Plans",
+      }),
+    ).toBe("Review Plans");
   });
 });
 

@@ -108,7 +108,10 @@ import {
   workspaceResolveReleaseMode,
   workspaceShowsDomainSubmitReview,
 } from "@/lib/trainingPlanWorkspaceView";
-import { deriveTrainingPlanWorkspaceTabStates } from "@/lib/trainingPlanWorkspaceTabs";
+import {
+  deriveTrainingPlanWorkspaceTabStates,
+  type TrainingPlanWorkspaceTabPrimaryAction,
+} from "@/lib/trainingPlanWorkspaceTabs";
 import { runTrainingPlanGenerationJob } from "@/lib/coachTrainingPlanGenerationJobs";
 import {
   formatDateOnly,
@@ -773,11 +776,36 @@ function createEmptyHeadCoachDomainPlanStates(): Record<
   };
 }
 
+export function reviewReviseStepLabelForPrimaryAction(
+  action: TrainingPlanWorkspaceTabPrimaryAction,
+): string | null {
+  if (action === "REVIEW_DOMAIN_PLANS") return "Review Plans";
+  if (action === "REVISE_OR_SUBMIT_OWN_DOMAIN_PLAN") return "Revise / Submit Plan";
+  if (action === "VIEW_REVIEW_STATUS") return "Review Status";
+  return null;
+}
+
+export function resolveReviewReviseStepLabelFromWorkspace(input: {
+  workspace: TrainingPlanWorkspace | null;
+  fallbackLabel: string | null;
+}): string | null {
+  if (input.workspace?.assignmentContext === undefined) {
+    return input.fallbackLabel;
+  }
+  return reviewReviseStepLabelForPrimaryAction(
+    deriveTrainingPlanWorkspaceTabStates(input.workspace).tabs.REVIEW_REVISE.primaryAction,
+  );
+}
+
 function workflowStepLabel(
   key: GuidedWorkflowStepKey,
   headCoachReviewMode: boolean,
   kind: "rail" | "tab",
+  reviewReviseStepLabel?: string | null,
 ): string {
+  if (key === "generate" && reviewReviseStepLabel !== null && reviewReviseStepLabel !== undefined) {
+    return reviewReviseStepLabel;
+  }
   if (key === "generate" && headCoachReviewMode) {
     return kind === "rail" ? "Review Plans" : "Review Plans";
   }
@@ -1228,9 +1256,11 @@ function railGapSegmentClass(sideHidden: boolean): string {
 function TrainingPlanWorkflowProgressRail({
   steps,
   headCoachReviewMode,
+  reviewReviseStepLabel,
 }: {
   steps: GuidedWorkflowUiStep[];
   headCoachReviewMode: boolean;
+  reviewReviseStepLabel?: string | null;
 }) {
   const nodeForStep = (step: GuidedWorkflowUiStep) => {
     if (step.markCompleteTick) {
@@ -1275,7 +1305,12 @@ function TrainingPlanWorkflowProgressRail({
     >
       <ol className="flex w-full">
         {steps.map((step, index) => {
-          const railLine = workflowStepLabel(step.key, headCoachReviewMode, "rail");
+          const railLine = workflowStepLabel(
+            step.key,
+            headCoachReviewMode,
+            "rail",
+            reviewReviseStepLabel,
+          );
           const displayTitle = `Step ${index + 1}: ${railLine}`;
           const subtitle = step.markCompleteTick
             ? "Completed"
@@ -1323,8 +1358,14 @@ function workflowStripTabHeading(
   step: GuidedWorkflowUiStep,
   index: number,
   headCoachReviewMode: boolean,
+  reviewReviseStepLabel?: string | null,
 ): ReactElement {
-  const baseTitle = workflowStepLabel(step.key, headCoachReviewMode, "tab");
+  const baseTitle = workflowStepLabel(
+    step.key,
+    headCoachReviewMode,
+    "tab",
+    reviewReviseStepLabel,
+  );
   const prefix = `Step ${index + 1}: ${baseTitle}`;
   if (step.status === "locked") {
     return (
@@ -1361,11 +1402,13 @@ function WorkflowConnectedTabStrip({
   steps,
   onSelect,
   headCoachReviewMode,
+  reviewReviseStepLabel,
 }: {
   selectedTab: GuidedWorkflowStepKey;
   steps: GuidedWorkflowUiStep[];
   onSelect: (tab: GuidedWorkflowStepKey) => void;
   headCoachReviewMode: boolean;
+  reviewReviseStepLabel?: string | null;
 }) {
   /** Equal 1/N width columns: shrinkable text + icons must not widen the flex row */
   const baseTab =
@@ -1415,7 +1458,12 @@ function WorkflowConnectedTabStrip({
             ].join(" ");
           }
 
-          const heading = workflowStripTabHeading(step, index, headCoachReviewMode);
+          const heading = workflowStripTabHeading(
+            step,
+            index,
+            headCoachReviewMode,
+            reviewReviseStepLabel,
+          );
 
           return (
             <button
@@ -5687,6 +5735,12 @@ export function CoachAthletePlanningProfileView({
     trainingPlanShellModel.shell === "head_coach_function_aware";
   const headCoachFunctionAwareMode =
     trainingPlanShellModel.shell === "head_coach_function_aware";
+  const reviewReviseStepLabel = useMemo(() => {
+    return resolveReviewReviseStepLabelFromWorkspace({
+      workspace,
+      fallbackLabel: null,
+    });
+  }, [workspace]);
   const shouldResolveSpecialistDomainWorkspace =
     trainingPlanShellModel.shell === "specialist_domain";
   const shouldForceAssistantDomainWorkspace = shouldResolveSpecialistDomainWorkspace;
@@ -8215,13 +8269,19 @@ export function CoachAthletePlanningProfileView({
         }
         return {
           key,
-          title: workflowStepLabel(key, headCoachReviewMode, "tab"),
+          title: workflowStepLabel(key, headCoachReviewMode, "tab", reviewReviseStepLabel),
           summary: "",
           status,
           markCompleteTick: stepDone,
         };
       }) satisfies GuidedWorkflowUiStep[],
-    [headCoachReviewMode, selectedWorkflowTab, workflowPrecMap, workflowStepCompleteForTick],
+    [
+      headCoachReviewMode,
+      reviewReviseStepLabel,
+      selectedWorkflowTab,
+      workflowPrecMap,
+      workflowStepCompleteForTick,
+    ],
   );
 
   const workflowStepStatusByKey = useMemo(
@@ -12424,6 +12484,7 @@ export function CoachAthletePlanningProfileView({
               <TrainingPlanWorkflowProgressRail
                 steps={[...workflowStepperModel]}
                 headCoachReviewMode={headCoachReviewMode}
+                reviewReviseStepLabel={reviewReviseStepLabel}
               />
             </div>
             <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
@@ -12431,6 +12492,7 @@ export function CoachAthletePlanningProfileView({
                 selectedTab={selectedWorkflowTab}
                 steps={[...workflowStepperModel]}
                 headCoachReviewMode={headCoachReviewMode}
+                reviewReviseStepLabel={reviewReviseStepLabel}
                 onSelect={(tab) => {
                   if (workflowStepStatusByKey[tab] === "locked") return;
                   setSelectedWorkflowTab(tab);

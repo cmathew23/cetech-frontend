@@ -223,6 +223,8 @@ const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
 ];
 const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
   "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
+const ASSIGNMENT_CONTEXT_MISSING_LEGACY_FALLBACK_WARNING =
+  "[TrainingPlanWorkspace] assignmentContext missing; using legacy fallback";
 
 type TrainingPlanPersistenceContext = {
   seasonCycleId: string;
@@ -4151,6 +4153,7 @@ export function CoachAthletePlanningProfileView({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRefreshGenRef = useRef(0);
   const workspaceHasLoadedRef = useRef(false);
+  const assignmentContextMissingWarningScopeRef = useRef<string | null>(null);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
 
@@ -4694,6 +4697,15 @@ export function CoachAthletePlanningProfileView({
       setWorkspaceRefreshing(false);
     };
   }, [refreshTrainingPlanWorkspace]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (workspace === null || workspace.assignmentContext !== undefined) return;
+    const warningScope = `${entityId}:${athleteIdTrimmed}`;
+    if (assignmentContextMissingWarningScopeRef.current === warningScope) return;
+    assignmentContextMissingWarningScopeRef.current = warningScope;
+    console.warn(ASSIGNMENT_CONTEXT_MISSING_LEGACY_FALLBACK_WARNING);
+  }, [athleteIdTrimmed, entityId, workspace]);
 
   useEffect(() => {
     let cancelled = false;

@@ -11,8 +11,10 @@ import {
   resolvePlanningContextLocked,
   resolveWorkflowModeFromWorkspace,
   workspaceDomainHasPersistedPlanIds,
+  workspaceDirectReleaseAllowed,
   workspaceHasSubmittedDomainPlans,
   workspaceHeadCoachCanCreateSkillsPlan,
+  workspaceHeadCoachOwnsPlanningContext,
   workspaceHeadCoachOwnsSkillsForAthlete,
   workspaceResolveReleaseMode,
   workspaceShowsDomainSubmitReview,
@@ -70,6 +72,47 @@ function baseWorkspace(
   };
 }
 
+function assignmentDomain(overrides: Partial<NonNullable<TrainingPlanWorkspace["assignmentContext"]>["domains"]["SKILLS"]> = {}) {
+  return {
+    ownerType: "NONE" as const,
+    ownerUserId: null,
+    ownerCoachProfileId: null,
+    ownedByCurrentUser: false,
+    canOpen: false,
+    canGenerate: false,
+    canRevise: false,
+    canSubmitForReview: false,
+    canApprove: false,
+    canRelease: false,
+    releaseMode: "HEAD_COACH_APPROVAL" as const,
+    ...overrides,
+  };
+}
+
+function assignmentContext(
+  overrides: Partial<NonNullable<TrainingPlanWorkspace["assignmentContext"]>> = {},
+): NonNullable<TrainingPlanWorkspace["assignmentContext"]> {
+  return {
+    hasHeadCoach: true,
+    releaseMode: "HEAD_COACH_APPROVAL",
+    planningContext: {
+      ownerType: "HEAD_COACH",
+      ownerUserId: "head-coach",
+      ownerCoachProfileId: "head-coach-profile",
+      canRead: true,
+      canCreate: true,
+      canLock: true,
+      canManage: true,
+    },
+    domains: {
+      SKILLS: assignmentDomain(),
+      NUTRITION: assignmentDomain(),
+      S_AND_C: assignmentDomain(),
+    },
+    ...overrides,
+  };
+}
+
 describe("trainingPlanWorkspaceView", () => {
   it("maps backend workflow shell and mode tokens", () => {
     expect(parseWorkspaceWorkflowMode("HEAD_COACH_FUNCTION_AWARE")).toBe(
@@ -107,6 +150,158 @@ describe("trainingPlanWorkspaceView", () => {
       },
     });
     expect(workspaceHasSubmittedDomainPlans(workspace)).toBe(true);
+  });
+
+  it("prefers assignmentContext release mode over legacy direct release flags", () => {
+    const headCoachApproval = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: false,
+        requesterIsHeadCoach: false,
+        requesterHasSkillsFunction: false,
+        requesterOwnsCurrentDomain: true,
+        headCoachOwnsPlanningContext: false,
+        directReleaseAllowed: true,
+      },
+      assignmentContext: assignmentContext({
+        releaseMode: "HEAD_COACH_APPROVAL",
+      }),
+    });
+
+    expect(workspaceDirectReleaseAllowed(headCoachApproval)).toBe(false);
+    expect(workspaceResolveReleaseMode(headCoachApproval)).toBe("head_coach_review");
+
+    const directRelease = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: true,
+        requesterHasSkillsFunction: false,
+        requesterOwnsCurrentDomain: false,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      assignmentContext: assignmentContext({
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+    });
+
+    expect(workspaceDirectReleaseAllowed(directRelease)).toBe(true);
+    expect(workspaceResolveReleaseMode(directRelease)).toBe("direct_release");
+  });
+
+  it("prefers assignmentContext planning owner over legacy planning ownership flags", () => {
+    expect(
+      workspaceHeadCoachOwnsPlanningContext(
+        baseWorkspace({
+          ownershipFlags: {
+            hasHeadCoach: true,
+            requesterIsHeadCoach: true,
+            requesterHasSkillsFunction: false,
+            requesterOwnsCurrentDomain: false,
+            headCoachOwnsPlanningContext: false,
+            directReleaseAllowed: false,
+          },
+          assignmentContext: assignmentContext({
+            planningContext: {
+              ownerType: "HEAD_COACH",
+              ownerUserId: "head-coach",
+              ownerCoachProfileId: "head-coach-profile",
+              canRead: true,
+              canCreate: true,
+              canLock: true,
+              canManage: true,
+            },
+          }),
+        }),
+      ),
+    ).toBe(true);
+
+    for (const ownerType of ["SKILLS_FALLBACK", "NONE"] as const) {
+      expect(
+        workspaceHeadCoachOwnsPlanningContext(
+          baseWorkspace({
+            ownershipFlags: {
+              hasHeadCoach: true,
+              requesterIsHeadCoach: true,
+              requesterHasSkillsFunction: false,
+              requesterOwnsCurrentDomain: false,
+              headCoachOwnsPlanningContext: true,
+              directReleaseAllowed: false,
+            },
+            assignmentContext: assignmentContext({
+              planningContext: {
+                ownerType,
+                ownerUserId: null,
+                ownerCoachProfileId: null,
+                canRead: true,
+                canCreate: false,
+                canLock: false,
+                canManage: false,
+              },
+            }),
+          }),
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("prefers assignmentContext Skills ownership over legacy Skills ownership inference", () => {
+    const headCoachSelf = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: true,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: false,
+        requesterOwnsSkillsForThisAthlete: false,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      currentDomain: "NUTRITION",
+      assignmentContext: assignmentContext({
+        domains: {
+          SKILLS: assignmentDomain({
+            ownerType: "HEAD_COACH_SELF",
+            ownedByCurrentUser: true,
+          }),
+          NUTRITION: assignmentDomain(),
+          S_AND_C: assignmentDomain(),
+        },
+      }),
+    });
+
+    expect(workspaceHeadCoachOwnsSkillsForAthlete(headCoachSelf)).toBe(true);
+
+    const assignedSkillsCoach = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: true,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: true,
+        requesterOwnsSkillsForThisAthlete: true,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      currentDomain: "SKILLS",
+      domains: {
+        SKILLS: {
+          ...emptyDomain("SKILLS"),
+          allowedActions: ["SUBMIT_REVIEW", "RELEASE"],
+        },
+        NUTRITION: emptyDomain("NUTRITION"),
+        S_AND_C: emptyDomain("S_AND_C"),
+      },
+      assignmentContext: assignmentContext({
+        domains: {
+          SKILLS: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+          }),
+          NUTRITION: assignmentDomain(),
+          S_AND_C: assignmentDomain(),
+        },
+      }),
+    });
+
+    expect(workspaceHeadCoachOwnsSkillsForAthlete(assignedSkillsCoach)).toBe(false);
   });
 
   it("Workflow 2: uses requesterOwnsSkillsForThisAthlete instead of Skills function alone", () => {
@@ -216,8 +411,41 @@ describe("trainingPlanWorkspaceView", () => {
         S_AND_C: emptyDomain("S_AND_C"),
       },
     });
+    expect(workspaceDirectReleaseAllowed(workspace)).toBe(true);
     expect(workspaceResolveReleaseMode(workspace)).toBe("direct_release");
     expect(resolveWorkflowModeFromWorkspace(workspace)).toBe("specialist_domain");
+  });
+
+  it("keeps legacy planning ownership fallback when assignmentContext is missing", () => {
+    expect(
+      workspaceHeadCoachOwnsPlanningContext(
+        baseWorkspace({
+          ownershipFlags: {
+            hasHeadCoach: true,
+            requesterIsHeadCoach: true,
+            requesterHasSkillsFunction: false,
+            requesterOwnsCurrentDomain: false,
+            headCoachOwnsPlanningContext: true,
+            directReleaseAllowed: false,
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      workspaceHeadCoachOwnsPlanningContext(
+        baseWorkspace({
+          ownershipFlags: {
+            hasHeadCoach: false,
+            requesterIsHeadCoach: false,
+            requesterHasSkillsFunction: false,
+            requesterOwnsCurrentDomain: true,
+            headCoachOwnsPlanningContext: false,
+            directReleaseAllowed: true,
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("keeps legacy planning context lock when workspace is unlocked", () => {

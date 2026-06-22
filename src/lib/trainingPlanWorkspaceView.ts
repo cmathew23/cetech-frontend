@@ -145,12 +145,18 @@ export function workspacePlanningContextLocked(
 export function workspaceHeadCoachOwnsPlanningContext(
   workspace: TrainingPlanWorkspace,
 ): boolean {
+  if (workspace.assignmentContext !== undefined) {
+    return workspace.assignmentContext.planningContext.ownerType === "HEAD_COACH";
+  }
   return workspace.ownershipFlags.headCoachOwnsPlanningContext;
 }
 
 export function workspaceDirectReleaseAllowed(
   workspace: TrainingPlanWorkspace,
 ): boolean {
+  if (workspace.assignmentContext !== undefined) {
+    return workspace.assignmentContext.releaseMode === "DIRECT_DOMAIN_RELEASE";
+  }
   return workspace.ownershipFlags.directReleaseAllowed;
 }
 
@@ -161,6 +167,14 @@ export function workspaceDirectReleaseAllowed(
 export function workspaceHeadCoachOwnsSkillsForAthlete(
   workspace: TrainingPlanWorkspace,
 ): boolean {
+  const assignmentSkillsContext = workspace.assignmentContext?.domains.SKILLS;
+  if (assignmentSkillsContext !== undefined) {
+    return (
+      assignmentSkillsContext.ownerType === "HEAD_COACH_SELF" &&
+      assignmentSkillsContext.ownedByCurrentUser
+    );
+  }
+
   const flags = workspace.ownershipFlags;
   if (flags.requesterOwnsSkillsForThisAthlete !== undefined) {
     return flags.requesterOwnsSkillsForThisAthlete;
@@ -315,7 +329,12 @@ export function workspaceShowsDomainSubmitReview(
 export function workspaceResolveReleaseMode(
   workspace: TrainingPlanWorkspace,
 ): TrainingPlanResolvedReleaseMode {
-  if (workspace.ownershipFlags.directReleaseAllowed) {
+  if (workspace.assignmentContext !== undefined) {
+    return workspace.assignmentContext.releaseMode === "DIRECT_DOMAIN_RELEASE"
+      ? "direct_release"
+      : "head_coach_review";
+  }
+  if (workspaceDirectReleaseAllowed(workspace)) {
     return "direct_release";
   }
   const domainModes = GENERATION_DOMAINS.map(

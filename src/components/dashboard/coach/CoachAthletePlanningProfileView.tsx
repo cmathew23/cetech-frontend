@@ -2162,6 +2162,28 @@ export function resolveWorkspaceDomainSubmitForReviewVisible(
   });
 }
 
+export function resolveDomainHeadCoachReviewActionVisible(input: {
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyCanShowReviewAction: boolean;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+}): boolean {
+  const hasPlanIds =
+    (input.planId?.trim() ?? "") !== "" &&
+    (input.versionId?.trim() ?? "") !== "";
+  if (!hasPlanIds) return false;
+
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return input.legacyCanShowReviewAction;
+  }
+
+  return assignmentDomainContext.canApprove && input.legacyCanShowReviewAction;
+}
+
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
   isHeadCoachPlanningContextOwner: boolean;
   currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
@@ -9375,6 +9397,18 @@ export function CoachAthletePlanningProfileView({
     const normalizedStatus = status.trim().toUpperCase();
     const isAssistantApproved = normalizedStatus === "ASSISTANT_COACH_APPROVED";
     const isHeadCoachApproved = normalizedStatus === "HEAD_COACH_APPROVED";
+    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE") && !isHeadCoachApproved,
+      planId,
+      versionId,
+    });
+    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION") && isAssistantApproved,
+      planId,
+      versionId,
+    });
 
     return (
       <section className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -9426,7 +9460,7 @@ export function CoachAthletePlanningProfileView({
             </dl>
 
             <div className="flex flex-wrap gap-2">
-              {allowedActions.has("HEAD_APPROVE") && !isHeadCoachApproved ? (
+              {canShowApproveAction ? (
                 <Button
                   type="button"
                   variant="primary"
@@ -9437,7 +9471,7 @@ export function CoachAthletePlanningProfileView({
                   Approve Plan
                 </Button>
               ) : null}
-              {allowedActions.has("REQUEST_REVISION") && isAssistantApproved ? (
+              {canShowRequestRevisionAction ? (
                 <Button
                   type="button"
                   variant="secondary"
@@ -11106,6 +11140,20 @@ export function CoachAthletePlanningProfileView({
       planId: persistedGovernedPlanContext.planId,
       versionId: persistedGovernedPlanContext.versionId,
     });
+    const canShowStep6HeadApproveAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext:
+        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+      legacyCanShowReviewAction: persistedGovernedAllowedActions.has("HEAD_APPROVE"),
+      planId: persistedGovernedPlanContext.planId,
+      versionId: persistedGovernedPlanContext.versionId,
+    });
+    const canShowStep6RequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext:
+        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+      legacyCanShowReviewAction: persistedGovernedAllowedActions.has("REQUEST_REVISION"),
+      planId: persistedGovernedPlanContext.planId,
+      versionId: persistedGovernedPlanContext.versionId,
+    });
 
     return (
       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -11128,7 +11176,7 @@ export function CoachAthletePlanningProfileView({
               })}
             </Button>
           ) : null}
-          {persistedGovernedAllowedActions.has("HEAD_APPROVE") ? (
+          {canShowStep6HeadApproveAction ? (
             <Button
               type="button"
               variant="secondary"
@@ -11139,7 +11187,7 @@ export function CoachAthletePlanningProfileView({
               {governedPlanActionButtonLabel("HEAD_APPROVE")}
             </Button>
           ) : null}
-          {persistedGovernedAllowedActions.has("REQUEST_REVISION") ? (
+          {canShowStep6RequestRevisionAction ? (
             <Button
               type="button"
               variant="secondary"

@@ -47,6 +47,7 @@ import {
   resolveDomainViewPlanVisible,
   resolveDomainRevisePlanVisible,
   resolveDomainSubmitForReviewVisible,
+  resolveDomainHeadCoachReviewActionVisible,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -811,6 +812,141 @@ describe("resolveDomainSubmitForReviewVisible", () => {
         workflowStatus: "draft_generated",
         planId: "plan-1",
         versionId: null,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveDomainHeadCoachReviewActionVisible", () => {
+  it("uses legacy review visibility only when assignment domain context is missing", () => {
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: undefined,
+        legacyCanShowReviewAction: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: undefined,
+        legacyCanShowReviewAction: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("uses assignment canApprove as source of truth when assignment domain context exists", () => {
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanShowReviewAction: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanShowReviewAction: true,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("still requires existing review state/action checks after assignment permission passes", () => {
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanShowReviewAction: false,
+        planId: "plan-1",
+        versionId: "version-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("requires both plan and version ids before showing review actions", () => {
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanShowReviewAction: true,
+        planId: "plan-1",
+        versionId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides review actions for a domain owner when assignment denies canApprove", () => {
+    expect(
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "domain-coach",
+          ownerCoachProfileId: "domain-profile",
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: true,
+          canSubmitForReview: true,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyCanShowReviewAction: true,
+        planId: "plan-1",
+        versionId: "version-1",
       }),
     ).toBe(false);
   });

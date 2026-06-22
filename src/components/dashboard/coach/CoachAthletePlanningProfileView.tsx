@@ -154,6 +154,7 @@ import { cn } from "@/lib/utils";
 import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 import type {
   TrainingPlanWorkspace,
+  TrainingPlanWorkspaceAssignmentDomainContext,
   TrainingPlanWorkspaceAssignmentPlanningContext,
 } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -2038,6 +2039,38 @@ export function resolvePlanningContextAuthority(input: {
         assignmentPlanningContext.canLock ||
         assignmentPlanningContext.canManage),
     canLockPlanningContext: hasPlanningOwner && assignmentPlanningContext.canLock,
+  };
+}
+
+export function resolveDomainGeneratePermission(input: {
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyOwnershipFlags: PlanGenerationOwnershipFlags;
+}): {
+  canShowGenerate: boolean;
+  ownershipFlags: PlanGenerationOwnershipFlags;
+} {
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return {
+      canShowGenerate: !isPlanGenerationBlockedByOwnership(input.legacyOwnershipFlags),
+      ownershipFlags: input.legacyOwnershipFlags,
+    };
+  }
+
+  const canGenerate =
+    assignmentDomainContext.ownerType !== "NONE" &&
+    assignmentDomainContext.ownedByCurrentUser &&
+    assignmentDomainContext.canGenerate;
+
+  return {
+    canShowGenerate: canGenerate,
+    ownershipFlags: {
+      canGeneratePlan: canGenerate,
+      canGenerateCurrentDomainPlan: canGenerate,
+    },
   };
 }
 
@@ -6238,6 +6271,14 @@ export function CoachAthletePlanningProfileView({
       ),
     [assignedAthletePlanOwnership, planGenerationOwnershipByDomain],
   );
+  const resolveGeneratePermissionForDomain = useCallback(
+    (domain: TrainingPlanGenerationDomain) =>
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+        legacyOwnershipFlags: resolveOwnershipFlagsForDomain(domain),
+      }),
+    [resolveOwnershipFlagsForDomain, workspace?.assignmentContext?.domains],
+  );
 
   const generatePlanLocalErrorsByDomain = useMemo(() => {
     const ownershipErrorForDomain = (
@@ -6246,7 +6287,7 @@ export function CoachAthletePlanningProfileView({
       if (planOwnershipLoading) {
         return "Loading plan generation permissions.";
       }
-      return isPlanGenerationBlockedByOwnership(resolveOwnershipFlagsForDomain(domain))
+      return !resolveGeneratePermissionForDomain(domain).canShowGenerate
         ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
         : null;
     };
@@ -6325,10 +6366,11 @@ export function CoachAthletePlanningProfileView({
     }
     if (isDownstreamDomainCoach && allowedGenerationDomains.length === 1) {
       const only = allowedGenerationDomains[0];
-      const ownershipFlags = resolveOwnershipFlagsForDomain(only);
+      const generationPermission = resolveGeneratePermissionForDomain(only);
+      const ownershipFlags = generationPermission.ownershipFlags;
       const ownBlock = planOwnershipLoading
         ? "Loading plan generation permissions."
-        : isPlanGenerationBlockedByOwnership(ownershipFlags)
+        : !generationPermission.canShowGenerate
           ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
           : null;
       if (ownBlock !== null) {
@@ -6407,10 +6449,11 @@ export function CoachAthletePlanningProfileView({
     }
     return Object.fromEntries(
       allowedGenerationDomains.map((domain) => {
-        const ownershipFlags = resolveOwnershipFlagsForDomain(domain);
+        const generationPermission = resolveGeneratePermissionForDomain(domain);
+        const ownershipFlags = generationPermission.ownershipFlags;
         const ownBlock = planOwnershipLoading
           ? "Loading plan generation permissions."
-          : isPlanGenerationBlockedByOwnership(ownershipFlags)
+          : !generationPermission.canShowGenerate
             ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
             : null;
         if (ownBlock !== null) {
@@ -6485,7 +6528,7 @@ export function CoachAthletePlanningProfileView({
     planningContextLocked,
     planStartDate,
     requiresPlanningContextLockForGeneration,
-    resolveOwnershipFlagsForDomain,
+    resolveGeneratePermissionForDomain,
     setupState.hasHeadCoachConfigured,
     selectedActiveGoals.length,
     selectedSeason,
@@ -6528,7 +6571,7 @@ export function CoachAthletePlanningProfileView({
     const ownershipFlags =
       domain === null
         ? { canGeneratePlan: null, canGenerateCurrentDomainPlan: null }
-        : resolveOwnershipFlagsForDomain(domain);
+        : resolveGeneratePermissionForDomain(domain).ownershipFlags;
     if (
       shouldUseWorkflow1SpecialistCreateGate({
         hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
@@ -6569,7 +6612,7 @@ export function CoachAthletePlanningProfileView({
     planOwnershipLoading,
     planningContextLocked,
     readinessLoading,
-    resolveOwnershipFlagsForDomain,
+    resolveGeneratePermissionForDomain,
     setupState.hasHeadCoachConfigured,
     skipMainReadinessForAssistantCreateGate,
     upstreamPlanningContextLoading,
@@ -6613,12 +6656,12 @@ export function CoachAthletePlanningProfileView({
   const showHeadCoachDomainGeneratorCreateActions = useMemo(() => {
     if (!isHeadCoachPlanningContextOwner) return true;
     return allowedGenerationDomains.some(
-      (domain) => !isHeadCoachReviewerOnlyForDomain(domain),
+      (domain) => resolveGeneratePermissionForDomain(domain).canShowGenerate,
     );
   }, [
     allowedGenerationDomains,
     isHeadCoachPlanningContextOwner,
-    isHeadCoachReviewerOnlyForDomain,
+    resolveGeneratePermissionForDomain,
   ]);
 
   const headCoachOwnedSkillsDraft = useMemo(
@@ -6648,11 +6691,26 @@ export function CoachAthletePlanningProfileView({
     return headCoachSkillsWorkflowStatus !== "not_created";
   }, [headCoachSkillsWorkflowStatus, workspace]);
   const workspaceHeadCoachSkillsCanCreate = useMemo(
-    () =>
-      workspace !== null
-        ? workspaceHeadCoachCanCreateSkillsPlan(workspace, headCoachSkillsPlanExists)
-        : false,
-    [headCoachSkillsPlanExists, workspace],
+    () => {
+      if (workspace === null) return false;
+      if (workspace.assignmentContext !== undefined) {
+        const skillsGeneratePermission = resolveDomainGeneratePermission({
+          assignmentDomainContext: workspace.assignmentContext.domains.SKILLS,
+          legacyOwnershipFlags: resolveOwnershipFlagsForDomain("SKILLS"),
+        });
+        return (
+          skillsGeneratePermission.canShowGenerate &&
+          workspace.planningContext.locked &&
+          !headCoachSkillsPlanExists
+        );
+      }
+      return workspaceHeadCoachCanCreateSkillsPlan(workspace, headCoachSkillsPlanExists);
+    },
+    [
+      headCoachSkillsPlanExists,
+      resolveOwnershipFlagsForDomain,
+      workspace,
+    ],
   );
   const headCoachSkillsFallbackPlanId = useMemo(() => {
     const fromDetail = headCoachOwnedSkillsActiveDetail?.plan.id?.trim() ?? "";
@@ -6690,6 +6748,9 @@ export function CoachAthletePlanningProfileView({
   const headCoachSkillsCreateVisible = useMemo(
     () => {
       if (workspace) {
+        if (workspace.assignmentContext !== undefined) {
+          return workspaceHeadCoachSkillsCanCreate;
+        }
         return workspaceHeadCoachCanCreateSkillsPlan(workspace, headCoachSkillsPlanExists);
       }
       return canHeadCoachCreateSkillsPlan({
@@ -6707,6 +6768,7 @@ export function CoachAthletePlanningProfileView({
       planningContextLocked,
       resolveOwnershipFlagsForDomain,
       workspace,
+      workspaceHeadCoachSkillsCanCreate,
     ],
   );
 
@@ -6725,7 +6787,7 @@ export function CoachAthletePlanningProfileView({
       domain: "SKILLS",
       baseBusy,
       generationReadinessFromApis,
-      ownershipFlags: resolveOwnershipFlagsForDomain("SKILLS"),
+      ownershipFlags: resolveGeneratePermissionForDomain("SKILLS").ownershipFlags,
       hasHeadCoachConfigured: setupState.hasHeadCoachConfigured,
       isHeadCoachPlanningContextOwner,
       planningContextLocked,
@@ -6738,6 +6800,7 @@ export function CoachAthletePlanningProfileView({
     planOwnershipLoading,
     planningContextLocked,
     readinessLoading,
+    resolveGeneratePermissionForDomain,
     resolveOwnershipFlagsForDomain,
     setupState.hasHeadCoachConfigured,
     upstreamContextLockedForDownstream,
@@ -9972,19 +10035,18 @@ export function CoachAthletePlanningProfileView({
       null;
     const validatedLevel = lockedPlanningContextCardFields.validatedLevel;
     const canViewPlan = resolvedWorkflowPlanId.trim() !== "";
+    const currentDomainGeneratePermission =
+      resolveGeneratePermissionForDomain(currentCoachGenerationDomain);
     const showCreateAction =
       !assistantPlanDiscoveryLoading &&
       assistantDomainWorkflowStatus === "not_created" &&
-      (currentCoachGenerationDomain === null ||
-        !isHeadCoachReviewerOnlyForDomain(currentCoachGenerationDomain));
+      currentDomainGeneratePermission.canShowGenerate;
     const workflow1LockedContextDomainCoachCanCreate =
       setupState.hasHeadCoachConfigured &&
       currentCoachGenerationDomain !== null &&
       effectiveDownstreamPlanningContextLocked &&
       !planOwnershipLoading &&
-      !isPlanGenerationBlockedByOwnership(
-        resolveOwnershipFlagsForDomain(currentCoachGenerationDomain),
-      ) &&
+      currentDomainGeneratePermission.canShowGenerate &&
       currentDomainGenerationJob?.status !== "QUEUED" &&
       currentDomainGenerationJob?.status !== "RUNNING";
     const createPlanLocalError =
@@ -11681,12 +11743,13 @@ export function CoachAthletePlanningProfileView({
     const normalizedLockedGoalIds = lockedGoalIds.filter(
       (goalId): goalId is string => typeof goalId === "string" && goalId.trim() !== "",
     );
-    const handlerOwnershipFlags = resolveOwnershipFlagsForDomain(domain);
+    const handlerGeneratePermission = resolveGeneratePermissionForDomain(domain);
+    const handlerOwnershipFlags = handlerGeneratePermission.ownershipFlags;
     const lockedContextExpectedForDomain =
       domain !== null &&
       (workspaceLockedPlanningContext || effectiveDownstreamPlanningContextLocked) &&
       !planOwnershipLoading &&
-      !isPlanGenerationBlockedByOwnership(handlerOwnershipFlags);
+      handlerGeneratePermission.canShowGenerate;
     const lockedContextDetailsComplete =
       canGenerateFromLockedPlanningContextForDomain({
         domain,
@@ -11714,7 +11777,7 @@ export function CoachAthletePlanningProfileView({
       effectiveSkillsPlanningContextLocked;
     const lockedContextOwnershipError = planOwnershipLoading
       ? "Loading plan generation permissions."
-      : isPlanGenerationBlockedByOwnership(handlerOwnershipFlags)
+      : !handlerGeneratePermission.canShowGenerate
         ? PLAN_GENERATION_NOT_ASSIGNED_MESSAGE
         : null;
     let localGenerationError: string | null = null;
@@ -14089,7 +14152,12 @@ export function CoachAthletePlanningProfileView({
                           </div>
                         </WorkflowNeutralNotice>
                       ) : null}
-                      {allowedGenerationDomains.map((domain) => {
+                      {allowedGenerationDomains
+                        .filter(
+                          (domain) =>
+                            resolveGeneratePermissionForDomain(domain).canShowGenerate,
+                        )
+                        .map((domain) => {
                         const domainJob = generatePlanJobsByDomain[domain] ?? null;
                         const domainGenerationInProgress = isGenerationJobInProgress(domainJob);
                         return (

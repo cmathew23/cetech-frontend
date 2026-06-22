@@ -43,6 +43,7 @@ import {
   shouldUseSpecialistTrainingPlanWorkspace,
   workflow2SkillsSubmitReviewReconciled,
   resolvePlanningContextAuthority,
+  resolveDomainGeneratePermission,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -262,6 +263,120 @@ describe("resolvePlanningContextAuthority", () => {
       canShowPlanningContextControls: false,
       canLockPlanningContext: false,
     });
+  });
+});
+
+describe("resolveDomainGeneratePermission", () => {
+  it("uses legacy ownership flags only when assignment domain context is missing", () => {
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: undefined,
+        legacyOwnershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+      }),
+    ).toEqual({
+      canShowGenerate: true,
+      ownershipFlags: {
+        canGeneratePlan: true,
+        canGenerateCurrentDomainPlan: true,
+      },
+    });
+
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: undefined,
+        legacyOwnershipFlags: {
+          canGeneratePlan: false,
+          canGenerateCurrentDomainPlan: null,
+        },
+      }).canShowGenerate,
+    ).toBe(false);
+  });
+
+  it("uses assignment canGenerate as source of truth when assignment domain context exists", () => {
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "coach-1",
+          ownerCoachProfileId: "profile-1",
+          ownedByCurrentUser: true,
+          canOpen: false,
+          canGenerate: true,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyOwnershipFlags: {
+          canGeneratePlan: false,
+          canGenerateCurrentDomainPlan: false,
+        },
+      }),
+    ).toEqual({
+      canShowGenerate: true,
+      ownershipFlags: {
+        canGeneratePlan: true,
+        canGenerateCurrentDomainPlan: true,
+      },
+    });
+  });
+
+  it("protects Workflow 2B by hiding Skills Generate when assignment denies ownership", () => {
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: {
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "separate-skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        },
+        legacyOwnershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+      }),
+    ).toEqual({
+      canShowGenerate: false,
+      ownershipFlags: {
+        canGeneratePlan: false,
+        canGenerateCurrentDomainPlan: false,
+      },
+    });
+  });
+
+  it("requires a non-NONE owner type for assignment-backed generation", () => {
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: {
+          ownerType: "NONE",
+          ownerUserId: null,
+          ownerCoachProfileId: null,
+          ownedByCurrentUser: true,
+          canOpen: true,
+          canGenerate: true,
+          canRevise: false,
+          canSubmitForReview: false,
+          canApprove: false,
+          canRelease: false,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        },
+        legacyOwnershipFlags: {
+          canGeneratePlan: true,
+          canGenerateCurrentDomainPlan: true,
+        },
+      }).canShowGenerate,
+    ).toBe(false);
   });
 });
 

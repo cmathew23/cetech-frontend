@@ -4,6 +4,12 @@ import { apiRequest, type NormalizedApiError } from "@/lib/apiClient";
 import type { GenerationDomain } from "@/lib/coachAuthority";
 import type {
   TrainingPlanWorkspace,
+  TrainingPlanWorkspaceAssignmentContext,
+  TrainingPlanWorkspaceAssignmentDomainContext,
+  TrainingPlanWorkspaceAssignmentDomainOwnerType,
+  TrainingPlanWorkspaceAssignmentPlanningContext,
+  TrainingPlanWorkspaceAssignmentReleaseMode,
+  TrainingPlanWorkspacePlanningContextOwnerType,
   TrainingPlanWorkspaceDomain,
   TrainingPlanWorkspaceOwnershipFlags,
   TrainingPlanWorkspacePlanningContext,
@@ -134,6 +140,109 @@ function parseWorkspaceDomain(
   };
 }
 
+function parseAssignmentReleaseMode(
+  value: unknown,
+): TrainingPlanWorkspaceAssignmentReleaseMode | null {
+  const normalized = readString(value)?.toUpperCase();
+  if (
+    normalized === "HEAD_COACH_APPROVAL" ||
+    normalized === "DIRECT_DOMAIN_RELEASE"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function parsePlanningContextOwnerType(
+  value: unknown,
+): TrainingPlanWorkspacePlanningContextOwnerType {
+  const normalized = readString(value)?.toUpperCase();
+  if (
+    normalized === "HEAD_COACH" ||
+    normalized === "SKILLS_FALLBACK" ||
+    normalized === "NONE"
+  ) {
+    return normalized;
+  }
+  return "NONE";
+}
+
+function parseAssignmentDomainOwnerType(
+  value: unknown,
+): TrainingPlanWorkspaceAssignmentDomainOwnerType {
+  const normalized = readString(value)?.toUpperCase();
+  if (
+    normalized === "ASSIGNED_DOMAIN_COACH" ||
+    normalized === "HEAD_COACH_SELF" ||
+    normalized === "NONE"
+  ) {
+    return normalized;
+  }
+  return "NONE";
+}
+
+function parseAssignmentPlanningContext(
+  value: unknown,
+): TrainingPlanWorkspaceAssignmentPlanningContext {
+  const record = asRecord(value) ?? {};
+  const blockers = readStringList(record.blockers);
+  const parsed: TrainingPlanWorkspaceAssignmentPlanningContext = {
+    ownerType: parsePlanningContextOwnerType(record.ownerType),
+    ownerUserId: readString(record.ownerUserId),
+    ownerCoachProfileId: readString(record.ownerCoachProfileId),
+    canRead: readBoolean(record.canRead),
+    canCreate: readBoolean(record.canCreate),
+    canLock: readBoolean(record.canLock),
+    canManage: readBoolean(record.canManage),
+  };
+  if (blockers.length > 0 || "blockers" in record) {
+    parsed.blockers = blockers;
+  }
+  return parsed;
+}
+
+function parseAssignmentDomainContext(
+  value: unknown,
+): TrainingPlanWorkspaceAssignmentDomainContext {
+  const record = asRecord(value) ?? {};
+  const blockers = readStringList(record.blockers);
+  const parsed: TrainingPlanWorkspaceAssignmentDomainContext = {
+    ownerType: parseAssignmentDomainOwnerType(record.ownerType),
+    ownerUserId: readString(record.ownerUserId),
+    ownerCoachProfileId: readString(record.ownerCoachProfileId),
+    ownedByCurrentUser: readBoolean(record.ownedByCurrentUser),
+    canOpen: readBoolean(record.canOpen),
+    canGenerate: readBoolean(record.canGenerate),
+    canRevise: readBoolean(record.canRevise),
+    canSubmitForReview: readBoolean(record.canSubmitForReview),
+    canApprove: readBoolean(record.canApprove),
+    canRelease: readBoolean(record.canRelease),
+    releaseMode: parseAssignmentReleaseMode(record.releaseMode) ?? "HEAD_COACH_APPROVAL",
+  };
+  if (blockers.length > 0 || "blockers" in record) {
+    parsed.blockers = blockers;
+  }
+  return parsed;
+}
+
+function parseAssignmentContext(
+  value: unknown,
+): TrainingPlanWorkspaceAssignmentContext | undefined {
+  const record = asRecord(value);
+  if (record === null) return undefined;
+  const domainsRecord = asRecord(record.domains) ?? {};
+  return {
+    hasHeadCoach: readBoolean(record.hasHeadCoach),
+    releaseMode: parseAssignmentReleaseMode(record.releaseMode) ?? "HEAD_COACH_APPROVAL",
+    planningContext: parseAssignmentPlanningContext(record.planningContext),
+    domains: {
+      SKILLS: parseAssignmentDomainContext(domainsRecord.SKILLS),
+      NUTRITION: parseAssignmentDomainContext(domainsRecord.NUTRITION),
+      S_AND_C: parseAssignmentDomainContext(domainsRecord.S_AND_C),
+    },
+  };
+}
+
 function parsePlanningContext(value: unknown): TrainingPlanWorkspacePlanningContext {
   const record = asRecord(value) ?? {};
   return {
@@ -190,8 +299,9 @@ export function parseTrainingPlanWorkspacePayload(data: unknown): TrainingPlanWo
   const root = asRecord(data) ?? {};
   const nested = asRecord(root.data) ?? root;
   const domainsRecord = asRecord(nested.domains) ?? {};
+  const assignmentContext = parseAssignmentContext(nested.assignmentContext);
 
-  return {
+  const workspace: TrainingPlanWorkspace = {
     entityId: readString(nested.entityId) ?? "",
     athleteId: readString(nested.athleteId) ?? "",
     workflowShape: readString(nested.workflowShape) ?? "",
@@ -214,6 +324,10 @@ export function parseTrainingPlanWorkspacePayload(data: unknown): TrainingPlanWo
         : emptyWorkspaceDomain("S_AND_C"),
     },
   };
+  if (assignmentContext !== undefined) {
+    workspace.assignmentContext = assignmentContext;
+  }
+  return workspace;
 }
 
 export async function getTrainingPlanWorkspace(

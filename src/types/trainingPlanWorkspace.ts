@@ -53,6 +53,57 @@ export type TrainingPlanWorkspaceDomain = {
   allowedActions: string[];
 };
 
+export type TrainingPlanWorkspaceAssignmentReleaseMode =
+  | "HEAD_COACH_APPROVAL"
+  | "DIRECT_DOMAIN_RELEASE";
+
+export type TrainingPlanWorkspacePlanningContextOwnerType =
+  | "HEAD_COACH"
+  | "SKILLS_FALLBACK"
+  | "NONE";
+
+export type TrainingPlanWorkspaceAssignmentDomainOwnerType =
+  | "ASSIGNED_DOMAIN_COACH"
+  | "HEAD_COACH_SELF"
+  | "NONE";
+
+export type TrainingPlanWorkspaceAssignmentPlanningContext = {
+  ownerType: TrainingPlanWorkspacePlanningContextOwnerType;
+  ownerUserId?: string | null;
+  ownerCoachProfileId?: string | null;
+  canRead: boolean;
+  canCreate: boolean;
+  canLock: boolean;
+  canManage: boolean;
+  blockers?: string[];
+};
+
+export type TrainingPlanWorkspaceAssignmentDomainContext = {
+  ownerType: TrainingPlanWorkspaceAssignmentDomainOwnerType;
+  ownerUserId?: string | null;
+  ownerCoachProfileId?: string | null;
+  ownedByCurrentUser: boolean;
+  canOpen: boolean;
+  canGenerate: boolean;
+  canRevise: boolean;
+  canSubmitForReview: boolean;
+  canApprove: boolean;
+  canRelease: boolean;
+  releaseMode: TrainingPlanWorkspaceAssignmentReleaseMode;
+  blockers?: string[];
+};
+
+export type TrainingPlanWorkspaceAssignmentContext = {
+  hasHeadCoach: boolean;
+  releaseMode: TrainingPlanWorkspaceAssignmentReleaseMode;
+  planningContext: TrainingPlanWorkspaceAssignmentPlanningContext;
+  domains: {
+    SKILLS: TrainingPlanWorkspaceAssignmentDomainContext;
+    NUTRITION: TrainingPlanWorkspaceAssignmentDomainContext;
+    S_AND_C: TrainingPlanWorkspaceAssignmentDomainContext;
+  };
+};
+
 export type TrainingPlanWorkspace = {
   entityId: string;
   athleteId: string;
@@ -69,4 +120,5 @@ export type TrainingPlanWorkspace = {
     NUTRITION: TrainingPlanWorkspaceDomain;
     S_AND_C: TrainingPlanWorkspaceDomain;
   };
+  assignmentContext?: TrainingPlanWorkspaceAssignmentContext;
 };

@@ -53,6 +53,10 @@ import {
   resolveDomainSubmitForReviewVisible,
   resolveDomainHeadCoachReviewActionVisible,
   resolveDomainReleaseVisible,
+  resolveWorkflowReviewResetScopeDomain,
+  resolveHeadCoachReviewActiveDetailAfterRefresh,
+  shouldShowSubmittedPlanLoading,
+  shouldUseWorkflow1HeadCoachReviewActionPanel,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -155,6 +159,131 @@ describe("buildCoachWorkflowResetScopeKey", () => {
     });
 
     expect(generation).not.toBe(review);
+  });
+});
+
+describe("Workflow 1 Head Coach review state", () => {
+  it("uses a separate Workflow 1 Head Coach review action panel", () => {
+    expect(
+      shouldUseWorkflow1HeadCoachReviewActionPanel({
+        shell: "head_coach_review",
+        workflowShape: "HEAD_COACH_REVIEWER",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not apply the Workflow 1 action panel to function-aware Head Coach or direct-release shells", () => {
+    expect(
+      shouldUseWorkflow1HeadCoachReviewActionPanel({
+        shell: "head_coach_function_aware",
+        workflowShape: "HEAD_COACH_REVIEWER",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseWorkflow1HeadCoachReviewActionPanel({
+        shell: "skills_coach_planning",
+        workflowShape: "DIRECT_DOMAIN_RELEASE",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Workflow 1 Head Coach review reset scope independent of currentDomain churn", () => {
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      expect(
+        resolveWorkflowReviewResetScopeDomain({
+          shell: "head_coach_review",
+          workflowShape: "HEAD_COACH_REVIEWER",
+          currentCoachGenerationDomain: domain,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("preserves domain-scoped reset behavior for non-Workflow 1 shells", () => {
+    expect(
+      resolveWorkflowReviewResetScopeDomain({
+        shell: "head_coach_function_aware",
+        workflowShape: "HEAD_COACH_REVIEWER",
+        currentCoachGenerationDomain: "SKILLS",
+      }),
+    ).toBe("SKILLS");
+    expect(
+      resolveWorkflowReviewResetScopeDomain({
+        shell: "specialist_domain",
+        workflowShape: "DOMAIN_OWNER",
+        currentCoachGenerationDomain: "NUTRITION",
+      }),
+    ).toBe("NUTRITION");
+  });
+
+  it("keeps previously loaded review plan content visible during Workflow 1 approve/release refetch", () => {
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      const previousDetail = {
+        plan: { id: `plan-${domain}` },
+        version: { id: `version-${domain}` },
+        days: [{ sessions: [{ id: `session-${domain}` }] }],
+        allowedActions: ["HEAD_APPROVE"],
+      } as never;
+
+      expect(
+        resolveHeadCoachReviewActiveDetailAfterRefresh({
+          refreshedActiveDetail: null,
+          previousActiveDetail: previousDetail,
+          summaryPlanId: null,
+          preservePreviousDetail: true,
+        }),
+      ).toBe(previousDetail);
+    }
+  });
+
+  it("does not keep stale review detail outside the Workflow 1 preserve path unless plan ids match", () => {
+    const previousDetail = {
+      plan: { id: "plan-skills" },
+      version: { id: "version-skills" },
+      days: [],
+      allowedActions: ["HEAD_APPROVE"],
+    } as never;
+
+    expect(
+      resolveHeadCoachReviewActiveDetailAfterRefresh({
+        refreshedActiveDetail: null,
+        previousActiveDetail: previousDetail,
+        summaryPlanId: "different-plan",
+        preservePreviousDetail: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveHeadCoachReviewActiveDetailAfterRefresh({
+        refreshedActiveDetail: null,
+        previousActiveDetail: previousDetail,
+        summaryPlanId: "plan-skills",
+        preservePreviousDetail: false,
+      }),
+    ).toBe(previousDetail);
+  });
+
+  it("does not replace already loaded Workflow 1 review content with Loading submitted plan during refetch", () => {
+    expect(
+      shouldShowSubmittedPlanLoading({
+        loading: true,
+        hasActiveDetail: true,
+        workflow1HeadCoachReviewActionPanelMode: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowSubmittedPlanLoading({
+        loading: true,
+        hasActiveDetail: false,
+        workflow1HeadCoachReviewActionPanelMode: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowSubmittedPlanLoading({
+        loading: true,
+        hasActiveDetail: true,
+        workflow1HeadCoachReviewActionPanelMode: false,
+      }),
+    ).toBe(true);
   });
 });
 

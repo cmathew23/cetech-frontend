@@ -799,6 +799,56 @@ export function resolveReviewReviseStepLabelFromWorkspace(input: {
   );
 }
 
+export function shouldUseWorkflow1HeadCoachReviewActionPanel(input: {
+  shell: TrainingPlanPageShell;
+  workflowShape: string | null | undefined;
+}): boolean {
+  return input.shell === "head_coach_review" && input.workflowShape === "HEAD_COACH_REVIEWER";
+}
+
+export function resolveWorkflowReviewResetScopeDomain(input: {
+  shell: TrainingPlanPageShell;
+  workflowShape: string | null | undefined;
+  currentCoachGenerationDomain: TrainingPlanGenerationDomain | null;
+}): TrainingPlanGenerationDomain | null {
+  if (
+    shouldUseWorkflow1HeadCoachReviewActionPanel({
+      shell: input.shell,
+      workflowShape: input.workflowShape,
+    })
+  ) {
+    return null;
+  }
+  return input.currentCoachGenerationDomain;
+}
+
+export function shouldShowSubmittedPlanLoading(input: {
+  loading: boolean;
+  hasActiveDetail: boolean;
+  workflow1HeadCoachReviewActionPanelMode: boolean;
+}): boolean {
+  return (
+    input.loading &&
+    !(input.workflow1HeadCoachReviewActionPanelMode && input.hasActiveDetail)
+  );
+}
+
+export function resolveHeadCoachReviewActiveDetailAfterRefresh(input: {
+  refreshedActiveDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  previousActiveDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  summaryPlanId: string | null;
+  preservePreviousDetail: boolean;
+}): CoachPersistedTrainingPlanActiveDetail | null {
+  if (input.refreshedActiveDetail !== null) return input.refreshedActiveDetail;
+  if (input.preservePreviousDetail) return input.previousActiveDetail;
+  return (
+    input.summaryPlanId !== null &&
+    input.previousActiveDetail?.plan.id?.trim() === input.summaryPlanId
+      ? input.previousActiveDetail
+      : null
+  );
+}
+
 function workflowStepLabel(
   key: GuidedWorkflowStepKey,
   headCoachReviewMode: boolean,
@@ -5747,6 +5797,11 @@ export function CoachAthletePlanningProfileView({
     trainingPlanShellModel.shell === "head_coach_function_aware";
   const headCoachFunctionAwareMode =
     trainingPlanShellModel.shell === "head_coach_function_aware";
+  const workflow1HeadCoachReviewActionPanelMode =
+    shouldUseWorkflow1HeadCoachReviewActionPanel({
+      shell: trainingPlanShellModel.shell,
+      workflowShape: workspace?.workflowShape,
+    });
   const reviewReviseStepLabel = useMemo(() => {
     return resolveReviewReviseStepLabelFromWorkspace({
       workspace,
@@ -7512,7 +7567,11 @@ export function CoachAthletePlanningProfileView({
       entityId,
       coachUserId: currentCoachUserId,
       activeRole: currentActiveRole,
-      domain: currentCoachGenerationDomain,
+      domain: resolveWorkflowReviewResetScopeDomain({
+        shell: trainingPlanShellModel.shell,
+        workflowShape: workspace?.workflowShape,
+        currentCoachGenerationDomain,
+      }),
       workflowMode: resetScopeWorkflowMode,
     });
     if (coachDomainStateResetRef.current === null) {
@@ -7566,6 +7625,7 @@ export function CoachAthletePlanningProfileView({
     isHeadCoachPlanningContextOwner,
     planningContextLocked,
     trainingPlanShellModel.ready,
+    trainingPlanShellModel.shell,
     trainingPlanShellModel.workflowMode,
     workspace,
   ]);
@@ -7769,32 +7829,38 @@ export function CoachAthletePlanningProfileView({
           SKILLS: {
             ...nextStates.SKILLS,
             latestDraft: nextStates.SKILLS.latestDraft ?? prev.SKILLS.latestDraft,
-            activeDetail:
-              nextStates.SKILLS.activeDetail ??
-              (nextStates.SKILLS.summaryPlanId !== null &&
-              prev.SKILLS.activeDetail?.plan.id?.trim() === nextStates.SKILLS.summaryPlanId
-                ? prev.SKILLS.activeDetail
-                : null),
+            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+              refreshedActiveDetail: nextStates.SKILLS.activeDetail,
+              previousActiveDetail: prev.SKILLS.activeDetail,
+              summaryPlanId: nextStates.SKILLS.summaryPlanId,
+              preservePreviousDetail:
+                workflow1HeadCoachReviewActionPanelMode &&
+                headCoachSubmittedReviewDomain === "SKILLS",
+            }),
           },
           NUTRITION: {
             ...nextStates.NUTRITION,
             latestDraft: nextStates.NUTRITION.latestDraft ?? prev.NUTRITION.latestDraft,
-            activeDetail:
-              nextStates.NUTRITION.activeDetail ??
-              (nextStates.NUTRITION.summaryPlanId !== null &&
-              prev.NUTRITION.activeDetail?.plan.id?.trim() === nextStates.NUTRITION.summaryPlanId
-                ? prev.NUTRITION.activeDetail
-                : null),
+            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+              refreshedActiveDetail: nextStates.NUTRITION.activeDetail,
+              previousActiveDetail: prev.NUTRITION.activeDetail,
+              summaryPlanId: nextStates.NUTRITION.summaryPlanId,
+              preservePreviousDetail:
+                workflow1HeadCoachReviewActionPanelMode &&
+                headCoachSubmittedReviewDomain === "NUTRITION",
+            }),
           },
           S_AND_C: {
             ...nextStates.S_AND_C,
             latestDraft: nextStates.S_AND_C.latestDraft ?? prev.S_AND_C.latestDraft,
-            activeDetail:
-              nextStates.S_AND_C.activeDetail ??
-              (nextStates.S_AND_C.summaryPlanId !== null &&
-              prev.S_AND_C.activeDetail?.plan.id?.trim() === nextStates.S_AND_C.summaryPlanId
-                ? prev.S_AND_C.activeDetail
-                : null),
+            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+              refreshedActiveDetail: nextStates.S_AND_C.activeDetail,
+              previousActiveDetail: prev.S_AND_C.activeDetail,
+              summaryPlanId: nextStates.S_AND_C.summaryPlanId,
+              preservePreviousDetail:
+                workflow1HeadCoachReviewActionPanelMode &&
+                headCoachSubmittedReviewDomain === "S_AND_C",
+            }),
           },
         }));
         setSubmittedDomainPlansBootstrapState("loaded");
@@ -7810,6 +7876,8 @@ export function CoachAthletePlanningProfileView({
     entityId,
     isHeadCoachPlanningContextOwner,
     planningContextBootstrapState,
+    headCoachSubmittedReviewDomain,
+    workflow1HeadCoachReviewActionPanelMode,
     workspace,
   ]);
 
@@ -8058,19 +8126,28 @@ export function CoachAthletePlanningProfileView({
           loading: false,
           error,
           latestDraft: prev[domain].latestDraft,
-          activeDetail:
-            activeDetail ??
-            (summaryPlanId !== null &&
-            prev[domain].activeDetail?.plan.id?.trim() === summaryPlanId
-              ? prev[domain].activeDetail
-              : null),
+          activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+            refreshedActiveDetail: activeDetail,
+            previousActiveDetail: prev[domain].activeDetail,
+            summaryPlanId,
+            preservePreviousDetail:
+              workflow1HeadCoachReviewActionPanelMode &&
+              headCoachSubmittedReviewDomain === domain,
+          }),
           summaryStatus,
           summaryPlanId,
           summaryVersionId,
         },
       }));
     },
-    [athleteIdTrimmed, entityId, headCoachReviewMode, workspace],
+    [
+      athleteIdTrimmed,
+      entityId,
+      headCoachReviewMode,
+      headCoachSubmittedReviewDomain,
+      workflow1HeadCoachReviewActionPanelMode,
+      workspace,
+    ],
   );
 
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
@@ -9137,7 +9214,9 @@ export function CoachAthletePlanningProfileView({
         );
       }
       if (isHeadCoachPlanningContextOwner) {
-        setSelectedWorkflowTab("generate");
+        if (!workflow1HeadCoachReviewActionPanelMode) {
+          setSelectedWorkflowTab("generate");
+        }
         setHeadCoachSubmittedReviewDomain(actionDomain);
       }
       setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
@@ -9547,6 +9626,197 @@ export function CoachAthletePlanningProfileView({
     setHeadCoachSubmittedReviewDomain(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanActionSuccessFeedback(null);
+    setRequestRevisionModalOpen(false);
+    setRequestRevisionFeedback("");
+  }
+
+  function renderWorkflow1HeadCoachReviewActionPanel() {
+    if (
+      !workflow1HeadCoachReviewActionPanelMode ||
+      !headCoachReviewMode ||
+      headCoachSubmittedReviewDomain === null
+    ) {
+      return null;
+    }
+
+    const reviewDomain = headCoachSubmittedReviewDomain;
+    const domainState = headCoachDomainPlanStates[reviewDomain];
+    const activeDetail = domainState.activeDetail;
+    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
+    const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
+    const planId = activeDetail?.plan.id?.trim() ?? "";
+    const versionId = activeDetail?.version.id?.trim() ?? "";
+    const workspaceAllowedActions =
+      workspace !== null
+        ? workspaceAllowedActionsSet(workspace, reviewDomain)
+        : new Set<GovernedTrainingPlanWorkflowAction>();
+    const allowedActions = new Set<GovernedTrainingPlanWorkflowAction>([
+      ...workspaceAllowedActions,
+      ...(activeDetail?.allowedActions ?? []),
+    ]);
+    const status =
+      workspaceDomainEntry?.summary.status?.trim() ??
+      domainState.summaryStatus ??
+      activeDetail?.version.status ??
+      activeDetail?.plan.status ??
+      "";
+    const normalizedStatus = status.trim().toUpperCase();
+    const isAssistantApproved = normalizedStatus === "ASSISTANT_COACH_APPROVED";
+    const isHeadCoachApproved = normalizedStatus === "HEAD_COACH_APPROVED";
+    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE") && !isHeadCoachApproved,
+      planId,
+      versionId,
+    });
+    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION") && isAssistantApproved,
+      planId,
+      versionId,
+    });
+    const canShowReleaseAction = resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
+      requiredReleaseMode: "HEAD_COACH_APPROVAL",
+      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
+        allowedActions,
+        status,
+      }),
+      planId,
+      versionId,
+    });
+
+    return (
+      <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h4 className="text-sm font-normal text-textPrimary">
+              Head Coach Review Actions
+            </h4>
+            <p className="text-sm text-textSecondary">
+              Review governance for the opened {reviewDomainLabel} plan.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={governedPlanActionLoading !== null}
+            onClick={closeHeadCoachPlanReview}
+          >
+            Close Review
+          </Button>
+        </div>
+        <dl className="space-y-1">
+          <DetailRow label="Domain" value={reviewDomainLabel} />
+          <DetailRow label="Status" value={displayValue(status)} />
+        </dl>
+        <div className="flex flex-wrap gap-2">
+          {canShowApproveAction ? (
+            <Button
+              type="button"
+              variant="primary"
+              loading={governedPlanActionLoading === "HEAD_APPROVE"}
+              disabled={governedPlanActionLoading !== null}
+              onClick={() => void handlePersistedGovernedPlanAction("HEAD_APPROVE")}
+            >
+              Approve Plan
+            </Button>
+          ) : null}
+          {canShowRequestRevisionAction ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={governedPlanActionLoading !== null}
+              onClick={() => {
+                setRequestRevisionModalOpen(true);
+                setGovernedPlanActionError(null);
+                setGovernedPlanActionSuccess(null);
+                setGovernedPlanActionSuccessFeedback(null);
+              }}
+            >
+              Request Changes
+            </Button>
+          ) : null}
+          {canShowReleaseAction ? (
+            <Button
+              type="button"
+              variant="primary"
+              loading={governedPlanActionLoading === "RELEASE"}
+              disabled={governedPlanActionLoading !== null}
+              onClick={() => void handlePersistedGovernedPlanAction("RELEASE")}
+            >
+              Release to Athlete
+            </Button>
+          ) : null}
+        </div>
+        {requestRevisionModalOpen ? (
+          <form
+            className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
+            onSubmit={(event) => void handleRequestRevisionSubmit(event)}
+          >
+            <div className="space-y-1">
+              <h5 className="text-sm font-normal text-textPrimary">Request Changes</h5>
+              <p className="text-sm text-textSecondary">
+                Explain what the coach should change before resubmitting.
+              </p>
+            </div>
+            <label className="space-y-1 text-sm text-textPrimary">
+              <span className="font-medium">Revision feedback</span>
+              <textarea
+                rows={4}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                value={requestRevisionFeedback}
+                onChange={(event) => setRequestRevisionFeedback(event.target.value)}
+                placeholder="Describe the required changes."
+                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+              />
+            </label>
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                onClick={() => {
+                  setRequestRevisionModalOpen(false);
+                  setRequestRevisionFeedback("");
+                  setGovernedPlanActionError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                disabled={
+                  governedPlanActionLoading === "REQUEST_REVISION" ||
+                  requestRevisionFeedback.trim() === ""
+                }
+              >
+                Send Request
+              </Button>
+            </div>
+          </form>
+        ) : null}
+        {governedPlanActionError ? (
+          <Alert variant="danger">{governedPlanActionError}</Alert>
+        ) : null}
+        {governedPlanActionSuccess ? (
+          <WorkflowNeutralNotice>
+            <div className="space-y-2">
+              <div>{governedPlanActionSuccess}</div>
+              {governedPlanActionSuccessFeedback ? (
+                <div className="text-sm text-textSecondary">
+                  Head Coach Notes: {governedPlanActionSuccessFeedback}
+                </div>
+              ) : null}
+            </div>
+          </WorkflowNeutralNotice>
+        ) : null}
+      </section>
+    );
   }
 
   function renderHeadCoachPlanReviewPanel() {
@@ -9559,6 +9829,11 @@ export function CoachAthletePlanningProfileView({
     const activeDetail = domainState.activeDetail;
     const isLoading = domainState.loading;
     const loadError = domainState.error;
+    const showSubmittedPlanLoading = shouldShowSubmittedPlanLoading({
+      loading: isLoading,
+      hasActiveDetail: activeDetail !== null,
+      workflow1HeadCoachReviewActionPanelMode,
+    });
     const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? null;
     const workspaceVersionId = workspaceDomainEntry?.summary.versionId?.trim() ?? null;
@@ -9615,16 +9890,18 @@ export function CoachAthletePlanningProfileView({
               Review the submitted plan content, then approve or request revision.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={closeHeadCoachPlanReview}
-          >
-            Close Review
-          </Button>
+          {!workflow1HeadCoachReviewActionPanelMode ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={closeHeadCoachPlanReview}
+            >
+              Close Review
+            </Button>
+          ) : null}
         </div>
 
-        {isLoading ? (
+        {showSubmittedPlanLoading ? (
           <div className="text-sm text-textSecondary">Loading submitted plan…</div>
         ) : null}
 
@@ -9632,15 +9909,15 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="danger">Unable to load submitted plan. {loadError}</Alert>
         ) : null}
 
-        {governedPlanActionError ? (
+        {governedPlanActionError && !workflow1HeadCoachReviewActionPanelMode ? (
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
 
-        {governedPlanActionSuccess ? (
+        {governedPlanActionSuccess && !workflow1HeadCoachReviewActionPanelMode ? (
           <Alert variant="success">{governedPlanActionSuccess}</Alert>
         ) : null}
 
-        {!isLoading && !loadError && activeDetail ? (
+        {!showSubmittedPlanLoading && !loadError && activeDetail ? (
           <>
             <dl className="grid gap-2 sm:grid-cols-2">
               <DetailRow label="Training Plan ID" value={displayValue(planId)} />
@@ -9653,6 +9930,7 @@ export function CoachAthletePlanningProfileView({
               />
             </dl>
 
+            {!workflow1HeadCoachReviewActionPanelMode ? (
             <div className="flex flex-wrap gap-2">
               {canShowApproveAction ? (
                 <Button
@@ -9687,6 +9965,7 @@ export function CoachAthletePlanningProfileView({
                 </Button>
               ) : null}
             </div>
+            ) : null}
 
             {activeDetail.days.length > 0 ? (
               <div className="space-y-3">
@@ -9784,6 +10063,7 @@ export function CoachAthletePlanningProfileView({
     });
     return (
       <div className="space-y-4">
+        {renderWorkflow1HeadCoachReviewActionPanel()}
         {renderHeadCoachPlanReviewPanel()}
         <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
           <div className="space-y-1">
@@ -14628,7 +14908,7 @@ export function CoachAthletePlanningProfileView({
             levelValidationSnapshot={readinessSources.levelValidation}
             onAfterSaveConfirmed={refreshProfileAndReadinessAfterLevelValidation}
           />
-          {requestRevisionModalOpen ? (
+          {requestRevisionModalOpen && !workflow1HeadCoachReviewActionPanelMode ? (
             <Modal
               className="w-full max-w-lg overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
               aria-labelledby="request-revision-modal-title"

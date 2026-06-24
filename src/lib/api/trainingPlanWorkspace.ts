@@ -118,6 +118,7 @@ function parseWorkspaceSummary(
     generationDomain,
     status: readString(record.status),
     versionNumber: readNumber(record.versionNumber),
+    selectedVersionId: readString(record.selectedVersionId),
     latestVersionId: readString(record.latestVersionId),
     approvedVersionId: readString(record.approvedVersionId),
     activeVersionId: readString(record.activeVersionId),
@@ -216,6 +217,7 @@ function parseAssignmentDomainContext(
     canRevise: readBoolean(record.canRevise),
     canSubmitForReview: readBoolean(record.canSubmitForReview),
     canApprove: readBoolean(record.canApprove),
+    canRequestRevision: readBoolean(record.canRequestRevision),
     canRelease: readBoolean(record.canRelease),
     releaseMode: parseAssignmentReleaseMode(record.releaseMode) ?? "HEAD_COACH_APPROVAL",
   };

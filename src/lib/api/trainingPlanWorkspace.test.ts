@@ -98,6 +98,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
               generationDomain: "NUTRITION",
               trainingPlanId: "nutrition-plan",
               versionId: "nutrition-version",
+              selectedVersionId: "nutrition-selected-version",
               status: "AI_GENERATED",
             },
           },
@@ -135,6 +136,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
               canRevise: false,
               canSubmitForReview: false,
               canApprove: false,
+              canRequestRevision: false,
               canRelease: false,
               releaseMode: "HEAD_COACH_APPROVAL",
               blockers: ["Assigned to another coach"],
@@ -149,6 +151,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
               canRevise: true,
               canSubmitForReview: true,
               canApprove: false,
+              canRequestRevision: false,
               canRelease: false,
               releaseMode: "HEAD_COACH_APPROVAL",
               blockers: [],
@@ -163,6 +166,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
               canRevise: false,
               canSubmitForReview: false,
               canApprove: false,
+              canRequestRevision: false,
               canRelease: false,
               releaseMode: "DIRECT_DOMAIN_RELEASE",
             },
@@ -175,6 +179,9 @@ describe("parseTrainingPlanWorkspacePayload", () => {
     expect(workspace.athleteId).toBe("athlete-1");
     expect(workspace.planningContext.locked).toBe(true);
     expect(workspace.domains.NUTRITION.summary.trainingPlanId).toBe("nutrition-plan");
+    expect(workspace.domains.NUTRITION.summary.selectedVersionId).toBe(
+      "nutrition-selected-version",
+    );
     expect(workspace.domains.NUTRITION.allowedActions).toEqual(["SUBMIT_REVIEW"]);
 
     expect(workspace.assignmentContext).toBeDefined();
@@ -200,6 +207,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       canRevise: false,
       canSubmitForReview: false,
       canApprove: false,
+      canRequestRevision: false,
       canRelease: false,
       releaseMode: "HEAD_COACH_APPROVAL",
       blockers: ["Assigned to another coach"],
@@ -214,6 +222,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       canRevise: true,
       canSubmitForReview: true,
       canApprove: false,
+      canRequestRevision: false,
       canRelease: false,
       releaseMode: "HEAD_COACH_APPROVAL",
       blockers: [],
@@ -228,6 +237,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       canRevise: false,
       canSubmitForReview: false,
       canApprove: false,
+      canRequestRevision: false,
       canRelease: false,
       releaseMode: "DIRECT_DOMAIN_RELEASE",
     });

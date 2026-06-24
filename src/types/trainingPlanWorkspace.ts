@@ -6,6 +6,7 @@ export type TrainingPlanWorkspaceSummary = {
   generationDomain: GenerationDomain;
   status: string | null;
   versionNumber: number | null;
+  selectedVersionId?: string | null;
   latestVersionId?: string | null;
   approvedVersionId?: string | null;
   activeVersionId?: string | null;
@@ -88,6 +89,7 @@ export type TrainingPlanWorkspaceAssignmentDomainContext = {
   canRevise: boolean;
   canSubmitForReview: boolean;
   canApprove: boolean;
+  canRequestRevision?: boolean;
   canRelease: boolean;
   releaseMode: TrainingPlanWorkspaceAssignmentReleaseMode;
   blockers?: string[];

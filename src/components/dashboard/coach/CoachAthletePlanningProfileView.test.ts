@@ -55,6 +55,7 @@ import {
   resolveDomainReleaseVisible,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
+  resolveHeadCoachReviewActionContext,
   shouldShowSubmittedPlanLoading,
   shouldUseWorkflow1HeadCoachReviewActionPanel,
   isHeadCoachSkillsOwnerWorkflow,
@@ -825,6 +826,75 @@ describe("resolveHeadCoachSubmittedReviewCardDomains", () => {
         }),
       }),
     ).toEqual([]);
+  });
+
+  it("keeps Workflow 2A approved Nutrition and submitted S&C cards visible from domain summaries", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace: workflow2AHeadCoachOwnedSkillsWorkspace({
+          domains: {
+            SKILLS: {
+              ...base.domains.SKILLS,
+              summary: {
+                trainingPlanId: "skills-plan",
+                versionId: "skills-version",
+                generationDomain: "SKILLS",
+                status: "ACTIVE",
+                versionNumber: 1,
+              },
+            },
+            NUTRITION: {
+              ...base.domains.NUTRITION,
+              summary: {
+                trainingPlanId: "nutrition-plan",
+                versionId: null,
+                selectedVersionId: "nutrition-selected-version",
+                generationDomain: "NUTRITION",
+                status: "HEAD_COACH_APPROVED",
+                versionNumber: 1,
+              },
+              allowedActions: [],
+            },
+            S_AND_C: {
+              ...base.domains.S_AND_C,
+              summary: {
+                trainingPlanId: "sandc-plan",
+                versionId: null,
+                selectedVersionId: "sandc-selected-version",
+                generationDomain: "S_AND_C",
+                status: "ASSISTANT_COACH_APPROVED",
+                versionNumber: 1,
+              },
+              allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+            },
+          },
+          assignmentContext: shellAssignmentContext({
+            hasHeadCoach: true,
+            releaseMode: "HEAD_COACH_APPROVAL",
+            domains: {
+              SKILLS: shellAssignmentDomain({
+                ownerType: "HEAD_COACH_SELF",
+                ownedByCurrentUser: true,
+                canApprove: false,
+              }),
+              NUTRITION: shellAssignmentDomain({
+                canApprove: false,
+                canRequestRevision: false,
+                canRelease: false,
+              }),
+              S_AND_C: shellAssignmentDomain({
+                canApprove: true,
+                canRequestRevision: true,
+                canRelease: false,
+              }),
+            },
+          }),
+        }),
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
   });
 
   it("does not show Head Coach review card domains for Workflow 3 direct release", () => {
@@ -1767,6 +1837,52 @@ describe("resolveDomainHeadCoachReviewActionVisible", () => {
       }),
     ).toBe(false);
   });
+
+  it("keeps Workflow 2A submitted Nutrition and S&C review actions active when release is not allowed", () => {
+    for (const domain of ["NUTRITION", "S_AND_C"] as const) {
+      const assignmentDomainContext = shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownerUserId: `${domain.toLowerCase()}-coach`,
+        ownerCoachProfileId: `${domain.toLowerCase()}-profile`,
+        ownedByCurrentUser: false,
+        canOpen: true,
+        canApprove: true,
+        canRequestRevision: true,
+        canRelease: false,
+        blockers: [],
+      });
+      const allowedActions = new Set(["HEAD_APPROVE", "REQUEST_REVISION"]);
+
+      expect(
+        resolveDomainHeadCoachReviewActionVisible({
+          assignmentDomainContext,
+          reviewAction: "HEAD_APPROVE",
+          legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
+          planId: `${domain.toLowerCase()}-plan`,
+          versionId: `${domain.toLowerCase()}-version`,
+        }),
+      ).toBe(true);
+      expect(
+        resolveDomainHeadCoachReviewActionVisible({
+          assignmentDomainContext,
+          reviewAction: "REQUEST_REVISION",
+          legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
+          planId: `${domain.toLowerCase()}-plan`,
+          versionId: `${domain.toLowerCase()}-version`,
+        }),
+      ).toBe(true);
+      expect(
+        resolveDomainReleaseVisible({
+          assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+          assignmentDomainContext,
+          requiredReleaseMode: "HEAD_COACH_APPROVAL",
+          legacyCanRelease: true,
+          planId: `${domain.toLowerCase()}-plan`,
+          versionId: `${domain.toLowerCase()}-version`,
+        }),
+      ).toBe(false);
+    }
+  });
 });
 
 describe("resolveDomainReleaseVisible", () => {
@@ -2599,6 +2715,85 @@ describe("resolveTrainingPlanWorkflowMode", () => {
       "not_created",
     );
     expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.S_AND_C)).toBe("not_created");
+  });
+
+  it("resolves Workflow 2A Head Coach review actions from the reviewed domain summary", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      domains: {
+        ...base.domains,
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "de729d07-cba3-4f01-a220-bedab4af4b88",
+            versionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+            selectedVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+            latestVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+            approvedVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+            activeVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+            versionNumber: 1,
+            status: "ACTIVE",
+            generationDomain: "SKILLS",
+          },
+          allowedActions: [],
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          summary: {
+            trainingPlanId: "e1f80d9c-52af-46ef-a1d0-43be05655c47",
+            versionId: null,
+            selectedVersionId: "04d31412-fc3e-434b-a206-9924b2d2fd44",
+            latestVersionId: "04d31412-fc3e-434b-a206-9924b2d2fd44",
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: 1,
+            status: "ASSISTANT_COACH_APPROVED",
+            generationDomain: "NUTRITION",
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+        S_AND_C: {
+          ...base.domains.S_AND_C,
+          summary: {
+            trainingPlanId: "e2daeb66-b6fa-4b07-b2aa-42f8a55f40c2",
+            versionId: null,
+            selectedVersionId: "2ab433a2-1efe-4844-94c1-e7f80f74aa33",
+            latestVersionId: "2ab433a2-1efe-4844-94c1-e7f80f74aa33",
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: 1,
+            status: "ASSISTANT_COACH_APPROVED",
+            generationDomain: "S_AND_C",
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+      },
+    });
+
+    expect(
+      resolveHeadCoachReviewActionContext({
+        workspace,
+        domain: "NUTRITION",
+        fallbackPlanId: "de729d07-cba3-4f01-a220-bedab4af4b88",
+        fallbackVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+      }),
+    ).toEqual({
+      planId: "e1f80d9c-52af-46ef-a1d0-43be05655c47",
+      versionId: "04d31412-fc3e-434b-a206-9924b2d2fd44",
+      generationDomain: "NUTRITION",
+    });
+    expect(
+      resolveHeadCoachReviewActionContext({
+        workspace,
+        domain: "S_AND_C",
+        fallbackPlanId: "de729d07-cba3-4f01-a220-bedab4af4b88",
+        fallbackVersionId: "1399cc59-bc78-4c24-8a32-6794c2fc460e",
+      }),
+    ).toEqual({
+      planId: "e2daeb66-b6fa-4b07-b2aa-42f8a55f40c2",
+      versionId: "2ab433a2-1efe-4844-94c1-e7f80f74aa33",
+      generationDomain: "S_AND_C",
+    });
   });
 
   it("falls back to legacy ids for non-workspace View Plan behavior", () => {
@@ -3552,6 +3747,7 @@ function shellAssignmentDomain(
     canRevise: false,
     canSubmitForReview: false,
     canApprove: false,
+    canRequestRevision: false,
     canRelease: false,
     releaseMode: "HEAD_COACH_APPROVAL",
     ...overrides,

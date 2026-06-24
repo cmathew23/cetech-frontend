@@ -727,7 +727,7 @@ const WORKFLOW_TAB_LABELS: Record<GuidedWorkflowStepKey, string> = {
   generate: "Generate",
 };
 
-type GovernedPlanContext = {
+export type GovernedPlanContext = {
   planId: string;
   versionId: string;
   generationDomain: TrainingPlanGenerationDomain;
@@ -962,11 +962,13 @@ function headCoachDomainStatusLabel(kind: AssistantDomainWorkflowStatus): string
 
 function resolveHeadCoachDomainSummaryVersionId(input: {
   versionId: string | null;
-  latestVersionId: string | null;
-  approvedVersionId: string | null;
-  activeVersionId: string | null;
+  selectedVersionId?: string | null;
+  latestVersionId?: string | null;
+  approvedVersionId?: string | null;
+  activeVersionId?: string | null;
 }): string | null {
   return (
+    input.selectedVersionId?.trim() ??
     input.versionId?.trim() ??
     input.latestVersionId?.trim() ??
     input.approvedVersionId?.trim() ??
@@ -987,13 +989,14 @@ export function resolveHeadCoachReviewSummarySource(input: {
 } {
   const workspaceSummary = input.workspace?.domains[input.domain]?.summary ?? null;
   const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
-  const workspaceVersionId = workspaceSummary?.versionId?.trim() ?? "";
+  const workspaceVersionId =
+    workspaceSummary !== null ? resolveHeadCoachDomainSummaryVersionId(workspaceSummary) : null;
   const legacyPlanId = input.legacySummary.trainingPlanId?.trim() ?? "";
   const legacyVersionId = resolveHeadCoachDomainSummaryVersionId(input.legacySummary);
   return {
     planId: workspacePlanId !== "" ? workspacePlanId : legacyPlanId !== "" ? legacyPlanId : null,
     versionId:
-      workspaceVersionId !== ""
+      workspaceVersionId !== null && workspaceVersionId !== ""
         ? workspaceVersionId
         : legacyVersionId !== null && legacyVersionId !== ""
           ? legacyVersionId
@@ -1002,7 +1005,7 @@ export function resolveHeadCoachReviewSummarySource(input: {
       (workspaceSummary?.status?.trim() ?? "") !== ""
         ? (workspaceSummary?.status?.trim() ?? null)
         : input.legacySummary.status?.trim() || null,
-    hasWorkspaceIds: workspacePlanId !== "" && workspaceVersionId !== "",
+    hasWorkspaceIds: workspacePlanId !== "" && (workspaceVersionId ?? "") !== "",
   };
 }
 
@@ -1913,7 +1916,20 @@ export function resolveHeadCoachSubmittedReviewCardDomains(input: {
   workspace: TrainingPlanWorkspace | null;
 }): TrainingPlanGenerationDomain[] {
   if (input.workspace?.assignmentContext !== undefined) {
-    return deriveTrainingPlanWorkspaceTabStates(input.workspace).domains.reviewDomains;
+    const reviewDomains = deriveTrainingPlanWorkspaceTabStates(input.workspace).domains.reviewDomains;
+    if (input.shell !== "head_coach_function_aware" || !input.headCoachOwnsSkills) {
+      return reviewDomains;
+    }
+    const domains = new Set<TrainingPlanGenerationDomain>(reviewDomains);
+    for (const domain of ["NUTRITION", "S_AND_C"] as const) {
+      const summary = input.workspace.domains[domain].summary;
+      const planId = summary.trainingPlanId?.trim() ?? "";
+      const versionId = resolveHeadCoachDomainSummaryVersionId(summary);
+      if (planId !== "" && (versionId ?? "") !== "") {
+        domains.add(domain);
+      }
+    }
+    return GENERATION_DOMAIN_ORDER.filter((domain) => domains.has(domain));
   }
   return headCoachSubmittedReviewDomains(input);
 }
@@ -2302,6 +2318,10 @@ export function resolveDomainHeadCoachReviewActionVisible(input: {
     | TrainingPlanWorkspaceAssignmentDomainContext
     | null
     | undefined;
+  reviewAction?: Extract<
+    GovernedTrainingPlanWorkflowAction,
+    "HEAD_APPROVE" | "REQUEST_REVISION"
+  >;
   legacyCanShowReviewAction: boolean;
   planId: string | null | undefined;
   versionId: string | null | undefined;
@@ -2316,7 +2336,12 @@ export function resolveDomainHeadCoachReviewActionVisible(input: {
     return input.legacyCanShowReviewAction;
   }
 
-  return assignmentDomainContext.canApprove && input.legacyCanShowReviewAction;
+  const assignmentCanReview =
+    input.reviewAction === "REQUEST_REVISION"
+      ? assignmentDomainContext.canRequestRevision === true
+      : assignmentDomainContext.canApprove;
+
+  return assignmentCanReview && input.legacyCanShowReviewAction;
 }
 
 export function resolveDomainReleaseVisible(input: {
@@ -3798,6 +3823,34 @@ export function resolveWorkflowActionContext(input: {
   };
 }
 
+export function resolveHeadCoachReviewActionContext(input: {
+  workspace: TrainingPlanWorkspace | null;
+  domain: TrainingPlanGenerationDomain;
+  fallbackPlanId?: string | null;
+  fallbackVersionId?: string | null;
+}): GovernedPlanContext | null {
+  const summary = input.workspace?.domains[input.domain]?.summary ?? null;
+  const workspacePlanId = summary?.trainingPlanId?.trim() ?? "";
+  const workspaceVersionId =
+    summary !== null ? resolveHeadCoachDomainSummaryVersionId(summary) : null;
+  const planId =
+    workspacePlanId !== ""
+      ? workspacePlanId
+      : input.fallbackPlanId?.trim() ?? "";
+  const versionId =
+    workspaceVersionId !== null && workspaceVersionId !== ""
+      ? workspaceVersionId
+      : input.fallbackVersionId?.trim() ?? "";
+
+  if (planId === "" || versionId === "") return null;
+
+  return {
+    planId,
+    versionId,
+    generationDomain: input.domain,
+  };
+}
+
 export type WorkspaceDomainViewPlanContext = {
   planId: string;
   versionId: string;
@@ -4344,6 +4397,8 @@ export function CoachAthletePlanningProfileView({
     useState<string | null>(null);
   const [requestRevisionModalOpen, setRequestRevisionModalOpen] = useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
+  const [requestRevisionActionContext, setRequestRevisionActionContext] =
+    useState<GovernedPlanContext | null>(null);
   const [assistantRevisePanelDomain, setAssistantRevisePanelDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
   const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
@@ -9220,12 +9275,15 @@ export function CoachAthletePlanningProfileView({
 
   async function handlePersistedGovernedPlanAction(
     action: GovernedTrainingPlanWorkflowAction,
+    actionContextOverride?: GovernedPlanContext | null,
   ) {
-    if (governedPlanActionLoading !== null || persistedGovernedPlanContext === null) {
+    const actionContext = actionContextOverride ?? persistedGovernedPlanContext;
+    if (governedPlanActionLoading !== null || actionContext === null) {
       return;
     }
     if (action === "REQUEST_REVISION") {
       setRequestRevisionModalOpen(true);
+      setRequestRevisionActionContext(actionContext);
       setGovernedPlanActionError(null);
       setGovernedPlanActionSuccess(null);
       setGovernedPlanActionSuccessFeedback(null);
@@ -9237,7 +9295,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccess(null);
     setGovernedPlanActionSuccessFeedback(null);
 
-    const actionDomain = persistedGovernedPlanContext.generationDomain;
+    const actionDomain = actionContext.generationDomain;
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
 
     try {
@@ -9245,8 +9303,8 @@ export function CoachAthletePlanningProfileView({
         const workspaceSubmitIds = resolveSubmitReviewPlanVersionIds({
           workspace,
           domain: actionDomain,
-          fallbackPlanId: persistedGovernedPlanContext.planId,
-          fallbackVersionId: persistedGovernedPlanContext.versionId,
+          fallbackPlanId: actionContext.planId,
+          fallbackVersionId: actionContext.versionId,
         });
         let submitPlanId = workspaceSubmitIds.planId;
         let submitVersionId = workspaceSubmitIds.versionId;
@@ -9259,7 +9317,7 @@ export function CoachAthletePlanningProfileView({
           !workspaceProvidesSubmitState
         ) {
           const visibleDraft = latestDraftMatchesCurrentDomain ? latestSkillsDraft : null;
-          let submitContext = persistedGovernedPlanContext;
+          let submitContext = actionContext;
           if (
             !isAssistantGovernedDetailAlignedWithVisibleDraft({
               governedContext: submitContext,
@@ -9309,16 +9367,16 @@ export function CoachAthletePlanningProfileView({
         await headApprove(
           entityId,
           athleteIdTrimmed,
-          persistedGovernedPlanContext.planId,
-          persistedGovernedPlanContext.versionId,
+          actionContext.planId,
+          actionContext.versionId,
           actionDomain,
         );
       } else {
         await release(
           entityId,
           athleteIdTrimmed,
-          persistedGovernedPlanContext.planId,
-          persistedGovernedPlanContext.versionId,
+          actionContext.planId,
+          actionContext.versionId,
           actionDomain,
         );
       }
@@ -9329,14 +9387,14 @@ export function CoachAthletePlanningProfileView({
           action === "SUBMIT_REVIEW"
         ) {
           await refreshWorkflow2HeadCoachSkillsDomainSlotAfterSubmit(
-            persistedGovernedPlanContext.planId,
+            actionContext.planId,
           );
         } else {
           await refreshHeadCoachDomainPlanState(actionDomain);
         }
       } else {
         await refreshPersistedPlanDetail(
-          persistedGovernedPlanContext.planId,
+          actionContext.planId,
           actionDomain,
           { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
         );
@@ -9357,7 +9415,7 @@ export function CoachAthletePlanningProfileView({
         isClientRequestTimedOut(e)
       ) {
         const recovered = await refreshWorkflow2HeadCoachSkillsDomainSlotAfterSubmit(
-          persistedGovernedPlanContext.planId,
+          actionContext.planId,
         );
         if (recovered) {
           setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
@@ -9373,9 +9431,14 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  async function handleRequestRevisionSubmit(event?: FormEvent<HTMLFormElement>) {
+  async function handleRequestRevisionSubmit(
+    event?: FormEvent<HTMLFormElement>,
+    actionContextOverride?: GovernedPlanContext | null,
+  ) {
     event?.preventDefault();
-    if (governedPlanActionLoading !== null || persistedGovernedPlanContext === null) {
+    const actionContext =
+      actionContextOverride ?? requestRevisionActionContext ?? persistedGovernedPlanContext;
+    if (governedPlanActionLoading !== null || actionContext === null) {
       return;
     }
 
@@ -9392,15 +9455,15 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccess(null);
     setGovernedPlanActionSuccessFeedback(null);
 
-    const actionDomain = persistedGovernedPlanContext.generationDomain;
+    const actionDomain = actionContext.generationDomain;
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
 
     try {
       await requestRevision(
         entityId,
         athleteIdTrimmed,
-        persistedGovernedPlanContext.planId,
-        persistedGovernedPlanContext.versionId,
+        actionContext.planId,
+        actionContext.versionId,
         actionDomain,
         coachFeedback,
       );
@@ -9408,13 +9471,14 @@ export function CoachAthletePlanningProfileView({
         await refreshHeadCoachDomainPlanState(actionDomain);
       } else {
         await refreshPersistedPlanDetail(
-          persistedGovernedPlanContext.planId,
+          actionContext.planId,
           actionDomain,
           { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
         );
       }
       setRequestRevisionFeedback("");
       setRequestRevisionModalOpen(false);
+      setRequestRevisionActionContext(null);
       const domainLabel = trainingPlanDomainLabel(actionDomain);
       setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
       void refreshTrainingPlanWorkspace({ background: true });
@@ -9675,7 +9739,10 @@ export function CoachAthletePlanningProfileView({
     const activeDetail = state.activeDetail;
     const workspaceDomainEntry = workspace?.domains[domain];
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
-    const workspaceVersionId = workspaceDomainEntry?.summary.versionId?.trim() ?? "";
+    const workspaceVersionId =
+      workspaceDomainEntry !== undefined
+        ? (resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary) ?? "")
+        : "";
     const planId =
       workflow2SkillsSlotProjection?.planId ??
       (workspacePlanId !== "" ? workspacePlanId : null) ??
@@ -9756,6 +9823,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccess(null);
     setGovernedPlanActionSuccessFeedback(null);
     setRequestRevisionModalOpen(false);
+    setRequestRevisionActionContext(null);
     setRequestRevisionFeedback("");
   }
 
@@ -9773,8 +9841,14 @@ export function CoachAthletePlanningProfileView({
     const activeDetail = domainState.activeDetail;
     const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
     const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const planId = activeDetail?.plan.id?.trim() ?? "";
-    const versionId = activeDetail?.version.id?.trim() ?? "";
+    const reviewActionContext = resolveHeadCoachReviewActionContext({
+      workspace,
+      domain: reviewDomain,
+      fallbackPlanId: activeDetail?.plan.id,
+      fallbackVersionId: activeDetail?.version.id,
+    });
+    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
+    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
     const workspaceAllowedActions =
       workspace !== null
         ? workspaceAllowedActionsSet(workspace, reviewDomain)
@@ -9789,18 +9863,16 @@ export function CoachAthletePlanningProfileView({
       activeDetail?.version.status ??
       activeDetail?.plan.status ??
       "";
-    const normalizedStatus = status.trim().toUpperCase();
-    const isAssistantApproved = normalizedStatus === "ASSISTANT_COACH_APPROVED";
-    const isHeadCoachApproved = normalizedStatus === "HEAD_COACH_APPROVED";
     const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
       assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE") && !isHeadCoachApproved,
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
       planId,
       versionId,
     });
     const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
       assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION") && isAssistantApproved,
+      reviewAction: "REQUEST_REVISION",
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
       planId,
       versionId,
     });
@@ -9847,7 +9919,9 @@ export function CoachAthletePlanningProfileView({
               variant="primary"
               loading={governedPlanActionLoading === "HEAD_APPROVE"}
               disabled={governedPlanActionLoading !== null}
-              onClick={() => void handlePersistedGovernedPlanAction("HEAD_APPROVE")}
+              onClick={() =>
+                void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
+              }
             >
               Approve Plan
             </Button>
@@ -9858,6 +9932,7 @@ export function CoachAthletePlanningProfileView({
               variant="secondary"
               disabled={governedPlanActionLoading !== null}
               onClick={() => {
+                setRequestRevisionActionContext(reviewActionContext);
                 setRequestRevisionModalOpen(true);
                 setGovernedPlanActionError(null);
                 setGovernedPlanActionSuccess(null);
@@ -9873,7 +9948,9 @@ export function CoachAthletePlanningProfileView({
               variant="primary"
               loading={governedPlanActionLoading === "RELEASE"}
               disabled={governedPlanActionLoading !== null}
-              onClick={() => void handlePersistedGovernedPlanAction("RELEASE")}
+              onClick={() =>
+                void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
+              }
             >
               Release to Athlete
             </Button>
@@ -9882,7 +9959,7 @@ export function CoachAthletePlanningProfileView({
         {requestRevisionModalOpen ? (
           <form
             className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
-            onSubmit={(event) => void handleRequestRevisionSubmit(event)}
+            onSubmit={(event) => void handleRequestRevisionSubmit(event, reviewActionContext)}
           >
             <div className="space-y-1">
               <h5 className="text-sm font-normal text-textPrimary">Request Changes</h5>
@@ -9908,6 +9985,7 @@ export function CoachAthletePlanningProfileView({
                 disabled={governedPlanActionLoading === "REQUEST_REVISION"}
                 onClick={() => {
                   setRequestRevisionModalOpen(false);
+                  setRequestRevisionActionContext(null);
                   setRequestRevisionFeedback("");
                   setGovernedPlanActionError(null);
                 }}
@@ -9964,15 +10042,24 @@ export function CoachAthletePlanningProfileView({
     });
     const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? null;
-    const workspaceVersionId = workspaceDomainEntry?.summary.versionId?.trim() ?? null;
+    const workspaceVersionId =
+      workspaceDomainEntry !== null
+        ? resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary)
+        : null;
 
     const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
     const allowedActions =
       workspace && headCoachSubmittedReviewDomain !== null
         ? workspaceAllowedActionsSet(workspace, headCoachSubmittedReviewDomain)
         : new Set(activeDetail?.allowedActions ?? []);
-    const planId = activeDetail?.plan.id?.trim() ?? "";
-    const versionId = activeDetail?.version.id?.trim() ?? "";
+    const reviewActionContext = resolveHeadCoachReviewActionContext({
+      workspace,
+      domain: reviewDomain,
+      fallbackPlanId: activeDetail?.plan.id,
+      fallbackVersionId: activeDetail?.version.id,
+    });
+    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
+    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
     const versionNumber = activeDetail?.version.versionNumber ?? null;
     const status =
       workspaceDomainEntry?.summary.status?.trim() ??
@@ -9980,18 +10067,16 @@ export function CoachAthletePlanningProfileView({
       activeDetail?.version.status ??
       activeDetail?.plan.status ??
       "";
-    const normalizedStatus = status.trim().toUpperCase();
-    const isAssistantApproved = normalizedStatus === "ASSISTANT_COACH_APPROVED";
-    const isHeadCoachApproved = normalizedStatus === "HEAD_COACH_APPROVED";
     const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
       assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE") && !isHeadCoachApproved,
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
       planId,
       versionId,
     });
     const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
       assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION") && isAssistantApproved,
+      reviewAction: "REQUEST_REVISION",
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
       planId,
       versionId,
     });
@@ -10066,7 +10151,9 @@ export function CoachAthletePlanningProfileView({
                   variant="primary"
                   loading={governedPlanActionLoading === "HEAD_APPROVE"}
                   disabled={governedPlanActionLoading !== null}
-                  onClick={() => void handlePersistedGovernedPlanAction("HEAD_APPROVE")}
+                  onClick={() =>
+                    void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
+                  }
                 >
                   Approve Plan
                 </Button>
@@ -10076,7 +10163,10 @@ export function CoachAthletePlanningProfileView({
                   type="button"
                   variant="secondary"
                   disabled={governedPlanActionLoading !== null}
-                  onClick={() => setRequestRevisionModalOpen(true)}
+                  onClick={() => {
+                    setRequestRevisionActionContext(reviewActionContext);
+                    setRequestRevisionModalOpen(true);
+                  }}
                 >
                   Request Revision
                 </Button>
@@ -10087,7 +10177,9 @@ export function CoachAthletePlanningProfileView({
                   variant="primary"
                   loading={governedPlanActionLoading === "RELEASE"}
                   disabled={governedPlanActionLoading !== null}
-                  onClick={() => void handlePersistedGovernedPlanAction("RELEASE")}
+                  onClick={() =>
+                    void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
+                  }
                 >
                   Release to Athlete
                 </Button>
@@ -11781,6 +11873,7 @@ export function CoachAthletePlanningProfileView({
     const canShowStep6RequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
       assignmentDomainContext:
         workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+      reviewAction: "REQUEST_REVISION",
       legacyCanShowReviewAction: persistedGovernedAllowedActions.has("REQUEST_REVISION"),
       planId: persistedGovernedPlanContext.planId,
       versionId: persistedGovernedPlanContext.versionId,
@@ -15098,6 +15191,7 @@ export function CoachAthletePlanningProfileView({
                     disabled={governedPlanActionLoading === "REQUEST_REVISION"}
                     onClick={() => {
                       setRequestRevisionModalOpen(false);
+                      setRequestRevisionActionContext(null);
                       setRequestRevisionFeedback("");
                       setGovernedPlanActionError(null);
                     }}

@@ -57,6 +57,8 @@ import {
   resolveHeadCoachReviewActiveDetailAfterRefresh,
   shouldShowSubmittedPlanLoading,
   shouldUseWorkflow1HeadCoachReviewActionPanel,
+  isHeadCoachSkillsOwnerWorkflow,
+  resolveWorkflowActionContext,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -64,6 +66,7 @@ import {
   resolvePlanningContextLocked,
   parseWorkspaceInitialTab,
   resolveWorkflowModeFromWorkspace,
+  deriveWorkflowStatusFromWorkspaceDomain,
   workspaceHeadCoachCanCreateSkillsPlan,
   workspaceHeadCoachOwnsSkillsForAthlete,
   workspaceShowsDomainSubmitReview,
@@ -2521,6 +2524,81 @@ describe("resolveTrainingPlanWorkflowMode", () => {
       ...workspace,
       workflowMode: "HEAD_COACH_REVIEW",
     })).toBe("head_coach_function_aware");
+  });
+
+  it("uses Workflow 2A Skills workspace summary for action context when other domains are not created", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      domains: {
+        ...base.domains,
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "plan-skills-1",
+            versionId: "version-skills-1",
+            latestVersionId: "version-skills-1",
+            approvedVersionId: "version-skills-1",
+            activeVersionId: "version-skills-1",
+            versionNumber: 1,
+            status: "ACTIVE",
+            generationDomain: "SKILLS",
+          },
+          allowedActions: [],
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          summary: {
+            ...base.domains.NUTRITION.summary,
+            trainingPlanId: null,
+            versionId: null,
+            status: null,
+          },
+        },
+        S_AND_C: {
+          ...base.domains.S_AND_C,
+          summary: {
+            ...base.domains.S_AND_C.summary,
+            trainingPlanId: null,
+            versionId: null,
+            status: null,
+          },
+        },
+      },
+    });
+
+    expect(isHeadCoachSkillsOwnerWorkflow(workspace)).toBe(true);
+    expect(
+      resolveWorkflowActionContext({
+        workspace,
+        legacyContext: {
+          planId: "legacy-nutrition-plan",
+          versionId: "legacy-nutrition-version",
+          generationDomain: "NUTRITION",
+        },
+        legacyAllowedActions: ["HEAD_APPROVE"],
+        currentDomain: "NUTRITION",
+      }),
+    ).toEqual({
+      planId: "plan-skills-1",
+      versionId: "version-skills-1",
+      generationDomain: "SKILLS",
+      versionNumber: 1,
+      status: "ACTIVE",
+      allowedActions: [],
+      source: "workspace.domains.SKILLS.summary",
+    });
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS)).toBe("released");
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace,
+      }),
+    ).toEqual(["NUTRITION", "S_AND_C"]);
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.NUTRITION)).toBe(
+      "not_created",
+    );
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.S_AND_C)).toBe("not_created");
   });
 
   it("falls back to legacy ids for non-workspace View Plan behavior", () => {

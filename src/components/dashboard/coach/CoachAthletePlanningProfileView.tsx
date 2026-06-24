@@ -3730,6 +3730,74 @@ export function resolveSubmitReviewPlanVersionIds(input: {
   };
 }
 
+export type WorkflowActionContext = AssistantGovernedPlanContext & {
+  versionNumber: number | null;
+  status: string | null;
+  allowedActions: string[];
+  source: string;
+};
+
+function resolveWorkspaceSummaryActionVersionId(
+  summary: TrainingPlanWorkspace["domains"]["SKILLS"]["summary"],
+): string {
+  return (
+    summary.versionId?.trim() ??
+    summary.activeVersionId?.trim() ??
+    summary.approvedVersionId?.trim() ??
+    summary.latestVersionId?.trim() ??
+    ""
+  );
+}
+
+export function isHeadCoachSkillsOwnerWorkflow(workspace: TrainingPlanWorkspace | null): boolean {
+  if (workspace === null) return false;
+  if (workspace.workflowShape === "HEAD_COACH_SKILLS_OWNER") return true;
+  return (
+    workspace.shell === "HEAD_COACH_FUNCTION_AWARE" &&
+    parseWorkspaceCurrentDomain(workspace.currentDomain) === "SKILLS" &&
+    workspace.ownershipFlags.requesterOwnsSkillsForThisAthlete === true
+  );
+}
+
+export function resolveWorkflowActionContext(input: {
+  workspace: TrainingPlanWorkspace | null;
+  legacyContext: AssistantGovernedPlanContext | null;
+  legacyAllowedActions: Iterable<string>;
+  currentDomain: TrainingPlanGenerationDomain | null;
+}): WorkflowActionContext | null {
+  const workspace = input.workspace;
+  if (isHeadCoachSkillsOwnerWorkflow(workspace) && workspace !== null) {
+    const skills = workspace.domains.SKILLS;
+    const summary = skills.summary;
+    const planId = summary.trainingPlanId?.trim() ?? "";
+    const versionId = resolveWorkspaceSummaryActionVersionId(summary);
+    if (planId === "" || versionId === "") return null;
+    return {
+      planId,
+      versionId,
+      generationDomain: summary.generationDomain ?? "SKILLS",
+      versionNumber: summary.versionNumber,
+      status: summary.status?.trim() || null,
+      allowedActions: Array.isArray(skills.allowedActions) ? skills.allowedActions : [],
+      source: "workspace.domains.SKILLS.summary",
+    };
+  }
+
+  const legacyContext = input.legacyContext;
+  if (legacyContext === null) return null;
+  const workspaceDomain =
+    input.workspace !== null && input.currentDomain !== null
+      ? input.workspace.domains[input.currentDomain]
+      : null;
+  return {
+    ...legacyContext,
+    versionNumber: workspaceDomain?.summary.versionNumber ?? null,
+    status: workspaceDomain?.summary.status?.trim() || null,
+    allowedActions: Array.from(input.legacyAllowedActions),
+    source: "legacy governed detail",
+  };
+}
+
 export type WorkspaceDomainViewPlanContext = {
   planId: string;
   versionId: string;
@@ -6013,11 +6081,15 @@ export function CoachAthletePlanningProfileView({
   const generateResultMatchesCurrentDomain =
     currentCoachGenerationDomain !== null &&
     generatePlanSuccessDomain === currentCoachGenerationDomain;
+  const headCoachSkillsOwnerWorkflow = isHeadCoachSkillsOwnerWorkflow(workspace);
   /**
-   * Step 6 Workflow Actions: plan id resolution order (persisted detail → latest draft →
-   * generate result → URL query), with each source constrained to the current coach domain.
+   * Step 6 Workflow Actions: after the workspace shell is resolved, Workflow 2A uses the
+   * HC-owned Skills summary as action/status context. Legacy detail objects still render content.
    */
   const resolvedWorkflowPlanId = useMemo(() => {
+    if (headCoachSkillsOwnerWorkflow) {
+      return workspace?.domains.SKILLS.summary.trainingPlanId?.trim() ?? "";
+    }
     if (currentCoachGenerationDomain === null) return "";
     const fromPersisted = persistedDetailMatchesCurrentDomain
       ? (persistedSkillsPlanDetail?.plan.id?.trim() ?? "")
@@ -6039,18 +6111,25 @@ export function CoachAthletePlanningProfileView({
     currentCoachGenerationDomain,
     generatePlanSuccess?.trainingPlanId,
     generateResultMatchesCurrentDomain,
+    headCoachSkillsOwnerWorkflow,
     isDownstreamDomainCoach,
     latestDraftMatchesCurrentDomain,
     latestSkillsDraft?.trainingPlanId,
     persistedDetailMatchesCurrentDomain,
     persistedSkillsPlanDetail?.plan.id,
     urlPlanCandidate,
+    workspace?.domains.SKILLS.summary.trainingPlanId,
   ]);
   /**
    * Step 6 Workflow Actions: domain for active/detail (detail field → verified request domain →
    * latest draft domain → domain used for domain-drafts/latest → readiness fallback).
    */
   const resolvedWorkflowGenerationDomain = useMemo((): TrainingPlanGenerationDomain => {
+    if (headCoachSkillsOwnerWorkflow) {
+      return normalizeTrainingPlanGenerationDomain(
+        workspace?.domains.SKILLS.summary.generationDomain,
+      ) ?? "SKILLS";
+    }
     return (
       currentCoachGenerationDomain
       ?? persistedDetailDomain
@@ -6061,9 +6140,11 @@ export function CoachAthletePlanningProfileView({
   }, [
     currentCoachGenerationDomain,
     domainForLatestDomainDraft,
+    headCoachSkillsOwnerWorkflow,
     latestDraftDomain,
     persistedDetailDomain,
     readinessGenerationDomain,
+    workspace?.domains.SKILLS.summary.generationDomain,
   ]);
   const persistedSkillsPlanGoalNames = useMemo(
     () =>
@@ -6176,6 +6257,15 @@ export function CoachAthletePlanningProfileView({
   const assistantDomainWorkflowStatus = useMemo(
     () => {
       if (assistantPlanDiscoveryLoading) return "not_created";
+      if (headCoachSkillsOwnerWorkflow && workspace !== null) {
+        const summary = workspace.domains.SKILLS.summary;
+        const workspacePlanId = summary.trainingPlanId?.trim() ?? "";
+        const workspaceVersionId = resolveWorkspaceSummaryActionVersionId(summary);
+        if (workspacePlanId === "" || workspaceVersionId === "") {
+          return "not_created";
+        }
+        return deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS);
+      }
       if (workspace !== null && currentCoachGenerationDomain !== null) {
         const summary = workspace.domains[currentCoachGenerationDomain].summary;
         const workspacePlanId = summary.trainingPlanId?.trim() ?? "";
@@ -6195,6 +6285,7 @@ export function CoachAthletePlanningProfileView({
     [
       assistantPlanDiscoveryLoading,
       currentCoachGenerationDomain,
+      headCoachSkillsOwnerWorkflow,
       latestDraftMatchesCurrentDomain,
       latestSkillsDraft,
       persistedDetailMatchesCurrentDomain,
@@ -6206,6 +6297,7 @@ export function CoachAthletePlanningProfileView({
     assistantDomainWorkflowStatus !== "not_created";
   const persistedGovernedPlanDomain = useMemo<TrainingPlanGenerationDomain | null>(
     () => {
+      if (headCoachSkillsOwnerWorkflow) return "SKILLS";
       if (currentCoachGenerationDomain !== null) {
         return persistedDetailMatchesCurrentDomain ? currentCoachGenerationDomain : null;
       }
@@ -6213,12 +6305,13 @@ export function CoachAthletePlanningProfileView({
     },
     [
       currentCoachGenerationDomain,
+      headCoachSkillsOwnerWorkflow,
       persistedDetailDomain,
       persistedDetailMatchesCurrentDomain,
       persistedPlanQueryDomain,
     ],
   );
-  const persistedGovernedPlanContext = useMemo(() => {
+  const legacyPersistedGovernedPlanContext = useMemo<AssistantGovernedPlanContext | null>(() => {
     if (headCoachReviewMode && headCoachSubmittedReviewDomain !== null) {
       const domainState = headCoachDomainPlanStates[headCoachSubmittedReviewDomain];
       const activeDetail = domainState.activeDetail;
@@ -6259,7 +6352,7 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.plan.id,
     persistedSkillsPlanDetail?.version.id,
   ]);
-  const persistedGovernedAllowedActions = useMemo(() => {
+  const legacyPersistedGovernedAllowedActions = useMemo(() => {
     if (workspace && currentCoachGenerationDomain) {
       return workspaceAllowedActionsSet(workspace, currentCoachGenerationDomain);
     }
@@ -6269,6 +6362,30 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.allowedActions,
     workspace,
   ]);
+  const workflowActionContext = useMemo(
+    () =>
+      resolveWorkflowActionContext({
+        workspace,
+        legacyContext: legacyPersistedGovernedPlanContext,
+        legacyAllowedActions: legacyPersistedGovernedAllowedActions,
+        currentDomain: currentCoachGenerationDomain,
+      }),
+    [
+      currentCoachGenerationDomain,
+      legacyPersistedGovernedAllowedActions,
+      legacyPersistedGovernedPlanContext,
+      workspace,
+    ],
+  );
+  const persistedGovernedPlanContext = workflowActionContext;
+  const persistedGovernedAllowedActions = useMemo(
+    () =>
+      new Set<GovernedTrainingPlanWorkflowAction>(
+        (workflowActionContext?.allowedActions as GovernedTrainingPlanWorkflowAction[] | undefined) ??
+          [],
+      ),
+    [workflowActionContext],
+  );
   const assistantVisibleDraftForSubmit = useMemo(
     () => (latestDraftMatchesCurrentDomain ? latestSkillsDraft : null),
     [latestDraftMatchesCurrentDomain, latestSkillsDraft],
@@ -7421,6 +7538,15 @@ export function CoachAthletePlanningProfileView({
     if (planId === "") {
       return { kind: "no_plan" as const };
     }
+    if (
+      headCoachSkillsOwnerWorkflow &&
+      workflowActionContext !== null &&
+      workflowActionContext.generationDomain === "SKILLS"
+    ) {
+      return workflowActionContext.allowedActions.length > 0
+        ? { kind: "actions" as const }
+        : { kind: "workspace_status" as const, context: workflowActionContext };
+    }
 
     const urlDrivesThisPlan =
       !isDownstreamDomainCoach && urlPlanCandidate?.trim() === planId;
@@ -7483,11 +7609,13 @@ export function CoachAthletePlanningProfileView({
     resolvedWorkflowGenerationDomain,
     resolvedWorkflowPlanId,
     setupLoading,
+    headCoachSkillsOwnerWorkflow,
     step6GenerationInProgress,
     step6WorkflowInternalError,
     step6WorkflowInternalLoading,
     step6WorkflowOrchestrationActive,
     urlPlanCandidate,
+    workflowActionContext,
   ]);
 
   useEffect(() => {
@@ -11597,6 +11725,24 @@ export function CoachAthletePlanningProfileView({
                   Selected version status: {displayValue(d.version.status)}
                 </div>
               ) : null}
+            </div>
+          </WorkflowNeutralNotice>
+        </div>
+      );
+    }
+
+    if (model.kind === "workspace_status") {
+      return (
+        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h5 className="text-sm font-normal text-textPrimary">Workflow Actions</h5>
+          <WorkflowNeutralNotice>
+            <div className="space-y-1">
+              <div className="text-sm text-textSecondary">
+                Skills Plan status: {assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus)}
+              </div>
+              <div className="text-sm text-textSecondary">
+                No workflow action is currently required for Skills.
+              </div>
             </div>
           </WorkflowNeutralNotice>
         </div>

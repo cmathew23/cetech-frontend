@@ -52,7 +52,12 @@ import {
   resolveDomainRevisePlanVisible,
   resolveDomainSubmitForReviewVisible,
   resolveDomainHeadCoachReviewActionVisible,
+  resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
+  resolveContextAppStepCompleteForNavigation,
+  resolveSetupStateAfterSeasonCreate,
+  formatSeasonOptionLabel,
+  resolveCompetitionSeasonPhaseForDate,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
   resolveHeadCoachReviewActionContext,
@@ -2056,6 +2061,407 @@ describe("resolveDomainHeadCoachReviewActionVisible", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+describe("Workflow 3 Skills coach Tab 6", () => {
+  function workflow3SkillsCoachWorkspace(
+    overrides: Partial<TrainingPlanWorkspace> = {},
+  ): TrainingPlanWorkspace {
+    const base = workflow1OwnedSkillsWorkspace();
+    return workflow1OwnedSkillsWorkspace({
+      workflowShape: "DIRECT_DOMAIN_RELEASE",
+      shell: "SKILLS_COACH_PLANNING",
+      workflowMode: "SKILLS_COACH_PLANNING",
+      currentDomain: "SKILLS",
+      initialTab: "DOMAIN",
+      ownershipFlags: {
+        ...base.ownershipFlags,
+        hasHeadCoach: false,
+        requesterIsHeadCoach: false,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: true,
+        requesterOwnsSkillsForThisAthlete: true,
+        headCoachOwnsPlanningContext: false,
+        directReleaseAllowed: true,
+      },
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: false,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+        planningContext: {
+          ownerType: "SKILLS_FALLBACK",
+          ownerUserId: "skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          canRead: true,
+          canCreate: true,
+          canLock: true,
+          canManage: true,
+        },
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownerUserId: "skills-coach",
+            ownerCoachProfileId: "skills-profile",
+            ownedByCurrentUser: true,
+            canOpen: true,
+            canGenerate: true,
+            canRevise: true,
+            canApprove: true,
+            canRelease: true,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+          }),
+          NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+          S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+        },
+      }),
+      ...overrides,
+    });
+  }
+
+  it("shows the Skills generate, approve, and direct-release path without Head Coach review cards", () => {
+    const workspace = workflow3SkillsCoachWorkspace();
+    const skillsAssignmentContext = workspace.assignmentContext?.domains.SKILLS;
+
+    expect(resolveWorkflowModeFromWorkspace(workspace)).toBe("skills_coach_planning");
+    expect(
+      resolveDomainGeneratePermission({
+        assignmentDomainContext: skillsAssignmentContext,
+        legacyOwnershipFlags: {
+          canGeneratePlan: false,
+          canGenerateCurrentDomainPlan: false,
+        },
+      }).canShowGenerate,
+    ).toBe(true);
+    expect(
+      resolveDirectReleaseSkillsOwnerApproveVisible({
+        assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
+        assignmentDomainContext: skillsAssignmentContext,
+        domain: "SKILLS",
+        legacyCanApprove: true,
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
+        assignmentDomainContext: skillsAssignmentContext,
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(true);
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "specialist_domain",
+        headCoachOwnsSkills: false,
+        workspace,
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not show Nutrition or S&C review cards for Workflow 3 Skills coach", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        NUTRITION: {
+          ...workflow3SkillsCoachWorkspace().domains.NUTRITION,
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: "nutrition-version",
+            generationDomain: "NUTRITION",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+        S_AND_C: {
+          ...workflow3SkillsCoachWorkspace().domains.S_AND_C,
+          summary: {
+            trainingPlanId: "sandc-plan",
+            versionId: "sandc-version",
+            generationDomain: "S_AND_C",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+      },
+    });
+
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "specialist_domain",
+        headCoachOwnsSkills: false,
+        workspace,
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps Workflow 3 Skills approve payload scoped to Skills only", () => {
+    const workspace = workflow3SkillsCoachWorkspace();
+    const actionContext = resolveWorkflowActionContext({
+      workspace,
+      legacyContext: {
+        planId: "skills-plan",
+        versionId: "skills-version",
+        generationDomain: "SKILLS",
+      },
+      legacyAllowedActions: ["HEAD_APPROVE"],
+      currentDomain: "SKILLS",
+    });
+
+    expect(actionContext).toMatchObject({
+      planId: "skills-plan",
+      versionId: "skills-version",
+      generationDomain: "SKILLS",
+      allowedActions: ["HEAD_APPROVE"],
+    });
+  });
+
+  it("does not expose request-revision controls for direct-release Skills owner approval", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: false,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+        planningContext: {
+          ownerType: "SKILLS_FALLBACK",
+          ownerUserId: "skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          canRead: true,
+          canCreate: true,
+          canLock: true,
+          canManage: true,
+        },
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: true,
+            canOpen: true,
+            canGenerate: true,
+            canApprove: true,
+            canRequestRevision: true,
+            canRelease: true,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+          }),
+          NUTRITION: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+          S_AND_C: shellAssignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+        },
+      }),
+    });
+    const skillsAssignmentContext = workspace.assignmentContext?.domains.SKILLS;
+    const canShowDirectApprove = resolveDirectReleaseSkillsOwnerApproveVisible({
+      assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
+      assignmentDomainContext: skillsAssignmentContext,
+      domain: "SKILLS",
+      legacyCanApprove: true,
+      planId: "skills-plan",
+      versionId: "skills-version",
+    });
+    const canShowRequestRevision =
+      !canShowDirectApprove &&
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: skillsAssignmentContext,
+        reviewAction: "REQUEST_REVISION",
+        legacyCanShowReviewAction: true,
+        planId: "skills-plan",
+        versionId: "skills-version",
+      });
+
+    expect(canShowDirectApprove).toBe(true);
+    expect(canShowRequestRevision).toBe(false);
+  });
+});
+
+describe("resolveContextAppStepCompleteForNavigation", () => {
+  it("unlocks Step 2 for Workflow 3 Skills when only level validation is pending", () => {
+    expect(
+      resolveContextAppStepCompleteForNavigation({
+        appCompleteness: "INCOMPLETE",
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+        missingRequiredFields: [],
+        backendBlockers: [],
+        skillsOwnedDirectRelease: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps Step 2 locked when required APP fields are missing", () => {
+    expect(
+      resolveContextAppStepCompleteForNavigation({
+        appCompleteness: "INCOMPLETE",
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+        missingRequiredFields: ["dateOfBirth"],
+        backendBlockers: [],
+        skillsOwnedDirectRelease: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Step 2 locked when backend blockers are present", () => {
+    expect(
+      resolveContextAppStepCompleteForNavigation({
+        appCompleteness: "INCOMPLETE",
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+        missingRequiredFields: [],
+        backendBlockers: ["Athlete profile missing sport"],
+        skillsOwnedDirectRelease: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Workflow 2A/2B navigation requiring complete Context APP", () => {
+    expect(
+      resolveContextAppStepCompleteForNavigation({
+        appCompleteness: "INCOMPLETE",
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+        missingRequiredFields: [],
+        backendBlockers: [],
+        skillsOwnedDirectRelease: false,
+      }),
+    ).toBe(false);
+    expect(
+      resolveContextAppStepCompleteForNavigation({
+        appCompleteness: "COMPLETE",
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+        missingRequiredFields: [],
+        backendBlockers: [],
+        skillsOwnedDirectRelease: false,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("season create display state", () => {
+  const emptySetupState = {
+    seasons: [],
+    phasesBySeasonCycleId: {},
+    goals: [],
+    coachFunctions: [],
+    hasHeadCoachConfigured: false,
+    academyCoachRole: "",
+    trainingPlanReleaseMode: "",
+  };
+  const createdCustomSeason = {
+    id: "season-custom-1",
+    seasonCycleId: "season-custom-1",
+    entityId: "entity-1",
+    sport: "GOLF",
+    year: 2026,
+    name: "Trott 2026 Golf Season",
+    startDate: "2026-01-01T00:00:00.000Z",
+    endDate: "2026-12-31T00:00:00.000Z",
+    phases: [],
+  };
+
+  it("keeps a custom backend season name displayed after create", () => {
+    const next = resolveSetupStateAfterSeasonCreate(emptySetupState, createdCustomSeason);
+    const selectedSeason = next.seasons.find(
+      (season) => season.seasonCycleId === createdCustomSeason.seasonCycleId,
+    );
+
+    expect(selectedSeason?.name).toBe("Trott 2026 Golf Season");
+    expect(formatSeasonOptionLabel(createdCustomSeason)).toBe("Trott 2026 Golf Season");
+  });
+
+  it("does not display the generated default as the saved selected name after custom create", () => {
+    const next = resolveSetupStateAfterSeasonCreate(emptySetupState, createdCustomSeason);
+    const selectedSeason = next.seasons.find(
+      (season) => season.seasonCycleId === createdCustomSeason.seasonCycleId,
+    );
+
+    expect(selectedSeason?.name).not.toBe("2026 Golf Season");
+    expect(formatSeasonOptionLabel(createdCustomSeason)).not.toBe("2026 Golf Season");
+  });
+
+  it("removes the empty seasons state after successful create", () => {
+    const next = resolveSetupStateAfterSeasonCreate(emptySetupState, createdCustomSeason);
+
+    expect(emptySetupState.seasons.length).toBe(0);
+    expect(next.seasons.length).toBe(1);
+    expect(next.seasons[0]?.seasonCycleId).toBe("season-custom-1");
+  });
+
+  it("keeps generated default season labeling before a custom create", () => {
+    expect(
+      formatSeasonOptionLabel({
+        ...createdCustomSeason,
+        id: "season-default-1",
+        seasonCycleId: "season-default-1",
+        name: "2026 Golf Season",
+      }),
+    ).toBe("2026 Golf Season");
+  });
+});
+
+describe("resolveCompetitionSeasonPhaseForDate", () => {
+  const createdPhases = [
+    {
+      phaseId: "created-off-season-id",
+      seasonCycleId: "season-1",
+      phase: "OFF_SEASON",
+      startDate: "2026-06-01T00:00:00.000Z",
+      endDate: "2026-07-31T00:00:00.000Z",
+    },
+    {
+      phaseId: "created-pre-season-id",
+      seasonCycleId: "season-1",
+      phase: "PRE_SEASON",
+      startDate: "2026-08-01T00:00:00.000Z",
+      endDate: "2026-09-30T00:00:00.000Z",
+    },
+    {
+      phaseId: "created-in-season-id",
+      seasonCycleId: "season-1",
+      phase: "IN_SEASON",
+      startDate: "2026-10-01T00:00:00.000Z",
+      endDate: "2027-05-31T00:00:00.000Z",
+    },
+  ];
+
+  it("maps a competition date inside IN_SEASON to the created IN_SEASON phase id", () => {
+    expect(
+      resolveCompetitionSeasonPhaseForDate({
+        phases: createdPhases,
+        competitionDate: "2027-01-14",
+      })?.phaseId,
+    ).toBe("created-in-season-id");
+  });
+
+  it("returns null when the competition date is outside all created phases", () => {
+    expect(
+      resolveCompetitionSeasonPhaseForDate({
+        phases: createdPhases,
+        competitionDate: "2027-06-01",
+      }),
+    ).toBeNull();
+  });
+
+  it("uses created phase ids rather than default phase labels", () => {
+    const phase = resolveCompetitionSeasonPhaseForDate({
+      phases: createdPhases,
+      competitionDate: "2027-01-14",
+    });
+
+    expect(phase?.phase).toBe("IN_SEASON");
+    expect(phase?.phaseId).toBe("created-in-season-id");
+    expect(phase?.phaseId).not.toBe("IN_SEASON");
+  });
+
+  it("preserves existing created phase ranges for non-competition season setup", () => {
+    expect(
+      resolveCompetitionSeasonPhaseForDate({
+        phases: createdPhases,
+        competitionDate: "2026-06-01",
+      })?.phaseId,
+    ).toBe("created-off-season-id");
+    expect(
+      resolveCompetitionSeasonPhaseForDate({
+        phases: createdPhases,
+        competitionDate: "2026-09-30",
+      })?.phaseId,
+    ).toBe("created-pre-season-id");
   });
 });
 

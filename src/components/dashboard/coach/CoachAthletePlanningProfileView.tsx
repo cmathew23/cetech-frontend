@@ -196,7 +196,7 @@ type PlanningReadinessSources = {
   readiness: CoachAthleteTrainingPlanReadiness | null;
   completeness: CoachAthleteTrainingPlanCompleteness | null;
 };
-type GoalsSeasonSetupState = {
+export type GoalsSeasonSetupState = {
   seasons: SeasonCycleSummary[];
   phasesBySeasonCycleId: Record<string, SeasonPhaseSummary[]>;
   goals: GoalSummary[];
@@ -2371,6 +2371,42 @@ export function resolveDomainHeadCoachReviewActionVisible(input: {
   return assignmentCanReview && input.legacyCanShowReviewAction;
 }
 
+export function resolveDirectReleaseSkillsOwnerApproveVisible(input: {
+  assignmentReleaseMode:
+    | TrainingPlanWorkspaceAssignmentReleaseMode
+    | null
+    | undefined;
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  domain: TrainingPlanGenerationDomain;
+  legacyCanApprove: boolean;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+}): boolean {
+  const hasPlanIds =
+    (input.planId?.trim() ?? "") !== "" &&
+    (input.versionId?.trim() ?? "") !== "";
+  if (!hasPlanIds || !input.legacyCanApprove || input.domain !== "SKILLS") return false;
+
+  const assignmentDomainContext = input.assignmentDomainContext;
+  if (
+    input.assignmentReleaseMode !== "DIRECT_DOMAIN_RELEASE" ||
+    assignmentDomainContext === null ||
+    assignmentDomainContext === undefined
+  ) {
+    return false;
+  }
+
+  return (
+    assignmentDomainContext.releaseMode === "DIRECT_DOMAIN_RELEASE" &&
+    assignmentDomainContext.ownerType === "ASSIGNED_DOMAIN_COACH" &&
+    assignmentDomainContext.ownedByCurrentUser === true &&
+    assignmentDomainContext.canApprove === true
+  );
+}
+
 export function resolveDomainReleaseVisible(input: {
   assignmentReleaseMode:
     | TrainingPlanWorkspaceAssignmentReleaseMode
@@ -2860,6 +2896,22 @@ function canRunWorkloadAssessment(input: {
   );
 }
 
+export function resolveContextAppStepCompleteForNavigation(input: {
+  appCompleteness: string | null;
+  planningEligibility: string | null;
+  missingRequiredFields: string[];
+  backendBlockers: string[];
+  skillsOwnedDirectRelease: boolean;
+}): boolean {
+  if (input.appCompleteness === "COMPLETE") return true;
+  if (!input.skillsOwnedDirectRelease) return false;
+  return (
+    input.planningEligibility === "PENDING_LEVEL_VALIDATION" &&
+    input.missingRequiredFields.length === 0 &&
+    input.backendBlockers.length === 0
+  );
+}
+
 function readinessAllowsPlanGeneration(input: {
   readinessStatus: string | null;
   isReady: boolean | null;
@@ -3196,12 +3248,36 @@ function formatSportLabel(sportCode: string): string {
     .join(" ");
 }
 
-function formatSeasonOptionLabel(season: SeasonCycleSummary): string {
+export function formatSeasonOptionLabel(season: SeasonCycleSummary): string {
+  if (season.name) return season.name;
   if (season.year !== null && season.sport) {
     return `${season.year} ${formatSportLabel(season.sport)} Season`;
   }
-  if (season.name) return season.name;
   return season.id;
+}
+
+export function resolveSetupStateAfterSeasonCreate(
+  current: GoalsSeasonSetupState,
+  createdSeason: SeasonCycleSummary,
+): GoalsSeasonSetupState {
+  const createdPhases = createdSeason.phases ?? [];
+  const hasExistingSeason = current.seasons.some(
+    (season) => season.seasonCycleId === createdSeason.seasonCycleId,
+  );
+  return {
+    ...current,
+    seasons: hasExistingSeason
+      ? current.seasons.map((season) =>
+          season.seasonCycleId === createdSeason.seasonCycleId
+            ? { ...createdSeason, phases: createdPhases }
+            : season,
+        )
+      : [...current.seasons, { ...createdSeason, phases: createdPhases }],
+    phasesBySeasonCycleId: {
+      ...current.phasesBySeasonCycleId,
+      [createdSeason.seasonCycleId]: createdPhases,
+    },
+  };
 }
 
 function dateOnly(value: string | null | undefined): string | null {
@@ -3252,6 +3328,27 @@ function detectCurrentPhase(
         if (!start || !end) return false;
         return start <= today && today <= end;
       }) ?? null
+  );
+}
+
+export function resolveCompetitionSeasonPhaseForDate(input: {
+  phases: SeasonPhaseSummary[];
+  competitionDate: string;
+}): SeasonPhaseSummary | null {
+  const competitionDate = input.competitionDate.trim();
+  if (competitionDate === "") return null;
+  const matchingPhases = input.phases.filter((phase) => {
+    if (!phase.phaseId || !phase.startDate || !phase.endDate) return false;
+    const start = dateOnly(phase.startDate);
+    const end = dateOnly(phase.endDate);
+    return start !== null && end !== null && competitionDate >= start && competitionDate <= end;
+  });
+  return (
+    matchingPhases.sort((left, right) => {
+      if (left.phase === "IN_SEASON" && right.phase !== "IN_SEASON") return -1;
+      if (right.phase === "IN_SEASON" && left.phase !== "IN_SEASON") return 1;
+      return phaseSortValue(left.phase) - phaseSortValue(right.phase);
+    })[0] ?? null
   );
 }
 
@@ -6104,7 +6201,13 @@ export function CoachAthletePlanningProfileView({
   const seasonReady = selectedSeasonCycleId !== null && selectedSeason !== null;
   const currentPhaseDetected = activePhaseForSelectedSeason !== null;
 
-  const appStepComplete = readinessPanel.appCompleteness === "COMPLETE";
+  const appStepComplete = resolveContextAppStepCompleteForNavigation({
+    appCompleteness: readinessPanel.appCompleteness,
+    planningEligibility: readinessPanel.planningEligibility,
+    missingRequiredFields: readinessPanel.missingRequiredFields,
+    backendBlockers: readinessPanel.blockers,
+    skillsOwnedDirectRelease: trainingPlanShellModel.shell === "skills_coach_planning",
+  });
   const levelStepComplete = readinessPanel.validationStatus === "CONFIRMED";
   const workloadComplete =
     levelStepComplete === true
@@ -11898,25 +12001,39 @@ export function CoachAthletePlanningProfileView({
       planId: persistedGovernedPlanContext.planId,
       versionId: persistedGovernedPlanContext.versionId,
     });
-    const canShowStep6HeadApproveAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext:
-        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
-      legacyCanShowReviewAction: persistedGovernedAllowedActions.has("HEAD_APPROVE"),
-      planId: persistedGovernedPlanContext.planId,
-      versionId: persistedGovernedPlanContext.versionId,
-    });
-    const canShowStep6RequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext:
-        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
-      reviewAction: "REQUEST_REVISION",
-      legacyCanShowReviewAction: persistedGovernedAllowedActions.has("REQUEST_REVISION"),
-      planId: persistedGovernedPlanContext.planId,
-      versionId: persistedGovernedPlanContext.versionId,
-    });
+    const step6ActionDomain = persistedGovernedPlanContext.generationDomain;
+    const step6ActionAssignmentDomainContext =
+      workspace?.assignmentContext?.domains[step6ActionDomain];
+    const canShowDirectReleaseSkillsOwnerApproveAction =
+      resolveDirectReleaseSkillsOwnerApproveVisible({
+        assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+        assignmentDomainContext: step6ActionAssignmentDomainContext,
+        domain: step6ActionDomain,
+        legacyCanApprove: persistedGovernedAllowedActions.has("HEAD_APPROVE"),
+        planId: persistedGovernedPlanContext.planId,
+        versionId: persistedGovernedPlanContext.versionId,
+      });
+    const canShowStep6HeadApproveAction =
+      canShowDirectReleaseSkillsOwnerApproveAction ||
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: step6ActionAssignmentDomainContext,
+        legacyCanShowReviewAction: persistedGovernedAllowedActions.has("HEAD_APPROVE"),
+        planId: persistedGovernedPlanContext.planId,
+        versionId: persistedGovernedPlanContext.versionId,
+      });
+    const canShowStep6RequestRevisionAction =
+      !canShowDirectReleaseSkillsOwnerApproveAction &&
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext: step6ActionAssignmentDomainContext,
+        reviewAction: "REQUEST_REVISION",
+        legacyCanShowReviewAction: persistedGovernedAllowedActions.has("REQUEST_REVISION"),
+        planId: persistedGovernedPlanContext.planId,
+        versionId: persistedGovernedPlanContext.versionId,
+      });
     const canShowStep6ReleaseAction = resolveDomainReleaseVisible({
       assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
       assignmentDomainContext:
-        workspace?.assignmentContext?.domains[persistedGovernedPlanContext.generationDomain],
+        step6ActionAssignmentDomainContext,
       legacyCanRelease: persistedGovernedAllowedActions.has("RELEASE"),
       planId: persistedGovernedPlanContext.planId,
       versionId: persistedGovernedPlanContext.versionId,
@@ -12284,9 +12401,14 @@ export function CoachAthletePlanningProfileView({
 
     try {
       const season = await createSeasonCycle(payload);
+      setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
+      setSelectedSeasonCycleId(season.seasonCycleId);
       await refreshGoalsSeasonSetup();
+      setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
       setSeasonCreateFormExplicit(false);
+      setSeasonName(season.name ?? payload.name);
+      setSeasonNameEdited(false);
       setSeasonSuccess("Season created and selected.");
     } catch (e) {
       setSeasonError(formatApiError(e, "Failed to create season. Please try again."));
@@ -12479,6 +12601,15 @@ export function CoachAthletePlanningProfileView({
       setCompetitionSuccess(null);
       return;
     }
+    const competitionSeasonPhase = resolveCompetitionSeasonPhaseForDate({
+      phases: selectedSeasonPhases,
+      competitionDate,
+    });
+    if (competitionSeasonPhase?.phaseId == null) {
+      setCompetitionError("Competition date must fall within a created season phase.");
+      setCompetitionSuccess(null);
+      return;
+    }
     const competitionEventId = slugifyCompetitionId(competitionName, competitionDate);
     if (competitionEventId === "") {
       setCompetitionError("Competition event ID could not be generated.");
@@ -12493,10 +12624,12 @@ export function CoachAthletePlanningProfileView({
         athleteId: athleteIdTrimmed,
         entityId,
         seasonCycleId: selectedSeasonCycleId,
+        seasonPhaseId: competitionSeasonPhase.phaseId,
         createdByCoachId: coachUserId,
         goalType: "COMPETITION",
+        goalCategory: "TRAINING",
         competitionEventId,
-        startDate: `${phaseByType.IN_SEASON?.startDate ?? today}T00:00:00.000Z`,
+        startDate: `${dateOnly(competitionSeasonPhase.startDate) ?? competitionDate}T00:00:00.000Z`,
         targetDate: `${competitionDate}T00:00:00.000Z`,
       });
       await refreshGoalsSeasonSetup();

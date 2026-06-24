@@ -1915,21 +1915,48 @@ export function resolveHeadCoachSubmittedReviewCardDomains(input: {
   headCoachOwnsSkills: boolean;
   workspace: TrainingPlanWorkspace | null;
 }): TrainingPlanGenerationDomain[] {
-  if (input.workspace?.assignmentContext !== undefined) {
-    const reviewDomains = deriveTrainingPlanWorkspaceTabStates(input.workspace).domains.reviewDomains;
-    if (input.shell !== "head_coach_function_aware" || !input.headCoachOwnsSkills) {
-      return reviewDomains;
+  const assignmentContext = input.workspace?.assignmentContext;
+  if (assignmentContext !== undefined) {
+    if (!assignmentContext.hasHeadCoach || assignmentContext.releaseMode !== "HEAD_COACH_APPROVAL") {
+      return [];
     }
-    const domains = new Set<TrainingPlanGenerationDomain>(reviewDomains);
+    const assignmentSkillsContext = assignmentContext.domains.SKILLS;
+    const headCoachOwnsSkills =
+      assignmentSkillsContext.ownerType === "HEAD_COACH_SELF" &&
+      assignmentSkillsContext.ownedByCurrentUser === true;
+    if (
+      input.shell === "head_coach_review" ||
+      !headCoachOwnsSkills
+    ) {
+      return GENERATION_DOMAIN_ORDER.filter((domain) => {
+        if (domain === "SKILLS" && headCoachOwnsSkills) return false;
+        const assignmentDomain = assignmentContext.domains[domain];
+        return (
+          assignmentDomain.ownerType !== "NONE" ||
+          assignmentDomain.canApprove === true ||
+          assignmentDomain.canRequestRevision === true
+        );
+      });
+    }
+    const reviewDomains = new Set<TrainingPlanGenerationDomain>();
     for (const domain of ["NUTRITION", "S_AND_C"] as const) {
+      const assignmentDomain = assignmentContext.domains[domain];
+      if (
+        assignmentDomain.ownerType !== "NONE" ||
+        assignmentDomain.canApprove === true ||
+        assignmentDomain.canRequestRevision === true
+      ) {
+        reviewDomains.add(domain);
+        continue;
+      }
       const summary = input.workspace.domains[domain].summary;
       const planId = summary.trainingPlanId?.trim() ?? "";
       const versionId = resolveHeadCoachDomainSummaryVersionId(summary);
       if (planId !== "" && (versionId ?? "") !== "") {
-        domains.add(domain);
+        reviewDomains.add(domain);
       }
     }
-    return GENERATION_DOMAIN_ORDER.filter((domain) => domains.has(domain));
+    return GENERATION_DOMAIN_ORDER.filter((domain) => reviewDomains.has(domain));
   }
   return headCoachSubmittedReviewDomains(input);
 }
@@ -3776,6 +3803,13 @@ function resolveWorkspaceSummaryActionVersionId(
 
 export function isHeadCoachSkillsOwnerWorkflow(workspace: TrainingPlanWorkspace | null): boolean {
   if (workspace === null) return false;
+  const assignmentSkillsContext = workspace.assignmentContext?.domains.SKILLS;
+  if (assignmentSkillsContext !== undefined) {
+    return (
+      assignmentSkillsContext.ownerType === "HEAD_COACH_SELF" &&
+      assignmentSkillsContext.ownedByCurrentUser === true
+    );
+  }
   if (workspace.workflowShape === "HEAD_COACH_SKILLS_OWNER") return true;
   return (
     workspace.shell === "HEAD_COACH_FUNCTION_AWARE" &&
@@ -9715,7 +9749,7 @@ export function CoachAthletePlanningProfileView({
   function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
     const state = headCoachDomainPlanStates[domain];
     const workflow2SkillsSlotProjection =
-      headCoachFunctionAwareMode && domain === "SKILLS"
+      headCoachFunctionAwareMode && headCoachOwnedSkillsGrouping && domain === "SKILLS"
         ? resolveWorkflow2SubmittedDomainSkillsSlotProjection({
             summaryStatus: state.summaryStatus,
             summaryPlanId: state.summaryPlanId,
@@ -9773,6 +9807,7 @@ export function CoachAthletePlanningProfileView({
     const isNotCreated = workflowStatus === "not_created";
     const showWorkflow2DraftPendingNotice =
       headCoachFunctionAwareMode &&
+      headCoachOwnedSkillsGrouping &&
       domain === "SKILLS" &&
       workflowStatus === "draft_generated";
 

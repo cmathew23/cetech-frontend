@@ -958,6 +958,180 @@ describe("resolveHeadCoachSubmittedReviewCardDomains", () => {
     ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
   });
 
+  it("uses assignment ownership for Workflow 2B even when Head Coach has Skills-function metadata", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      shell: "HEAD_COACH_FUNCTION_AWARE",
+      workflowShape: "HEAD_COACH_SKILLS_OWNER",
+      ownershipFlags: {
+        ...workflow2AHeadCoachOwnedSkillsWorkspace().ownershipFlags,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: true,
+        requesterOwnsSkillsForThisAthlete: true,
+      },
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+            canRequestRevision: false,
+          }),
+          NUTRITION: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+            canRequestRevision: false,
+          }),
+          S_AND_C: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+            canRequestRevision: false,
+          }),
+        },
+      }),
+    });
+
+    expect(
+      resolveHeadCoachOwnedSkillsGrouping({
+        workspace,
+        legacyHeadCoachOwnsSkills: true,
+      }),
+    ).toBe(false);
+    expect(isHeadCoachSkillsOwnerWorkflow(workspace)).toBe(false);
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_function_aware",
+        headCoachOwnsSkills: true,
+        workspace,
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS)).toBe("not_created");
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.NUTRITION)).toBe(
+      "not_created",
+    );
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.S_AND_C)).toBe("not_created");
+  });
+
+  it("renders all Workflow 2B assigned review cards even when no plans are submitted", () => {
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+          }),
+          NUTRITION: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+          }),
+          S_AND_C: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+          }),
+        },
+      }),
+    });
+
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace,
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS)).toBe("not_created");
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.NUTRITION)).toBe(
+      "not_created",
+    );
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.S_AND_C)).toBe("not_created");
+  });
+
+  it("keeps all Workflow 2B cards visible across submitted, approved, and released statuses", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: null,
+            selectedVersionId: "skills-version",
+            generationDomain: "SKILLS",
+            status: "ASSISTANT_COACH_APPROVED",
+            versionNumber: 1,
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: null,
+            selectedVersionId: "nutrition-version",
+            generationDomain: "NUTRITION",
+            status: "HEAD_COACH_APPROVED",
+            versionNumber: 1,
+          },
+          allowedActions: [],
+        },
+        S_AND_C: {
+          ...base.domains.S_AND_C,
+          summary: {
+            trainingPlanId: "sandc-plan",
+            versionId: null,
+            selectedVersionId: "sandc-version",
+            generationDomain: "S_AND_C",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+          allowedActions: [],
+        },
+      },
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+          }),
+          NUTRITION: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+          }),
+          S_AND_C: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: false,
+          }),
+        },
+      }),
+    });
+
+    expect(
+      resolveHeadCoachSubmittedReviewCardDomains({
+        shell: "head_coach_review",
+        headCoachOwnsSkills: false,
+        workspace,
+      }),
+    ).toEqual(["SKILLS", "NUTRITION", "S_AND_C"]);
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS)).toBe(
+      "submitted_for_review",
+    );
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.NUTRITION)).toBe("approved");
+    expect(deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.S_AND_C)).toBe("released");
+  });
+
   it("preserves legacy fallback for missing assignmentContext", () => {
     expect(
       resolveHeadCoachSubmittedReviewCardDomains({
@@ -2792,6 +2966,121 @@ describe("resolveTrainingPlanWorkflowMode", () => {
     ).toEqual({
       planId: "e2daeb66-b6fa-4b07-b2aa-42f8a55f40c2",
       versionId: "2ab433a2-1efe-4844-94c1-e7f80f74aa33",
+      generationDomain: "S_AND_C",
+    });
+  });
+
+  it("resolves Workflow 2B Head Coach review actions from each clicked domain summary", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      assignmentContext: shellAssignmentContext({
+        hasHeadCoach: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+            canRequestRevision: true,
+          }),
+          NUTRITION: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+            canRequestRevision: true,
+          }),
+          S_AND_C: shellAssignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+            canRequestRevision: true,
+          }),
+        },
+      }),
+      domains: {
+        ...base.domains,
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: null,
+            selectedVersionId: "skills-selected-version",
+            latestVersionId: "skills-latest-version",
+            approvedVersionId: "skills-approved-version",
+            activeVersionId: "skills-active-version",
+            versionNumber: 1,
+            status: "ASSISTANT_COACH_APPROVED",
+            generationDomain: "SKILLS",
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: null,
+            selectedVersionId: "nutrition-selected-version",
+            latestVersionId: "nutrition-latest-version",
+            approvedVersionId: "nutrition-approved-version",
+            activeVersionId: "nutrition-active-version",
+            versionNumber: 1,
+            status: "ASSISTANT_COACH_APPROVED",
+            generationDomain: "NUTRITION",
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+        S_AND_C: {
+          ...base.domains.S_AND_C,
+          summary: {
+            trainingPlanId: "sandc-plan",
+            versionId: null,
+            selectedVersionId: "sandc-selected-version",
+            latestVersionId: "sandc-latest-version",
+            approvedVersionId: "sandc-approved-version",
+            activeVersionId: "sandc-active-version",
+            versionNumber: 1,
+            status: "ASSISTANT_COACH_APPROVED",
+            generationDomain: "S_AND_C",
+          },
+          allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+        },
+      },
+    });
+
+    expect(
+      resolveHeadCoachReviewActionContext({
+        workspace,
+        domain: "SKILLS",
+        fallbackPlanId: "global-skills-plan",
+        fallbackVersionId: "global-skills-version",
+      }),
+    ).toEqual({
+      planId: "skills-plan",
+      versionId: "skills-selected-version",
+      generationDomain: "SKILLS",
+    });
+    expect(
+      resolveHeadCoachReviewActionContext({
+        workspace,
+        domain: "NUTRITION",
+        fallbackPlanId: "global-skills-plan",
+        fallbackVersionId: "global-skills-version",
+      }),
+    ).toEqual({
+      planId: "nutrition-plan",
+      versionId: "nutrition-selected-version",
+      generationDomain: "NUTRITION",
+    });
+    expect(
+      resolveHeadCoachReviewActionContext({
+        workspace,
+        domain: "S_AND_C",
+        fallbackPlanId: "global-skills-plan",
+        fallbackVersionId: "global-skills-version",
+      }),
+    ).toEqual({
+      planId: "sandc-plan",
+      versionId: "sandc-selected-version",
       generationDomain: "S_AND_C",
     });
   });

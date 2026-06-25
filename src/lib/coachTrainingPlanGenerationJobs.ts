@@ -24,6 +24,10 @@ export async function runTrainingPlanGenerationJob(options: {
   sportCode: string;
   generationDomain: TrainingPlanGenerationDomain;
   durationDays: 7 | 15 | 30;
+  seasonCycleId?: string | null;
+  planStartDate?: string | null;
+  planEndDate?: string | null;
+  goalIds?: string[];
   onUpdate?: (job: CoachAthleteTrainingPlanGenerationJob) => void;
   delayMs?: (ms: number) => Promise<void>;
 }): Promise<TrainingPlanGenerationJobTerminalResult> {
@@ -40,6 +44,10 @@ export async function runTrainingPlanGenerationJob(options: {
       sportCode: options.sportCode,
       durationDays: options.durationDays,
       generationDomain: options.generationDomain,
+      seasonCycleId: options.seasonCycleId,
+      planStartDate: options.planStartDate,
+      planEndDate: options.planEndDate,
+      goalIds: options.goalIds,
     },
   );
   options.onUpdate?.(startedJob);

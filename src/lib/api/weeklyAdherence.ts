@@ -110,6 +110,8 @@ export type WeeklyAdherenceOverallSummary = {
   plannedSessions: number;
   loggedSessions: number;
   adherencePercent: number;
+  plannedItems: number | null;
+  completedItems: number | null;
 };
 
 export type WeeklyAdherenceSummary = {
@@ -144,6 +146,12 @@ function readNumericValue(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function readOptionalPercent(value: unknown): number | null {
+  const parsed = readNumericValue(value);
+  if (parsed === null) return null;
+  return Math.max(0, Math.min(100, parsed));
 }
 
 function readFiniteNumber(value: unknown): number {
@@ -370,11 +378,73 @@ function parseOverallSummary(raw: unknown): WeeklyAdherenceOverallSummary | null
   if (raw === null || raw === undefined) return null;
   const row = asRecord(raw);
   if (!row) return null;
+  const adherencePercent = readOptionalPercent(
+    row.adherencePercent ??
+      row.overallAdherencePercent ??
+      row.itemAdherencePercent ??
+      row.percent,
+  );
+  if (adherencePercent === null) return null;
   return {
     plannedSessions: readNonNegInt(row.plannedSessions),
     loggedSessions: readNonNegInt(row.loggedSessions),
-    adherencePercent: readPercent(row.adherencePercent),
+    adherencePercent,
+    plannedItems: readOptionalFiniteNumberFromKeys(row, [
+      "plannedItems",
+      "totalItems",
+      "totalPrescribedItems",
+      "plannedItemCount",
+    ]),
+    completedItems: readOptionalFiniteNumberFromKeys(row, [
+      "completedItems",
+      "completedItemCount",
+      "completionCredit",
+      "weightedCompletionCredit",
+    ]),
   };
+}
+
+function parseOverallSummaryFromRecord(
+  record: Record<string, unknown>,
+): WeeklyAdherenceOverallSummary | null {
+  return (
+    parseOverallSummary(record.overall) ??
+    parseOverallSummary(record.overallSummary) ??
+    parseOverallSummary(record.adherenceSummary) ??
+    parseOverallSummary(record.summary)
+  );
+}
+
+function weeklyAdherenceOverallDiagnostic(input: {
+  rawResponse: unknown;
+  parsed: WeeklyAdherenceSummary;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  const rawRecord = asRecord(input.rawResponse);
+  const unwrappedRecord = unwrapWeeklyAdherencePayload(input.rawResponse);
+  const rawTopLevelKeys = rawRecord ? Object.keys(rawRecord) : [];
+  const unwrappedTopLevelKeys = Object.keys(unwrappedRecord);
+  const candidateFields = [
+    "overall",
+    "overallSummary",
+    "adherenceSummary",
+    "summary",
+  ] as const;
+  const matchedOverallField =
+    candidateFields.find((field) => parseOverallSummary(unwrappedRecord[field]) !== null) ??
+    null;
+  console.info("[WeeklyAdherence overall diagnostic]", {
+    rawTopLevelKeys,
+    unwrappedTopLevelKeys,
+    matchedOverallField,
+    parsedOverall: input.parsed.overall,
+    parsedDomainKeys: Object.keys(input.parsed.domains),
+    shouldRenderOverall: input.parsed.overall !== null,
+    hiddenReason:
+      input.parsed.overall !== null
+        ? null
+        : "No backend overall adherence percent found in parsed payload.",
+  });
 }
 
 function parseVisibleDomains(raw: unknown): WeeklyAdherenceDomainKey[] {
@@ -391,7 +461,8 @@ function looksLikeWeeklyAdherenceRecord(record: Record<string, unknown>): boolea
     "domains" in record ||
     "weekStart" in record ||
     "weekEnd" in record ||
-    "athleteId" in record
+    "athleteId" in record ||
+    "overall" in record
   );
 }
 
@@ -410,6 +481,12 @@ export function unwrapWeeklyAdherencePayload(payload: unknown): Record<string, u
     const nested = record.data;
     if (nested !== undefined && nested !== null) {
       current = nested;
+      continue;
+    }
+
+    const summary = asRecord(record.summary);
+    if (summary && looksLikeWeeklyAdherenceRecord(summary)) {
+      current = summary;
       continue;
     }
 
@@ -450,7 +527,7 @@ export function parseWeeklyAdherenceSummaryPayload(
     weekStart: readString(record.weekStart),
     weekEnd: readString(record.weekEnd),
     domains,
-    overall: parseOverallSummary(record.overall),
+    overall: parseOverallSummaryFromRecord(record),
     visibleDomains: parseVisibleDomains(record.visibleDomains),
   };
 }
@@ -473,7 +550,9 @@ export async function fetchWeeklyAdherenceSummary(params: {
       timeoutMs: WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS,
     },
   );
-  return parseWeeklyAdherenceSummaryPayload(raw);
+  const parsed = parseWeeklyAdherenceSummaryPayload(raw);
+  weeklyAdherenceOverallDiagnostic({ rawResponse: raw, parsed });
+  return parsed;
 }
 
 export function hasNutritionAdherenceDomain(

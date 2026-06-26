@@ -7336,12 +7336,21 @@ export function CoachAthletePlanningProfileView({
     [persistedDetailDomain, persistedSkillsPlanDetail],
   );
   const headCoachSkillsWorkflowStatus = useMemo(
-    () =>
-      deriveAssistantDomainWorkflowStatus({
+    () => {
+      if (headCoachSkillsOwnerWorkflow && workspace !== null) {
+        return deriveWorkflowStatusFromWorkspaceDomain(workspace.domains.SKILLS);
+      }
+      return deriveAssistantDomainWorkflowStatus({
         latestDraft: headCoachOwnedSkillsDraft,
         activeDetail: headCoachOwnedSkillsActiveDetail,
-      }),
-    [headCoachOwnedSkillsActiveDetail, headCoachOwnedSkillsDraft],
+      });
+    },
+    [
+      headCoachOwnedSkillsActiveDetail,
+      headCoachOwnedSkillsDraft,
+      headCoachSkillsOwnerWorkflow,
+      workspace,
+    ],
   );
   const headCoachOwnedSkillsGrouping = useMemo(
     () =>
@@ -7357,6 +7366,9 @@ export function CoachAthletePlanningProfileView({
     }
     return headCoachSkillsWorkflowStatus !== "not_created";
   }, [headCoachSkillsWorkflowStatus, workspace]);
+  const shouldShowLatestDraftPlanViewer =
+    shouldLoadLatestSkillsDraft &&
+    !(headCoachSkillsOwnerWorkflow && headCoachSkillsPlanExists);
   const workspaceHeadCoachSkillsCanCreate = useMemo(
     () => {
       if (workspace === null) return false;
@@ -7540,12 +7552,16 @@ export function CoachAthletePlanningProfileView({
     [step6GenerationLifecyclePhase],
   );
   const step6GeneratedDraftWorkflowStatus = useMemo(
-    () =>
-      deriveAssistantDomainWorkflowStatus({
+    () => {
+      if (headCoachSkillsOwnerWorkflow) return assistantDomainWorkflowStatus;
+      return deriveAssistantDomainWorkflowStatus({
         latestDraft: latestDraftMatchesCurrentDomain ? latestSkillsDraft : null,
         activeDetail: persistedDetailMatchesCurrentDomain ? persistedSkillsPlanDetail : null,
-      }),
+      });
+    },
     [
+      assistantDomainWorkflowStatus,
+      headCoachSkillsOwnerWorkflow,
       latestDraftMatchesCurrentDomain,
       latestSkillsDraft,
       persistedDetailMatchesCurrentDomain,
@@ -8287,6 +8303,43 @@ export function CoachAthletePlanningProfileView({
     },
     [athleteIdTrimmed, router],
   );
+
+  useEffect(() => {
+    if (!accessGateReady) return;
+    if (!headCoachSkillsOwnerWorkflow) return;
+    if (selectedWorkflowTab !== "generate" || !generateTabPrecSatisfied) return;
+    const context = headCoachSkillsViewPlanContext;
+    if (context === null || context.planId.trim() === "") return;
+    const currentPlanId = headCoachOwnedSkillsActiveDetail?.plan.id?.trim() ?? "";
+    const currentVersionId = headCoachOwnedSkillsActiveDetail?.version.id?.trim() ?? "";
+    const contextVersionId = context.versionId.trim();
+    if (
+      currentPlanId === context.planId.trim() &&
+      (contextVersionId === "" || currentVersionId === contextVersionId)
+    ) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await refreshPersistedPlanDetail(context.planId, "SKILLS", {
+          updateWorkflowRequestedPlanId: false,
+        });
+      } catch (e) {
+        setPersistedSkillsPlanError(formatApiError(e, "Could not load Skills plan."));
+        setPersistedPlanErrorDomain("SKILLS");
+      }
+    })();
+  }, [
+    accessGateReady,
+    generateTabPrecSatisfied,
+    headCoachOwnedSkillsActiveDetail?.plan.id,
+    headCoachOwnedSkillsActiveDetail?.version.id,
+    headCoachSkillsOwnerWorkflow,
+    headCoachSkillsViewPlanContext,
+    refreshPersistedPlanDetail,
+    selectedWorkflowTab,
+  ]);
 
   async function handleViewWorkspaceDomainPlan(
     domain: TrainingPlanGenerationDomain,
@@ -10735,7 +10788,9 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderHeadCoachOwnedSkillsPlanPanel() {
+  function renderHeadCoachOwnedSkillsPlanPanel(
+    options: { showWorkflowActions?: boolean } = {},
+  ) {
     if (
       !headCoachOwnedSkillsGrouping ||
       !headCoachSkillsPlanExists ||
@@ -10748,10 +10803,12 @@ export function CoachAthletePlanningProfileView({
       headCoachOwnedSkillsActiveDetail?.version.status ??
       headCoachOwnedSkillsActiveDetail?.plan.status ??
       headCoachOwnedSkillsDraft?.status ??
+      workspace?.domains.SKILLS.summary.status ??
       null;
     const skillsVersionNumber =
       headCoachOwnedSkillsActiveDetail?.version.versionNumber ??
       headCoachOwnedSkillsDraft?.versionNumber ??
+      workspace?.domains.SKILLS.summary.versionNumber ??
       null;
     const skillsTrainingDays =
       headCoachOwnedSkillsDraft !== null
@@ -10883,7 +10940,7 @@ export function CoachAthletePlanningProfileView({
             </div>
           </div>
         ) : null}
-        {renderStep6WorkflowActionsStrip()}
+        {options.showWorkflowActions === false ? null : renderStep6WorkflowActionsStrip()}
       </div>
     );
   }
@@ -14589,6 +14646,9 @@ export function CoachAthletePlanningProfileView({
                             Review persisted plan details, latest drafts, and revision content.
                           </p>
                         </div>
+                        {headCoachSkillsOwnerWorkflow
+                          ? renderHeadCoachOwnedSkillsPlanPanel({ showWorkflowActions: false })
+                          : null}
                   {requestedPlanId !== null && !shouldHidePersistedGeneratorPanel ? (
                         isDownstreamDomainCoach && persistedPlanDisplayDomain === "SKILLS" ? (
                           <WorkflowNeutralNotice>
@@ -14941,7 +15001,7 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
-                  {shouldLoadLatestSkillsDraft &&
+                  {shouldShowLatestDraftPlanViewer &&
                   !isHeadCoachReviewerOnlyForDomain(
                     latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
                   ) ? (
@@ -15307,7 +15367,12 @@ export function CoachAthletePlanningProfileView({
                       {allowedGenerationDomains
                         .filter(
                           (domain) =>
-                            resolveGeneratePermissionForDomain(domain).canShowGenerate,
+                            resolveGeneratePermissionForDomain(domain).canShowGenerate &&
+                            !(
+                              headCoachSkillsOwnerWorkflow &&
+                              domain === "SKILLS" &&
+                              headCoachSkillsPlanExists
+                            ),
                         )
                         .map((domain) => {
                         const domainJob = generatePlanJobsByDomain[domain] ?? null;

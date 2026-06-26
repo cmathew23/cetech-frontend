@@ -184,13 +184,21 @@ export function CoachTrainingPlansPageContent() {
       setLoading(true);
       setError(null);
       try {
-        const [dash, rows] = await Promise.all([
+        const [dashResult, rowsResult] = await Promise.allSettled([
           fetchCoachMeDashboard(),
           fetchCoachAssignedAthletes(),
         ]);
+        if (rowsResult.status !== "fulfilled") {
+          throw rowsResult.reason;
+        }
         if (cancelled) return;
-        const headCoachConfigured = dash.hasHeadCoachConfigured === true;
-        const headCoachUser = headCoachConfigured && currentCoachIsHeadCoach(dash.academyCoachRole);
+        const rows = rowsResult.value;
+        const dash = dashResult.status === "fulfilled" ? dashResult.value : null;
+        const headCoachConfigured = dash?.hasHeadCoachConfigured === true;
+        const headCoachUser =
+          dash !== null &&
+          headCoachConfigured &&
+          currentCoachIsHeadCoach(dash.academyCoachRole);
         const lockMap: Record<string, boolean | null> = {};
         if (!headCoachUser && entityId !== "") {
           const contextResults = await Promise.allSettled(
@@ -210,7 +218,9 @@ export function CoachTrainingPlansPageContent() {
         }
         if (cancelled) return;
         setAthletes(rows);
-        setPlanDomain(derivePrimaryCoachPlanDomain(dash.functions ?? []));
+        setPlanDomain(
+          dash ? derivePrimaryCoachPlanDomain(dash.functions ?? []) : null,
+        );
         setHasHeadCoachConfigured(headCoachConfigured);
         setIsHeadCoachPlanningContextOwner(headCoachUser);
         setPlanningContextLockedByAthleteId(lockMap);

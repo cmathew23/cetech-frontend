@@ -114,26 +114,31 @@ export function CoachHeaderIdentityMetadata() {
     void (async () => {
       setIdentityFetchLoading(true);
 
-      const [profileResult, coachesResult] = await Promise.allSettled([
-        fetchMyProfile(),
-        currentCoachUserId !== "" ? fetchMyAcademyCoaches() : Promise.resolve(null),
-      ]);
+      const nextProfileMe = await fetchMyProfile().catch((): ProfileMe | null => null);
       if (cancelled) return;
 
-      const coachesPayload =
-        coachesResult.status === "fulfilled" ? coachesResult.value : null;
-      const currentCoach = coachesPayload
-        ? findCurrentAcademyCoachRow({
-            coaches: coachesPayload.coaches,
-            currentCoachUserId,
-            currentCoachEmail:
-              currentCoachEmail ||
-              (profileResult.status === "fulfilled" ? profileResult.value.email : ""),
-          })
-        : null;
-      const nextProfileMe =
-        profileResult.status === "fulfilled" ? profileResult.value : null;
-      const nextAcademyCoachName = coachNameFromAcademyCoachRow(currentCoach);
+      const profileResolvedCoachName = resolveCoachHeaderName({
+        appContextUser,
+        profileMe: nextProfileMe,
+        academyCoachName: "",
+        cachedCoachName: coachHeaderNameCache.get(identityCacheKey) ?? "",
+      });
+
+      let nextAcademyCoachName = "";
+      if (profileResolvedCoachName === "" && currentCoachUserId !== "") {
+        const coachesPayload = await fetchMyAcademyCoaches().catch(
+          (): { coaches: AcademyCoachStructureRow[] } | null => null,
+        );
+        if (cancelled) return;
+        const currentCoach = coachesPayload
+          ? findCurrentAcademyCoachRow({
+              coaches: coachesPayload.coaches,
+              currentCoachUserId,
+              currentCoachEmail: currentCoachEmail || nextProfileMe?.email || "",
+            })
+          : null;
+        nextAcademyCoachName = coachNameFromAcademyCoachRow(currentCoach);
+      }
       const nextResolvedCoachName = resolveCoachHeaderName({
         appContextUser,
         profileMe: nextProfileMe,

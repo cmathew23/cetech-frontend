@@ -180,7 +180,9 @@ export function useOnboarding() {
   useEffect(() => {
     if (hasFetched.current) return;
     hasFetched.current = true;
-    void fetchStatus();
+    void fetchStatus().catch(() => {
+      // `fetchStatus` already stores the normalized error in hook state.
+    });
   }, [fetchStatus]);
 
   return {

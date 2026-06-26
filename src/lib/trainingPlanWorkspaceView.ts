@@ -366,6 +366,17 @@ export function resolveTrainingPlanTab6Authority(
   };
 }
 
+export function workspaceAssignedGenerationDomains(
+  workspace: TrainingPlanWorkspace,
+): GenerationDomain[] {
+  const assignment = workspace.assignmentContext;
+  if (assignment === undefined) return [];
+  return GENERATION_DOMAINS.filter((domain) => {
+    const context = assignment.domains[domain];
+    return context.ownerType !== "NONE" && context.ownedByCurrentUser;
+  });
+}
+
 export function workspaceResolvableGenerationDomains(
   workspace: TrainingPlanWorkspace,
 ): GenerationDomain[] {

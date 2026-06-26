@@ -99,6 +99,7 @@ import {
   resolveLegacyAssistantCreateButtonDisabled,
   resolveTrainingPlanTab6Authority,
   resolveWorkflowModeFromWorkspace,
+  workspaceAssignedGenerationDomains,
   workspaceAllowedActionsSet,
   workspaceDirectReleaseAllowed,
   workspaceHasSubmittedDomainPlans,
@@ -4640,6 +4641,10 @@ export function CoachAthletePlanningProfileView({
     trainingPlanShellOwnership.planningContextShellOwner === "head_coach" ||
     trainingPlanShellOwnership.planningContextShellOwner === "skills_coach";
   const allowedGenerationDomains = useMemo(() => {
+    if (workspace?.assignmentContext !== undefined) {
+      return workspaceAssignedGenerationDomains(workspace);
+    }
+
     const mergeLegacyAssignedDomains = (): TrainingPlanGenerationDomain[] => {
       const fromCoach = coachAssignedGenerationDomains;
       if (isHeadCoachPlanningContextOwner) {

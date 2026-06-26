@@ -11,6 +11,7 @@ import {
   resolvePlanningContextLocked,
   resolveTrainingPlanTab6Authority,
   resolveWorkflowModeFromWorkspace,
+  workspaceAssignedGenerationDomains,
   workspaceDomainHasPersistedPlanIds,
   workspaceDirectReleaseAllowed,
   workspaceHasSubmittedDomainPlans,
@@ -629,6 +630,99 @@ describe("trainingPlanWorkspaceView", () => {
       isGovernanceCoach: false,
       isDirectReleaseDomainCoach: true,
     });
+  });
+
+  it("derives generation candidate domains from assignment ownership only", () => {
+    const workflow2AHeadCoach = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: true,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: false,
+        requesterOwnsSkillsForThisAthlete: false,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      assignmentContext: assignmentContext({
+        domains: {
+          SKILLS: assignmentDomain({
+            ownerType: "HEAD_COACH_SELF",
+            ownedByCurrentUser: true,
+          }),
+          NUTRITION: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+          }),
+          S_AND_C: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+          }),
+        },
+      }),
+    });
+    const workflow2BHeadCoach = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: true,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: true,
+        requesterOwnsSkillsForThisAthlete: true,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      assignmentContext: assignmentContext({
+        domains: {
+          SKILLS: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: false,
+            canApprove: true,
+          }),
+          NUTRITION: assignmentDomain({ canApprove: true }),
+          S_AND_C: assignmentDomain({ canApprove: true }),
+        },
+      }),
+    });
+    const workflow2BAssignedSkillsCoach = baseWorkspace({
+      ownershipFlags: {
+        hasHeadCoach: true,
+        requesterIsHeadCoach: false,
+        requesterHasSkillsFunction: true,
+        requesterOwnsCurrentDomain: false,
+        headCoachOwnsPlanningContext: true,
+        directReleaseAllowed: false,
+      },
+      assignmentContext: assignmentContext({
+        domains: {
+          SKILLS: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: true,
+          }),
+          NUTRITION: assignmentDomain(),
+          S_AND_C: assignmentDomain(),
+        },
+      }),
+    });
+    const workflow3NutritionCoach = baseWorkspace({
+      assignmentContext: assignmentContext({
+        hasHeadCoach: false,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+        domains: {
+          SKILLS: assignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+          NUTRITION: assignmentDomain({
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: true,
+            releaseMode: "DIRECT_DOMAIN_RELEASE",
+          }),
+          S_AND_C: assignmentDomain({ releaseMode: "DIRECT_DOMAIN_RELEASE" }),
+        },
+      }),
+    });
+
+    expect(workspaceAssignedGenerationDomains(workflow2AHeadCoach)).toEqual(["SKILLS"]);
+    expect(workspaceAssignedGenerationDomains(workflow2BHeadCoach)).toEqual([]);
+    expect(workspaceAssignedGenerationDomains(workflow2BAssignedSkillsCoach)).toEqual(["SKILLS"]);
+    expect(workspaceAssignedGenerationDomains(workflow3NutritionCoach)).toEqual(["NUTRITION"]);
+    expect(workspaceAssignedGenerationDomains(baseWorkspace())).toEqual([]);
   });
 
   it("keeps legacy planning ownership fallback when assignmentContext is missing", () => {

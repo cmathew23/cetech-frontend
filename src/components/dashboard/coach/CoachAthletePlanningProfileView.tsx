@@ -97,6 +97,7 @@ import {
   resolvePlanningContextLocked,
   resolveEffectiveDownstreamPlanningContextLocked,
   resolveLegacyAssistantCreateButtonDisabled,
+  resolveTrainingPlanTab6Authority,
   resolveWorkflowModeFromWorkspace,
   workspaceAllowedActionsSet,
   workspaceDirectReleaseAllowed,
@@ -6051,6 +6052,20 @@ export function CoachAthletePlanningProfileView({
     trainingPlanShellModel.shell === "head_coach_function_aware";
   const headCoachFunctionAwareMode =
     trainingPlanShellModel.shell === "head_coach_function_aware";
+  const tab6Authority = useMemo(
+    () => resolveTrainingPlanTab6Authority(workspace),
+    [workspace],
+  );
+  const tab6HasAssignedDomainOwnership =
+    tab6Authority.isAssignedSkillsOwner ||
+    tab6Authority.isAssignedNutritionOwner ||
+    tab6Authority.isAssignedSCOwner;
+  const tab6HasGovernanceAuthority =
+    tab6Authority.isGovernanceCoach ||
+    tab6Authority.canApproveDomains ||
+    tab6Authority.canReleaseToAthlete;
+  const tab6ReviewOnlyMode =
+    headCoachReviewMode && !tab6HasAssignedDomainOwnership;
   const workflow1HeadCoachReviewActionPanelMode =
     shouldUseWorkflow1HeadCoachReviewActionPanel({
       shell: trainingPlanShellModel.shell,
@@ -14411,7 +14426,7 @@ export function CoachAthletePlanningProfileView({
                             : "Generation follows the backend readiness contract. Any backend blockers are shown here before execution."}
                     </p>
                   </div>
-                  {headCoachReviewMode ? (
+                  {tab6ReviewOnlyMode ? (
                     renderHeadCoachReviewWorkspace()
                   ) : (
                     <>
@@ -15288,6 +15303,9 @@ export function CoachAthletePlanningProfileView({
                   {trainingPlanShellModel.shell !== "head_coach_planning" &&
                   !isHeadCoachReviewerOnlyForDomain(resolvedWorkflowGenerationDomain)
                     ? renderStep6WorkflowActionsStrip()
+                    : null}
+                  {headCoachReviewMode && tab6HasGovernanceAuthority
+                    ? renderHeadCoachSubmittedDomainPlansSection()
                     : null}
                   </>
                   )}

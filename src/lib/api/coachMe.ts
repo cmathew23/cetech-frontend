@@ -13,6 +13,8 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 
 /** Shared client default is 10_000 ms; coach dashboard summary needs more time in pre-MVP environments. */
 export const COACH_ME_DASHBOARD_TIMEOUT_MS = 130_000;
+/** Shared roster read powers multiple coach pages and can exceed the generic 10s client timeout. */
+export const COACH_ASSIGNED_ATHLETES_TIMEOUT_MS = 30_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -268,6 +270,7 @@ export async function fetchCoachAssignedAthletes(): Promise<CoachAssignedAthlete
   const raw = await apiRequest(paths.coach.assignedAthletes, {
     method: "GET",
     cache: "no-store",
+    timeoutMs: COACH_ASSIGNED_ATHLETES_TIMEOUT_MS,
   });
   const data = adaptBackendSuccess(raw);
   const list = assertAthletesArray(data);

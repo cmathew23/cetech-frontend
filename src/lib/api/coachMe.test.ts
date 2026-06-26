@@ -9,7 +9,9 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import {
+  COACH_ASSIGNED_ATHLETES_TIMEOUT_MS,
   COACH_ME_DASHBOARD_TIMEOUT_MS,
+  fetchCoachAssignedAthletes,
   fetchCoachMeDashboard,
   parseAssignedAthleteRow,
 } from "@/lib/api/coachMe";
@@ -35,6 +37,28 @@ describe("fetchCoachMeDashboard", () => {
       method: "GET",
       cache: "no-store",
       timeoutMs: 130_000,
+    });
+  });
+});
+
+describe("fetchCoachAssignedAthletes", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("uses an extended timeout instead of the shared 10s client default", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: { athletes: [] },
+    });
+
+    await fetchCoachAssignedAthletes();
+
+    expect(COACH_ASSIGNED_ATHLETES_TIMEOUT_MS).toBe(30_000);
+    expect(apiRequestMock).toHaveBeenCalledWith("/coach/me/assigned-athletes", {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: 30_000,
     });
   });
 });

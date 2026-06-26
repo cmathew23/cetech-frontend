@@ -6065,10 +6065,6 @@ export function CoachAthletePlanningProfileView({
     tab6Authority.isAssignedSkillsOwner ||
     tab6Authority.isAssignedNutritionOwner ||
     tab6Authority.isAssignedSCOwner;
-  const tab6HasGovernanceAuthority =
-    tab6Authority.isGovernanceCoach ||
-    tab6Authority.canApproveDomains ||
-    tab6Authority.canReleaseToAthlete;
   const tab6ReviewOnlyMode =
     headCoachReviewMode && !tab6HasAssignedDomainOwnership;
   const workflow1HeadCoachReviewActionPanelMode =
@@ -15349,7 +15345,7 @@ export function CoachAthletePlanningProfileView({
                     ? renderStep6WorkflowActionsStrip()
                     : null}
                       </div>
-                  {headCoachReviewMode && tab6HasGovernanceAuthority
+                  {headCoachReviewMode
                     ? (
                       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                         <div className="space-y-1">

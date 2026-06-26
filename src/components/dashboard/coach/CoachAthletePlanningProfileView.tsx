@@ -14432,9 +14432,28 @@ export function CoachAthletePlanningProfileView({
                     </p>
                   </div>
                   {tab6ReviewOnlyMode ? (
-                    renderHeadCoachReviewWorkspace()
+                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-normal text-textPrimary">
+                          Review &amp; Release
+                        </h4>
+                        <p className="text-sm text-textSecondary">
+                          Review submitted domain plans and complete governance actions.
+                        </p>
+                      </div>
+                      {renderHeadCoachReviewWorkspace()}
+                    </div>
                   ) : (
                     <>
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Domain Integration
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Confirm planning context, readiness, blockers, and generation status.
+                          </p>
+                        </div>
                       {isPlanningContextAuthority && !isDownstreamDomainCoach
                         ? renderHeadCoachPlanningContextLockAction()
                         : null}
@@ -14564,6 +14583,16 @@ export function CoachAthletePlanningProfileView({
                           </div>
                         </WorkflowNeutralNotice>
                       ) : null}
+                      </div>
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Plan Viewer
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Review persisted plan details, latest drafts, and revision content.
+                          </p>
+                        </div>
                   {requestedPlanId !== null && !shouldHidePersistedGeneratorPanel ? (
                         isDownstreamDomainCoach && persistedPlanDisplayDomain === "SKILLS" ? (
                           <WorkflowNeutralNotice>
@@ -15230,6 +15259,16 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
+                      </div>
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Domain Actions
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Generate assigned domain plans and continue available workflow actions.
+                          </p>
+                        </div>
                   {requestedPlanId !== null ? (
                     persistedPlanDisplayDomain === "S_AND_C" ? (
                       <div className="flex flex-wrap gap-2">
@@ -15309,8 +15348,21 @@ export function CoachAthletePlanningProfileView({
                   !isHeadCoachReviewerOnlyForDomain(resolvedWorkflowGenerationDomain)
                     ? renderStep6WorkflowActionsStrip()
                     : null}
+                      </div>
                   {headCoachReviewMode && tab6HasGovernanceAuthority
-                    ? renderHeadCoachSubmittedDomainPlansSection()
+                    ? (
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Review &amp; Release
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Review submitted domain plans and complete governance actions.
+                          </p>
+                        </div>
+                        {renderHeadCoachSubmittedDomainPlansSection()}
+                      </div>
+                    )
                     : null}
                   </>
                   )}

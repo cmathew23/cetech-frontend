@@ -711,6 +711,8 @@ type GuidedWorkflowStepKey =
   | "plan-dates"
   | "generate";
 
+type ContextBuilderStepKey = Exclude<GuidedWorkflowStepKey, "generate">;
+
 const WORKFLOW_RAIL_LABELS: Record<GuidedWorkflowStepKey, string> = {
   "context-app": "Context / APP",
   "level-validation": "Level Validation",
@@ -1278,6 +1280,13 @@ const WORKFLOW_STEP_SEQUENCE_LIST: GuidedWorkflowStepKey[] = [
   "season-goals",
   "plan-dates",
   "generate",
+];
+const CONTEXT_BUILDER_STEP_SEQUENCE_LIST: ContextBuilderStepKey[] = [
+  "context-app",
+  "level-validation",
+  "workload",
+  "season-goals",
+  "plan-dates",
 ];
 type GuidedWorkflowStepStatus = "completed" | "active" | "available" | "locked";
 
@@ -8751,6 +8760,61 @@ export function CoachAthletePlanningProfileView({
     [workflowStepperModel],
   );
 
+  const resolvePreLockContextBuilderTab = useCallback((): ContextBuilderStepKey => {
+    const firstIncomplete: ContextBuilderStepKey =
+      !appStepComplete
+        ? "context-app"
+        : !levelStepComplete
+          ? "level-validation"
+          : !workloadComplete
+            ? "workload"
+            : !seasonGoalsGateComplete
+              ? "season-goals"
+              : "plan-dates";
+
+    if (workflowStepStatusByKey[firstIncomplete] !== "locked") {
+      return firstIncomplete;
+    }
+
+    return (
+      CONTEXT_BUILDER_STEP_SEQUENCE_LIST.find(
+        (step) => workflowStepStatusByKey[step] !== "locked",
+      ) ?? "context-app"
+    );
+  }, [
+    appStepComplete,
+    levelStepComplete,
+    seasonGoalsGateComplete,
+    workloadComplete,
+    workflowStepStatusByKey,
+  ]);
+
+  useEffect(() => {
+    if (!trainingPlanShellModel.ready) return;
+    if (shouldResolveSpecialistDomainWorkspace) return;
+    if (!isHeadCoachPlanningContextOwner || isDownstreamDomainCoach) return;
+    if (
+      trainingPlanShellModel.shell !== "head_coach_planning" &&
+      trainingPlanShellModel.shell !== "head_coach_function_aware" &&
+      trainingPlanShellModel.shell !== "head_coach_review"
+    ) {
+      return;
+    }
+    if (planningContextLocked) return;
+    if (isContextBuilderStep(selectedWorkflowTab)) return;
+
+    setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+  }, [
+    isDownstreamDomainCoach,
+    isHeadCoachPlanningContextOwner,
+    planningContextLocked,
+    resolvePreLockContextBuilderTab,
+    selectedWorkflowTab,
+    shouldResolveSpecialistDomainWorkspace,
+    trainingPlanShellModel.ready,
+    trainingPlanShellModel.shell,
+  ]);
+
   const loadWorkloadAssessment = useCallback(
     async (resetGenerationState: boolean): Promise<boolean> => {
       if (
@@ -14412,6 +14476,275 @@ export function CoachAthletePlanningProfileView({
     return null;
   }
 
+  function isContextBuilderStep(step: GuidedWorkflowStepKey): step is ContextBuilderStepKey {
+    return step !== "generate";
+  }
+
+  function contextBuilderStatusLabel(input: {
+    complete: boolean;
+    active: boolean;
+    workflowStatus?: GuidedWorkflowStepStatus;
+  }): string {
+    if (input.complete) return "Completed";
+    if (input.active) return "Active";
+    if (input.workflowStatus === "locked") return "Locked / needs previous step";
+    return "Pending";
+  }
+
+  function contextBuilderStepComplete(step: ContextBuilderStepKey): boolean {
+    if (step === "context-app") return appStepComplete;
+    if (step === "level-validation") return levelStepComplete;
+    if (step === "workload") return workloadComplete;
+    if (step === "season-goals") return seasonGoalsGateComplete;
+    return planDatesStepComplete;
+  }
+
+  function contextBuilderStepPurpose(step: ContextBuilderStepKey): string {
+    if (step === "context-app") return "Confirm the athlete profile is complete and eligible for planning.";
+    if (step === "level-validation") return "Confirm the validated level that planning should use.";
+    if (step === "workload") return "Check the workload range before dates and goals are finalized.";
+    if (step === "season-goals") return "Select the season, current phase, and active goals.";
+    return "Set and confirm the training plan window before locking context.";
+  }
+
+  function contextBuilderStepValue(step: ContextBuilderStepKey): string {
+    if (step === "context-app") {
+      return `APP ${displayValue(readinessPanel.appCompleteness)} / eligibility ${displayValue(
+        readinessPanel.planningEligibility,
+      )}`;
+    }
+    if (step === "level-validation") {
+      return `Validated level: ${displayValue(readinessPanel.validatedLevel)}`;
+    }
+    if (step === "workload") {
+      const workloadStatus = workloadAssessmentResult?.workloadClassification?.status ?? null;
+      const weeklyHours = workloadAssessmentResult?.workloadClassification?.weeklyTrainingHours ?? null;
+      return workloadComplete
+        ? `Workload ${displayValue(workloadStatus)} (${displayValue(weeklyHours)} hrs/week)`
+        : "Workload assessment not completed";
+    }
+    if (step === "season-goals") {
+      const selectedGoalCount = selectedGoalIds.length;
+      return selectedSeason
+        ? `${displayValue(selectedSeason.name)} / ${selectedGoalCount} active goal${
+            selectedGoalCount === 1 ? "" : "s"
+          } selected`
+        : "Season and goals not selected";
+    }
+    return planDatesStepComplete
+      ? `${planStartDate} to ${planEndDate}`
+      : planWindowInsideCurrentPhase
+        ? "Plan window ready to confirm"
+        : "Plan window not ready";
+  }
+
+  function contextBuilderMissingRequirement(step: ContextBuilderStepKey): string | null {
+    if (contextBuilderStepComplete(step)) return null;
+    if (workflowStepStatusByKey[step] === "locked") return "Complete the previous setup section first.";
+    if (step === "context-app") {
+      if (readinessPanel.missingRequiredFields.length > 0) {
+        return `Missing APP fields: ${formatMissingRequiredFields(
+          readinessPanel.missingRequiredFields,
+        )}`;
+      }
+      if (readinessError) return readinessError;
+      return "Confirm APP completeness and planning eligibility.";
+    }
+    if (step === "level-validation") return "Confirm the athlete's validated level.";
+    if (step === "workload") return "Run workload assessment.";
+    if (step === "season-goals") {
+      if (selectedSeasonCycleId === null) return "Select or create a season.";
+      if (!currentPhaseDetected) return "Create or detect the current season phase.";
+      if (!goalsReadyForGeneration) return "Select at least one active goal.";
+      return "Finish season and goal setup.";
+    }
+    if (!planWindowInsideCurrentPhase) return "Choose a plan window inside the current phase.";
+    if (!planDatesConfirmedForCurrentAthlete) return "Confirm plan dates.";
+    return "Lock planning context when ready.";
+  }
+
+  function handleSelectContextBuilderStep(step: ContextBuilderStepKey) {
+    if (workflowStepStatusByKey[step] === "locked") return;
+    setSelectedWorkflowTab(step);
+  }
+
+  function renderContextBuilderSetupItem(step: ContextBuilderStepKey, index: number) {
+    const complete = contextBuilderStepComplete(step);
+    const active = selectedWorkflowTab === step;
+    const workflowStatus = workflowStepStatusByKey[step];
+    const locked = workflowStatus === "locked";
+    const stateLabel = contextBuilderStatusLabel({ complete, active, workflowStatus });
+    const missingRequirement = contextBuilderMissingRequirement(step);
+
+    return (
+      <li key={step}>
+        <button
+          type="button"
+          className={`flex h-full w-full flex-col gap-2 rounded-lg border p-3 text-left transition ${
+            active
+              ? "border-primary bg-primaryLight/20 shadow-sm"
+              : locked
+                ? "cursor-default border-slate-200 bg-slate-50 text-textMuted"
+                : "border-slate-200 bg-white hover:border-primary/50 hover:bg-slate-50"
+          }`}
+          disabled={locked}
+          onClick={() => handleSelectContextBuilderStep(step)}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-sm font-normal text-textPrimary">
+                {index + 1}. {WORKFLOW_RAIL_LABELS[step]}
+              </div>
+              <p className="text-xs text-textSecondary">{contextBuilderStepPurpose(step)}</p>
+            </div>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
+                complete
+                  ? "bg-primaryLight text-primary"
+                  : active
+                    ? "bg-blue-50 text-blue-700"
+                    : locked
+                      ? "bg-slate-100 text-slate-500"
+                      : "bg-slate-100 text-textSecondary"
+              }`}
+            >
+              {stateLabel}
+            </span>
+          </div>
+          <div className="text-xs text-textSecondary">{contextBuilderStepValue(step)}</div>
+          {active && missingRequirement ? (
+            <div className="text-xs font-medium text-textPrimary">{missingRequirement}</div>
+          ) : null}
+        </button>
+      </li>
+    );
+  }
+
+  function renderContextBuilderLockItem() {
+    const active = selectedWorkflowTab === "plan-dates" && planDatesStepComplete;
+    const locked = workflowStepStatusByKey["plan-dates"] === "locked";
+    const stateLabel = contextBuilderStatusLabel({
+      complete: headCoachLockedContextStepComplete,
+      active,
+      workflowStatus: locked ? "locked" : undefined,
+    });
+
+    return (
+      <li>
+        <button
+          type="button"
+          className={`flex h-full w-full flex-col gap-2 rounded-lg border p-3 text-left transition ${
+            headCoachLockedContextStepComplete
+              ? "border-primary/40 bg-primaryLight/20"
+              : active
+                ? "border-primary bg-primaryLight/20 shadow-sm"
+                : locked
+                  ? "cursor-default border-slate-200 bg-slate-50 text-textMuted"
+                  : "border-slate-200 bg-white hover:border-primary/50 hover:bg-slate-50"
+          }`}
+          disabled={workflowStepStatusByKey["plan-dates"] === "locked"}
+          onClick={() => handleSelectContextBuilderStep("plan-dates")}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-sm font-normal text-textPrimary">6. Lock Planning Context</div>
+              <p className="text-xs text-textSecondary">
+                Freeze the planning context before moving into domain plans.
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
+                headCoachLockedContextStepComplete
+                  ? "bg-primaryLight text-primary"
+                  : active
+                    ? "bg-blue-50 text-blue-700"
+                    : locked
+                      ? "bg-slate-100 text-slate-500"
+                      : "bg-slate-100 text-textSecondary"
+              }`}
+            >
+              {stateLabel}
+            </span>
+          </div>
+          <div className="text-xs text-textSecondary">
+            {headCoachLockedContextStepComplete
+              ? "Planning context is locked."
+              : planDatesStepComplete
+                ? "Plan dates are ready. Use the existing lock action in Plan Dates."
+                : "Finish plan dates before locking context."}
+          </div>
+        </button>
+      </li>
+    );
+  }
+
+  function renderContextBuilderWorkspace() {
+    if (!isContextBuilderStep(selectedWorkflowTab)) return null;
+    const activeStepMissingRequirement = contextBuilderMissingRequirement(selectedWorkflowTab);
+    const contextBuilderComplete = planDatesStepComplete || headCoachLockedContextStepComplete;
+
+    return (
+      <section className="space-y-5">
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <h2 className="text-lg font-normal text-textPrimary">Context Builder</h2>
+            <p className="max-w-3xl text-sm text-textSecondary">
+              Build the athlete&apos;s planning context in one guided setup before domain plans
+              are generated, reviewed, or released.
+            </p>
+          </div>
+          {headCoachLockedContextStepComplete ? (
+            <WorkflowNeutralNotice>
+              <div className="text-sm font-medium text-textPrimary">
+                Context is locked and ready for domain plans.
+              </div>
+            </WorkflowNeutralNotice>
+          ) : contextBuilderComplete ? (
+            <WorkflowNeutralNotice>
+              <div className="text-sm font-medium text-textPrimary">
+                Context setup is complete. Lock Planning Context is the next action.
+              </div>
+            </WorkflowNeutralNotice>
+          ) : null}
+        </div>
+
+        <ol className="grid gap-3 md:grid-cols-2">
+          {CONTEXT_BUILDER_STEP_SEQUENCE_LIST.map(renderContextBuilderSetupItem)}
+          {renderContextBuilderLockItem()}
+        </ol>
+
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h3 className="text-base font-normal text-textPrimary">
+              {WORKFLOW_RAIL_LABELS[selectedWorkflowTab]}
+            </h3>
+            <p className="text-sm text-textSecondary">
+              {contextBuilderStepPurpose(selectedWorkflowTab)}
+            </p>
+          </div>
+          <dl className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+            <DetailRow label="Current status" value={contextBuilderStatusLabel({
+              complete: contextBuilderStepComplete(selectedWorkflowTab),
+              active: true,
+              workflowStatus: workflowStepStatusByKey[selectedWorkflowTab],
+            })} />
+            <DetailRow label="Planning value" value={contextBuilderStepValue(selectedWorkflowTab)} />
+            {activeStepMissingRequirement ? (
+              <DetailRow label="Next requirement" value={activeStepMissingRequirement} />
+            ) : null}
+          </dl>
+
+          <details className="space-y-3 rounded-lg border border-slate-200 bg-white p-3" open>
+            <summary className="cursor-pointer text-sm font-medium text-textPrimary">
+              Setup details and actions
+            </summary>
+            <div className="pt-3">{renderContextBuilderActiveStepContent(selectedWorkflowTab)}</div>
+          </details>
+        </section>
+      </section>
+    );
+  }
+
   const trainingPlanPageHeader = (
     <PageHeader
       title="Training Plan"
@@ -14462,27 +14795,31 @@ export function CoachAthletePlanningProfileView({
             trainingPlanShellModel.shell === "head_coach_planning" ||
             trainingPlanShellModel.shell === "skills_coach_planning" ? (
           <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-            <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
-              <TrainingPlanWorkflowProgressRail
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-              />
-            </div>
-            <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
-              <WorkflowConnectedTabStrip
-                selectedTab={selectedWorkflowTab}
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-                onSelect={(tab) => {
-                  if (workflowStepStatusByKey[tab] === "locked") return;
-                  setSelectedWorkflowTab(tab);
-                }}
-              />
-            </div>
+            {!isContextBuilderStep(selectedWorkflowTab) ? (
+              <>
+                <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
+                  <TrainingPlanWorkflowProgressRail
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                  />
+                </div>
+                <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
+                  <WorkflowConnectedTabStrip
+                    selectedTab={selectedWorkflowTab}
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                    onSelect={(tab) => {
+                      if (workflowStepStatusByKey[tab] === "locked") return;
+                      setSelectedWorkflowTab(tab);
+                    }}
+                  />
+                </div>
+              </>
+            ) : null}
             <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
-              {renderContextBuilderActiveStepContent(selectedWorkflowTab)}
+              {renderContextBuilderWorkspace()}
 
             {selectedWorkflowTab === "generate" ? (
               !workflowPrecMap.generate ? (

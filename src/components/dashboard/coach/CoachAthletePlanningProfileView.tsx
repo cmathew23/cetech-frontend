@@ -14905,86 +14905,12 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  const trainingPlanPageHeader = (
-    <PageHeader
-      title="Training Plan"
-      subtitle="Step-based plan creation workflow"
-    />
-  );
-
-  if (loading) {
+  function renderDomainPlansIntegrationWorkspace() {
+    if (selectedWorkflowTab !== "generate") return null;
     return (
-      <div className="w-full max-w-5xl space-y-4">
-        {trainingPlanPageHeader}
-        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
-          Loading athlete planning profile…
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full max-w-5xl space-y-4">
-      {trainingPlanPageHeader}
-
-      {error ? <Alert variant="danger">{error}</Alert> : null}
-      {missingPlanningProfile ? (
-        <Alert variant="warning">
-          Planning Profile Pending. The athlete must complete APP before training
-          plan validation.
-        </Alert>
-      ) : null}
-
-      {!error && !missingPlanningProfile && !profile ? (
-        <Alert variant="warning">No planning profile data available.</Alert>
-      ) : null}
-
-
-      {profile ? (
-        <>
-          {workflowViewSelectionLoading ? (
-            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
-                Loading training plan workspace...
-              </div>
-            </Card>
-          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
-            renderAssistantDomainWorkspace()
-          ) : trainingPlanShellModel.shell === "head_coach_review" ||
-            trainingPlanShellModel.shell === "head_coach_function_aware" ||
-            trainingPlanShellModel.shell === "head_coach_planning" ||
-            trainingPlanShellModel.shell === "skills_coach_planning" ? (
-          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-            {!isContextBuilderStep(selectedWorkflowTab) ? (
-              <>
-                <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
-                  <TrainingPlanWorkflowProgressRail
-                    steps={[...workflowStepperModel]}
-                    headCoachReviewMode={headCoachReviewMode}
-                    reviewReviseStepLabel={reviewReviseStepLabel}
-                  />
-                </div>
-                <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
-                  <WorkflowConnectedTabStrip
-                    selectedTab={selectedWorkflowTab}
-                    steps={[...workflowStepperModel]}
-                    headCoachReviewMode={headCoachReviewMode}
-                    reviewReviseStepLabel={reviewReviseStepLabel}
-                    onSelect={(tab) => {
-                      if (workflowStepStatusByKey[tab] === "locked") return;
-                      setSelectedWorkflowTab(tab);
-                    }}
-                  />
-                </div>
-              </>
-            ) : null}
-            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
-              {renderContextBuilderWorkspace()}
-
-            {selectedWorkflowTab === "generate" ? (
               !workflowPrecMap.generate ? (
                 <WorkflowLockedCard
-                  title={`Step 6 — ${headCoachReviewMode ? "Review Plans" : "Generate Plan"}`}
+                  title="Domain Plans Integration"
                   message={
                     isDownstreamDomainCoach
                       ? "Finish Context / APP and Level Validation before opening your domain plan panel."
@@ -14996,17 +14922,11 @@ export function CoachAthletePlanningProfileView({
               ) : (
                 <section className="space-y-3 rounded-lg border border-slate-200 p-4">
                   <div className="space-y-1">
-                    <h3 className="text-sm font-normal text-textPrimary">
-                      {`Step 6 — ${headCoachReviewMode ? "Review Plans" : "Generate Plan"}`}
-                    </h3>
+                    <h2 className="text-lg font-normal text-textPrimary">
+                      Domain Plans Integration
+                    </h2>
                     <p className="text-sm text-textSecondary">
-                      {headCoachReviewMode
-                        ? workflow2AHeadCoachStep6Intro(trainingPlanShellModel.shell)
-                        : step6GenerationLifecyclePhase === "generated_draft"
-                          ? "Review the generated plan below and continue with workflow actions when ready."
-                          : step6GenerationLifecyclePhase === "generating"
-                            ? "Plan generation is in progress."
-                            : "Generation follows the backend readiness contract. Any backend blockers are shown here before execution."}
+                      Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning context through generation, submission, review, and release.
                     </p>
                   </div>
                   {tab6ReviewOnlyMode ? (
@@ -15816,7 +15736,87 @@ export function CoachAthletePlanningProfileView({
                   )}
               </section>
               )
+
+    );
+  }
+
+  const trainingPlanPageHeader = (
+    <PageHeader
+      title="Training Plan"
+      subtitle="Build context, coordinate domain plans, and review athlete plans"
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="w-full max-w-5xl space-y-4">
+        {trainingPlanPageHeader}
+        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
+          Loading athlete planning profile…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-5xl space-y-4">
+      {trainingPlanPageHeader}
+
+      {error ? <Alert variant="danger">{error}</Alert> : null}
+      {missingPlanningProfile ? (
+        <Alert variant="warning">
+          Planning Profile Pending. The athlete must complete APP before training
+          plan validation.
+        </Alert>
+      ) : null}
+
+      {!error && !missingPlanningProfile && !profile ? (
+        <Alert variant="warning">No planning profile data available.</Alert>
+      ) : null}
+
+
+      {profile ? (
+        <>
+          {workflowViewSelectionLoading ? (
+            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
+                Loading training plan workspace...
+              </div>
+            </Card>
+          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
+            renderAssistantDomainWorkspace()
+          ) : trainingPlanShellModel.shell === "head_coach_review" ||
+            trainingPlanShellModel.shell === "head_coach_function_aware" ||
+            trainingPlanShellModel.shell === "head_coach_planning" ||
+            trainingPlanShellModel.shell === "skills_coach_planning" ? (
+          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+            {!isContextBuilderStep(selectedWorkflowTab) && selectedWorkflowTab !== "generate" ? (
+              <>
+                <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
+                  <TrainingPlanWorkflowProgressRail
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                  />
+                </div>
+                <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
+                  <WorkflowConnectedTabStrip
+                    selectedTab={selectedWorkflowTab}
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                    onSelect={(tab) => {
+                      if (workflowStepStatusByKey[tab] === "locked") return;
+                      setSelectedWorkflowTab(tab);
+                    }}
+                  />
+                </div>
+              </>
             ) : null}
+            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
+              {renderContextBuilderWorkspace()}
+
+              {renderDomainPlansIntegrationWorkspace()}
             </div>
           </Card>
           ) : (

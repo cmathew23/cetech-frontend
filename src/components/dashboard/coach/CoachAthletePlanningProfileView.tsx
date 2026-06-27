@@ -13202,77 +13202,10 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  const trainingPlanPageHeader = (
-    <PageHeader
-      title="Training Plan"
-      subtitle="Step-based plan creation workflow"
-    />
-  );
 
-  if (loading) {
+  function renderContextAppStepContent() {
+    if (profile === null) return null;
     return (
-      <div className="w-full max-w-5xl space-y-4">
-        {trainingPlanPageHeader}
-        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
-          Loading athlete planning profile…
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full max-w-5xl space-y-4">
-      {trainingPlanPageHeader}
-
-      {error ? <Alert variant="danger">{error}</Alert> : null}
-      {missingPlanningProfile ? (
-        <Alert variant="warning">
-          Planning Profile Pending. The athlete must complete APP before training
-          plan validation.
-        </Alert>
-      ) : null}
-
-      {!error && !missingPlanningProfile && !profile ? (
-        <Alert variant="warning">No planning profile data available.</Alert>
-      ) : null}
-
-
-      {profile ? (
-        <>
-          {workflowViewSelectionLoading ? (
-            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
-                Loading training plan workspace...
-              </div>
-            </Card>
-          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
-            renderAssistantDomainWorkspace()
-          ) : trainingPlanShellModel.shell === "head_coach_review" ||
-            trainingPlanShellModel.shell === "head_coach_function_aware" ||
-            trainingPlanShellModel.shell === "head_coach_planning" ||
-            trainingPlanShellModel.shell === "skills_coach_planning" ? (
-          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-            <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
-              <TrainingPlanWorkflowProgressRail
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-              />
-            </div>
-            <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
-              <WorkflowConnectedTabStrip
-                selectedTab={selectedWorkflowTab}
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-                onSelect={(tab) => {
-                  if (workflowStepStatusByKey[tab] === "locked") return;
-                  setSelectedWorkflowTab(tab);
-                }}
-              />
-            </div>
-            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
-              {selectedWorkflowTab === "context-app" ? (
                 <>
                 <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
                   <div className="space-y-1">
@@ -13498,9 +13431,12 @@ export function CoachAthletePlanningProfileView({
                   />
                 </div>
                 </>
-              ) : null}
 
-              {selectedWorkflowTab === "level-validation" ? (
+    );
+  }
+
+  function renderLevelValidationStepContent() {
+    return (
                 !workflowPrecMap["level-validation"] ? (
                   <WorkflowLockedCard
                     title="Step 2 — Level Validation"
@@ -13563,9 +13499,94 @@ export function CoachAthletePlanningProfileView({
                     ) : null}
                   </section>
                 )
-              ) : null}
 
-              {selectedWorkflowTab === "season-goals" ? (
+    );
+  }
+
+  function renderWorkloadAssessmentStepContent() {
+    return (
+                isDownstreamDomainCoach ? (
+                  <div className="space-y-3">
+                    <h3 className="text-base font-normal text-textPrimary">
+                      Step 3 — Workload Assessment
+                    </h3>
+                    {renderDownstreamUpstreamPlanningReadOnlySection()}
+                  </div>
+                ) : !workflowPrecMap.workload ? (
+                  <WorkflowLockedCard
+                    title="Step 3 — Workload Assessment"
+                    message="Confirm level validation before running workload assessment."
+                  />
+                ) : (
+                  <>
+                    {workloadComplete && !showWorkloadCompletionState ? (
+                      <WorkflowCompactSummaryStrip
+                        title="Step 3 — Workload Assessment"
+                        values={[
+                          {
+                            label: "Current Weekly Training Hours",
+                            value: displayValue(
+                              workloadAssessmentResult?.workloadClassification?.weeklyTrainingHours,
+                            ),
+                          },
+                          {
+                            label: "Recommended Range",
+                            value: formatWeeklyRange(
+                              workloadAssessmentResult?.workloadClassification?.recommendedMinHours ??
+                                null,
+                              workloadAssessmentResult?.workloadClassification?.recommendedMaxHours ??
+                                null,
+                            ),
+                          },
+                          {
+                            label: "Training Load Status",
+                            value: displayValue(
+                              workloadAssessmentResult?.workloadClassification?.status,
+                            ),
+                          },
+                          {
+                            label: "Sport",
+                            value: displayValue(workloadAssessmentResult?.workloadClassification?.sportCode),
+                          },
+                          {
+                            label: "Age Band",
+                            value: displayValue(workloadAssessmentResult?.workloadClassification?.ageBand),
+                          },
+                        ]}
+                      />
+                    ) : (
+                      <TrainingPlanWorkloadAssessmentStep
+                        showValidateLevel={showValidateLevel}
+                        readinessLoading={readinessLoading}
+                        workloadAssessmentLoading={workloadAssessmentLoading}
+                        workloadAssessmentError={workloadAssessmentError}
+                        workloadAssessmentResult={workloadAssessmentResult}
+                        workloadComplete={workloadComplete}
+                        showWorkloadCompletionState={showWorkloadCompletionState}
+                        readinessGate={{
+                          appCompleteness: readinessPanel.appCompleteness,
+                          validationStatus: readinessPanel.validationStatus,
+                          planningEligibility: readinessPanel.planningEligibility,
+                        }}
+                        onRunWorkloadAssessment={() => {
+                          void handleRunWorkloadAssessment();
+                        }}
+                      />
+                    )}
+                    {workloadComplete ? (
+                      <WorkflowTabNextButton
+                        label="Next → Goals"
+                        onClick={() => setSelectedWorkflowTab("season-goals")}
+                      />
+                    ) : null}
+                  </>
+                )
+
+    );
+  }
+
+  function renderSeasonGoalsStepContent() {
+    return (
                 isDownstreamDomainCoach ? (
                   <div className="space-y-3">
                     <h3 className="text-base font-normal text-textPrimary">Step 4 — Season & Goals</h3>
@@ -14333,88 +14354,12 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   </section>
                 )
-              ) : null}
 
-              {selectedWorkflowTab === "workload" ? (
-                isDownstreamDomainCoach ? (
-                  <div className="space-y-3">
-                    <h3 className="text-base font-normal text-textPrimary">
-                      Step 3 — Workload Assessment
-                    </h3>
-                    {renderDownstreamUpstreamPlanningReadOnlySection()}
-                  </div>
-                ) : !workflowPrecMap.workload ? (
-                  <WorkflowLockedCard
-                    title="Step 3 — Workload Assessment"
-                    message="Confirm level validation before running workload assessment."
-                  />
-                ) : (
-                  <>
-                    {workloadComplete && !showWorkloadCompletionState ? (
-                      <WorkflowCompactSummaryStrip
-                        title="Step 3 — Workload Assessment"
-                        values={[
-                          {
-                            label: "Current Weekly Training Hours",
-                            value: displayValue(
-                              workloadAssessmentResult?.workloadClassification?.weeklyTrainingHours,
-                            ),
-                          },
-                          {
-                            label: "Recommended Range",
-                            value: formatWeeklyRange(
-                              workloadAssessmentResult?.workloadClassification?.recommendedMinHours ??
-                                null,
-                              workloadAssessmentResult?.workloadClassification?.recommendedMaxHours ??
-                                null,
-                            ),
-                          },
-                          {
-                            label: "Training Load Status",
-                            value: displayValue(
-                              workloadAssessmentResult?.workloadClassification?.status,
-                            ),
-                          },
-                          {
-                            label: "Sport",
-                            value: displayValue(workloadAssessmentResult?.workloadClassification?.sportCode),
-                          },
-                          {
-                            label: "Age Band",
-                            value: displayValue(workloadAssessmentResult?.workloadClassification?.ageBand),
-                          },
-                        ]}
-                      />
-                    ) : (
-                      <TrainingPlanWorkloadAssessmentStep
-                        showValidateLevel={showValidateLevel}
-                        readinessLoading={readinessLoading}
-                        workloadAssessmentLoading={workloadAssessmentLoading}
-                        workloadAssessmentError={workloadAssessmentError}
-                        workloadAssessmentResult={workloadAssessmentResult}
-                        workloadComplete={workloadComplete}
-                        showWorkloadCompletionState={showWorkloadCompletionState}
-                        readinessGate={{
-                          appCompleteness: readinessPanel.appCompleteness,
-                          validationStatus: readinessPanel.validationStatus,
-                          planningEligibility: readinessPanel.planningEligibility,
-                        }}
-                        onRunWorkloadAssessment={() => {
-                          void handleRunWorkloadAssessment();
-                        }}
-                      />
-                    )}
-                    {workloadComplete ? (
-                      <WorkflowTabNextButton
-                        label="Next → Goals"
-                        onClick={() => setSelectedWorkflowTab("season-goals")}
-                      />
-                    ) : null}
-                  </>
-                )
-              ) : null}
+    );
+  }
 
-            {selectedWorkflowTab === "plan-dates" ? (
+  function renderPlanDatesStepContent() {
+    return (
               isDownstreamDomainCoach ? (
                 <div className="space-y-3">
                   <h3 className="text-base font-normal text-textPrimary">Step 5 — Plan Dates</h3>
@@ -14454,7 +14399,90 @@ export function CoachAthletePlanningProfileView({
                   ) : null}
                 </section>
               )
-            ) : null}
+
+    );
+  }
+
+  function renderContextBuilderActiveStepContent(step: GuidedWorkflowStepKey) {
+    if (step === "context-app") return renderContextAppStepContent();
+    if (step === "level-validation") return renderLevelValidationStepContent();
+    if (step === "workload") return renderWorkloadAssessmentStepContent();
+    if (step === "season-goals") return renderSeasonGoalsStepContent();
+    if (step === "plan-dates") return renderPlanDatesStepContent();
+    return null;
+  }
+
+  const trainingPlanPageHeader = (
+    <PageHeader
+      title="Training Plan"
+      subtitle="Step-based plan creation workflow"
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="w-full max-w-5xl space-y-4">
+        {trainingPlanPageHeader}
+        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
+          Loading athlete planning profile…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-5xl space-y-4">
+      {trainingPlanPageHeader}
+
+      {error ? <Alert variant="danger">{error}</Alert> : null}
+      {missingPlanningProfile ? (
+        <Alert variant="warning">
+          Planning Profile Pending. The athlete must complete APP before training
+          plan validation.
+        </Alert>
+      ) : null}
+
+      {!error && !missingPlanningProfile && !profile ? (
+        <Alert variant="warning">No planning profile data available.</Alert>
+      ) : null}
+
+
+      {profile ? (
+        <>
+          {workflowViewSelectionLoading ? (
+            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
+                Loading training plan workspace...
+              </div>
+            </Card>
+          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
+            renderAssistantDomainWorkspace()
+          ) : trainingPlanShellModel.shell === "head_coach_review" ||
+            trainingPlanShellModel.shell === "head_coach_function_aware" ||
+            trainingPlanShellModel.shell === "head_coach_planning" ||
+            trainingPlanShellModel.shell === "skills_coach_planning" ? (
+          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+            <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
+              <TrainingPlanWorkflowProgressRail
+                steps={[...workflowStepperModel]}
+                headCoachReviewMode={headCoachReviewMode}
+                reviewReviseStepLabel={reviewReviseStepLabel}
+              />
+            </div>
+            <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
+              <WorkflowConnectedTabStrip
+                selectedTab={selectedWorkflowTab}
+                steps={[...workflowStepperModel]}
+                headCoachReviewMode={headCoachReviewMode}
+                reviewReviseStepLabel={reviewReviseStepLabel}
+                onSelect={(tab) => {
+                  if (workflowStepStatusByKey[tab] === "locked") return;
+                  setSelectedWorkflowTab(tab);
+                }}
+              />
+            </div>
+            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
+              {renderContextBuilderActiveStepContent(selectedWorkflowTab)}
 
             {selectedWorkflowTab === "generate" ? (
               !workflowPrecMap.generate ? (

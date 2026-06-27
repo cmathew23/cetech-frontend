@@ -10543,8 +10543,11 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  /** Head Coach submitted-plan cards + inline review panel (shared by pure HC Step 6 and HC-with-domain Step 6). */
-  function renderHeadCoachSubmittedDomainPlansSection() {
+  function renderDomainPlansIntegrationCard(domain: TrainingPlanGenerationDomain) {
+    return renderHeadCoachDomainPlanCard(domain);
+  }
+
+  function renderDomainPlansIntegrationSection() {
     if (!headCoachReviewMode) return null;
     const locked = upstreamPlanningContext?.planningContextLocked === true;
     const reviewDomains = resolveHeadCoachSubmittedReviewCardDomains({
@@ -10553,22 +10556,30 @@ export function CoachAthletePlanningProfileView({
       workspace,
     });
     return (
+      <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="space-y-1">
+          <h4 className="text-sm font-normal text-textPrimary">Submitted Domain Plans</h4>
+          <p className="text-sm text-textSecondary">
+            {locked
+              ? "Assigned domain coaches can create their plans using this locked context."
+              : "Lock planning context first, then review submitted plans from the assigned domain coaches here."}
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {reviewDomains.map(renderDomainPlansIntegrationCard)}
+        </div>
+      </section>
+    );
+  }
+
+  /** Head Coach submitted-plan cards + inline review panel (shared by pure HC Step 6 and HC-with-domain Step 6). */
+  function renderHeadCoachSubmittedDomainPlansSection() {
+    if (!headCoachReviewMode) return null;
+    return (
       <div className="space-y-4">
         {renderWorkflow1HeadCoachReviewActionPanel()}
         {renderHeadCoachPlanReviewPanel()}
-        <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <div className="space-y-1">
-            <h4 className="text-sm font-normal text-textPrimary">Submitted Domain Plans</h4>
-            <p className="text-sm text-textSecondary">
-              {locked
-                ? "Assigned domain coaches can create their plans using this locked context."
-                : "Lock planning context first, then review submitted plans from the assigned domain coaches here."}
-            </p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {reviewDomains.map(renderHeadCoachDomainPlanCard)}
-          </div>
-        </section>
+        {renderDomainPlansIntegrationSection()}
       </div>
     );
   }
@@ -12246,6 +12257,155 @@ export function CoachAthletePlanningProfileView({
           </WorkflowNeutralNotice>
         ) : null}
       </div>
+    );
+  }
+
+  function renderLockedPlanningContextSummaryForDomainIntegration() {
+    return isPlanningContextAuthority && !isDownstreamDomainCoach
+      ? renderHeadCoachPlanningContextLockAction()
+      : null;
+  }
+
+  function renderStep6DomainIntegrationContent() {
+    return (
+                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Domain Integration
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Confirm planning context, readiness, blockers, and generation status.
+                          </p>
+                        </div>
+                      {renderLockedPlanningContextSummaryForDomainIntegration()}
+                      {isDownstreamDomainCoach &&
+                      !upstreamPlanningContextLoading &&
+                      !upstreamPlanningContextError &&
+                      !effectiveDownstreamPlanningContextLocked ? (
+                        <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
+                      ) : null}
+                      {isDownstreamDomainCoach ? (
+                        renderDownstreamUpstreamPlanningReadOnlySection()
+                      ) : step6ShowsPreGenerationReadiness ? (
+                        <dl className="space-y-2">
+                          <DetailRow
+                            label="Backend readiness status"
+                            value={displayValue(readinessPanel.readinessStatus)}
+                          />
+                          <DetailRow
+                            label="Backend allows generation"
+                            value={generationReadinessFromApis ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="APP complete"
+                            value={readinessPanel.appCompleteness === "COMPLETE" ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Level validation confirmed"
+                            value={readinessPanel.validationStatus === "CONFIRMED" ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Workload assessment complete"
+                            value={workloadComplete ? "Yes" : "Pending — not ready"}
+                          />
+                          <DetailRow
+                            label="Season selected"
+                            value={seasonReady ? "Yes" : "Pending — not ready"}
+                          />
+                          <DetailRow
+                            label="Current phase detected"
+                            value={currentPhaseDetected ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Plan window inside current phase"
+                            value={planWindowInsideCurrentPhase ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="At least one ACTIVE goal selected"
+                            value={goalsReadyForGeneration ? "Yes" : "Pending — not ready"}
+                          />
+                        </dl>
+                      ) : step6ShowsGeneratedDraftSummary ? (
+                        <WorkflowNeutralNotice>
+                          <div className="space-y-1 text-sm">
+                            <div className="font-medium text-textPrimary">
+                              Plan status:{" "}
+                              {assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus)}
+                            </div>
+                            <p className="text-textSecondary">
+                              A generated plan is available for this athlete. Review the plan
+                              details below.
+                            </p>
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      {step6ShowsPreGenerationReadiness &&
+                      readinessPanel.blockers.length > 0 ? (
+                        <Alert variant="warning">
+                          <div className="space-y-2">
+                            <div className="font-medium">Backend blockers</div>
+                            <ul className="list-inside list-disc space-y-1">
+                              {readinessPanel.blockers.map((blocker) => (
+                                <li key={blocker} className="whitespace-pre-wrap break-words">
+                                  {blocker}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </Alert>
+                      ) : null}
+                      {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
+                      {(trainingPlanShellModel.shell !== "skills_coach_planning" ||
+                        step6GenerationLifecyclePhase === "generating") &&
+                      currentDomainGenerationJob !== null
+                        ? renderGenerationJobProgress(currentDomainGenerationJob)
+                        : null}
+                      {generatePlanRecoveryMessage ? (
+                        <WorkflowNeutralNotice>
+                          <div className="text-sm font-medium text-textPrimary">
+                            {generatePlanRecoveryMessage}
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      {generatePlanSuccess ? (
+                        <WorkflowNeutralNotice>
+                          <div className="space-y-2">
+                            <div className="font-medium">Training plan draft generated successfully.</div>
+                            <dl className="space-y-1">
+                              <DetailRow
+                                label="Training Plan ID"
+                                value={displayValue(generatePlanSuccess.trainingPlanId)}
+                              />
+                              <DetailRow
+                                label="Training Plan Version ID"
+                                value={displayValue(generatePlanSuccess.trainingPlanVersionId)}
+                              />
+                              <DetailRow
+                                label="Version Number"
+                                value={displayValue(generatePlanSuccess.versionNumber)}
+                              />
+                              <DetailRow
+                                label="Status"
+                                value={displayValue(generatePlanSuccess.status)}
+                              />
+                              <DetailRow
+                                label="Days Created"
+                                value={displayValue(generatePlanSuccess.daysCreated)}
+                              />
+                              <DetailRow
+                                label="Sessions Created"
+                                value={displayValue(generatePlanSuccess.sessionsCreated)}
+                              />
+                              <DetailRow
+                                label="Items Persisted"
+                                value={displayValue(generatePlanSuccess.itemsPersisted)}
+                              />
+                            </dl>
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      </div>
+
     );
   }
 
@@ -14863,145 +15023,7 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : (
                     <>
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-normal text-textPrimary">
-                            Domain Integration
-                          </h4>
-                          <p className="text-sm text-textSecondary">
-                            Confirm planning context, readiness, blockers, and generation status.
-                          </p>
-                        </div>
-                      {isPlanningContextAuthority && !isDownstreamDomainCoach
-                        ? renderHeadCoachPlanningContextLockAction()
-                        : null}
-                      {isDownstreamDomainCoach &&
-                      !upstreamPlanningContextLoading &&
-                      !upstreamPlanningContextError &&
-                      !effectiveDownstreamPlanningContextLocked ? (
-                        <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
-                      ) : null}
-                      {isDownstreamDomainCoach ? (
-                        renderDownstreamUpstreamPlanningReadOnlySection()
-                      ) : step6ShowsPreGenerationReadiness ? (
-                        <dl className="space-y-2">
-                          <DetailRow
-                            label="Backend readiness status"
-                            value={displayValue(readinessPanel.readinessStatus)}
-                          />
-                          <DetailRow
-                            label="Backend allows generation"
-                            value={generationReadinessFromApis ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="APP complete"
-                            value={readinessPanel.appCompleteness === "COMPLETE" ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Level validation confirmed"
-                            value={readinessPanel.validationStatus === "CONFIRMED" ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Workload assessment complete"
-                            value={workloadComplete ? "Yes" : "Pending — not ready"}
-                          />
-                          <DetailRow
-                            label="Season selected"
-                            value={seasonReady ? "Yes" : "Pending — not ready"}
-                          />
-                          <DetailRow
-                            label="Current phase detected"
-                            value={currentPhaseDetected ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Plan window inside current phase"
-                            value={planWindowInsideCurrentPhase ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="At least one ACTIVE goal selected"
-                            value={goalsReadyForGeneration ? "Yes" : "Pending — not ready"}
-                          />
-                        </dl>
-                      ) : step6ShowsGeneratedDraftSummary ? (
-                        <WorkflowNeutralNotice>
-                          <div className="space-y-1 text-sm">
-                            <div className="font-medium text-textPrimary">
-                              Plan status:{" "}
-                              {assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus)}
-                            </div>
-                            <p className="text-textSecondary">
-                              A generated plan is available for this athlete. Review the plan
-                              details below.
-                            </p>
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      {step6ShowsPreGenerationReadiness &&
-                      readinessPanel.blockers.length > 0 ? (
-                        <Alert variant="warning">
-                          <div className="space-y-2">
-                            <div className="font-medium">Backend blockers</div>
-                            <ul className="list-inside list-disc space-y-1">
-                              {readinessPanel.blockers.map((blocker) => (
-                                <li key={blocker} className="whitespace-pre-wrap break-words">
-                                  {blocker}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </Alert>
-                      ) : null}
-                      {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
-                      {(trainingPlanShellModel.shell !== "skills_coach_planning" ||
-                        step6GenerationLifecyclePhase === "generating") &&
-                      currentDomainGenerationJob !== null
-                        ? renderGenerationJobProgress(currentDomainGenerationJob)
-                        : null}
-                      {generatePlanRecoveryMessage ? (
-                        <WorkflowNeutralNotice>
-                          <div className="text-sm font-medium text-textPrimary">
-                            {generatePlanRecoveryMessage}
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      {generatePlanSuccess ? (
-                        <WorkflowNeutralNotice>
-                          <div className="space-y-2">
-                            <div className="font-medium">Training plan draft generated successfully.</div>
-                            <dl className="space-y-1">
-                              <DetailRow
-                                label="Training Plan ID"
-                                value={displayValue(generatePlanSuccess.trainingPlanId)}
-                              />
-                              <DetailRow
-                                label="Training Plan Version ID"
-                                value={displayValue(generatePlanSuccess.trainingPlanVersionId)}
-                              />
-                              <DetailRow
-                                label="Version Number"
-                                value={displayValue(generatePlanSuccess.versionNumber)}
-                              />
-                              <DetailRow
-                                label="Status"
-                                value={displayValue(generatePlanSuccess.status)}
-                              />
-                              <DetailRow
-                                label="Days Created"
-                                value={displayValue(generatePlanSuccess.daysCreated)}
-                              />
-                              <DetailRow
-                                label="Sessions Created"
-                                value={displayValue(generatePlanSuccess.sessionsCreated)}
-                              />
-                              <DetailRow
-                                label="Items Persisted"
-                                value={displayValue(generatePlanSuccess.itemsPersisted)}
-                              />
-                            </dl>
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      </div>
+                      {renderStep6DomainIntegrationContent()}
                       <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
                         <div className="space-y-1">
                           <h4 className="text-sm font-normal text-textPrimary">

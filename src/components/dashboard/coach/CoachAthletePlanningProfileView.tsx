@@ -4338,6 +4338,7 @@ export function CoachAthletePlanningProfileView({
   const prevUrlPlanForPersistedSyncRef = useRef<string | null | undefined>(undefined);
   /** Suppress repeated internal active/detail fetches after a failure until the plan/domain key changes or Step 6 is left. */
   const workflowStep6FetchFailedForKeyRef = useRef<string | null>(null);
+  const headCoachReviewDetailFetchKeyRef = useRef<string | null>(null);
   const step6WorkflowFetchGenRef = useRef(0);
   const coachDomainStateResetRef = useRef<string | null>(null);
 
@@ -8135,7 +8136,6 @@ export function CoachAthletePlanningProfileView({
           });
           const summaryVersionId = summarySource.versionId;
           const summaryPlanId = summarySource.planId;
-          let activeDetail: CoachPersistedTrainingPlanActiveDetail | null = null;
           let versions: CoachPersistedTrainingPlanVersion[] = [];
 
           nextStates[domain].summaryPlanId = summaryPlanId;
@@ -8143,17 +8143,6 @@ export function CoachAthletePlanningProfileView({
 
           if (summaryPlanId !== null && summaryPlanId !== "") {
             knownDomainPlanIdsRef.current[domain] = summaryPlanId;
-            try {
-              activeDetail = await fetchPersistedTrainingPlanActiveDetail(summaryPlanId, domain);
-              nextStates[domain].activeDetail = activeDetail;
-            } catch (e) {
-              if (!(isNormalizedApiError(e) && e.status === 404)) {
-                nextStates[domain].error = formatApiError(
-                  e,
-                  `Could not load review details for ${trainingPlanDomainLabel(domain)}.`,
-                );
-              }
-            }
             if (summaryVersionId !== null || (summarySource.status?.trim() ?? "") === "") {
               try {
                 versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
@@ -8169,7 +8158,7 @@ export function CoachAthletePlanningProfileView({
           }
           nextStates[domain].summaryStatus = resolveHeadCoachDomainSummaryStatus({
             summaryStatus: summarySource.status,
-            activeDetail,
+            activeDetail: null,
             versions,
             summaryVersionId,
           });
@@ -8182,36 +8171,30 @@ export function CoachAthletePlanningProfileView({
             ...nextStates.SKILLS,
             latestDraft: nextStates.SKILLS.latestDraft ?? prev.SKILLS.latestDraft,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: nextStates.SKILLS.activeDetail,
+              refreshedActiveDetail: null,
               previousActiveDetail: prev.SKILLS.activeDetail,
               summaryPlanId: nextStates.SKILLS.summaryPlanId,
-              preservePreviousDetail:
-                workflow1HeadCoachReviewActionPanelMode &&
-                headCoachSubmittedReviewDomain === "SKILLS",
+              preservePreviousDetail: true,
             }),
           },
           NUTRITION: {
             ...nextStates.NUTRITION,
             latestDraft: nextStates.NUTRITION.latestDraft ?? prev.NUTRITION.latestDraft,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: nextStates.NUTRITION.activeDetail,
+              refreshedActiveDetail: null,
               previousActiveDetail: prev.NUTRITION.activeDetail,
               summaryPlanId: nextStates.NUTRITION.summaryPlanId,
-              preservePreviousDetail:
-                workflow1HeadCoachReviewActionPanelMode &&
-                headCoachSubmittedReviewDomain === "NUTRITION",
+              preservePreviousDetail: true,
             }),
           },
           S_AND_C: {
             ...nextStates.S_AND_C,
             latestDraft: nextStates.S_AND_C.latestDraft ?? prev.S_AND_C.latestDraft,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: nextStates.S_AND_C.activeDetail,
+              refreshedActiveDetail: null,
               previousActiveDetail: prev.S_AND_C.activeDetail,
               summaryPlanId: nextStates.S_AND_C.summaryPlanId,
-              preservePreviousDetail:
-                workflow1HeadCoachReviewActionPanelMode &&
-                headCoachSubmittedReviewDomain === "S_AND_C",
+              preservePreviousDetail: true,
             }),
           },
         }));
@@ -8228,8 +8211,6 @@ export function CoachAthletePlanningProfileView({
     entityId,
     isHeadCoachPlanningContextOwner,
     planningContextBootstrapState,
-    headCoachSubmittedReviewDomain,
-    workflow1HeadCoachReviewActionPanelMode,
     workspace,
   ]);
 
@@ -9910,12 +9891,31 @@ export function CoachAthletePlanningProfileView({
   }
 
   function openHeadCoachDomainPlanReview(planContext: GovernedPlanContext) {
+    const planId = planContext.planId.trim();
+    const versionId = planContext.versionId.trim();
+    const domain = planContext.generationDomain;
     if (planContext.planId.trim() !== "") {
-      knownDomainPlanIdsRef.current[planContext.generationDomain] = planContext.planId.trim();
+      knownDomainPlanIdsRef.current[domain] = planId;
     }
-    setHeadCoachSubmittedReviewDomain(planContext.generationDomain);
+    setHeadCoachSubmittedReviewDomain(domain);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+
+    const activeDetail = headCoachDomainPlanStates[domain].activeDetail;
+    const activePlanId = activeDetail?.plan.id?.trim() ?? "";
+    const activeVersionId = activeDetail?.version.id?.trim() ?? "";
+    const detailMatchesSelectedPlan =
+      activePlanId === planId && (versionId === "" || activeVersionId === versionId);
+    if (detailMatchesSelectedPlan) return;
+
+    const fetchKey = `${domain}:${planId}:${versionId}`;
+    if (headCoachReviewDetailFetchKeyRef.current === fetchKey) return;
+    headCoachReviewDetailFetchKeyRef.current = fetchKey;
+    void refreshHeadCoachDomainPlanState(domain).finally(() => {
+      if (headCoachReviewDetailFetchKeyRef.current === fetchKey) {
+        headCoachReviewDetailFetchKeyRef.current = null;
+      }
+    });
   }
 
   function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {

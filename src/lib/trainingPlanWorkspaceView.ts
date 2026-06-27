@@ -223,6 +223,160 @@ export function workspaceAllowedActionsSet(
   return new Set(parseWorkspaceAllowedActions(workspace.domains[domain]));
 }
 
+export type TrainingPlanTab6Authority = {
+  canManagePlanningContext: boolean;
+  canGenerateSkills: boolean;
+  canGenerateNutrition: boolean;
+  canGenerateSC: boolean;
+  canSubmitSkillsForReview: boolean;
+  canSubmitNutritionForReview: boolean;
+  canSubmitSCForReview: boolean;
+  canApproveDomains: boolean;
+  canReleaseToAthlete: boolean;
+  isAssignedSkillsOwner: boolean;
+  isAssignedNutritionOwner: boolean;
+  isAssignedSCOwner: boolean;
+  isGovernanceCoach: boolean;
+  isDirectReleaseDomainCoach: boolean;
+};
+
+const EMPTY_TAB6_AUTHORITY: TrainingPlanTab6Authority = {
+  canManagePlanningContext: false,
+  canGenerateSkills: false,
+  canGenerateNutrition: false,
+  canGenerateSC: false,
+  canSubmitSkillsForReview: false,
+  canSubmitNutritionForReview: false,
+  canSubmitSCForReview: false,
+  canApproveDomains: false,
+  canReleaseToAthlete: false,
+  isAssignedSkillsOwner: false,
+  isAssignedNutritionOwner: false,
+  isAssignedSCOwner: false,
+  isGovernanceCoach: false,
+  isDirectReleaseDomainCoach: false,
+};
+
+function legacyRequesterOwnsDomain(
+  workspace: TrainingPlanWorkspace,
+  domain: GenerationDomain,
+): boolean {
+  const flags = workspace.ownershipFlags;
+  if (domain === "SKILLS" && flags.requesterOwnsSkillsForThisAthlete !== undefined) {
+    return flags.requesterOwnsSkillsForThisAthlete;
+  }
+  if (domain === "NUTRITION" && flags.requesterOwnsNutritionForThisAthlete !== undefined) {
+    return flags.requesterOwnsNutritionForThisAthlete;
+  }
+  if (domain === "S_AND_C" && flags.requesterOwnsStrengthForThisAthlete !== undefined) {
+    return flags.requesterOwnsStrengthForThisAthlete;
+  }
+  return (
+    flags.requesterOwnsCurrentDomain &&
+    parseWorkspaceCurrentDomain(workspace.currentDomain) === domain
+  );
+}
+
+export function resolveTrainingPlanTab6Authority(
+  workspace: TrainingPlanWorkspace | null | undefined,
+): TrainingPlanTab6Authority {
+  if (workspace === null || workspace === undefined) return EMPTY_TAB6_AUTHORITY;
+
+  const assignment = workspace.assignmentContext;
+  if (assignment !== undefined) {
+    const skills = assignment.domains.SKILLS;
+    const nutrition = assignment.domains.NUTRITION;
+    const sandC = assignment.domains.S_AND_C;
+    const domainContexts = [skills, nutrition, sandC];
+    const ownsSkills = skills.ownerType !== "NONE" && skills.ownedByCurrentUser;
+    const ownsNutrition = nutrition.ownerType !== "NONE" && nutrition.ownedByCurrentUser;
+    const ownsSC = sandC.ownerType !== "NONE" && sandC.ownedByCurrentUser;
+    const canApproveDomains = domainContexts.some(
+      (domain) => domain.canApprove || domain.canRequestRevision === true,
+    );
+    const canReleaseToAthlete = domainContexts.some((domain) => domain.canRelease);
+    const isGovernanceCoach =
+      canApproveDomains ||
+      domainContexts.some(
+        (domain) =>
+          domain.releaseMode === "HEAD_COACH_APPROVAL" && domain.canRelease,
+      );
+    const isDirectReleaseDomainCoach =
+      assignment.releaseMode === "DIRECT_DOMAIN_RELEASE" &&
+      domainContexts.some(
+        (domain) =>
+          domain.ownerType !== "NONE" &&
+          domain.ownedByCurrentUser &&
+          (domain.canGenerate || domain.canSubmitForReview || domain.canRelease),
+      );
+
+    return {
+      canManagePlanningContext:
+        assignment.planningContext.ownerType !== "NONE" &&
+        (assignment.planningContext.canCreate ||
+          assignment.planningContext.canLock ||
+          assignment.planningContext.canManage),
+      canGenerateSkills: ownsSkills && skills.canGenerate,
+      canGenerateNutrition: ownsNutrition && nutrition.canGenerate,
+      canGenerateSC: ownsSC && sandC.canGenerate,
+      canSubmitSkillsForReview: ownsSkills && skills.canSubmitForReview,
+      canSubmitNutritionForReview: ownsNutrition && nutrition.canSubmitForReview,
+      canSubmitSCForReview: ownsSC && sandC.canSubmitForReview,
+      canApproveDomains,
+      canReleaseToAthlete,
+      isAssignedSkillsOwner: ownsSkills,
+      isAssignedNutritionOwner: ownsNutrition,
+      isAssignedSCOwner: ownsSC,
+      isGovernanceCoach,
+      isDirectReleaseDomainCoach,
+    };
+  }
+
+  const ownsSkills = legacyRequesterOwnsDomain(workspace, "SKILLS");
+  const ownsNutrition = legacyRequesterOwnsDomain(workspace, "NUTRITION");
+  const ownsSC = legacyRequesterOwnsDomain(workspace, "S_AND_C");
+  const skillsActions = workspaceAllowedActionsSet(workspace, "SKILLS");
+  const nutritionActions = workspaceAllowedActionsSet(workspace, "NUTRITION");
+  const sandCActions = workspaceAllowedActionsSet(workspace, "S_AND_C");
+  const domainActionSets = [skillsActions, nutritionActions, sandCActions];
+  const canApproveDomains = domainActionSets.some(
+    (actions) => actions.has("HEAD_APPROVE") || actions.has("REQUEST_REVISION"),
+  );
+  const canReleaseToAthlete = domainActionSets.some((actions) => actions.has("RELEASE"));
+
+  return {
+    canManagePlanningContext: workspace.ownershipFlags.headCoachOwnsPlanningContext,
+    canGenerateSkills: ownsSkills,
+    canGenerateNutrition: ownsNutrition,
+    canGenerateSC: ownsSC,
+    canSubmitSkillsForReview: ownsSkills && skillsActions.has("SUBMIT_REVIEW"),
+    canSubmitNutritionForReview: ownsNutrition && nutritionActions.has("SUBMIT_REVIEW"),
+    canSubmitSCForReview: ownsSC && sandCActions.has("SUBMIT_REVIEW"),
+    canApproveDomains,
+    canReleaseToAthlete,
+    isAssignedSkillsOwner: ownsSkills,
+    isAssignedNutritionOwner: ownsNutrition,
+    isAssignedSCOwner: ownsSC,
+    isGovernanceCoach:
+      workspace.ownershipFlags.requesterIsHeadCoach &&
+      (canApproveDomains || canReleaseToAthlete),
+    isDirectReleaseDomainCoach:
+      workspace.ownershipFlags.directReleaseAllowed &&
+      (ownsSkills || ownsNutrition || ownsSC),
+  };
+}
+
+export function workspaceAssignedGenerationDomains(
+  workspace: TrainingPlanWorkspace,
+): GenerationDomain[] {
+  const assignment = workspace.assignmentContext;
+  if (assignment === undefined) return [];
+  return GENERATION_DOMAINS.filter((domain) => {
+    const context = assignment.domains[domain];
+    return context.ownerType !== "NONE" && context.ownedByCurrentUser;
+  });
+}
+
 export function workspaceResolvableGenerationDomains(
   workspace: TrainingPlanWorkspace,
 ): GenerationDomain[] {

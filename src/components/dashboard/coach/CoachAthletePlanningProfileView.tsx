@@ -1095,6 +1095,92 @@ function assistantWorkflowStatusLabelForKind(kind: AssistantDomainWorkflowStatus
   return "Not Created";
 }
 
+function domainIntegrationOwnerLabel(
+  domain: TrainingPlanGenerationDomain,
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined,
+): string {
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return assistantRoleLabel(domain);
+  }
+  if (assignmentDomainContext.ownerType === "HEAD_COACH_SELF") {
+    return assignmentDomainContext.ownedByCurrentUser ? "Head Coach (you)" : "Head Coach";
+  }
+  if (assignmentDomainContext.ownerType === "ASSIGNED_DOMAIN_COACH") {
+    return assignmentDomainContext.ownedByCurrentUser
+      ? `${assistantRoleLabel(domain)} (you)`
+      : assistantRoleLabel(domain);
+  }
+  return "Unassigned";
+}
+
+function domainIntegrationStatusTone(kind: AssistantDomainWorkflowStatus): string {
+  if (kind === "released" || kind === "approved") {
+    return "border-green-200 bg-green-50 text-green-700";
+  }
+  if (kind === "submitted_for_review" || kind === "revision_requested") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  if (kind === "draft_generated") {
+    return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+  return "border-slate-200 bg-slate-50 text-textSecondary";
+}
+
+function domainIntegrationNextActionLabel(input: {
+  workflowStatus: AssistantDomainWorkflowStatus;
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
+  planningContextLocked: boolean;
+  loading: boolean;
+  hasError: boolean;
+  canGenerate: boolean;
+  canSubmitForReview: boolean;
+  canViewPlan: boolean;
+  canReview: boolean;
+  canRelease: boolean;
+  isCurrentReviewPlan: boolean;
+}): string {
+  if (input.loading) return "Loading the latest plan state.";
+  if (input.hasError) return "Resolve the status warning, then refresh this track.";
+  if (input.isCurrentReviewPlan) return "Review is open above.";
+
+  if (input.workflowStatus === "not_created") {
+    if (input.canGenerate) return "Ready to generate this domain plan.";
+    if (!input.planningContextLocked) {
+      return "Waiting for planning context to be locked.";
+    }
+    if (input.assignmentDomainContext?.ownerType === "NONE") {
+      return "No domain owner is assigned.";
+    }
+    return "Waiting for the assigned coach to generate a plan.";
+  }
+
+  if (input.workflowStatus === "draft_generated") {
+    if (input.canSubmitForReview) return "Ready to submit for review.";
+    return "Waiting for the assigned coach to submit for review.";
+  }
+
+  if (input.workflowStatus === "submitted_for_review") {
+    if (input.canReview) return "Open review to approve or request changes.";
+    if (input.canViewPlan) return "Ready for Head Coach review.";
+    return "Waiting for review access.";
+  }
+
+  if (input.workflowStatus === "revision_requested") {
+    if (input.assignmentDomainContext?.ownedByCurrentUser === true) {
+      return "Revision requested; revise and resubmit.";
+    }
+    return "Waiting for the assigned coach to revise and resubmit.";
+  }
+
+  if (input.workflowStatus === "approved") {
+    return input.canRelease
+      ? "Approved and ready to release."
+      : "Approved; waiting for release.";
+  }
+
+  return "Released to athlete.";
+}
+
 export function deriveAssistantDomainWorkflowStatus(input: {
   latestDraft: CoachAthleteLatestDomainDraft | null;
   activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
@@ -9984,6 +10070,7 @@ export function CoachAthletePlanningProfileView({
 
   function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
     const state = headCoachDomainPlanStates[domain];
+    const assignmentDomainContext = workspace?.assignmentContext?.domains[domain];
     const workflow2SkillsSlotProjection =
       headCoachFunctionAwareMode && headCoachOwnedSkillsGrouping && domain === "SKILLS"
         ? resolveWorkflow2SubmittedDomainSkillsSlotProjection({
@@ -10046,17 +10133,120 @@ export function CoachAthletePlanningProfileView({
       headCoachOwnedSkillsGrouping &&
       domain === "SKILLS" &&
       workflowStatus === "draft_generated";
+    const rawPlanStatus =
+      [
+        workspaceDomainEntry?.summary.status,
+        state.summaryStatus,
+        activeDetail?.version.status,
+        activeDetail?.plan.status,
+      ].find((value) => (value?.trim() ?? "") !== "") ?? null;
+    const planStatusLabel =
+      rawPlanStatus !== null
+        ? formatEnumeratedLabel(rawPlanStatus)
+        : isNotCreated
+          ? "No plan yet"
+          : "Unavailable";
+    const allowedActions =
+      workspace !== null
+        ? workspaceAllowedActionsSet(workspace, domain)
+        : new Set<GovernedTrainingPlanWorkflowAction>();
+    for (const action of activeDetail?.allowedActions ?? []) {
+      allowedActions.add(action);
+    }
+    const canShowSubmitForReview = resolveDomainSubmitForReviewVisible({
+      assignmentDomainContext,
+      legacyCanSubmitForReview:
+        workspace !== null
+          ? workspaceShowsDomainSubmitReview(workspace, domain)
+          : allowedActions.has("SUBMIT_REVIEW"),
+      workflowStatus,
+      planId,
+      versionId,
+    });
+    const canShowReviewAction =
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext,
+        legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
+        planId,
+        versionId,
+      }) ||
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext,
+        reviewAction: "REQUEST_REVISION",
+        legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
+        planId,
+        versionId,
+      });
+    const canShowReleaseAction = resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext,
+      requiredReleaseMode: "HEAD_COACH_APPROVAL",
+      legacyCanRelease: allowedActions.has("RELEASE"),
+      planId,
+      versionId,
+    });
+    const generatePermission = resolveGeneratePermissionForDomain(domain);
+    const ownerLabel = domainIntegrationOwnerLabel(domain, assignmentDomainContext);
+    const nextActionLabel = domainIntegrationNextActionLabel({
+      workflowStatus,
+      assignmentDomainContext,
+      planningContextLocked:
+        workspace?.planningContext.locked ??
+        upstreamPlanningContext?.planningContextLocked === true,
+      loading: state.loading,
+      hasError: state.error !== null,
+      canGenerate: generatePermission.canShowGenerate,
+      canSubmitForReview: canShowSubmitForReview,
+      canViewPlan: canShowViewPlan,
+      canReview: canShowReviewAction,
+      canRelease: canShowReleaseAction,
+      isCurrentReviewPlan,
+    });
 
     return (
-      <div
+      <Card
         key={domain}
-        className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
+        accent={false}
+        padding="compact"
+        className="space-y-3 border-slate-200 bg-white"
       >
-        <div className="space-y-1">
-          <h4 className="text-sm font-normal text-textPrimary">
-            {trainingPlanDomainLabel(domain)}
-          </h4>
-          <p className="text-sm text-textSecondary">Status: {status}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h4 className="text-sm font-normal text-textPrimary">
+              {trainingPlanDomainLabel(domain)}
+            </h4>
+            <p className="text-xs text-textMuted">Domain track workflow</p>
+          </div>
+          <span
+            className={cn(
+              "whitespace-nowrap rounded-full border px-2 py-0.5 text-xs",
+              domainIntegrationStatusTone(workflowStatus),
+            )}
+          >
+            {status}
+          </span>
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-0.5">
+            <div className="text-xs text-textMuted">Assigned owner</div>
+            <div className="break-words text-sm text-textPrimary">{ownerLabel}</div>
+          </div>
+          <div className="space-y-0.5">
+            <div className="text-xs text-textMuted">Plan status</div>
+            <div className="break-words text-sm text-textPrimary">{planStatusLabel}</div>
+          </div>
+          <div className="space-y-0.5">
+            <div className="text-xs text-textMuted">Workflow status</div>
+            <div className="break-words text-sm text-textPrimary">
+              {assistantWorkflowStatusLabelForKind(workflowStatus)}
+            </div>
+          </div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div className="text-xs text-textMuted">Next action</div>
+          <p className="mt-1 whitespace-normal break-words text-sm text-textPrimary">
+            {nextActionLabel}
+          </p>
         </div>
         {state.loading ? (
           <div className="text-sm text-textSecondary">Loading plan status…</div>
@@ -10084,7 +10274,7 @@ export function CoachAthletePlanningProfileView({
         {isCurrentReviewPlan ? (
           <div className="text-sm font-medium text-blue-600">Currently reviewing this plan above.</div>
         ) : null}
-      </div>
+      </Card>
     );
   }
 

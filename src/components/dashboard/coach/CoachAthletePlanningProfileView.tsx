@@ -10768,7 +10768,7 @@ export function CoachAthletePlanningProfileView({
     return (
       <div className="space-y-4">
         {renderWorkflow1HeadCoachReviewActionPanel()}
-        {renderHeadCoachPlanReviewPanel()}
+        {renderPlanViewerReviewPanel()}
         {renderDomainPlansIntegrationSection()}
       </div>
     );
@@ -11053,6 +11053,24 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  function renderPlanViewerReviewPanel() {
+    return renderHeadCoachPlanReviewPanel();
+  }
+
+  function renderPlanViewerPersistedPlanDetail(
+    detail: CoachPersistedTrainingPlanActiveDetail,
+    options: {
+      title?: string;
+      showRevisePanel?: boolean;
+    } = {},
+  ) {
+    return renderPersistedSkillsPlanDetail(detail, options);
+  }
+
+  function renderPlanViewerWorkflowActions() {
+    return renderStep6WorkflowActionsStrip();
+  }
+
   function renderHeadCoachOwnedSkillsPlanPanel(
     options: { showWorkflowActions?: boolean } = {},
   ) {
@@ -11158,7 +11176,7 @@ export function CoachAthletePlanningProfileView({
           ) : null}
         </div>
         {visibleSkillsPlanDetail !== null
-          ? renderPersistedSkillsPlanDetail(visibleSkillsPlanDetail)
+          ? renderPlanViewerPersistedPlanDetail(visibleSkillsPlanDetail)
           : null}
         {headCoachSkillsRevisePanelOpen ? (
           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
@@ -11205,7 +11223,7 @@ export function CoachAthletePlanningProfileView({
             </div>
           </div>
         ) : null}
-        {options.showWorkflowActions === false ? null : renderStep6WorkflowActionsStrip()}
+        {options.showWorkflowActions === false ? null : renderPlanViewerWorkflowActions()}
       </div>
     );
   }
@@ -15095,57 +15113,34 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderDomainPlansIntegrationWorkspace() {
-    if (selectedWorkflowTab !== "generate") return null;
+  function renderPlanViewerContent(children: ReactNode) {
     return (
-              !workflowPrecMap.generate ? (
-                <WorkflowLockedCard
-                  title="Domain Plans Integration"
-                  message={
-                    isDownstreamDomainCoach
-                      ? "Finish Context / APP and Level Validation before opening your domain plan panel."
-                      : headCoachReviewMode
-                        ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
-                        : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
-                  }
-                />
-              ) : (
-                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <h2 className="text-lg font-normal text-textPrimary">
-                      Domain Plans Integration
-                    </h2>
-                    <p className="text-sm text-textSecondary">
-                      Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning context through generation, submission, review, and release.
-                    </p>
-                  </div>
-                  {tab6ReviewOnlyMode ? (
-                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-normal text-textPrimary">
-                          Review &amp; Release
-                        </h4>
-                        <p className="text-sm text-textSecondary">
-                          Review submitted domain plans and complete governance actions.
-                        </p>
-                      </div>
-                      {renderHeadCoachReviewWorkspace()}
-                    </div>
-                  ) : (
-                    <>
-                      {renderStep6DomainIntegrationContent()}
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-normal text-textPrimary">
-                            Plan Viewer
-                          </h4>
-                          <p className="text-sm text-textSecondary">
-                            Review persisted plan details, latest drafts, and revision content.
-                          </p>
-                        </div>
-                        {headCoachSkillsOwnerWorkflow
-                          ? renderHeadCoachOwnedSkillsPlanPanel({ showWorkflowActions: false })
-                          : null}
+      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+        <div className="space-y-1">
+          <h4 className="text-sm font-normal text-textPrimary">
+            Plan Viewer
+          </h4>
+          <p className="text-sm text-textSecondary">
+            Review persisted plan details, latest drafts, and revision content.
+          </p>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+
+  function renderPlanViewerEmptyState(domain: TrainingPlanGenerationDomain) {
+    return (
+      <div className="text-sm text-textSecondary">
+        {generationDraftEmptyState(domain)}
+      </div>
+    );
+  }
+
+  function renderPlanViewerPersistedDetailSection() {
+    return (
+      <>
                   {requestedPlanId !== null && !shouldHidePersistedGeneratorPanel ? (
                         isDownstreamDomainCoach && persistedPlanDisplayDomain === "SKILLS" ? (
                           <WorkflowNeutralNotice>
@@ -15498,6 +15493,13 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
+      </>
+    );
+  }
+
+  function renderPlanViewerLatestDraftDetail() {
+    return (
+      <>
                   {shouldShowLatestDraftPlanViewer &&
                   !isHeadCoachReviewerOnlyForDomain(
                     latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
@@ -15518,9 +15520,7 @@ export function CoachAthletePlanningProfileView({
                         draftMissing: latestSkillsDraftMissing,
                         generationInProgress: step6GenerationInProgress,
                       }) ? (
-                      <div className="text-sm text-textSecondary">
-                        {generationDraftEmptyState(latestDraftDisplayDomain ?? "SKILLS")}
-                      </div>
+                      renderPlanViewerEmptyState(latestDraftDisplayDomain ?? "SKILLS")
                     ) : latestSkillsDraft ? (
                       <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
                         <h4 className="text-sm font-normal text-textPrimary">
@@ -15812,7 +15812,66 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
+      </>
+    );
+  }
+
+  function renderPlanViewerSelectedDomainContent() {
+    return (
+      <>
+                        {headCoachSkillsOwnerWorkflow
+                          ? renderHeadCoachOwnedSkillsPlanPanel({ showWorkflowActions: false })
+                          : null}
+        {renderPlanViewerPersistedDetailSection()}
+        {renderPlanViewerLatestDraftDetail()}
+      </>
+    );
+  }
+
+  function renderPlanViewerLowerContent() {
+    return renderPlanViewerSelectedDomainContent();
+  }
+
+  function renderDomainPlansIntegrationWorkspace() {
+    if (selectedWorkflowTab !== "generate") return null;
+    return (
+              !workflowPrecMap.generate ? (
+                <WorkflowLockedCard
+                  title="Domain Plans Integration"
+                  message={
+                    isDownstreamDomainCoach
+                      ? "Finish Context / APP and Level Validation before opening your domain plan panel."
+                      : headCoachReviewMode
+                        ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
+                        : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
+                  }
+                />
+              ) : (
+                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-normal text-textPrimary">
+                      Domain Plans Integration
+                    </h2>
+                    <p className="text-sm text-textSecondary">
+                      Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning context through generation, submission, review, and release.
+                    </p>
+                  </div>
+                  {tab6ReviewOnlyMode ? (
+                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-normal text-textPrimary">
+                          Review &amp; Release
+                        </h4>
+                        <p className="text-sm text-textSecondary">
+                          Review submitted domain plans and complete governance actions.
+                        </p>
                       </div>
+                      {renderHeadCoachReviewWorkspace()}
+                    </div>
+                  ) : (
+                    <>
+                      {renderStep6DomainIntegrationContent()}
+                      {renderPlanViewerContent(renderPlanViewerLowerContent())}
                       <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                         <div className="space-y-1">
                           <h4 className="text-sm font-normal text-textPrimary">
@@ -15904,7 +15963,7 @@ export function CoachAthletePlanningProfileView({
                   )}
                   {trainingPlanShellModel.shell !== "head_coach_planning" &&
                   !isHeadCoachReviewerOnlyForDomain(resolvedWorkflowGenerationDomain)
-                    ? renderStep6WorkflowActionsStrip()
+                    ? renderPlanViewerWorkflowActions()
                     : null}
                       </div>
                   {headCoachReviewMode

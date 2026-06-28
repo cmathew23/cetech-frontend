@@ -15113,19 +15113,109 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderPlanViewerContent(children: ReactNode) {
+  function resolvePlanViewerSelectedDomain(): TrainingPlanGenerationDomain | null {
+    if (headCoachSubmittedReviewDomain !== null) return headCoachSubmittedReviewDomain;
     return (
-      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+      normalizeTrainingPlanGenerationDomain(persistedPlanDisplayDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(persistedDetailDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(persistedVerifiedDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(latestDraftDisplayDomain ?? undefined) ??
+      currentCoachGenerationDomain ??
+      resolvedWorkflowGenerationDomain ??
+      null
+    );
+  }
+
+  function resolvePlanViewerSelectedDomainLabel(): string {
+    const domain = resolvePlanViewerSelectedDomain();
+    return domain !== null ? trainingPlanDomainLabel(domain) : "No domain selected";
+  }
+
+  function resolvePlanViewerStatusLabel(): string {
+    if (headCoachSubmittedReviewDomain !== null) {
+      const reviewDomain = headCoachSubmittedReviewDomain;
+      const state = headCoachDomainPlanStates[reviewDomain];
+      const workflowStatus =
+        workspace !== null
+          ? deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[reviewDomain])
+          : deriveHeadCoachDomainWorkflowStatus({
+              summaryStatus: state.summaryStatus,
+              summaryPlanId: state.summaryPlanId,
+              summaryVersionId: state.summaryVersionId,
+              activeDetail: state.activeDetail,
+            });
+      return assistantWorkflowStatusLabelForKind(workflowStatus);
+    }
+
+    if (assistantPlanDiscoveryLoading || persistedSkillsPlanLoading) {
+      return "Loading plan";
+    }
+
+    const selectedDomain = resolvePlanViewerSelectedDomain();
+    if (selectedDomain !== null && workspace !== null) {
+      return assistantWorkflowStatusLabelForKind(
+        deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[selectedDomain]),
+      );
+    }
+
+    const persistedStatus =
+      persistedSkillsPlanDetail?.version.status ?? persistedSkillsPlanDetail?.plan.status ?? null;
+    if (hasRenderableValue(persistedStatus)) {
+      return formatEnumeratedLabel(persistedStatus);
+    }
+
+    if (latestSkillsDraft !== null) {
+      return assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus);
+    }
+
+    if (generatePlanSuccess !== null && hasRenderableValue(generatePlanSuccess.status)) {
+      return formatEnumeratedLabel(generatePlanSuccess.status);
+    }
+
+    return assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
+  }
+
+  function resolvePlanViewerModeLabel(): string {
+    if (headCoachSubmittedReviewDomain !== null) return "Reviewing";
+    if (assistantRevisePanelDomain !== null) return "Revising";
+    if (assistantPlanDiscoveryLoading || persistedSkillsPlanLoading) return "Loading";
+    if (isGenerationJobInProgress(currentDomainGenerationJob)) return "Generating";
+    if (requestedPlanId !== null && persistedSkillsPlanDetail !== null) return "Viewing saved plan";
+    if (latestSkillsDraft !== null) return "Viewing latest draft";
+    if (generatePlanSuccess !== null) return "Generated draft";
+    return "Waiting for plan";
+  }
+
+  function renderPlanViewerSummaryItem(label: string, value: string) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+        <div className="text-xs text-textMuted">{label}</div>
+        <div className="mt-0.5 break-words text-sm text-textPrimary">{value}</div>
+      </div>
+    );
+  }
+
+  function renderPlanViewerContent(children: ReactNode) {
+    const selectedDomainLabel = resolvePlanViewerSelectedDomainLabel();
+    const statusLabel = resolvePlanViewerStatusLabel();
+    const modeLabel = resolvePlanViewerModeLabel();
+
+    return (
+      <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
         <div className="space-y-1">
-          <h4 className="text-sm font-normal text-textPrimary">
-            Plan Viewer
-          </h4>
+          <h3 className="text-base font-normal text-textPrimary">Plan Viewer</h3>
           <p className="text-sm text-textSecondary">
-            Review persisted plan details, latest drafts, and revision content.
+            Review the selected domain plan, draft, revision feedback, and available workflow
+            actions.
           </p>
         </div>
-        {children}
-      </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {renderPlanViewerSummaryItem("Selected domain", selectedDomainLabel)}
+          {renderPlanViewerSummaryItem("Plan status", statusLabel)}
+          {renderPlanViewerSummaryItem("Mode", modeLabel)}
+        </div>
+        <div className="space-y-3">{children}</div>
+      </section>
     );
   }
 

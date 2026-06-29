@@ -956,7 +956,7 @@ function normalizeHeadCoachDomainWorkflowStatus(
 }
 
 function headCoachDomainStatusLabel(kind: AssistantDomainWorkflowStatus): string {
-  if (kind === "released") return "Released to Athlete";
+  if (kind === "released") return "Domain Released to Athlete";
   if (kind === "approved") return "Head Coach Approved";
   if (kind === "revision_requested") return "Revision Requested";
   if (kind === "submitted_for_review") return "Submitted for Head Coach Review";
@@ -1086,16 +1086,18 @@ type AssistantDomainWorkflowStatus =
   | "approved"
   | "released";
 
-function assistantWorkflowStatusLabelForKind(kind: AssistantDomainWorkflowStatus): string {
+export function assistantWorkflowStatusLabelForKind(
+  kind: AssistantDomainWorkflowStatus,
+): string {
   if (kind === "draft_generated") return "Draft Generated";
   if (kind === "submitted_for_review") return "Submitted for Head Coach Review";
   if (kind === "revision_requested") return "Revision Requested";
   if (kind === "approved") return "Approved by Head Coach";
-  if (kind === "released") return "Released to Athlete";
+  if (kind === "released") return "Domain Released to Athlete";
   return "Not Created";
 }
 
-function domainIntegrationOwnerLabel(
+export function domainIntegrationOwnerLabel(
   domain: TrainingPlanGenerationDomain,
   assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined,
 ): string {
@@ -1126,7 +1128,7 @@ function domainIntegrationStatusTone(kind: AssistantDomainWorkflowStatus): strin
   return "border-slate-200 bg-slate-50 text-textSecondary";
 }
 
-function domainIntegrationNextActionLabel(input: {
+export function domainIntegrationNextActionLabel(input: {
   workflowStatus: AssistantDomainWorkflowStatus;
   assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
   planningContextLocked: boolean;
@@ -1178,7 +1180,33 @@ function domainIntegrationNextActionLabel(input: {
       : "Approved; waiting for release.";
   }
 
-  return "Released to athlete.";
+  return "This domain is released to the athlete.";
+}
+
+export type DomainIntegrationAvailableAction =
+  | "GENERATE"
+  | "VIEW_OR_REVIEW_PLAN"
+  | "SUBMIT_FOR_REVIEW"
+  | "HEAD_COACH_REVIEW"
+  | "RELEASE_DOMAIN"
+  | "REVISE_INSTRUCTIONS";
+
+export function domainIntegrationAvailableActionLabels(input: {
+  canGenerate: boolean;
+  canViewPlan: boolean;
+  canSubmitForReview: boolean;
+  canReview: boolean;
+  canRelease: boolean;
+  canRevise: boolean;
+}): string[] {
+  const actions: string[] = [];
+  if (input.canGenerate) actions.push("Generate domain plan");
+  if (input.canViewPlan) actions.push("View / review domain plan");
+  if (input.canSubmitForReview) actions.push("Submit for Head Coach review");
+  if (input.canReview) actions.push("Approve or request changes");
+  if (input.canRelease) actions.push("Release this domain");
+  if (input.canRevise) actions.push("Revise instructions");
+  return actions;
 }
 
 export function deriveAssistantDomainWorkflowStatus(input: {
@@ -1237,6 +1265,147 @@ export function canShowDomainReviseAction(input: {
     input.workflowStatus === "draft_generated" ||
     input.workflowStatus === "revision_requested"
   );
+}
+
+export type DomainReviseAvailability = {
+  domain: TrainingPlanGenerationDomain;
+  planId: string | null;
+  versionId: string | null;
+  baseVersionId: string | null;
+  requesterCanRevise: boolean;
+  baseVersionAvailable: boolean;
+  mutationEnabled: boolean;
+  placeholderVisible: boolean;
+  reason:
+    | "ready_existing_editable_version"
+    | "future_base_version_ready"
+    | "missing_plan_id"
+    | "missing_version_id"
+    | "missing_base_version"
+    | "not_authorized"
+    | "unsupported_workflow_status";
+};
+
+export function resolveDomainReviseAvailability(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+  baseVersionId?: string | null | undefined;
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyRequesterOwnsDomain: boolean;
+}): DomainReviseAvailability {
+  const assignmentDomainContext = input.assignmentDomainContext;
+  const requesterCanRevise =
+    assignmentDomainContext === null || assignmentDomainContext === undefined
+      ? input.legacyRequesterOwnsDomain
+      : assignmentDomainContext.ownedByCurrentUser &&
+        assignmentDomainContext.canRevise &&
+        assignmentDomainContext.ownerType !== "NONE";
+  const planId = input.planId?.trim() || null;
+  const versionId = input.versionId?.trim() || null;
+  const baseVersionId = input.baseVersionId?.trim() || null;
+  const baseVersionAvailable =
+    input.workflowStatus === "approved" || input.workflowStatus === "released"
+      ? baseVersionId !== null || versionId !== null
+      : false;
+
+  if (!requesterCanRevise) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "not_authorized",
+    };
+  }
+  if (planId === null) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "missing_plan_id",
+    };
+  }
+  if (versionId === null) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "missing_version_id",
+    };
+  }
+  if (
+    input.workflowStatus === "draft_generated" ||
+    input.workflowStatus === "revision_requested"
+  ) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: true,
+      placeholderVisible: true,
+      reason: "ready_existing_editable_version",
+    };
+  }
+  if (input.workflowStatus === "approved" || input.workflowStatus === "released") {
+    if (!baseVersionAvailable) {
+      return {
+        domain: input.domain,
+        planId,
+        versionId,
+        baseVersionId,
+        requesterCanRevise,
+        baseVersionAvailable,
+        mutationEnabled: false,
+        placeholderVisible: true,
+        reason: "missing_base_version",
+      };
+    }
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId: baseVersionId ?? versionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    };
+  }
+
+  return {
+    domain: input.domain,
+    planId,
+    versionId,
+    baseVersionId,
+    requesterCanRevise,
+    baseVersionAvailable,
+    mutationEnabled: false,
+    placeholderVisible: false,
+    reason: "unsupported_workflow_status",
+  };
 }
 
 export type Workflow2SubmittedDomainSkillsSlotProjection = {
@@ -2370,6 +2539,7 @@ export function resolveDomainViewPlanVisible(input: {
 }
 
 export function resolveDomainRevisePlanVisible(input: {
+  domain?: TrainingPlanGenerationDomain;
   assignmentDomainContext:
     | TrainingPlanWorkspaceAssignmentDomainContext
     | null
@@ -2379,16 +2549,15 @@ export function resolveDomainRevisePlanVisible(input: {
   reviseIds: DomainRevisePlanIds | null;
 }): boolean {
   const assignmentDomainContext = input.assignmentDomainContext;
-  const requesterOwnsDomain =
-    assignmentDomainContext === null || assignmentDomainContext === undefined
-      ? input.legacyRequesterOwnsDomain
-      : assignmentDomainContext.ownedByCurrentUser && assignmentDomainContext.canRevise;
 
-  return canShowDomainReviseAction({
+  return resolveDomainReviseAvailability({
+    domain: input.domain ?? "SKILLS",
     workflowStatus: input.workflowStatus,
-    reviseIds: input.reviseIds,
-    requesterOwnsDomain,
-  });
+    planId: input.reviseIds?.trainingPlanId,
+    versionId: input.reviseIds?.versionId,
+    assignmentDomainContext,
+    legacyRequesterOwnsDomain: input.legacyRequesterOwnsDomain,
+  }).mutationEnabled;
 }
 
 export function resolveDomainSubmitForReviewVisible(input: {
@@ -2892,7 +3061,7 @@ function governedPlanActionButtonLabel(
   }
   if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
-  return "Release to Athlete";
+  return "Release Domain to Athlete";
 }
 
 export function canShowHeadCoachReviewReleaseAction(input: {
@@ -2911,7 +3080,7 @@ function governedPlanActionSuccessMessage(
   if (action === "SUBMIT_REVIEW") return "Plan submitted for Head Coach review.";
   if (action === "HEAD_APPROVE") return "Plan approved.";
   if (action === "REQUEST_REVISION") return "Revision requested.";
-  return "Plan released to athlete.";
+  return "Domain plan released to athlete.";
 }
 
 function governedPlanActionErrorFallback(
@@ -10185,6 +10354,18 @@ export function CoachAthletePlanningProfileView({
       planId,
       versionId,
     });
+    const reviseAvailability = resolveDomainReviseAvailability({
+      domain,
+      workflowStatus,
+      planId,
+      versionId,
+      baseVersionId:
+        workspaceDomainEntry?.summary.approvedVersionId ??
+        workspaceDomainEntry?.summary.activeVersionId ??
+        null,
+      assignmentDomainContext,
+      legacyRequesterOwnsDomain: !isHeadCoachReviewerOnlyForDomain(domain),
+    });
     const generatePermission = resolveGeneratePermissionForDomain(domain);
     const ownerLabel = domainIntegrationOwnerLabel(domain, assignmentDomainContext);
     const nextActionLabel = domainIntegrationNextActionLabel({
@@ -10202,6 +10383,18 @@ export function CoachAthletePlanningProfileView({
       canRelease: canShowReleaseAction,
       isCurrentReviewPlan,
     });
+    const availableActionLabels = domainIntegrationAvailableActionLabels({
+      canGenerate: generatePermission.canShowGenerate,
+      canViewPlan: canShowViewPlan && !isCurrentReviewPlan,
+      canSubmitForReview: canShowSubmitForReview,
+      canReview: canShowReviewAction,
+      canRelease: canShowReleaseAction,
+      canRevise:
+        reviseAvailability.mutationEnabled ||
+        reviseAvailability.reason === "future_base_version_ready",
+    });
+    const reviseComingSoonVisible =
+      reviseAvailability.reason === "future_base_version_ready";
 
     return (
       <Card
@@ -10248,6 +10441,14 @@ export function CoachAthletePlanningProfileView({
             {nextActionLabel}
           </p>
         </div>
+        <div className="space-y-0.5">
+          <div className="text-xs text-textMuted">Available actions</div>
+          <div className="break-words text-sm text-textPrimary">
+            {availableActionLabels.length > 0
+              ? availableActionLabels.join(", ")
+              : "No action available now"}
+          </div>
+        </div>
         {state.loading ? (
           <div className="text-sm text-textSecondary">Loading plan status…</div>
         ) : null}
@@ -10273,6 +10474,11 @@ export function CoachAthletePlanningProfileView({
         ) : null}
         {isCurrentReviewPlan ? (
           <div className="text-sm font-medium text-blue-600">Currently reviewing this plan above.</div>
+        ) : null}
+        {reviseComingSoonVisible ? (
+          <Button type="button" variant="secondary" disabled>
+            Revise Instructions Coming Soon
+          </Button>
         ) : null}
       </Card>
     );
@@ -10413,7 +10619,7 @@ export function CoachAthletePlanningProfileView({
                 void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
               }
             >
-              Release to Athlete
+              Release Domain to Athlete
             </Button>
           ) : null}
         </div>
@@ -10642,7 +10848,7 @@ export function CoachAthletePlanningProfileView({
                     void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
                   }
                 >
-                  Release to Athlete
+                  Release Domain to Athlete
                 </Button>
               ) : null}
             </div>
@@ -15175,6 +15381,20 @@ export function CoachAthletePlanningProfileView({
     return assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
   }
 
+  function resolvePlanViewerDomainReleaseLabel(): string {
+    const selectedDomain = resolvePlanViewerSelectedDomain();
+    if (selectedDomain !== null && workspace !== null) {
+      const workflowStatus = deriveWorkflowStatusFromWorkspaceDomain(
+        workspace.domains[selectedDomain],
+      );
+      return workflowStatus === "released"
+        ? `${trainingPlanDomainLabel(selectedDomain)} domain active/released`
+        : `${trainingPlanDomainLabel(selectedDomain)} domain not released`;
+    }
+
+    return "Selected domain release status unavailable";
+  }
+
   function resolvePlanViewerModeLabel(): string {
     if (headCoachSubmittedReviewDomain !== null) return "Reviewing";
     if (assistantRevisePanelDomain !== null) return "Revising";
@@ -15198,6 +15418,7 @@ export function CoachAthletePlanningProfileView({
   function renderPlanViewerContent(children: ReactNode) {
     const selectedDomainLabel = resolvePlanViewerSelectedDomainLabel();
     const statusLabel = resolvePlanViewerStatusLabel();
+    const releaseLabel = resolvePlanViewerDomainReleaseLabel();
     const modeLabel = resolvePlanViewerModeLabel();
 
     return (
@@ -15209,9 +15430,10 @@ export function CoachAthletePlanningProfileView({
             actions.
           </p>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           {renderPlanViewerSummaryItem("Selected domain", selectedDomainLabel)}
           {renderPlanViewerSummaryItem("Plan status", statusLabel)}
+          {renderPlanViewerSummaryItem("Domain release", releaseLabel)}
           {renderPlanViewerSummaryItem("Mode", modeLabel)}
         </div>
         <div className="space-y-3">{children}</div>

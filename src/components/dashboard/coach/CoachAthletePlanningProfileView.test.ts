@@ -54,6 +54,10 @@ import {
   resolveDomainHeadCoachReviewActionVisible,
   resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
+  assistantWorkflowStatusLabelForKind,
+  domainIntegrationAvailableActionLabels,
+  domainIntegrationNextActionLabel,
+  resolveDomainReviseAvailability,
   resolveContextAppStepCompleteForNavigation,
   resolveSetupStateAfterSeasonCreate,
   formatSeasonOptionLabel,
@@ -1694,6 +1698,133 @@ describe("resolveDomainRevisePlanVisible", () => {
         reviseIds: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("Step 3D domain workflow contract", () => {
+  it("uses domain-level release wording instead of whole-plan completion wording", () => {
+    expect(assistantWorkflowStatusLabelForKind("released")).toBe(
+      "Domain Released to Athlete",
+    );
+    expect(
+      domainIntegrationNextActionLabel({
+        workflowStatus: "released",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownedByCurrentUser: false,
+        }),
+        planningContextLocked: true,
+        loading: false,
+        hasError: false,
+        canGenerate: false,
+        canSubmitForReview: false,
+        canViewPlan: true,
+        canReview: false,
+        canRelease: false,
+        isCurrentReviewPlan: false,
+      }),
+    ).toBe("This domain is released to the athlete.");
+    expect(
+      domainIntegrationAvailableActionLabels({
+        canGenerate: false,
+        canViewPlan: true,
+        canSubmitForReview: false,
+        canReview: false,
+        canRelease: false,
+        canRevise: false,
+      }),
+    ).toEqual(["View / review domain plan"]);
+    expect(
+      domainIntegrationAvailableActionLabels({
+        canGenerate: false,
+        canViewPlan: true,
+        canSubmitForReview: false,
+        canReview: false,
+        canRelease: true,
+        canRevise: false,
+      }),
+    ).toEqual(["View / review domain plan", "Release this domain"]);
+  });
+
+  it("locks future revise availability to owned domains with an approved or released base version", () => {
+    const released = resolveDomainReviseAvailability({
+      domain: "SKILLS",
+      workflowStatus: "released",
+      planId: "skills-plan",
+      versionId: "skills-active-version",
+      baseVersionId: "skills-active-version",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canRevise: true,
+        canSubmitForReview: true,
+      }),
+      legacyRequesterOwnsDomain: false,
+    });
+
+    expect(released).toMatchObject({
+      domain: "SKILLS",
+      planId: "skills-plan",
+      versionId: "skills-active-version",
+      baseVersionId: "skills-active-version",
+      requesterCanRevise: true,
+      baseVersionAvailable: true,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    });
+
+    const approved = resolveDomainReviseAvailability({
+      domain: "NUTRITION",
+      workflowStatus: "approved",
+      planId: "nutrition-plan",
+      versionId: "nutrition-approved-version",
+      baseVersionId: "nutrition-approved-version",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canRevise: true,
+      }),
+      legacyRequesterOwnsDomain: false,
+    });
+
+    expect(approved).toMatchObject({
+      domain: "NUTRITION",
+      baseVersionAvailable: true,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    });
+  });
+
+  it("does not infer W2B Head Coach Skills revise authority from generic capability", () => {
+    expect(
+      resolveDomainReviseAvailability({
+        domain: "SKILLS",
+        workflowStatus: "released",
+        planId: "skills-plan",
+        versionId: "skills-active-version",
+        baseVersionId: "skills-active-version",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "separate-skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: true,
+        }),
+        legacyRequesterOwnsDomain: true,
+      }),
+    ).toMatchObject({
+      requesterCanRevise: false,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "not_authorized",
+    });
   });
 });
 

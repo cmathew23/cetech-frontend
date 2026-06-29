@@ -58,6 +58,8 @@ import {
   domainIntegrationAvailableActionLabels,
   domainIntegrationNextActionLabel,
   resolveDomainReviseAvailability,
+  resolveTrainingPlanWorkspaceDomainIntegrationComplete,
+  resolveTrainingPlanWorkspaceLifecycleSteps,
   resolveContextAppStepCompleteForNavigation,
   resolveSetupStateAfterSeasonCreate,
   formatSeasonOptionLabel,
@@ -1825,6 +1827,93 @@ describe("Step 3D domain workflow contract", () => {
       placeholderVisible: false,
       reason: "not_authorized",
     });
+  });
+});
+
+describe("Training Plan Workspace lifecycle display", () => {
+  it("keeps Domain Plans Integration active for W1 partial domain release", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: "skills-version",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        },
+        NUTRITION: base.domains.NUTRITION,
+        S_AND_C: base.domains.S_AND_C,
+      },
+      assignmentContext: shellAssignmentContext({
+        domains: {
+          SKILLS: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          NUTRITION: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          S_AND_C: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+        },
+      }),
+    });
+
+    const domainIntegrationComplete =
+      resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "plan-viewer",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: true,
+      domainIntegrationComplete,
+    });
+
+    expect(domainIntegrationComplete).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
+  });
+
+  it("marks Domain Plans Integration complete when all assigned domains are released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const releasedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "ACTIVE",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: releasedDomain("SKILLS"),
+        NUTRITION: releasedDomain("NUTRITION"),
+        S_AND_C: releasedDomain("S_AND_C"),
+      },
+      assignmentContext: shellAssignmentContext({
+        domains: {
+          SKILLS: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          NUTRITION: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          S_AND_C: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+        },
+      }),
+    });
+
+    const domainIntegrationComplete =
+      resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "plan-viewer",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: true,
+      domainIntegrationComplete,
+    });
+
+    expect(domainIntegrationComplete).toBe(true);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe(
+      "completed",
+    );
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
   });
 });
 

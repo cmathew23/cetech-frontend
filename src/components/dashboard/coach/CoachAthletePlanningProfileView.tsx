@@ -1574,6 +1574,213 @@ function railGapSegmentClass(sideHidden: boolean): string {
   return sideHidden ? `${base} pointer-events-none opacity-0` : base;
 }
 
+const TRAINING_PLAN_WORKSPACE_DOMAINS: TrainingPlanGenerationDomain[] = [
+  "SKILLS",
+  "NUTRITION",
+  "S_AND_C",
+];
+
+export type TrainingPlanWorkspaceVisualMode =
+  | "context-builder"
+  | "domain-integration"
+  | "plan-viewer";
+
+export type TrainingPlanWorkspaceLifecycleStepState =
+  | "completed"
+  | "active"
+  | "available"
+  | "locked";
+
+export type TrainingPlanWorkspaceLifecycleStep = {
+  key: TrainingPlanWorkspaceVisualMode;
+  title: string;
+  description: string;
+  state: TrainingPlanWorkspaceLifecycleStepState;
+};
+
+export function resolveTrainingPlanWorkspaceDomainIntegrationComplete(
+  workspace: TrainingPlanWorkspace | null,
+): boolean {
+  if (workspace === null) return false;
+
+  const assignedDomains =
+    workspace.assignmentContext !== undefined
+      ? TRAINING_PLAN_WORKSPACE_DOMAINS.filter(
+          (domain) => workspace.assignmentContext?.domains[domain].ownerType !== "NONE",
+        )
+      : TRAINING_PLAN_WORKSPACE_DOMAINS.filter((domain) => {
+          const entry = workspace.domains[domain];
+          return (
+            entry.canOpen ||
+            entry.submittedForReview ||
+            entry.allowedActions.length > 0 ||
+            (entry.summary.trainingPlanId?.trim() ?? "") !== "" ||
+            (entry.summary.status?.trim() ?? "") !== ""
+          );
+        });
+
+  return (
+    assignedDomains.length > 0 &&
+    assignedDomains.every(
+      (domain) => deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[domain]) === "released",
+    )
+  );
+}
+
+export function resolveTrainingPlanWorkspaceLifecycleSteps(input: {
+  activeMode: TrainingPlanWorkspaceVisualMode;
+  contextComplete: boolean;
+  domainAvailable: boolean;
+  planViewerAvailable: boolean;
+  domainIntegrationComplete: boolean;
+}): TrainingPlanWorkspaceLifecycleStep[] {
+  return [
+    {
+      key: "context-builder",
+      title: "Context Builder",
+      description: "Validate athlete context and lock the planning inputs.",
+      state:
+        input.activeMode === "context-builder"
+          ? "active"
+          : input.contextComplete
+            ? "completed"
+            : "available",
+    },
+    {
+      key: "domain-integration",
+      title: "Domain Plans Integration",
+      description: "Coordinate domain plans and governance actions.",
+      state: !input.domainAvailable
+        ? "locked"
+        : input.domainIntegrationComplete
+          ? "completed"
+          : input.activeMode === "domain-integration" || input.activeMode === "plan-viewer"
+            ? "active"
+            : "available",
+    },
+    {
+      key: "plan-viewer",
+      title: "Plan Viewer",
+      description: "Review selected, active, or released domain plan details.",
+      state:
+        input.activeMode === "plan-viewer"
+          ? "active"
+          : input.planViewerAvailable
+            ? "available"
+            : "locked",
+    },
+  ];
+}
+
+function workspaceLifecycleStateLabel(
+  state: TrainingPlanWorkspaceLifecycleStepState,
+): string {
+  if (state === "completed") return "Complete";
+  if (state === "active") return "Active";
+  if (state === "available") return "Available";
+  return "Locked";
+}
+
+function workspaceLifecycleStepClass(
+  state: TrainingPlanWorkspaceLifecycleStepState,
+): string {
+  if (state === "completed") return "border-green-200 bg-green-50 text-green-700";
+  if (state === "active") return "border-primary bg-primaryLight/20 text-primary";
+  if (state === "available") return "border-slate-200 bg-white text-textPrimary";
+  return "border-slate-200 bg-slate-100 text-textMuted";
+}
+
+function TrainingPlanWorkspaceLifecycleHeader({
+  steps,
+}: {
+  steps: TrainingPlanWorkspaceLifecycleStep[];
+}) {
+  return (
+    <nav
+      aria-label="Training plan workspace lifecycle"
+      className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4"
+    >
+      <ol className="grid gap-3 md:grid-cols-3">
+        {steps.map((step, index) => (
+          <li
+            key={step.key}
+            className={cn(
+              "rounded-lg border px-3 py-2.5",
+              workspaceLifecycleStepClass(step.state),
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-xs uppercase tracking-wide text-current/70">
+                  Phase {index + 1}
+                </div>
+                <div className="text-sm font-medium">{step.title}</div>
+              </div>
+              <span className="whitespace-nowrap rounded-full border border-current/20 px-2 py-0.5 text-[11px]">
+                {workspaceLifecycleStateLabel(step.state)}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-current/75">
+              {step.description}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+function workspaceModeShellModeLabel(mode: TrainingPlanWorkspaceVisualMode): string {
+  if (mode === "context-builder") return "Context Builder";
+  if (mode === "domain-integration") return "Domain Plans Integration";
+  return "Plan Viewer";
+}
+
+function TrainingPlanWorkspaceModeShell({
+  mode,
+  header,
+  summary,
+  primary,
+  secondary,
+  activity,
+}: {
+  mode: TrainingPlanWorkspaceVisualMode;
+  header: ReactNode;
+  summary?: ReactNode;
+  primary: ReactNode;
+  secondary?: ReactNode;
+  activity?: ReactNode;
+}) {
+  const hasSecondary = secondary !== null && secondary !== undefined;
+  return (
+    <section
+      className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
+      data-workspace-mode={mode}
+    >
+      <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">{header}</div>
+        <span className="w-fit shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-textSecondary">
+          {workspaceModeShellModeLabel(mode)}
+        </span>
+      </div>
+      {summary !== null && summary !== undefined ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          {summary}
+        </div>
+      ) : null}
+      <div className={hasSecondary ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]" : ""}>
+        <div className="min-w-0">{primary}</div>
+        {hasSecondary ? <aside className="min-w-0">{secondary}</aside> : null}
+      </div>
+      {activity !== null && activity !== undefined ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          {activity}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TrainingPlanWorkflowProgressRail({
   steps,
   headCoachReviewMode,
@@ -15252,12 +15459,61 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  function resolveTrainingPlanWorkspaceVisualMode(): TrainingPlanWorkspaceVisualMode {
+    if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
+    if (
+      selectedWorkflowTab === "generate" &&
+      (headCoachSubmittedReviewDomain !== null ||
+        requestedPlanId !== null ||
+        persistedSkillsPlanDetail !== null ||
+        latestSkillsDraft !== null ||
+        generatePlanSuccess !== null)
+    ) {
+      return "plan-viewer";
+    }
+    return "domain-integration";
+  }
+
+  function resolveTrainingPlanWorkspaceLifecycleHeaderSteps(): TrainingPlanWorkspaceLifecycleStep[] {
+    const activeMode = resolveTrainingPlanWorkspaceVisualMode();
+    const contextComplete = planningContextLocked || headCoachLockedContextStepComplete;
+    const domainAvailable = workflowPrecMap.generate;
+    const planViewerAvailable =
+      domainAvailable &&
+      (headCoachSubmittedReviewDomain !== null ||
+        requestedPlanId !== null ||
+        persistedSkillsPlanDetail !== null ||
+        latestSkillsDraft !== null ||
+        generatePlanSuccess !== null);
+
+    return resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode,
+      contextComplete,
+      domainAvailable,
+      planViewerAvailable,
+      domainIntegrationComplete:
+        resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+  }
+
   function renderContextBuilderWorkspace() {
     if (!isContextBuilderStep(selectedWorkflowTab)) return null;
     const activeStepMissingRequirement = contextBuilderMissingRequirement(selectedWorkflowTab);
     const contextBuilderComplete = planDatesStepComplete || headCoachLockedContextStepComplete;
 
     return (
+      <TrainingPlanWorkspaceModeShell
+        mode="context-builder"
+        header={
+          <>
+            <h2 className="text-lg font-normal text-textPrimary">Context Builder</h2>
+            <p className="max-w-3xl text-sm text-textSecondary">
+              Build the athlete&apos;s planning context in one guided setup before domain plans
+              are generated, reviewed, or released.
+            </p>
+          </>
+        }
+        primary={
       <section className="space-y-5">
         <div className="space-y-2">
           <div className="space-y-1">
@@ -15316,6 +15572,8 @@ export function CoachAthletePlanningProfileView({
           </details>
         </section>
       </section>
+        }
+      />
     );
   }
 
@@ -15422,22 +15680,27 @@ export function CoachAthletePlanningProfileView({
     const modeLabel = resolvePlanViewerModeLabel();
 
     return (
-      <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <div className="space-y-1">
-          <h3 className="text-base font-normal text-textPrimary">Plan Viewer</h3>
-          <p className="text-sm text-textSecondary">
-            Review the selected domain plan, draft, revision feedback, and available workflow
-            actions.
-          </p>
-        </div>
+      <TrainingPlanWorkspaceModeShell
+        mode="plan-viewer"
+        header={
+          <>
+            <h3 className="text-base font-normal text-textPrimary">Plan Viewer</h3>
+            <p className="text-sm text-textSecondary">
+              Review the selected domain plan, draft, revision feedback, and available workflow
+              actions.
+            </p>
+          </>
+        }
+        summary={
         <div className="grid gap-3 md:grid-cols-4">
           {renderPlanViewerSummaryItem("Selected domain", selectedDomainLabel)}
           {renderPlanViewerSummaryItem("Plan status", statusLabel)}
           {renderPlanViewerSummaryItem("Domain release", releaseLabel)}
           {renderPlanViewerSummaryItem("Mode", modeLabel)}
         </div>
-        <div className="space-y-3">{children}</div>
-      </section>
+        }
+        primary={<div className="space-y-3">{children}</div>}
+      />
     );
   }
 
@@ -16148,26 +16411,48 @@ export function CoachAthletePlanningProfileView({
     if (selectedWorkflowTab !== "generate") return null;
     return (
               !workflowPrecMap.generate ? (
-                <WorkflowLockedCard
-                  title="Domain Plans Integration"
-                  message={
-                    isDownstreamDomainCoach
-                      ? "Finish Context / APP and Level Validation before opening your domain plan panel."
-                      : headCoachReviewMode
-                        ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
-                        : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
+                <TrainingPlanWorkspaceModeShell
+                  mode="domain-integration"
+                  header={
+                    <>
+                      <h2 className="text-lg font-normal text-textPrimary">
+                        Domain Plans Integration
+                      </h2>
+                      <p className="text-sm text-textSecondary">
+                        Coordinate Skills, Nutrition, and S&amp;C from locked context through
+                        domain-level generation, review, and release.
+                      </p>
+                    </>
+                  }
+                  primary={
+                    <WorkflowLockedCard
+                      title="Domain Plans Integration"
+                      message={
+                        isDownstreamDomainCoach
+                          ? "Finish Context / APP and Level Validation before opening your domain plan panel."
+                          : headCoachReviewMode
+                            ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
+                            : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
+                      }
+                    />
                   }
                 />
               ) : (
-                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <h2 className="text-lg font-normal text-textPrimary">
-                      Domain Plans Integration
-                    </h2>
-                    <p className="text-sm text-textSecondary">
-                      Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning context through generation, submission, review, and release.
-                    </p>
-                  </div>
+                <TrainingPlanWorkspaceModeShell
+                  mode="domain-integration"
+                  header={
+                    <>
+                      <h2 className="text-lg font-normal text-textPrimary">
+                        Domain Plans Integration
+                      </h2>
+                      <p className="text-sm text-textSecondary">
+                        Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning
+                        context through generation, submission, review, and release.
+                      </p>
+                    </>
+                  }
+                  primary={
+                    <div className="space-y-3">
                   {tab6ReviewOnlyMode ? (
                     <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
                       <div className="space-y-1">
@@ -16295,7 +16580,9 @@ export function CoachAthletePlanningProfileView({
                     : null}
                   </>
                   )}
-              </section>
+                    </div>
+                  }
+                />
               )
 
     );
@@ -16375,6 +16662,9 @@ export function CoachAthletePlanningProfileView({
               </>
             ) : null}
             <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
+              <TrainingPlanWorkspaceLifecycleHeader
+                steps={resolveTrainingPlanWorkspaceLifecycleHeaderSteps()}
+              />
               {renderContextBuilderWorkspace()}
 
               {renderDomainPlansIntegrationWorkspace()}

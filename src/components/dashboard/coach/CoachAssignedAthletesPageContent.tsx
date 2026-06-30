@@ -1,10 +1,12 @@
 "use client";
 
 import { AssignedAthletesTable } from "@/components/dashboard/coach/AssignedAthletesTable";
+import { DASHBOARD_PAGE_CONTENT_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { fetchCoachAssignedAthletes, type CoachAssignedAthleteRow } from "@/lib/api/coachMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 
 function formatCoachApiError(e: unknown, fallback: string): string {
@@ -51,7 +53,7 @@ export function CoachAssignedAthletesPageContent() {
   }, []);
 
   return (
-    <div className="w-full max-w-5xl space-y-6">
+    <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
       <PageHeader
         title="Assigned Athletes"
         subtitle="Roster of athletes assigned to you: status and academy membership."

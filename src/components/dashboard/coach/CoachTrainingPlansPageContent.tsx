@@ -1,6 +1,9 @@
 "use client";
 
-import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  DASHBOARD_MAJOR_OUTER_CARD_CLASS,
+  DASHBOARD_PAGE_CONTENT_CLASS,
+} from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { cn } from "@/lib/utils";
 
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -248,7 +251,7 @@ export function CoachTrainingPlansPageContent() {
   }, [accessGateReady, entityId]);
 
   return (
-    <div className="w-full max-w-5xl space-y-6">
+    <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
       <PageHeader
         title="Training Plan"
         subtitle="Create and manage athlete training plans."

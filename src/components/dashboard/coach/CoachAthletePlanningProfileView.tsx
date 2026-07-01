@@ -649,6 +649,7 @@ type GuidedWorkflowStepKey =
 type ContextBuilderStepKey = Exclude<GuidedWorkflowStepKey, "generate">;
 type ContextBuilderDrawerStepKey = ContextBuilderStepKey;
 const CONTEXT_BUILDER_DRAWER_ANIMATION_MS = 220;
+const DOMAIN_REVIEW_DRAWER_ANIMATION_MS = 220;
 
 const PLANNING_CONTEXT_BLOCKER_SUPPRESSED = new Set(["PLANNING_CONTEXT_LOCK_MISSING"]);
 
@@ -810,6 +811,35 @@ type HeadCoachDomainPlanState = {
   summaryStatus: string | null;
   summaryPlanId: string | null;
   summaryVersionId: string | null;
+};
+
+type DomainReviewSurfaceModel = {
+  domain: TrainingPlanGenerationDomain;
+  domainLabel: string;
+  state: HeadCoachDomainPlanState;
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
+  assignedCoachLabel: string;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  statusLabel: string;
+  planStatusLabel: string;
+  nextActionLabel: string;
+  availableActionLabels: string[];
+  allowedActions: Set<GovernedTrainingPlanWorkflowAction>;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  planId: string;
+  versionId: string;
+  versionNumber: number | null;
+  trainingDays: number | null;
+  isCurrentReviewPlan: boolean;
+  showWorkflow2DraftPendingNotice: boolean;
+  reviseComingSoonVisible: boolean;
+  canShowViewPlan: boolean;
+  canShowSubmitForReview: boolean;
+  canShowApproveAction: boolean;
+  canShowRequestRevisionAction: boolean;
+  canShowReleaseAction: boolean;
+  actionContext: GovernedPlanContext | null;
+  viewPlanContext: WorkspaceDomainViewPlanContext | null;
 };
 
 function createEmptyHeadCoachDomainPlanStates(): Record<
@@ -5093,6 +5123,13 @@ export function CoachAthletePlanningProfileView({
   /** Set only when Head Coach opens Submitted Domain Plans review — not URL persisted-plan sync. */
   const [headCoachSubmittedReviewDomain, setHeadCoachSubmittedReviewDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
+  const [domainReviewDrawerOpen, setDomainReviewDrawerOpen] = useState(false);
+  const [domainReviewDrawerDomain, setDomainReviewDrawerDomain] =
+    useState<TrainingPlanGenerationDomain | null>(null);
+  const [domainReviewDrawerClosing, setDomainReviewDrawerClosing] = useState(false);
+  const domainReviewDrawerCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [step6WorkflowInternalLoading, setStep6WorkflowInternalLoading] = useState(false);
   const [step6WorkflowInternalError, setStep6WorkflowInternalError] = useState<string | null>(
     null,
@@ -8328,6 +8365,38 @@ export function CoachAthletePlanningProfileView({
     contextBuilderDrawerCloseTimeoutRef.current = null;
   }, []);
 
+  const clearDomainReviewDrawerCloseTimeout = useCallback(() => {
+    if (domainReviewDrawerCloseTimeoutRef.current === null) return;
+    clearTimeout(domainReviewDrawerCloseTimeoutRef.current);
+    domainReviewDrawerCloseTimeoutRef.current = null;
+  }, []);
+
+  const handleOpenDomainReviewDrawer = useCallback(
+    (domain: TrainingPlanGenerationDomain) => {
+      clearDomainReviewDrawerCloseTimeout();
+      setDomainReviewDrawerClosing(false);
+      setDomainReviewDrawerDomain(domain);
+      setDomainReviewDrawerOpen(true);
+    },
+    [clearDomainReviewDrawerCloseTimeout],
+  );
+
+  const handleCloseDomainReviewDrawer = useCallback(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerClosing) return;
+    clearDomainReviewDrawerCloseTimeout();
+    setDomainReviewDrawerClosing(true);
+    domainReviewDrawerCloseTimeoutRef.current = setTimeout(() => {
+      setDomainReviewDrawerOpen(false);
+      setDomainReviewDrawerDomain(null);
+      setDomainReviewDrawerClosing(false);
+      domainReviewDrawerCloseTimeoutRef.current = null;
+    }, DOMAIN_REVIEW_DRAWER_ANIMATION_MS);
+  }, [
+    clearDomainReviewDrawerCloseTimeout,
+    domainReviewDrawerClosing,
+    domainReviewDrawerOpen,
+  ]);
+
   const handleCloseContextBuilderDrawer = useCallback(() => {
     if (contextBuilderDrawerStep === null || contextBuilderDrawerClosing) return;
     clearContextBuilderDrawerCloseTimeout();
@@ -8364,15 +8433,43 @@ export function CoachAthletePlanningProfileView({
   }, [contextBuilderDrawerClosing, contextBuilderDrawerStep, handleCloseContextBuilderDrawer]);
 
   useEffect(() => {
+    if (!domainReviewDrawerOpen) return;
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        handleCloseDomainReviewDrawer();
+      }
+    }
+    document.addEventListener("keydown", handleDrawerKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDrawerKeyDown);
+    };
+  }, [domainReviewDrawerOpen, handleCloseDomainReviewDrawer]);
+
+  useEffect(() => {
     if (selectedWorkflowTab === "generate") return;
     setShowLockedContextBuilderView(false);
   }, [selectedWorkflowTab]);
 
   useEffect(() => {
+    if (!domainReviewDrawerOpen) return;
+    if (selectedWorkflowTab === "generate" && headCoachReviewMode) return;
+    clearDomainReviewDrawerCloseTimeout();
+    setDomainReviewDrawerOpen(false);
+    setDomainReviewDrawerDomain(null);
+    setDomainReviewDrawerClosing(false);
+  }, [
+    clearDomainReviewDrawerCloseTimeout,
+    domainReviewDrawerOpen,
+    headCoachReviewMode,
+    selectedWorkflowTab,
+  ]);
+
+  useEffect(() => {
     return () => {
       clearContextBuilderDrawerCloseTimeout();
+      clearDomainReviewDrawerCloseTimeout();
     };
-  }, [clearContextBuilderDrawerCloseTimeout]);
+  }, [clearContextBuilderDrawerCloseTimeout, clearDomainReviewDrawerCloseTimeout]);
 
   const step6WorkflowOrchestrationActive =
     accessGateReady &&
@@ -10637,7 +10734,9 @@ export function CoachAthletePlanningProfileView({
     });
   }
 
-  function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
+  function resolveDomainReviewSurfaceModel(
+    domain: TrainingPlanGenerationDomain,
+  ): DomainReviewSurfaceModel {
     const state = headCoachDomainPlanStates[domain];
     const assignmentDomainContext = workspace?.assignmentContext?.domains[domain];
     const workflow2SkillsSlotProjection =
@@ -10663,10 +10762,10 @@ export function CoachAthletePlanningProfileView({
           });
     const status = headCoachDomainStatusLabel(workflowStatus);
     const activeDetail = state.activeDetail;
-    const workspaceDomainEntry = workspace?.domains[domain];
+    const workspaceDomainEntry = workspace?.domains[domain] ?? null;
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
     const workspaceVersionId =
-      workspaceDomainEntry !== undefined
+      workspaceDomainEntry !== null
         ? (resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary) ?? "")
         : "";
     const planId =
@@ -10690,7 +10789,7 @@ export function CoachAthletePlanningProfileView({
           }
         : null;
     const canShowViewPlan = resolveDomainViewPlanVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+      assignmentDomainContext,
       legacyCanOpen: planContext !== null,
       planId,
       versionId,
@@ -10795,11 +10894,81 @@ export function CoachAthletePlanningProfileView({
     });
     const reviseComingSoonVisible =
       reviseAvailability.reason === "future_base_version_ready";
+    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext,
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
+      planId,
+      versionId,
+    });
+    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext,
+      reviewAction: "REQUEST_REVISION",
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
+      planId,
+      versionId,
+    });
+    const viewPlanContext = resolveWorkspaceDomainViewPlanContext({
+      workspace,
+      domain,
+      fallbackPlanId: planId,
+      fallbackVersionId: versionId,
+      fallbackStatus: rawPlanStatus,
+      fallbackSource: "domain review surface",
+    });
+
+    return {
+      domain,
+      domainLabel: trainingPlanDomainLabel(domain),
+      state,
+      assignmentDomainContext,
+      assignedCoachLabel,
+      workflowStatus,
+      statusLabel: status,
+      planStatusLabel,
+      nextActionLabel,
+      availableActionLabels,
+      allowedActions,
+      activeDetail,
+      planId,
+      versionId,
+      versionNumber:
+        workspaceDomainEntry?.summary.versionNumber ?? activeDetail?.version.versionNumber ?? null,
+      trainingDays: activeDetail?.days.filter((day) => day.sessions.length > 0).length ?? null,
+      isCurrentReviewPlan,
+      showWorkflow2DraftPendingNotice,
+      reviseComingSoonVisible,
+      canShowViewPlan,
+      canShowSubmitForReview,
+      canShowApproveAction,
+      canShowRequestRevisionAction,
+      canShowReleaseAction,
+      actionContext: planContext,
+      viewPlanContext,
+    };
+  }
+
+  function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
+    const reviewModel = resolveDomainReviewSurfaceModel(domain);
+    const {
+      state,
+      domainLabel,
+      assignedCoachLabel,
+      planStatusLabel,
+      workflowStatus,
+      statusLabel,
+      nextActionLabel,
+      availableActionLabels,
+      actionContext,
+      canShowViewPlan,
+      isCurrentReviewPlan,
+      showWorkflow2DraftPendingNotice,
+      reviseComingSoonVisible,
+    } = reviewModel;
 
     return (
       <tr key={domain} className="border-t border-border/70 align-top first:border-t-0">
         <th scope="row" className="py-3 pr-3 text-left text-sm font-normal text-textPrimary">
-          {trainingPlanDomainLabel(domain)}
+          {domainLabel}
         </th>
         <td className="px-3 py-3 text-sm text-textPrimary">{assignedCoachLabel}</td>
         <td className="px-3 py-3 text-sm text-textPrimary">
@@ -10823,7 +10992,7 @@ export function CoachAthletePlanningProfileView({
               domainIntegrationStatusTone(workflowStatus),
             )}
           >
-            {status}
+            {statusLabel}
           </span>
         </td>
         <td className="min-w-[12rem] px-3 py-3 text-sm text-textPrimary">
@@ -10836,13 +11005,16 @@ export function CoachAthletePlanningProfileView({
                 ? availableActionLabels.join(", ")
                 : "No action available now"}
             </span>
-            {planContext !== null && canShowViewPlan && !isCurrentReviewPlan ? (
+            {actionContext !== null && canShowViewPlan ? (
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => openHeadCoachDomainPlanReview(planContext)}
+                onClick={() => {
+                  handleOpenDomainReviewDrawer(domain);
+                  openHeadCoachDomainPlanReview(actionContext);
+                }}
               >
-                {reviewPlanButtonLabel(domain)}
+                {isCurrentReviewPlan ? "Open Review Drawer" : reviewPlanButtonLabel(domain)}
               </Button>
             ) : null}
             {isCurrentReviewPlan ? (
@@ -10879,66 +11051,17 @@ export function CoachAthletePlanningProfileView({
     }
 
     const reviewDomain = headCoachSubmittedReviewDomain;
-    const domainState = headCoachDomainPlanStates[reviewDomain];
-    const activeDetail = domainState.activeDetail;
-    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
-    const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const reviewActionContext = resolveHeadCoachReviewActionContext({
-      workspace,
-      domain: reviewDomain,
-      fallbackPlanId: activeDetail?.plan.id,
-      fallbackVersionId: activeDetail?.version.id,
-    });
-    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
-    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
-    const workspaceAllowedActions =
-      workspace !== null
-        ? workspaceAllowedActionsSet(workspace, reviewDomain)
-        : new Set<GovernedTrainingPlanWorkflowAction>();
-    const allowedActions = new Set<GovernedTrainingPlanWorkflowAction>([
-      ...workspaceAllowedActions,
-      ...(activeDetail?.allowedActions ?? []),
-    ]);
-    const status =
-      workspaceDomainEntry?.summary.status?.trim() ??
-      domainState.summaryStatus ??
-      activeDetail?.version.status ??
-      activeDetail?.plan.status ??
-      "";
-    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
-      planId,
-      versionId,
-    });
-    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      reviewAction: "REQUEST_REVISION",
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
-      planId,
-      versionId,
-    });
-    const canShowReleaseAction = resolveDomainReleaseVisible({
-      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      requiredReleaseMode: "HEAD_COACH_APPROVAL",
-      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
-        allowedActions,
-        status,
-      }),
-      planId,
-      versionId,
-    });
+    const reviewModel = resolveDomainReviewSurfaceModel(reviewDomain);
 
     return (
       <section className="space-y-3 border-y border-border/70 py-3">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h4 className="text-sm font-normal text-textPrimary">
-              Head Coach Review Actions
+              Domain Review Status
             </h4>
             <p className="text-sm text-textSecondary">
-              Review governance for the opened {reviewDomainLabel} plan.
+              Use the Domain Review Drawer for approve, request changes, and release actions.
             </p>
           </div>
           <Button
@@ -10951,103 +11074,20 @@ export function CoachAthletePlanningProfileView({
           </Button>
         </div>
         <dl className="space-y-1">
-          <DetailRow label="Domain" value={reviewDomainLabel} />
-          <DetailRow label="Status" value={displayValue(status)} />
+          <DetailRow label="Domain" value={reviewModel.domainLabel} />
+          <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
+          <DetailRow label="Workflow status" value={reviewModel.statusLabel} />
+          <DetailRow label="Next action" value={reviewModel.nextActionLabel} />
         </dl>
         <div className="flex flex-wrap gap-2">
-          {canShowApproveAction ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={governedPlanActionLoading === "HEAD_APPROVE"}
-              disabled={governedPlanActionLoading !== null}
-              onClick={() =>
-                void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
-              }
-            >
-              Approve Plan
-            </Button>
-          ) : null}
-          {canShowRequestRevisionAction ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={governedPlanActionLoading !== null}
-              onClick={() => {
-                setRequestRevisionActionContext(reviewActionContext);
-                setRequestRevisionModalOpen(true);
-                setGovernedPlanActionError(null);
-                setGovernedPlanActionSuccess(null);
-                setGovernedPlanActionSuccessFeedback(null);
-              }}
-            >
-              Request Changes
-            </Button>
-          ) : null}
-          {canShowReleaseAction ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={governedPlanActionLoading === "RELEASE"}
-              disabled={governedPlanActionLoading !== null}
-              onClick={() =>
-                void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
-              }
-            >
-              Release Domain to Athlete
-            </Button>
-          ) : null}
-        </div>
-        {requestRevisionModalOpen ? (
-          <form
-            className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
-            onSubmit={(event) => void handleRequestRevisionSubmit(event, reviewActionContext)}
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
           >
-            <div className="space-y-1">
-              <h5 className="text-sm font-normal text-textPrimary">Request Changes</h5>
-              <p className="text-sm text-textSecondary">
-                Explain what the coach should change before resubmitting.
-              </p>
-            </div>
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Revision feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={requestRevisionFeedback}
-                onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                placeholder="Describe the required changes."
-                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-              />
-            </label>
-            <div className="flex flex-wrap justify-end gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                onClick={() => {
-                  setRequestRevisionModalOpen(false);
-                  setRequestRevisionActionContext(null);
-                  setRequestRevisionFeedback("");
-                  setGovernedPlanActionError(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                disabled={
-                  governedPlanActionLoading === "REQUEST_REVISION" ||
-                  requestRevisionFeedback.trim() === ""
-                }
-              >
-                Send Request
-              </Button>
-            </div>
-          </form>
-        ) : null}
+            Open Domain Review Drawer
+          </Button>
+        </div>
         {governedPlanActionError ? (
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
@@ -11073,76 +11113,18 @@ export function CoachAthletePlanningProfileView({
     }
 
     const reviewDomain = headCoachSubmittedReviewDomain;
-    const domainState = headCoachDomainPlanStates[reviewDomain];
-    const activeDetail = domainState.activeDetail;
-    const isLoading = domainState.loading;
-    const loadError = domainState.error;
-    const showSubmittedPlanLoading = shouldShowSubmittedPlanLoading({
-      loading: isLoading,
-      hasActiveDetail: activeDetail !== null,
-      workflow1HeadCoachReviewActionPanelMode,
-    });
-    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
-    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? null;
-    const workspaceVersionId =
-      workspaceDomainEntry !== null
-        ? resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary)
-        : null;
-
-    const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const allowedActions =
-      workspace && headCoachSubmittedReviewDomain !== null
-        ? workspaceAllowedActionsSet(workspace, headCoachSubmittedReviewDomain)
-        : new Set(activeDetail?.allowedActions ?? []);
-    const reviewActionContext = resolveHeadCoachReviewActionContext({
-      workspace,
-      domain: reviewDomain,
-      fallbackPlanId: activeDetail?.plan.id,
-      fallbackVersionId: activeDetail?.version.id,
-    });
-    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
-    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
-    const versionNumber = activeDetail?.version.versionNumber ?? null;
-    const status =
-      workspaceDomainEntry?.summary.status?.trim() ??
-      domainState.summaryStatus ??
-      activeDetail?.version.status ??
-      activeDetail?.plan.status ??
-      "";
-    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
-      planId,
-      versionId,
-    });
-    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      reviewAction: "REQUEST_REVISION",
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
-      planId,
-      versionId,
-    });
-    const canShowReleaseAction = resolveDomainReleaseVisible({
-      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      requiredReleaseMode: "HEAD_COACH_APPROVAL",
-      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
-        allowedActions,
-        status,
-      }),
-      planId,
-      versionId,
-    });
+    const reviewModel = resolveDomainReviewSurfaceModel(reviewDomain);
+    const { state, activeDetail } = reviewModel;
 
     return (
       <section className="space-y-4 border-t border-border/70 pt-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h4 className="text-base font-normal text-textPrimary">
-              Reviewing {reviewDomainLabel}
+              Selected Domain Summary
             </h4>
             <p className="text-sm text-textSecondary">
-              Review the submitted plan content, then approve or request revision.
+              Open the Domain Review Drawer to inspect details and continue authorized workflow actions.
             </p>
           </div>
           {!workflow1HeadCoachReviewActionPanelMode ? (
@@ -11156,12 +11138,16 @@ export function CoachAthletePlanningProfileView({
           ) : null}
         </div>
 
-        {showSubmittedPlanLoading ? (
+        {shouldShowSubmittedPlanLoading({
+          loading: state.loading,
+          hasActiveDetail: activeDetail !== null,
+          workflow1HeadCoachReviewActionPanelMode,
+        }) ? (
           <div className="text-sm text-textSecondary">Loading submitted plan…</div>
         ) : null}
 
-        {loadError ? (
-          <Alert variant="danger">Unable to load submitted plan. {loadError}</Alert>
+        {state.error ? (
+          <Alert variant="danger">Unable to load submitted plan. {state.error}</Alert>
         ) : null}
 
         {governedPlanActionError && !workflow1HeadCoachReviewActionPanelMode ? (
@@ -11172,145 +11158,289 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="success">{governedPlanActionSuccess}</Alert>
         ) : null}
 
-        {!showSubmittedPlanLoading && !loadError && activeDetail ? (
+        {!state.loading && !state.error ? (
           <>
             <dl className="grid gap-2 sm:grid-cols-2">
-              <DetailRow label="Training Plan ID" value={displayValue(planId)} />
-              <DetailRow label="Version ID" value={displayValue(versionId)} />
-              <DetailRow label="Version" value={displayValue(versionNumber)} />
-              <DetailRow label="Status" value={displayValue(status)} />
-              <DetailRow
-                label="Training Days"
-                value={displayValue(activeDetail.days.filter((d) => d.sessions.length > 0).length)}
-              />
+              <DetailRow label="Domain" value={reviewModel.domainLabel} />
+              <DetailRow label="Assigned Coach" value={reviewModel.assignedCoachLabel} />
+              <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
+              <DetailRow label="Workflow status" value={reviewModel.statusLabel} />
+              <DetailRow label="Next action" value={reviewModel.nextActionLabel} />
+              <DetailRow label="Training Plan ID" value={displayValue(reviewModel.planId)} />
+              <DetailRow label="Version ID" value={displayValue(reviewModel.versionId)} />
+              <DetailRow label="Version" value={displayValue(reviewModel.versionNumber)} />
+              <DetailRow label="Training Days" value={displayValue(reviewModel.trainingDays)} />
             </dl>
 
-            {!workflow1HeadCoachReviewActionPanelMode ? (
             <div className="flex flex-wrap gap-2">
-              {canShowApproveAction ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  loading={governedPlanActionLoading === "HEAD_APPROVE"}
-                  disabled={governedPlanActionLoading !== null}
-                  onClick={() =>
-                    void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
-                  }
-                >
-                  Approve Plan
-                </Button>
-              ) : null}
-              {canShowRequestRevisionAction ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={governedPlanActionLoading !== null}
-                  onClick={() => {
-                    setRequestRevisionActionContext(reviewActionContext);
-                    setRequestRevisionModalOpen(true);
-                  }}
-                >
-                  Request Revision
-                </Button>
-              ) : null}
-              {canShowReleaseAction ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  loading={governedPlanActionLoading === "RELEASE"}
-                  disabled={governedPlanActionLoading !== null}
-                  onClick={() =>
-                    void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
-                  }
-                >
-                  Release Domain to Athlete
-                </Button>
-              ) : null}
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
+              >
+                Open Domain Review Drawer
+              </Button>
             </div>
-            ) : null}
-
-            {activeDetail.days.length > 0 ? (
-              <div className="space-y-3">
-                <h5 className="text-sm font-normal text-textPrimary">Plan Content</h5>
-                <div className="max-h-[400px] space-y-3 overflow-y-auto rounded-md border border-slate-200 bg-white p-3">
-                  {activeDetail.days
-                    .filter((day) => day.sessions.length > 0)
-                    .map((day, dayOffset) => (
-                      <div
-                        key={day.id ?? `day-${dayOffset}`}
-                        className="space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2"
-                      >
-                        <div className="text-sm font-medium text-textPrimary">
-                          {day.date ? formatDateOnly(day.date) : `Day ${day.dayIndex ?? dayOffset + 1}`}
-                        </div>
-                        {day.sessions.map((session, sessionOffset) => (
-                          <div
-                            key={session.id ?? `session-${sessionOffset}`}
-                            className="space-y-1 rounded-md border border-slate-200 bg-white p-2"
-                          >
-                            <dl className="space-y-1">
-                              {hasRenderableValue(session.title) ? (
-                                <DetailRow label="Session" value={displayLabelTitleCase(session.title)} />
-                              ) : null}
-                              {hasRenderableValue(session.objective) ? (
-                                <DetailRow label="Objective" value={displayValue(session.objective)} />
-                              ) : null}
-                              <DetailRow
-                                label="Duration"
-                                value={formatMinutesAsHoursMinutes(readSessionDurationMinutes(session))}
-                              />
-                            </dl>
-                            {session.sessionStructureSections.length > 0 ? (
-                              <div className="mt-2 space-y-2">
-                                {session.sessionStructureSections.map((section, sectionOffset) => (
-                                  <div key={`${section.key}-${sectionOffset}`} className="space-y-1">
-                                    <div className="text-xs font-medium text-textSecondary">
-                                      {displayLabelTitleCase(section.key)} ({section.items.length} item{section.items.length !== 1 ? "s" : ""})
-                                    </div>
-                                    {section.items.length > 0 ? (
-                                      <div className="space-y-1 pl-2">
-                                        {section.items.slice(0, 5).map((item, itemOffset) => (
-                                          <div key={`item-${itemOffset}`} className="space-y-0.5">
-                                            <div className="text-xs text-textSecondary">
-                                              {displayLabelTitleCase(item.label) || item.summary || `Item ${itemOffset + 1}`}
-                                              {hasRenderableValue(item.durationMinutes) ? ` • ${formatMinutesAsHoursMinutes(item.durationMinutes)}` : ""}
-                                              {hasRenderableValue(item.reps) ? ` • ${item.reps} reps` : ""}
-                                              {hasRenderableValue(item.sets) ? ` • ${item.sets} sets` : ""}
-                                            </div>
-                                            <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
-                                          </div>
-                                        ))}
-                                        {section.items.length > 5 ? (
-                                          <div className="text-xs text-textSecondary italic">
-                                            …and {section.items.length - 5} more
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-textSecondary">No training days in this plan.</div>
-            )}
           </>
         ) : shouldShowHeadCoachReviewEmptyState({
           activeDetail,
-          workspacePlanId,
-          workspaceVersionId,
-          isLoading,
-          loadError,
+          workspacePlanId: reviewModel.planId || null,
+          workspaceVersionId: reviewModel.versionId || null,
+          isLoading: state.loading,
+          loadError: state.error,
         }) ? (
           <div className="text-sm text-textSecondary">No submitted plan data available for this domain.</div>
         ) : null}
       </section>
+    );
+  }
+
+  function renderDomainReviewDrawer() {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain === null) return null;
+
+    const reviewModel = resolveDomainReviewSurfaceModel(domainReviewDrawerDomain);
+    const {
+      domain: reviewDomain,
+      domainLabel: reviewDomainLabel,
+      state: domainState,
+      assignedCoachLabel,
+      workflowStatus,
+      statusLabel,
+      planStatusLabel,
+      nextActionLabel,
+      activeDetail,
+      planId,
+      versionId,
+      versionNumber,
+      trainingDays,
+      canShowViewPlan,
+      canShowApproveAction,
+      canShowRequestRevisionAction,
+      canShowReleaseAction,
+      actionContext,
+      viewPlanContext,
+    } = reviewModel;
+    const hasDrawerWorkflowActions =
+      (canShowViewPlan && viewPlanContext !== null) ||
+      canShowApproveAction ||
+      canShowRequestRevisionAction ||
+      canShowReleaseAction;
+
+    return (
+      <div
+        className="fixed inset-0 z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="domain-review-drawer-title"
+      >
+        <style>
+          {`
+            @keyframes domainReviewDrawerSlideIn {
+              from { opacity: 0; transform: translateX(1.5rem); }
+              to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes domainReviewDrawerSlideOut {
+              from { opacity: 1; transform: translateX(0); }
+              to { opacity: 0; transform: translateX(1.5rem); }
+            }
+            @keyframes domainReviewBackdropFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes domainReviewBackdropFadeOut {
+              from { opacity: 1; }
+              to { opacity: 0; }
+            }
+          `}
+        </style>
+        <button
+          type="button"
+          className={cn(
+            "absolute inset-0 cursor-default bg-slate-950/25",
+            domainReviewDrawerClosing
+              ? "motion-safe:animate-[domainReviewBackdropFadeOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
+          )}
+          aria-label="Close Domain Review Drawer"
+          onClick={handleCloseDomainReviewDrawer}
+        />
+        <aside
+          className={cn(
+            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
+            domainReviewDrawerClosing
+              ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
+          )}
+        >
+          <header className="space-y-2 border-b border-border px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3
+                  id="domain-review-drawer-title"
+                  className="text-lg font-medium text-textPrimary"
+                >
+                  Domain Review Drawer
+                </h3>
+                <p className="text-sm text-textSecondary">{reviewDomainLabel}</p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleCloseDomainReviewDrawer}
+              >
+                Close
+              </Button>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div className="space-y-5">
+              <section className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-normal text-textPrimary">Review Status</h4>
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2 py-0.5 text-xs",
+                      domainIntegrationStatusTone(workflowStatus),
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
+                </div>
+                <dl className="space-y-1">
+                  <DetailRow label="Domain" value={reviewDomainLabel} />
+                  <DetailRow label="Assigned Coach" value={assignedCoachLabel} />
+                  <DetailRow label="Plan status" value={planStatusLabel} />
+                  <DetailRow
+                    label="Workflow status"
+                    value={assistantWorkflowStatusLabelForKind(workflowStatus)}
+                  />
+                  <DetailRow label="Current step / next action" value={nextActionLabel} />
+                  <DetailRow label="Training Plan ID" value={displayValue(planId)} />
+                  <DetailRow label="Version ID" value={displayValue(versionId)} />
+                  <DetailRow label="Version" value={displayValue(versionNumber)} />
+                  <DetailRow label="Training Days" value={displayValue(trainingDays)} />
+                </dl>
+                {domainState.loading ? (
+                  <DashboardStatusNotice type="loading" compact>
+                    Loading submitted plan detail...
+                  </DashboardStatusNotice>
+                ) : null}
+                {domainState.error ? (
+                  <DashboardStatusNotice type="warning" compact>
+                    Unable to load submitted plan detail. {domainState.error}
+                  </DashboardStatusNotice>
+                ) : null}
+                {governedPlanActionError ? (
+                  <Alert variant="danger">{governedPlanActionError}</Alert>
+                ) : null}
+                {governedPlanActionSuccess ? (
+                  <WorkflowNeutralNotice>
+                    <div className="space-y-2">
+                      <div>{governedPlanActionSuccess}</div>
+                      {governedPlanActionSuccessFeedback ? (
+                        <div className="text-sm text-textSecondary">
+                          Head Coach Notes: {governedPlanActionSuccessFeedback}
+                        </div>
+                      ) : null}
+                    </div>
+                  </WorkflowNeutralNotice>
+                ) : null}
+              </section>
+
+              <section className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-normal text-textPrimary">Review Actions</h4>
+                  <p className="text-sm text-textSecondary">
+                    Continue authorized workflow actions for this domain.
+                  </p>
+                </div>
+                {hasDrawerWorkflowActions ? (
+                  <div className="flex flex-wrap gap-2">
+                    {canShowViewPlan && viewPlanContext !== null ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={persistedSkillsPlanLoading}
+                        onClick={() => {
+                          void handleViewWorkspaceDomainPlan(reviewDomain, viewPlanContext);
+                        }}
+                      >
+                        View Domain Plan
+                      </Button>
+                    ) : null}
+                    {canShowApproveAction ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "HEAD_APPROVE"}
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction("HEAD_APPROVE", actionContext)
+                        }
+                      >
+                        Approve Plan
+                      </Button>
+                    ) : null}
+                    {canShowRequestRevisionAction ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction(
+                            "REQUEST_REVISION",
+                            actionContext,
+                          )
+                        }
+                      >
+                        Request Changes
+                      </Button>
+                    ) : null}
+                    {canShowReleaseAction ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "RELEASE"}
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction("RELEASE", actionContext)
+                        }
+                      >
+                        Release Domain to Athlete
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-sm text-textSecondary">
+                    No authorized workflow action is available for this domain right now.
+                  </div>
+                )}
+              </section>
+
+              {activeDetail !== null ? (
+                <div className="[&_>div]:border-slate-200 [&_>div]:bg-white">
+                  {renderPlanViewerPersistedPlanDetail(activeDetail, {
+                    title: `${reviewDomainLabel} Detail`,
+                  })}
+                </div>
+              ) : !domainState.loading && domainState.error === null ? (
+                <div className="text-sm text-textSecondary">
+                  No submitted plan data available for this domain.
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <footer className="flex justify-end border-t border-border px-5 py-4">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleCloseDomainReviewDrawer}
+            >
+              Close
+            </Button>
+          </footer>
+        </aside>
+      </div>
     );
   }
 
@@ -17323,7 +17453,9 @@ export function CoachAthletePlanningProfileView({
             levelValidationSnapshot={readinessSources.levelValidation}
             onAfterSaveConfirmed={refreshProfileAndReadinessAfterLevelValidation}
           />
-          {requestRevisionModalOpen && !workflow1HeadCoachReviewActionPanelMode ? (
+          {renderDomainReviewDrawer()}
+          {requestRevisionModalOpen &&
+          (!workflow1HeadCoachReviewActionPanelMode || domainReviewDrawerOpen) ? (
             <Modal
               className="w-full max-w-lg overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
               aria-labelledby="request-revision-modal-title"

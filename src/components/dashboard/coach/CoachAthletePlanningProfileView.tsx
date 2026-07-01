@@ -1958,6 +1958,7 @@ function TrainingPlanWorkspaceModeShell({
   const hasSecondary = secondary !== null && secondary !== undefined;
   const isContextBuilder = mode === "context-builder";
   const usesSeparatorShell = isContextBuilder || mode === "domain-integration";
+  const usesPlainSummary = mode === "plan-viewer";
   return (
     <section
       className={cn(
@@ -1975,7 +1976,15 @@ function TrainingPlanWorkspaceModeShell({
         </span>
       </div>
       {summary !== null && summary !== undefined ? (
-        <div className={usesSeparatorShell ? "border-y border-border/70 py-3" : "rounded-lg border border-slate-200 bg-slate-50 p-3"}>
+        <div
+          className={
+            usesPlainSummary
+              ? ""
+              : usesSeparatorShell
+                ? "border-y border-border/70 py-3"
+                : "rounded-lg border border-slate-200 bg-slate-50 p-3"
+          }
+        >
           {summary}
         </div>
       ) : null}
@@ -16750,9 +16759,9 @@ export function CoachAthletePlanningProfileView({
 
   function renderPlanViewerFact(label: string, value: ReactNode) {
     return (
-      <div className="min-w-0 space-y-0.5">
-        <div className="text-xs uppercase tracking-wide text-textMuted">{label}</div>
-        <div className="min-w-0 break-words text-sm text-textPrimary">{value}</div>
+      <div className="flex min-w-0 flex-col gap-0.5 py-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <dt className="text-xs uppercase tracking-wide text-textMuted">{label}</dt>
+        <dd className="min-w-0 break-words text-sm text-textPrimary sm:text-right">{value}</dd>
       </div>
     );
   }
@@ -16811,13 +16820,13 @@ export function CoachAthletePlanningProfileView({
                 Only the current released window is available here.
               </div>
             </div>
-            <div className="grid gap-x-6 gap-y-3 border-t border-border/70 pt-4 sm:grid-cols-2 lg:grid-cols-5">
+            <dl className="divide-y divide-border/70 border-t border-border/70">
               {renderPlanViewerFact("Selected domain", selectedDomainLabel)}
               {renderPlanViewerFact("Plan status", planStatusLabel)}
               {renderPlanViewerFact("Workflow status", workflowStatusLabel)}
               {renderPlanViewerFact("Plan window", displayValue(planWindowLabel))}
               {renderPlanViewerFact("Version", displayValue(versionNumber))}
-            </div>
+            </dl>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"

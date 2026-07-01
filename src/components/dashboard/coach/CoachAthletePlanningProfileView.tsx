@@ -11339,6 +11339,7 @@ export function CoachAthletePlanningProfileView({
   function renderDomainReviewDrawerStructureItem(
     item: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number]["sessionStructureSections"][number]["items"][number],
     itemOffset: number,
+    options: { showNutritionCalories?: boolean } = {},
   ) {
     const title = (item as { title?: DisplayableValue }).title;
     const instructions = (item as { instructions?: DisplayableValue }).instructions;
@@ -11353,6 +11354,9 @@ export function CoachAthletePlanningProfileView({
             ? displayValue(item.summary)
             : `Item ${itemOffset + 1}`;
     const measures = [
+      options.showNutritionCalories && item.calories !== null
+        ? formatNutritionCaloriesDisplay(item.calories)
+        : null,
       hasRenderableValue(item.durationMinutes)
         ? formatMinutesAsHoursMinutes(Number(item.durationMinutes))
         : null,
@@ -11384,8 +11388,13 @@ export function CoachAthletePlanningProfileView({
   function renderDomainReviewDrawerSession(
     session: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number],
     sessionOffset: number,
+    options: { showNutritionCalories?: boolean } = {},
   ) {
     const sessionNotes = (session as { notes?: DisplayableValue }).notes;
+    const sessionItems = session.sessionStructureSections.flatMap((section) => section.items);
+    const sessionCalories = options.showNutritionCalories
+      ? sumNutritionMetric(sessionItems, "calories")
+      : null;
     const sessionHeading = hasRenderableValue(session.title)
       ? displayLabelTitleCase(session.title)
       : `Session ${sessionOffset + 1}`;
@@ -11395,6 +11404,7 @@ export function CoachAthletePlanningProfileView({
         ? formatMinutesAsHoursMinutes(readSessionDurationMinutes(session))
         : null,
       hasRenderableValue(session.intensity) ? displayValue(session.intensity) : null,
+      sessionCalories !== null ? formatNutritionCaloriesDisplay(sessionCalories) : null,
     ].filter((value): value is string => value !== null && value.trim() !== "");
 
     return (
@@ -11421,7 +11431,9 @@ export function CoachAthletePlanningProfileView({
                 {section.items.length > 0 ? (
                   <ul className="space-y-3 pl-4">
                     {section.items.map((item, itemOffset) =>
-                      renderDomainReviewDrawerStructureItem(item, itemOffset),
+                      renderDomainReviewDrawerStructureItem(item, itemOffset, {
+                        showNutritionCalories: options.showNutritionCalories,
+                      }),
                     )}
                   </ul>
                 ) : (
@@ -11437,10 +11449,42 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  function resolveNutritionDayCalories(
+    day: CoachPersistedTrainingPlanActiveDetail["days"][number],
+  ): number | null {
+    return sumNutritionMetric(
+      day.sessions.flatMap((session) =>
+        session.sessionStructureSections.flatMap((section) => section.items),
+      ),
+      "calories",
+    );
+  }
+
+  function renderNutritionPlanCalorieSummary(
+    days: CoachPersistedTrainingPlanActiveDetail["days"],
+  ) {
+    const dailyCalories = days
+      .map(resolveNutritionDayCalories)
+      .filter((value): value is number => value !== null);
+    if (dailyCalories.length === 0) return null;
+
+    const totalCalories = dailyCalories.reduce((sum, value) => sum + value, 0);
+    const averageDailyCalories = totalCalories / dailyCalories.length;
+    return (
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-textSecondary">
+        <span>Total plan calories: {formatNutritionCaloriesDisplay(totalCalories)}</span>
+        <span>
+          Average daily calories: {formatNutritionCaloriesDisplay(averageDailyCalories)}
+        </span>
+      </div>
+    );
+  }
+
   function renderDomainPlanDaySchedule(
     detail: CoachPersistedTrainingPlanActiveDetail,
     domainLabel: string,
     description = "Review the submitted plan by day and session.",
+    domain: TrainingPlanGenerationDomain | null = null,
   ) {
     const sortedDays = [...detail.days].sort((a, b) => {
       const aIndex = typeof a.dayIndex === "number" ? a.dayIndex : Number.MAX_SAFE_INTEGER;
@@ -11449,12 +11493,14 @@ export function CoachAthletePlanningProfileView({
       return String(a.date ?? "").localeCompare(String(b.date ?? ""));
     });
     const hasSessions = sortedDays.some((day) => day.sessions.length > 0);
+    const showNutritionCalories = domain === "NUTRITION";
 
     return (
       <section className="space-y-4 border-t border-border/70 pt-5">
         <div className="space-y-1">
           <h4 className="text-sm font-normal text-textPrimary">{domainLabel} Schedule</h4>
           <p className="text-sm text-textSecondary">{description}</p>
+          {showNutritionCalories ? renderNutritionPlanCalorieSummary(sortedDays) : null}
         </div>
         {!hasSessions ? (
           <div className="text-sm text-textSecondary">No scheduled sessions are available.</div>
@@ -11464,6 +11510,9 @@ export function CoachAthletePlanningProfileView({
               const dayNumber = day.dayIndex ?? dayOffset + 1;
               const weekdayName = formatDrawerWeekdayName(day.date);
               const dayFocus = (day as { dayFocus?: DisplayableValue }).dayFocus;
+              const dayCalories = showNutritionCalories
+                ? resolveNutritionDayCalories(day)
+                : null;
               return (
                 <section key={day.id ?? `day-${dayOffset}`} className="space-y-3 py-5 first:pt-0">
                   <div className="space-y-1">
@@ -11481,6 +11530,11 @@ export function CoachAthletePlanningProfileView({
                     {hasRenderableValue(dayFocus) ? (
                       <div className="text-sm text-textSecondary">Focus: {displayValue(dayFocus)}</div>
                     ) : null}
+                    {dayCalories !== null ? (
+                      <div className="text-sm text-textSecondary">
+                        Daily calories: {formatNutritionCaloriesDisplay(dayCalories)}
+                      </div>
+                    ) : null}
                     {hasRenderableValue(day.notes) ? (
                       <div className="text-sm text-textSecondary">Notes: {displayValue(day.notes)}</div>
                     ) : null}
@@ -11490,7 +11544,9 @@ export function CoachAthletePlanningProfileView({
                   ) : (
                     <div className="divide-y divide-border/70">
                       {day.sessions.map((session, sessionOffset) =>
-                        renderDomainReviewDrawerSession(session, sessionOffset),
+                        renderDomainReviewDrawerSession(session, sessionOffset, {
+                          showNutritionCalories,
+                        }),
                       )}
                     </div>
                   )}
@@ -11784,7 +11840,7 @@ export function CoachAthletePlanningProfileView({
               ) : null}
 
               {activeDetail !== null ? (
-                renderDomainPlanDaySchedule(activeDetail, reviewDomainLabel)
+                renderDomainPlanDaySchedule(activeDetail, reviewDomainLabel, undefined, reviewDomain)
               ) : !domainState.loading && domainState.error === null ? (
                 <div className="text-sm text-textSecondary">
                   No submitted plan data available for this domain.
@@ -17551,10 +17607,12 @@ export function CoachAthletePlanningProfileView({
           ? persistedSkillsPlanDetail
           : null;
     if (planViewerRequestedPlanId !== null && visibleReleasedDetail !== null) {
+      const selectedDomain = resolvePlanViewerSelectedDomain();
       return renderDomainPlanDaySchedule(
         visibleReleasedDetail,
         resolvePlanViewerSelectedDomainLabel(),
         "View the released plan by day and session.",
+        selectedDomain,
       );
     }
     if (planViewerRequestedPlanId !== null) {

@@ -16631,11 +16631,12 @@ export function CoachAthletePlanningProfileView({
     if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
     const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
     const hasPlanViewerTrigger =
-      hasReleasedDomainPlan &&
-      (requestedPlanId !== null ||
-        persistedSkillsPlanDetail !== null ||
-        latestSkillsDraft !== null ||
-        generatePlanSuccess !== null);
+      releasedPlanViewerIntent !== null ||
+      (hasReleasedDomainPlan &&
+        (requestedPlanId !== null ||
+          persistedSkillsPlanDetail !== null ||
+          latestSkillsDraft !== null ||
+          generatePlanSuccess !== null));
     if (
       selectedWorkflowTab === "generate" &&
       hasPlanViewerTrigger
@@ -16651,14 +16652,14 @@ export function CoachAthletePlanningProfileView({
     const domainAvailable = workflowPrecMap.generate;
     const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
     const hasPlanViewerTrigger =
+      releasedPlanViewerIntent !== null ||
       requestedPlanId !== null ||
       persistedSkillsPlanDetail !== null ||
       latestSkillsDraft !== null ||
       generatePlanSuccess !== null;
     const planViewerAvailable =
       domainAvailable &&
-      hasReleasedDomainPlan &&
-      hasPlanViewerTrigger;
+      (releasedPlanViewerIntent !== null || (hasReleasedDomainPlan && hasPlanViewerTrigger));
 
     return resolveTrainingPlanWorkspaceLifecycleSteps({
       activeMode,

@@ -16209,13 +16209,14 @@ export function CoachAthletePlanningProfileView({
 
   function resolveTrainingPlanWorkspaceVisualMode(): TrainingPlanWorkspaceVisualMode {
     if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
+    const hasPlanViewerTrigger =
+      requestedPlanId !== null ||
+      persistedSkillsPlanDetail !== null ||
+      latestSkillsDraft !== null ||
+      generatePlanSuccess !== null;
     if (
       selectedWorkflowTab === "generate" &&
-      (headCoachSubmittedReviewDomain !== null ||
-        requestedPlanId !== null ||
-        persistedSkillsPlanDetail !== null ||
-        latestSkillsDraft !== null ||
-        generatePlanSuccess !== null)
+      hasPlanViewerTrigger
     ) {
       return "plan-viewer";
     }
@@ -16226,13 +16227,14 @@ export function CoachAthletePlanningProfileView({
     const activeMode = resolveTrainingPlanWorkspaceVisualMode();
     const contextComplete = planningContextLocked || headCoachLockedContextStepComplete;
     const domainAvailable = workflowPrecMap.generate;
+    const hasPlanViewerTrigger =
+      requestedPlanId !== null ||
+      persistedSkillsPlanDetail !== null ||
+      latestSkillsDraft !== null ||
+      generatePlanSuccess !== null;
     const planViewerAvailable =
       domainAvailable &&
-      (headCoachSubmittedReviewDomain !== null ||
-        requestedPlanId !== null ||
-        persistedSkillsPlanDetail !== null ||
-        latestSkillsDraft !== null ||
-        generatePlanSuccess !== null);
+      hasPlanViewerTrigger;
 
     return resolveTrainingPlanWorkspaceLifecycleSteps({
       activeMode,

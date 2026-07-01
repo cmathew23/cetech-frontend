@@ -29,6 +29,7 @@ import {
   errorForRenderedDomain,
   canShowDomainReviseAction,
   resolveDomainRevisePlanIds,
+  resolveLockedPlanningContextDisplayFields,
   resolveWorkflowResetScopeMode,
   headCoachSubmittedReviewDomains,
   shouldBlockWorkflowRenderForWorkspace,
@@ -1860,6 +1861,20 @@ describe("buildDomainReviewRevisionContext", () => {
 });
 
 describe("Training Plan Workspace lifecycle display", () => {
+  it("marks Context Builder active when the locked context canvas is visible", () => {
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "context-builder",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(steps.find((step) => step.key === "context-builder")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("available");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
   it("keeps Plan Viewer locked when domains are submitted for review but not released", () => {
     const base = workflow1OwnedSkillsWorkspace();
     const submittedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
@@ -3443,6 +3458,85 @@ describe("resolveTrainingPlanWorkflowMode", () => {
       }),
     ).toBeNull();
     expect(localSelectedGoalsLength).toBe(0);
+  });
+
+  it("resolves locked Domain Integration season and phase from the locked context", () => {
+    const displayFields = resolveLockedPlanningContextDisplayFields({
+      workspacePlanningContext: {
+        locked: true,
+        resolved: true,
+        lockId: "lock-1",
+        snapshotId: "snapshot-1",
+        selectedSeasonCycleId: "season-2026",
+        phase: "OFF_SEASON",
+        planStartDate: "2026-07-01",
+        planEndDate: "2026-07-07",
+        selectedGoalsSnapshot: [
+          {
+            goalId: "goal-approach",
+            goalName: "Improve approach distance control and proximity into greens",
+          },
+        ],
+      },
+      upstreamPlanningContext: null,
+      seasons: [
+        {
+          id: "season-row-2026",
+          seasonCycleId: "season-2026",
+          entityId: "entity-1",
+          sport: "GOLF",
+          year: 2026,
+          name: "Albus Golf Season 2026",
+          startDate: "2026-01-01",
+          endDate: "2026-12-31",
+          phases: [],
+        },
+      ],
+      phasesBySeasonCycleId: {
+        "season-2026": [
+          {
+            phaseId: "phase-off-season",
+            seasonCycleId: "season-2026",
+            phase: "OFF_SEASON",
+            startDate: "2026-01-01",
+            endDate: "2026-12-31",
+          },
+        ],
+      },
+      selectedSeason: {
+        id: "stale-season-row",
+        seasonCycleId: "stale-season",
+        entityId: "entity-1",
+        sport: "GOLF",
+        year: 2025,
+        name: "Stale Selected Season",
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+        phases: [],
+      },
+      activePhaseForSelectedSeason: {
+        phaseId: "phase-stale",
+        seasonCycleId: "stale-season",
+        phase: "IN_SEASON",
+        startDate: "2025-07-01",
+        endDate: "2025-09-01",
+      },
+      lockedPlanningContextSeasonPhase: null,
+    });
+
+    expect(displayFields).toMatchObject({
+      seasonName: "Albus Golf Season 2026",
+      currentPhase: "OFF_SEASON",
+      selectedGoalsSummary: "Improve approach distance control and proximity into greens",
+      selectedGoalCount: 1,
+      planStartDate: "2026-07-01",
+      planEndDate: "2026-07-07",
+      durationDays: 7,
+      insideCurrentPhase: true,
+      datesConfirmed: true,
+      seasonGoalsComplete: true,
+      planDatesComplete: true,
+    });
   });
 
   it("shows the active-goal blocker only when locked workspace context has no goals", () => {

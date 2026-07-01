@@ -354,6 +354,201 @@ export function readLockedWorkspaceGoalIds(input: {
   ).filter((goalId) => typeof goalId === "string" && goalId.trim() !== "");
 }
 
+export function resolveLockedPlanningContextDisplayFields(input: {
+  workspacePlanningContext: TrainingPlanWorkspace["planningContext"] | null;
+  upstreamPlanningContext: CoachAthleteUpstreamPlanningContext | null;
+  seasons: SeasonCycleSummary[];
+  phasesBySeasonCycleId?: Record<string, SeasonPhaseSummary[]>;
+  selectedSeason: SeasonCycleSummary | null;
+  activePhaseForSelectedSeason: SeasonPhaseSummary | null;
+  lockedPlanningContextSeasonPhase: string | null;
+  setupGoals?: GoalSummary[];
+  selectedActiveGoals?: GoalSummary[];
+}): {
+  seasonName: string | null;
+  currentPhase: string | null;
+  selectedGoalsSummary: string | null;
+  selectedGoalCount: number;
+  planStartDate: string | null;
+  planEndDate: string | null;
+  durationDays: number | null;
+  insideCurrentPhase: boolean | null;
+  datesConfirmed: boolean;
+  seasonGoalsComplete: boolean;
+  planDatesComplete: boolean;
+} {
+  const workspacePlanningContext = input.workspacePlanningContext;
+  const workspaceSnapshotRecords = collectObjectRecords(
+    workspacePlanningContext?.athletePlanningContextSnapshot,
+  );
+  const selectedGoalsSnapshotRecords = collectObjectRecords(
+    workspacePlanningContext?.selectedGoalsSnapshot,
+  );
+  const snapshotRecords = [...selectedGoalsSnapshotRecords, ...workspaceSnapshotRecords];
+  const snapshotSeasonName = readStringFromRecords(snapshotRecords, [
+    "seasonName",
+    "seasonCycleName",
+    "selectedSeasonName",
+  ]);
+  const snapshotPhase = readStringFromRecords(snapshotRecords, [
+    "currentPhase",
+    "phase",
+    "phaseCode",
+    "phaseName",
+  ]);
+  const lockedSeasonCycleId = trimmedNonEmpty(
+    workspacePlanningContext?.selectedSeasonCycleId,
+    workspacePlanningContext?.seasonCycleId,
+    workspacePlanningContext?.selectedSeasonId,
+    workspacePlanningContext?.seasonId,
+    readStringFromRecords(snapshotRecords, [
+      "selectedSeasonCycleId",
+      "seasonCycleId",
+      "selectedSeasonId",
+      "seasonId",
+    ]),
+    input.upstreamPlanningContext?.planningContext.seasonCycleId,
+    input.upstreamPlanningContext?.seasonCycleId,
+    input.upstreamPlanningContext?.planningContext.season?.seasonCycleId,
+    input.upstreamPlanningContext?.season?.seasonCycleId,
+  );
+  const lockedSeason =
+    lockedSeasonCycleId !== null
+      ? input.seasons.find((season) => season.seasonCycleId === lockedSeasonCycleId) ?? null
+      : null;
+  const currentPhase = trimmedNonEmpty(
+    workspacePlanningContext?.phase,
+    snapshotPhase,
+    input.upstreamPlanningContext?.planningContext.phase,
+    input.lockedPlanningContextSeasonPhase,
+    input.upstreamPlanningContext?.season?.phaseCode,
+    input.upstreamPlanningContext?.season?.phaseName,
+    input.upstreamPlanningContext?.phase,
+    input.activePhaseForSelectedSeason?.phase,
+    input.activePhaseForSelectedSeason?.phaseName,
+  );
+  const planStartDate = trimmedNonEmpty(
+    workspacePlanningContext?.planStartDate,
+    workspacePlanningContext?.startDate,
+    readStringFromRecords(snapshotRecords, ["planStartDate", "startDate", "trainingPlanStartDate"]),
+    input.upstreamPlanningContext?.planWindow?.startDate,
+    input.upstreamPlanningContext?.startDate,
+  );
+  const planEndDate = trimmedNonEmpty(
+    workspacePlanningContext?.planEndDate,
+    workspacePlanningContext?.endDate,
+    readStringFromRecords(snapshotRecords, ["planEndDate", "endDate", "trainingPlanEndDate"]),
+    input.upstreamPlanningContext?.planWindow?.endDate,
+    input.upstreamPlanningContext?.endDate,
+  );
+  const selectedGoalLabels = readGoalLabelsFromSnapshot(
+    workspacePlanningContext?.selectedGoalsSnapshot,
+  );
+  const athleteSnapshotGoalLabels = readGoalLabelsFromSnapshot(
+    workspacePlanningContext?.athletePlanningContextSnapshot,
+  );
+  const upstreamGoalLabels =
+    input.upstreamPlanningContext?.goals
+      .map((goal) => goal.goalName ?? goal.name ?? goal.goalId)
+      .filter((goal): goal is string => typeof goal === "string" && goal.trim() !== "") ?? [];
+  const lockedGoalIds = readLockedWorkspaceGoalIds({
+    selectedGoalsSnapshot: workspacePlanningContext?.selectedGoalsSnapshot,
+    athletePlanningContextSnapshot: workspacePlanningContext?.athletePlanningContextSnapshot,
+    goalIds: workspacePlanningContext?.goalIds,
+    lockedGoalIds: workspacePlanningContext?.lockedGoalIds,
+    fallbackGoalIds:
+      input.upstreamPlanningContext?.planningContext.lockedGoalIds ??
+      input.upstreamPlanningContext?.planningContext.goalIds ??
+      input.upstreamPlanningContext?.goalIds ??
+      [],
+  });
+  const setupGoalLabels = lockedGoalIds
+    .map((goalId) => input.setupGoals?.find((goal) => goal.goalId === goalId))
+    .filter((goal): goal is GoalSummary => goal !== undefined)
+    .map((goal) => goal.goalName ?? goal.goalId)
+    .filter((goal) => goal.trim() !== "");
+  const fallbackSelectedGoalLabels =
+    input.selectedActiveGoals
+      ?.map((goal) => goal.goalName ?? goal.goalId)
+      .filter((goal) => goal.trim() !== "") ?? [];
+  const selectedGoalDisplayLabels = firstNonEmptyStringList([
+    selectedGoalLabels,
+    athleteSnapshotGoalLabels,
+    upstreamGoalLabels,
+    setupGoalLabels,
+    fallbackSelectedGoalLabels,
+  ]);
+  const phasesForLockedSeason =
+    lockedSeasonCycleId !== null
+      ? (input.phasesBySeasonCycleId?.[lockedSeasonCycleId] ?? lockedSeason?.phases ?? [])
+      : [];
+  const currentPhaseRecord =
+    currentPhase !== null
+      ? phasesForLockedSeason.find(
+          (phase) => phase.phase === currentPhase || phase.phaseId === currentPhase,
+        ) ?? null
+      : null;
+  const insideCurrentPhase =
+    planStartDate !== null && planEndDate !== null && currentPhaseRecord !== null
+      ? isPlanWindowInsidePhase(currentPhaseRecord, planStartDate, planEndDate)
+      : null;
+  const resolvedDurationDays =
+    typeof workspacePlanningContext?.durationDays === "number" &&
+    Number.isFinite(workspacePlanningContext.durationDays)
+      ? workspacePlanningContext.durationDays
+      : calculateInclusiveDurationDays(planStartDate, planEndDate);
+  const seasonName = lockedSeason?.name ?? snapshotSeasonName ?? input.selectedSeason?.name ?? null;
+  const selectedGoalCount =
+    selectedGoalDisplayLabels.length > 0 ? selectedGoalDisplayLabels.length : lockedGoalIds.length;
+  const locked =
+    workspacePlanningContext?.locked === true ||
+    input.upstreamPlanningContext?.planningContextLocked === true ||
+    input.upstreamPlanningContext?.upstreamPlanningContextLocked === true;
+  const datesConfirmed =
+    locked && planStartDate !== null && planEndDate !== null;
+
+  return {
+    seasonName,
+    currentPhase,
+    selectedGoalsSummary:
+      selectedGoalDisplayLabels.length > 0 ? selectedGoalDisplayLabels.join(", ") : null,
+    selectedGoalCount,
+    planStartDate,
+    planEndDate,
+    durationDays: resolvedDurationDays,
+    insideCurrentPhase,
+    datesConfirmed,
+    seasonGoalsComplete:
+      locked && seasonName !== null && currentPhase !== null && selectedGoalCount > 0,
+    planDatesComplete: datesConfirmed,
+  };
+}
+
+function readGoalLabelsFromSnapshot(snapshot: unknown): string[] {
+  const records = Array.isArray(snapshot)
+    ? snapshot.map((item) => objectRecord(item)).filter((item): item is Record<string, unknown> => item !== null)
+    : collectObjectRecords(snapshot);
+  return records
+    .map((record) =>
+      readStringFromRecords([record], ["goalName", "name", "title", "goalId", "trainingGoalId", "id"]),
+    )
+    .filter((value): value is string => value !== null)
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function firstNonEmptyStringList(lists: string[][]): string[] {
+  return lists.find((list) => list.some((item) => item.trim() !== "")) ?? [];
+}
+
+function calculateInclusiveDurationDays(startDate: string | null, endDate: string | null): number | null {
+  if (startDate === null || endDate === null) return null;
+  const start = new Date(`${dateOnly(startDate)}T00:00:00.000Z`);
+  const end = new Date(`${dateOnly(endDate)}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const diffDays = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  return diffDays > 0 ? diffDays : null;
+}
+
 function extractPersistenceContextFromSnapshot(
   snapshot: unknown,
 ): TrainingPlanPersistenceContext | null {
@@ -879,6 +1074,7 @@ type DomainReviewSurfaceModel = {
   isCurrentReviewPlan: boolean;
   showWorkflow2DraftPendingNotice: boolean;
   reviseComingSoonVisible: boolean;
+  canShowGenerateAction: boolean;
   canShowViewPlan: boolean;
   canShowSubmitForReview: boolean;
   canShowApproveAction: boolean;
@@ -8561,6 +8757,19 @@ export function CoachAthletePlanningProfileView({
   ]);
 
   useEffect(() => {
+    if (!headCoachReviewMode) return;
+    if (!headCoachFunctionAwareMode) return;
+    if (!headCoachSkillsCreateVisible) return;
+    if (headCoachSubmittedReviewDomain !== null) return;
+    setHeadCoachSubmittedReviewDomain("SKILLS");
+  }, [
+    headCoachFunctionAwareMode,
+    headCoachReviewMode,
+    headCoachSkillsCreateVisible,
+    headCoachSubmittedReviewDomain,
+  ]);
+
+  useEffect(() => {
     return () => {
       clearContextBuilderDrawerCloseTimeout();
       clearDomainReviewDrawerCloseTimeout();
@@ -11093,6 +11302,7 @@ export function CoachAthletePlanningProfileView({
       isCurrentReviewPlan,
       showWorkflow2DraftPendingNotice,
       reviseComingSoonVisible,
+      canShowGenerateAction: generatePermission.canShowGenerate,
       canShowViewPlan,
       canShowSubmitForReview,
       canShowApproveAction,
@@ -11115,6 +11325,7 @@ export function CoachAthletePlanningProfileView({
       nextActionLabel,
       availableActionLabels,
       actionContext,
+      canShowGenerateAction,
       canShowViewPlan,
       viewPlanContext,
       showWorkflow2DraftPendingNotice,
@@ -11122,6 +11333,18 @@ export function CoachAthletePlanningProfileView({
     } = reviewModel;
     const canOpenReleasedPlanViewer =
       workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null;
+    const canGenerateWorkflow2SkillsPlan =
+      headCoachFunctionAwareMode &&
+      domain === "SKILLS" &&
+      workflowStatus === "not_created" &&
+      canShowGenerateAction &&
+      headCoachSkillsCreateVisible;
+    const displayedAvailableActionLabels = canGenerateWorkflow2SkillsPlan
+      ? ["Generate Skills Plan"]
+      : availableActionLabels;
+    const displayedNextActionLabel = canGenerateWorkflow2SkillsPlan
+      ? "Ready to generate this domain"
+      : nextActionLabel;
 
     return (
       <tr key={domain} className="border-t border-border/70 align-top first:border-t-0">
@@ -11154,16 +11377,42 @@ export function CoachAthletePlanningProfileView({
           </span>
         </td>
         <td className="min-w-[12rem] px-3 py-3 text-sm text-textPrimary">
-          {nextActionLabel}
+          {displayedNextActionLabel}
         </td>
         <td className="px-3 py-3 text-sm text-textPrimary">
           <div className="flex flex-col items-start gap-2">
             <span>
-              {availableActionLabels.length > 0
-                ? availableActionLabels.join(", ")
+              {displayedAvailableActionLabels.length > 0
+                ? displayedAvailableActionLabels.join(", ")
                 : "No action available now"}
             </span>
-            {canOpenReleasedPlanViewer ? (
+            {canGenerateWorkflow2SkillsPlan ? (
+              <>
+                {generatePlanLocalErrorsByDomain.SKILLS ? (
+                  <div className="text-xs text-amber-700">
+                    {generatePlanLocalErrorsByDomain.SKILLS}
+                  </div>
+                ) : null}
+                {renderGenerationJobProgress(generatePlanJobsByDomain.SKILLS ?? null)}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    headCoachSkillsCreateDisabled ||
+                    (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
+                  }
+                  onClick={() => {
+                    setHeadCoachSubmittedReviewDomain("SKILLS");
+                    void handleGenerateTrainingPlan("SKILLS");
+                  }}
+                >
+                  {renderGenerationJobButtonLabel(
+                    "SKILLS",
+                    generatePlanJobsByDomain.SKILLS ?? null,
+                  )}
+                </Button>
+              </>
+            ) : canOpenReleasedPlanViewer ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -11227,6 +11476,12 @@ export function CoachAthletePlanningProfileView({
       reviewModel.workflowStatus === "released" &&
       reviewModel.canShowViewPlan &&
       reviewModel.viewPlanContext !== null;
+    const canGenerateWorkflow2SkillsPlan =
+      headCoachFunctionAwareMode &&
+      reviewDomain === "SKILLS" &&
+      reviewModel.workflowStatus === "not_created" &&
+      reviewModel.canShowGenerateAction &&
+      headCoachSkillsCreateVisible;
 
     return (
       <section className="space-y-4 border-t border-border/70 pt-4">
@@ -11283,6 +11538,30 @@ export function CoachAthletePlanningProfileView({
             </dl>
 
             <div className="flex flex-wrap gap-2">
+              {canGenerateWorkflow2SkillsPlan ? (
+                <>
+                  {generatePlanLocalErrorsByDomain.SKILLS ? (
+                    <Alert variant="warning">{generatePlanLocalErrorsByDomain.SKILLS}</Alert>
+                  ) : null}
+                  {renderGenerationJobProgress(generatePlanJobsByDomain.SKILLS ?? null)}
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={
+                      headCoachSkillsCreateDisabled ||
+                      (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
+                    }
+                    onClick={() => {
+                      void handleGenerateTrainingPlan("SKILLS");
+                    }}
+                  >
+                    {renderGenerationJobButtonLabel(
+                      "SKILLS",
+                      generatePlanJobsByDomain.SKILLS ?? null,
+                    )}
+                  </Button>
+                </>
+              ) : null}
               {canOpenReleasedPlanViewer ? (
                 <Button
                   type="button"
@@ -11294,13 +11573,19 @@ export function CoachAthletePlanningProfileView({
                   {viewDomainInPlanViewerLabel(reviewDomain)}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant={canOpenReleasedPlanViewer ? "secondary" : "primary"}
-                onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
-              >
-                {openDomainPlanReviewLabel(reviewDomain)}
-              </Button>
+              {reviewModel.actionContext !== null || reviewModel.activeDetail !== null ? (
+                <Button
+                  type="button"
+                  variant={
+                    canOpenReleasedPlanViewer || canGenerateWorkflow2SkillsPlan
+                      ? "secondary"
+                      : "primary"
+                  }
+                  onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
+                >
+                  {openDomainPlanReviewLabel(reviewDomain)}
+                </Button>
+              ) : null}
             </div>
           </>
         ) : shouldShowHeadCoachReviewEmptyState({
@@ -11310,7 +11595,9 @@ export function CoachAthletePlanningProfileView({
           isLoading: state.loading,
           loadError: state.error,
         }) ? (
-          <div className="text-sm text-textSecondary">No submitted plan data available for this domain.</div>
+          <div className="text-sm text-textSecondary">
+            No submitted plan data available for this domain.
+          </div>
         ) : null}
       </section>
     );
@@ -12373,35 +12660,10 @@ export function CoachAthletePlanningProfileView({
 
   function renderHeadCoachReviewWorkspace() {
     if (!headCoachReviewMode) return null;
-    const skillsCreateError = generatePlanLocalErrorsByDomain.SKILLS ?? null;
     return (
       <div className="space-y-4">
         {renderLockedPlanningContextSummaryForDomainIntegration()}
-        {headCoachFunctionAwareMode && headCoachSkillsCreateVisible ? (
-          <section className="space-y-2 border-y border-border/70 py-3">
-            <h4 className="text-sm font-normal text-textPrimary">Skills Plan Generation</h4>
-            <p className="text-sm text-textSecondary">
-              Create the Skills plan for this athlete when assignment allows generation and
-              planning context is locked.
-            </p>
-            {skillsCreateError ? (
-              <Alert variant="warning">{skillsCreateError}</Alert>
-            ) : null}
-            {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
-            {renderGenerationJobProgress(generatePlanJobsByDomain.SKILLS ?? null)}
-            <Button
-              type="button"
-              variant="primary"
-              disabled={headCoachSkillsCreateDisabled || skillsCreateError !== null}
-              onClick={() => {
-                void handleGenerateTrainingPlan("SKILLS");
-              }}
-            >
-              {renderGenerationJobButtonLabel("SKILLS", generatePlanJobsByDomain.SKILLS ?? null)}
-            </Button>
-          </section>
-        ) : null}
-        {headCoachFunctionAwareMode ? renderHeadCoachOwnedSkillsPlanPanel() : null}
+        {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
         {renderHeadCoachSubmittedDomainPlansSection()}
       </div>
     );
@@ -13619,14 +13881,71 @@ export function CoachAthletePlanningProfileView({
       workspace?.planningContext.locked ??
       upstreamPlanningContext?.planningContextLocked ??
       planningContextLocked;
+    const contextStartDate =
+      workspace?.planningContext.planStartDate ??
+      workspace?.planningContext.startDate ??
+      upstreamPlanningContext?.planWindow?.startDate ??
+      upstreamPlanningContext?.startDate ??
+      cachedLockedPlanWindow?.startDate ??
+      planStartDate;
+    const contextEndDate =
+      workspace?.planningContext.planEndDate ??
+      workspace?.planningContext.endDate ??
+      upstreamPlanningContext?.planWindow?.endDate ??
+      upstreamPlanningContext?.endDate ??
+      cachedLockedPlanWindow?.endDate ??
+      planEndDate;
+    const selectedGoalsSummary =
+      lockedUpstreamGoals.length > 0
+        ? lockedUpstreamGoals
+            .map((goal) => goal.goalName ?? goal.goalId)
+            .filter((value) => value.trim() !== "")
+            .join(", ")
+        : selectedActiveGoals.length > 0
+          ? selectedActiveGoals
+              .map((goal) => goal.goalName ?? goal.goalId)
+              .filter((value) => value.trim() !== "")
+              .join(", ")
+          : null;
+    const lockedContextDisplayFields = resolveLockedPlanningContextDisplayFields({
+      workspacePlanningContext: workspace?.planningContext ?? null,
+      upstreamPlanningContext,
+      seasons: setupState.seasons,
+      selectedSeason,
+      activePhaseForSelectedSeason,
+      lockedPlanningContextSeasonPhase: lockedPlanningContextCardFields.seasonPhase,
+    });
     return (
       <DashboardStatusNotice
         type={locked ? "success" : "warning"}
         compact
       >
-        {locked
-          ? `Context locked and shared · Plan window: ${formatDateRange(planStartDate, planEndDate)} · Domain coaches can now generate and submit plans.`
-          : `Context not locked · Plan window: ${formatDateRange(planStartDate, planEndDate)} · Lock and share context before domain generation starts.`}
+        <div className="space-y-2">
+          <div>
+            {locked
+              ? "Context locked and shared. Domain coaches can now generate and submit plans."
+              : "Context not locked. Lock and share context before domain generation starts."}
+          </div>
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <DetailRow
+              label="Plan window"
+              value={formatDateRange(contextStartDate, contextEndDate)}
+            />
+            <DetailRow
+              label="Season"
+              value={displayValue(lockedContextDisplayFields.seasonName)}
+            />
+            <DetailRow
+              label="Current phase"
+              value={displayValue(lockedContextDisplayFields.currentPhase)}
+            />
+            <DetailRow label="Selected goals" value={selectedGoalsSummary ?? "None"} />
+            <DetailRow
+              label="Readiness"
+              value={locked ? "Ready / context locked and shared" : "Not locked"}
+            />
+          </dl>
+        </div>
       </DashboardStatusNotice>
     );
   }
@@ -16101,6 +16420,15 @@ export function CoachAthletePlanningProfileView({
     return planDatesStepComplete;
   }
 
+  function lockedReadOnlyContextBuilderStepComplete(
+    step: ContextBuilderStepKey,
+    displayFields: ReturnType<typeof resolveLockedPlanningContextDisplayFields>,
+  ): boolean {
+    if (step === "season-goals") return displayFields.seasonGoalsComplete;
+    if (step === "plan-dates") return displayFields.planDatesComplete;
+    return contextBuilderStepComplete(step) || planningContextLocked || headCoachLockedContextStepComplete;
+  }
+
   function contextBuilderStepPurpose(step: ContextBuilderStepKey): string {
     if (step === "context-app") return "Confirm the athlete profile is complete and eligible for planning.";
     if (step === "level-validation") return "Confirm the validated level that planning should use.";
@@ -16169,6 +16497,13 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderContextBuilderProgressSteps() {
+    return renderContextBuilderProgressStepsWithOptions({});
+  }
+
+  function renderContextBuilderProgressStepsWithOptions(options: {
+    lockedReadOnlyDisplayFields?: ReturnType<typeof resolveLockedPlanningContextDisplayFields> | null;
+  }) {
+    const lockedReadOnlyDisplayFields = options.lockedReadOnlyDisplayFields ?? null;
     const progressSteps: Array<{
       key: ContextBuilderStepKey | "final-review";
       title: string;
@@ -16179,7 +16514,9 @@ export function CoachAthletePlanningProfileView({
       ...CONTEXT_BUILDER_STEP_SEQUENCE_LIST.map((step) => ({
         key: step,
         title: contextBuilderProgressStepLabel(step),
-        complete: contextBuilderStepComplete(step),
+        complete: lockedReadOnlyDisplayFields
+          ? lockedReadOnlyContextBuilderStepComplete(step, lockedReadOnlyDisplayFields)
+          : contextBuilderStepComplete(step),
         active: selectedWorkflowTab === step,
         locked: workflowStepStatusByKey[step] === "locked",
       })),
@@ -16285,8 +16622,9 @@ export function CoachAthletePlanningProfileView({
     title: string;
     facts: Array<{ label: string; value: ReactNode }>;
     readOnly?: boolean;
+    completeOverride?: boolean;
   }) {
-    const complete = contextBuilderStepComplete(input.step);
+    const complete = input.completeOverride ?? contextBuilderStepComplete(input.step);
     const active = selectedWorkflowTab === input.step;
     const locked = workflowStepStatusByKey[input.step] === "locked";
     const readOnly = input.readOnly === true;
@@ -16361,20 +16699,64 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderContextBuilderStatusLedger(options: { readOnly?: boolean } = {}) {
+  function renderContextBuilderStatusLedger(
+    options: {
+      readOnly?: boolean;
+      lockedReadOnlyDisplayFields?: ReturnType<typeof resolveLockedPlanningContextDisplayFields> | null;
+    } = {},
+  ) {
     const readOnly = options.readOnly === true;
     const workloadClassification = workloadAssessmentResult?.workloadClassification ?? null;
+    const lockedReadOnlyDisplayFields = options.lockedReadOnlyDisplayFields ??
+      (readOnly
+      ? resolveLockedPlanningContextDisplayFields({
+          workspacePlanningContext: workspace?.planningContext ?? null,
+          upstreamPlanningContext,
+          seasons: setupState.seasons,
+          phasesBySeasonCycleId: setupState.phasesBySeasonCycleId,
+          selectedSeason,
+          activePhaseForSelectedSeason,
+          lockedPlanningContextSeasonPhase: lockedPlanningContextCardFields.seasonPhase,
+          setupGoals: setupState.goals,
+          selectedActiveGoals,
+        })
+      : null);
     const selectedGoalsSummary =
-      selectedActiveGoals.length > 0
+      lockedReadOnlyDisplayFields?.selectedGoalsSummary ??
+      (selectedActiveGoals.length > 0
         ? selectedActiveGoals
             .map((goal) => goal.goalName ?? goal.goalId)
             .filter((value) => value.trim() !== "")
             .join(", ")
-        : null;
+        : null);
     const planDurationLabel =
-      typeof durationDays === "number" && Number.isFinite(durationDays)
+      typeof lockedReadOnlyDisplayFields?.durationDays === "number"
+        ? `${lockedReadOnlyDisplayFields.durationDays} days`
+        : typeof durationDays === "number" && Number.isFinite(durationDays)
         ? `${durationDays} days`
         : null;
+    const seasonName = lockedReadOnlyDisplayFields?.seasonName ?? selectedSeason?.name ?? null;
+    const currentPhase =
+      lockedReadOnlyDisplayFields?.currentPhase ??
+      activePhaseForSelectedSeason?.phase ??
+      activePhaseForSelectedSeason?.phaseName ??
+      null;
+    const planWindowStartDate = lockedReadOnlyDisplayFields?.planStartDate ?? planStartDate;
+    const planWindowEndDate = lockedReadOnlyDisplayFields?.planEndDate ?? planEndDate;
+    const planWindowInsidePhaseLabel =
+      lockedReadOnlyDisplayFields?.insideCurrentPhase === null ||
+      lockedReadOnlyDisplayFields?.insideCurrentPhase === undefined
+        ? displayValue(null)
+        : lockedReadOnlyDisplayFields.insideCurrentPhase
+          ? "Yes"
+          : "No";
+    const datesConfirmedLabel = lockedReadOnlyDisplayFields
+      ? lockedReadOnlyDisplayFields.datesConfirmed
+        ? "Yes"
+        : "No"
+      : planDatesConfirmedForCurrentAthlete
+        ? "Yes"
+        : "No";
 
     return (
       <section className="space-y-3">
@@ -16433,13 +16815,12 @@ export function CoachAthletePlanningProfileView({
           step: "season-goals",
           title: "Season & Goals",
           readOnly,
+          completeOverride: lockedReadOnlyDisplayFields?.seasonGoalsComplete,
           facts: [
-            { label: "Season", value: displayValue(selectedSeason?.name ?? null) },
+            { label: "Season", value: displayValue(seasonName) },
             {
               label: "Current phase",
-              value: displayValue(
-                activePhaseForSelectedSeason?.phase ?? activePhaseForSelectedSeason?.phaseName ?? null,
-              ),
+              value: displayValue(currentPhase),
             },
             { label: "Selected goals", value: selectedGoalsSummary ?? "None" },
             { label: "Safety adaptation", value: displayValue(goalLibraryLevel) },
@@ -16449,11 +16830,12 @@ export function CoachAthletePlanningProfileView({
           step: "plan-dates",
           title: "Plan Dates",
           readOnly,
+          completeOverride: lockedReadOnlyDisplayFields?.planDatesComplete,
           facts: [
             { label: "Duration", value: displayValue(planDurationLabel) },
-            { label: "Plan window", value: formatDateRange(planStartDate, planEndDate) },
-            { label: "Inside current phase", value: planWindowInsideCurrentPhase ? "Yes" : "No" },
-            { label: "Dates confirmed", value: planDatesConfirmedForCurrentAthlete ? "Yes" : "No" },
+            { label: "Plan window", value: formatDateRange(planWindowStartDate, planWindowEndDate) },
+            { label: "Inside current phase", value: planWindowInsidePhaseLabel },
+            { label: "Dates confirmed", value: datesConfirmedLabel },
           ],
         })}
         </div>
@@ -16628,6 +17010,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function resolveTrainingPlanWorkspaceVisualMode(): TrainingPlanWorkspaceVisualMode {
+    if (shouldShowLockedContextBuilderView()) return "context-builder";
     if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
     const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
     const hasPlanViewerTrigger =
@@ -16669,6 +17052,16 @@ export function CoachAthletePlanningProfileView({
       domainIntegrationComplete:
         resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
     });
+  }
+
+  function shouldShowLockedContextBuilderView(): boolean {
+    if (!showLockedContextBuilderView) return false;
+    return (
+      planningContextLocked ||
+      headCoachLockedContextStepComplete ||
+      workspace?.planningContext.locked === true ||
+      upstreamPlanningContext?.planningContextLocked === true
+    );
   }
 
   function renderContextBuilderWorkspace() {
@@ -16713,6 +17106,17 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderLockedContextBuilderBackView() {
+    const lockedReadOnlyDisplayFields = resolveLockedPlanningContextDisplayFields({
+      workspacePlanningContext: workspace?.planningContext ?? null,
+      upstreamPlanningContext,
+      seasons: setupState.seasons,
+      phasesBySeasonCycleId: setupState.phasesBySeasonCycleId,
+      selectedSeason,
+      activePhaseForSelectedSeason,
+      lockedPlanningContextSeasonPhase: lockedPlanningContextCardFields.seasonPhase,
+      setupGoals: setupState.goals,
+      selectedActiveGoals,
+    });
     return (
       <TrainingPlanWorkspaceModeShell
         mode="context-builder"
@@ -16743,8 +17147,8 @@ export function CoachAthletePlanningProfileView({
                 Back to Domain Plans Integration
               </Button>
             </div>
-            {renderContextBuilderProgressSteps()}
-            {renderContextBuilderStatusLedger({ readOnly: true })}
+            {renderContextBuilderProgressStepsWithOptions({ lockedReadOnlyDisplayFields })}
+            {renderContextBuilderStatusLedger({ readOnly: true, lockedReadOnlyDisplayFields })}
             {renderContextBuilderSafetyNotice()}
           </section>
         }
@@ -17688,7 +18092,7 @@ export function CoachAthletePlanningProfileView({
       persistedReleasedPlanViewerDomain !== null &&
       (releasedPlanViewerIntent !== null || requestedPlanId !== null) &&
       (releasedPlanViewerIntent !== null || releasedPlanViewerWorkflowStatus === "released");
-    if (showLockedContextBuilderView && canOpenLockedContextBuilderView) {
+    if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
     if (showReleasedPlanViewerInReviewOnlyMode) {
@@ -17749,7 +18153,7 @@ export function CoachAthletePlanningProfileView({
                       </Button>
                     </div>
                   ) : null}
-                  {tab6ReviewOnlyMode ? (
+                  {headCoachReviewMode ? (
                     <section className="space-y-3">
                       <div className="space-y-1">
                         <h4 className="text-sm font-normal text-textPrimary">

@@ -83,6 +83,10 @@ export type TrainingPlanWorkspaceAssignmentDomainContext = {
   ownerType: TrainingPlanWorkspaceAssignmentDomainOwnerType;
   ownerUserId?: string | null;
   ownerCoachProfileId?: string | null;
+  ownerName?: string | null;
+  ownerDisplayName?: string | null;
+  assignedCoachName?: string | null;
+  assignedCoachDisplayName?: string | null;
   ownedByCurrentUser: boolean;
   canOpen: boolean;
   canGenerate: boolean;

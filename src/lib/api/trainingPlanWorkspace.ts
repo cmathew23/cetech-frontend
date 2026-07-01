@@ -211,6 +211,12 @@ function parseAssignmentDomainContext(
     ownerType: parseAssignmentDomainOwnerType(record.ownerType),
     ownerUserId: readString(record.ownerUserId),
     ownerCoachProfileId: readString(record.ownerCoachProfileId),
+    ownerName: readString(record.ownerName),
+    ownerDisplayName: readString(record.ownerDisplayName),
+    assignedCoachName: readString(record.assignedCoachName ?? record.coachName),
+    assignedCoachDisplayName: readString(
+      record.assignedCoachDisplayName ?? record.coachDisplayName,
+    ),
     ownedByCurrentUser: readBoolean(record.ownedByCurrentUser),
     canOpen: readBoolean(record.canOpen),
     canGenerate: readBoolean(record.canGenerate),

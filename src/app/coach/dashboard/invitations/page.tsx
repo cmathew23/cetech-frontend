@@ -1,9 +1,11 @@
 "use client";
 
+import { DASHBOARD_PAGE_CONTENT_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { InvitationInboxSection } from "@/components/invitations/InvitationInboxSection";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
 import { routeFromAccessContext } from "@/lib/accessContext";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
 export default function CoachDashboardInvitationsPage() {
@@ -19,7 +21,7 @@ export default function CoachDashboardInvitationsPage() {
   }
 
   return (
-    <div className="w-full max-w-4xl space-y-4">
+    <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-4")}>
       <PageHeader
         title="Invitations"
         subtitle="Pending academy invitations. Accept or decline to continue."

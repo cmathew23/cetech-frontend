@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDomainReviewRevisionContext,
   buildCoachWorkflowResetScopeKey,
   deriveHeadCoachDomainWorkflowStatus,
   deriveAssistantDomainWorkflowStatus,
@@ -54,6 +55,13 @@ import {
   resolveDomainHeadCoachReviewActionVisible,
   resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
+  assistantWorkflowStatusLabelForKind,
+  domainIntegrationAvailableActionLabels,
+  domainIntegrationNextActionLabel,
+  resolveDomainReviseAvailability,
+  resolveTrainingPlanWorkspaceDomainIntegrationComplete,
+  resolveTrainingPlanWorkspaceHasReleasedDomain,
+  resolveTrainingPlanWorkspaceLifecycleSteps,
   resolveContextAppStepCompleteForNavigation,
   resolveSetupStateAfterSeasonCreate,
   formatSeasonOptionLabel,
@@ -1694,6 +1702,316 @@ describe("resolveDomainRevisePlanVisible", () => {
         reviseIds: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("Step 3D domain workflow contract", () => {
+  it("uses domain-level release wording instead of whole-plan completion wording", () => {
+    expect(assistantWorkflowStatusLabelForKind("released")).toBe(
+      "Domain Released to Athlete",
+    );
+    expect(
+      domainIntegrationNextActionLabel({
+        workflowStatus: "released",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownedByCurrentUser: false,
+        }),
+        planningContextLocked: true,
+        loading: false,
+        hasError: false,
+        canGenerate: false,
+        canSubmitForReview: false,
+        canViewPlan: true,
+        canReview: false,
+        canRelease: false,
+        isCurrentReviewPlan: false,
+      }),
+    ).toBe("This domain is released to the athlete.");
+    expect(
+      domainIntegrationAvailableActionLabels({
+        canGenerate: false,
+        canViewPlan: true,
+        canSubmitForReview: false,
+        canReview: false,
+        canRelease: false,
+        canRevise: false,
+      }),
+    ).toEqual(["View / review domain plan"]);
+    expect(
+      domainIntegrationAvailableActionLabels({
+        canGenerate: false,
+        canViewPlan: true,
+        canSubmitForReview: false,
+        canReview: false,
+        canRelease: true,
+        canRevise: false,
+      }),
+    ).toEqual(["View / review domain plan", "Release this plan to athlete"]);
+  });
+
+  it("locks future revise availability to owned domains with an approved or released base version", () => {
+    const released = resolveDomainReviseAvailability({
+      domain: "SKILLS",
+      workflowStatus: "released",
+      planId: "skills-plan",
+      versionId: "skills-active-version",
+      baseVersionId: "skills-active-version",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canRevise: true,
+        canSubmitForReview: true,
+      }),
+      legacyRequesterOwnsDomain: false,
+    });
+
+    expect(released).toMatchObject({
+      domain: "SKILLS",
+      planId: "skills-plan",
+      versionId: "skills-active-version",
+      baseVersionId: "skills-active-version",
+      requesterCanRevise: true,
+      baseVersionAvailable: true,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    });
+
+    const approved = resolveDomainReviseAvailability({
+      domain: "NUTRITION",
+      workflowStatus: "approved",
+      planId: "nutrition-plan",
+      versionId: "nutrition-approved-version",
+      baseVersionId: "nutrition-approved-version",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canRevise: true,
+      }),
+      legacyRequesterOwnsDomain: false,
+    });
+
+    expect(approved).toMatchObject({
+      domain: "NUTRITION",
+      baseVersionAvailable: true,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    });
+  });
+
+  it("does not infer W2B Head Coach Skills revise authority from generic capability", () => {
+    expect(
+      resolveDomainReviseAvailability({
+        domain: "SKILLS",
+        workflowStatus: "released",
+        planId: "skills-plan",
+        versionId: "skills-active-version",
+        baseVersionId: "skills-active-version",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownerUserId: "separate-skills-coach",
+          ownerCoachProfileId: "skills-profile",
+          ownedByCurrentUser: false,
+          canOpen: true,
+          canGenerate: false,
+          canRevise: true,
+          canSubmitForReview: false,
+          canApprove: true,
+          canRelease: true,
+        }),
+        legacyRequesterOwnsDomain: true,
+      }),
+    ).toMatchObject({
+      requesterCanRevise: false,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "not_authorized",
+    });
+  });
+});
+
+describe("buildDomainReviewRevisionContext", () => {
+  it("prepares free-text revision context without mutating the instruction flow", () => {
+    expect(
+      buildDomainReviewRevisionContext({
+        athleteId: " athlete-1 ",
+        domain: "SKILLS",
+        selectedPlanId: " plan-1 ",
+        selectedVersionId: " version-1 ",
+        planStatus: " Submitted for Review ",
+        workflowStatus: "submitted_for_review",
+        currentFreeTextRevisionInstruction: "  Add more recovery guidance.  ",
+      }),
+    ).toEqual({
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      selectedPlanId: "plan-1",
+      selectedVersionId: "version-1",
+      planStatus: "Submitted for Review",
+      workflowStatus: "submitted_for_review",
+      currentFreeTextRevisionInstruction: "Add more recovery guidance.",
+      source: "domain_review_drawer",
+      selectedDay: null,
+      selectedDate: null,
+    });
+  });
+});
+
+describe("Training Plan Workspace lifecycle display", () => {
+  it("keeps Plan Viewer locked when domains are submitted for review but not released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const submittedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      submittedForReview: true,
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "ASSISTANT_COACH_APPROVED",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: submittedDomain("SKILLS"),
+        NUTRITION: submittedDomain("NUTRITION"),
+        S_AND_C: submittedDomain("S_AND_C"),
+      },
+    });
+    const hasReleasedDomain = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: hasReleasedDomain ? "plan-viewer" : "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: hasReleasedDomain,
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(hasReleasedDomain).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("keeps Plan Viewer locked when domains are Head Coach approved but not released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const approvedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      submittedForReview: false,
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "HEAD_COACH_APPROVED",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: approvedDomain("SKILLS"),
+        NUTRITION: approvedDomain("NUTRITION"),
+        S_AND_C: approvedDomain("S_AND_C"),
+      },
+    });
+    const hasReleasedDomain = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: hasReleasedDomain ? "plan-viewer" : "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: hasReleasedDomain,
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(hasReleasedDomain).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("keeps Domain Plans Integration active for W1 partial domain release", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: "skills-version",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        },
+        NUTRITION: base.domains.NUTRITION,
+        S_AND_C: base.domains.S_AND_C,
+      },
+      assignmentContext: shellAssignmentContext({
+        domains: {
+          SKILLS: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          NUTRITION: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          S_AND_C: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+        },
+      }),
+    });
+
+    const domainIntegrationComplete =
+      resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "plan-viewer",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: true,
+      domainIntegrationComplete,
+    });
+
+    expect(domainIntegrationComplete).toBe(false);
+    expect(resolveTrainingPlanWorkspaceHasReleasedDomain(workspace)).toBe(true);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
+  });
+
+  it("marks Domain Plans Integration complete when all assigned domains are released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const releasedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "ACTIVE",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: releasedDomain("SKILLS"),
+        NUTRITION: releasedDomain("NUTRITION"),
+        S_AND_C: releasedDomain("S_AND_C"),
+      },
+      assignmentContext: shellAssignmentContext({
+        domains: {
+          SKILLS: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          NUTRITION: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          S_AND_C: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+        },
+      }),
+    });
+
+    const domainIntegrationComplete =
+      resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "plan-viewer",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: true,
+      domainIntegrationComplete,
+    });
+
+    expect(domainIntegrationComplete).toBe(true);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe(
+      "completed",
+    );
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
   });
 });
 

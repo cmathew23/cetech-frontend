@@ -1,13 +1,13 @@
 "use client";
 
-import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
-import { COACH_WORKFLOW_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  COACH_WORKFLOW_OUTER_CARD_CLASS,
+  DASHBOARD_PAGE_CONTENT_CLASS,
+} from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import { DashboardStatusNotice } from "@/components/dashboard/shared/DashboardStatusNotice";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { SkillGoalAttributionText } from "@/components/dashboard/SkillGoalAttribution";
-import {
-  DASHBOARD_DETAIL_LABEL_CLASS,
-  DASHBOARD_PLANNING_CARD_TITLE_CLASS,
-} from "@/components/dashboard/shared/dashboardTypography";
+import { DASHBOARD_DETAIL_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GoalDisplayBlock } from "@/components/goals/GoalDisplayBlock";
 import { CoachAthleteLevelValidationModal } from "@/components/dashboard/coach/CoachAthleteLevelValidationModal";
@@ -167,7 +167,6 @@ import type {
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   type MutableRefObject,
-  type ComponentProps,
   type FormEvent,
   type ReactElement,
   type ReactNode,
@@ -185,7 +184,6 @@ type DisplayableValue =
   | Array<string | number | boolean>
   | null
   | undefined;
-type DetailGroup = Record<string, DisplayableValue>;
 type PlanningSummaryGoal = {
   goalId?: string | null;
   goalName?: string | null;
@@ -498,18 +496,6 @@ function hasRenderableValue(value: DisplayableValue): boolean {
   return true;
 }
 
-function CoachPlanningCardShell({
-  titleClassName,
-  ...props
-}: ComponentProps<typeof DashboardCardShell>) {
-  return (
-    <DashboardCardShell
-      titleClassName={cn(DASHBOARD_PLANNING_CARD_TITLE_CLASS, titleClassName)}
-      {...props}
-    />
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
@@ -652,57 +638,6 @@ function toFieldLabel(field: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
-function orderedGroupEntries(
-  group: DetailGroup | null | undefined,
-  preferredOrder: string[] = [],
-) {
-  if (!group || typeof group !== "object" || Array.isArray(group)) {
-    return [] as Array<[string, DisplayableValue]>;
-  }
-
-  const seen = new Set<string>();
-  const entries: Array<[string, DisplayableValue]> = [];
-
-  for (const key of preferredOrder) {
-    if (!Object.prototype.hasOwnProperty.call(group, key)) continue;
-    entries.push([key, group[key]]);
-    seen.add(key);
-  }
-
-  for (const [key, value] of Object.entries(group)) {
-    if (seen.has(key)) continue;
-    entries.push([key, value]);
-  }
-
-  return entries;
-}
-
-function DetailGroupCard({
-  title,
-  group,
-  preferredOrder,
-}: {
-  title: string;
-  group: DetailGroup | null | undefined;
-  preferredOrder?: string[];
-}) {
-  const entries = orderedGroupEntries(group, preferredOrder);
-
-  return (
-    <CoachPlanningCardShell accent={false} majorOuter title={title}>
-      {entries.length > 0 ? (
-        <dl className="space-y-2">
-          {entries.map(([field, value]) => (
-            <DetailRow key={field} label={toFieldLabel(field)} value={displayValue(value)} />
-          ))}
-        </dl>
-      ) : (
-        <div className="text-sm text-textSecondary">—</div>
-      )}
-    </CoachPlanningCardShell>
-  );
-}
-
 type GuidedWorkflowStepKey =
   | "context-app"
   | "level-validation"
@@ -710,6 +645,139 @@ type GuidedWorkflowStepKey =
   | "season-goals"
   | "plan-dates"
   | "generate";
+
+type ContextBuilderStepKey = Exclude<GuidedWorkflowStepKey, "generate">;
+type ContextBuilderDrawerStepKey = ContextBuilderStepKey;
+const CONTEXT_BUILDER_DRAWER_ANIMATION_MS = 220;
+const DOMAIN_REVIEW_DRAWER_ANIMATION_MS = 220;
+
+const PLANNING_CONTEXT_BLOCKER_SUPPRESSED = new Set(["PLANNING_CONTEXT_LOCK_MISSING"]);
+
+function normalizePlanningContextBlockerCode(blocker: string): string {
+  return blocker.trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+export function humanizePlanningContextBlockerCode(blocker: string): string | null {
+  const normalized = normalizePlanningContextBlockerCode(blocker);
+  if (PLANNING_CONTEXT_BLOCKER_SUPPRESSED.has(normalized)) return null;
+
+  const labels: Record<string, string> = {
+    LEVEL_VALIDATION_NOT_CONFIRMED: "Confirm athlete level",
+    NO_WORKLOAD_CONTEXT: "Complete workload assessment",
+    NO_PLAN_WINDOW: "Confirm plan dates",
+    NO_SEASON_CONTEXT: "Select season and goals",
+    NO_SEASON: "Select season and goals",
+    NO_GOALS_SELECTED: "Select season and goals",
+    NO_ACTIVE_GOALS: "Select season and goals",
+    NO_GOALS: "Select season and goals",
+    MISSING_SEASON: "Select season and goals",
+    MISSING_GOALS: "Select season and goals",
+    APP_NOT_COMPLETE: "Complete APP context",
+    APP_INCOMPLETE: "Complete APP context",
+    APP_CONTEXT_INCOMPLETE: "Complete APP context",
+    MISSING_APP_CONTEXT: "Complete APP context",
+    READINESS_NOT_COMPLETE: "Complete APP readiness",
+  };
+
+  if (labels[normalized]) return labels[normalized];
+
+  if (/^[A-Z][A-Z0-9_]+$/.test(normalized)) return null;
+
+  return blocker.trim();
+}
+
+export type CoachFacingPlanningContextPendingStepsInput = {
+  upstreamBlockers: string[];
+  appStepComplete: boolean;
+  levelStepComplete: boolean;
+  workloadComplete: boolean;
+  seasonGoalsComplete: boolean;
+  planDatesStepComplete: boolean;
+};
+
+export function resolveCoachFacingPlanningContextPendingSteps(
+  input: CoachFacingPlanningContextPendingStepsInput,
+): string[] {
+  const satisfiedByStep: Record<string, (value: CoachFacingPlanningContextPendingStepsInput) => boolean> =
+    {
+      LEVEL_VALIDATION_NOT_CONFIRMED: (value) => value.levelStepComplete,
+      NO_WORKLOAD_CONTEXT: (value) => value.workloadComplete,
+      NO_PLAN_WINDOW: (value) => value.planDatesStepComplete,
+      NO_SEASON_CONTEXT: (value) => value.seasonGoalsComplete,
+      NO_SEASON: (value) => value.seasonGoalsComplete,
+      NO_GOALS_SELECTED: (value) => value.seasonGoalsComplete,
+      NO_ACTIVE_GOALS: (value) => value.seasonGoalsComplete,
+      NO_GOALS: (value) => value.seasonGoalsComplete,
+      MISSING_SEASON: (value) => value.seasonGoalsComplete,
+      MISSING_GOALS: (value) => value.seasonGoalsComplete,
+      APP_NOT_COMPLETE: (value) => value.appStepComplete,
+      APP_INCOMPLETE: (value) => value.appStepComplete,
+      APP_CONTEXT_INCOMPLETE: (value) => value.appStepComplete,
+      MISSING_APP_CONTEXT: (value) => value.appStepComplete,
+      READINESS_NOT_COMPLETE: (value) => value.appStepComplete,
+    };
+
+  const pending = new Set<string>();
+  for (const blocker of input.upstreamBlockers) {
+    const normalized = normalizePlanningContextBlockerCode(blocker);
+    if (satisfiedByStep[normalized]?.(input)) continue;
+    const human = humanizePlanningContextBlockerCode(blocker);
+    if (human) pending.add(human);
+  }
+  return Array.from(pending);
+}
+
+export function contextBuilderNextRequiredLabel(input: {
+  appStepComplete: boolean;
+  levelStepComplete: boolean;
+  workloadComplete: boolean;
+  seasonPhaseReady: boolean;
+  goalsSelected: boolean;
+  planDatesStepComplete: boolean;
+  planningContextLocked: boolean;
+}): string {
+  if (!input.appStepComplete) return "Complete APP context";
+  if (!input.levelStepComplete) return "Confirm athlete level";
+  if (!input.workloadComplete) return "Complete workload assessment";
+  if (!input.seasonPhaseReady || !input.goalsSelected) return "Select season and goals";
+  if (!input.planDatesStepComplete) return "Confirm plan dates";
+  if (input.planningContextLocked) return "Open Domain Plans Integration";
+  return "Lock & Share Context with Coaches";
+}
+
+export function resolveContextBuilderPendingBeforeLock(
+  input: CoachFacingPlanningContextPendingStepsInput,
+): string[] {
+  const fromBlockers = resolveCoachFacingPlanningContextPendingSteps(input);
+  if (fromBlockers.length > 0) return fromBlockers;
+
+  const localPending: string[] = [];
+  if (!input.appStepComplete) localPending.push("Complete APP context");
+  if (!input.levelStepComplete) localPending.push("Confirm athlete level");
+  if (!input.workloadComplete) localPending.push("Complete workload assessment");
+  if (!input.seasonGoalsComplete) localPending.push("Select season and goals");
+  if (!input.planDatesStepComplete) localPending.push("Confirm plan dates");
+  return localPending;
+}
+
+export function contextBuilderLedgerActionLabel(input: {
+  step: ContextBuilderStepKey;
+  complete: boolean;
+  locked: boolean;
+}): string {
+  if (input.locked) return "Locked";
+  if (input.step === "context-app") return "View APP Context";
+  if (input.complete) {
+    if (input.step === "level-validation") return "Edit Validation";
+    if (input.step === "workload") return "Edit Workload";
+    if (input.step === "season-goals") return "Edit Season & Goals";
+    return "Edit Plan Dates";
+  }
+  if (input.step === "level-validation") return "Validate Level";
+  if (input.step === "workload") return "Set Workload";
+  if (input.step === "season-goals") return "Set Season & Goals";
+  return "Set Plan Dates";
+}
 
 const WORKFLOW_RAIL_LABELS: Record<GuidedWorkflowStepKey, string> = {
   "context-app": "Context / APP",
@@ -735,6 +803,52 @@ export type GovernedPlanContext = {
   generationDomain: TrainingPlanGenerationDomain;
 };
 
+export type DomainReviewRevisionContextSource = "domain_review_drawer";
+
+export type DomainReviewRevisionContext = {
+  athleteId: string;
+  domain: TrainingPlanGenerationDomain;
+  selectedPlanId: string | null;
+  selectedVersionId: string | null;
+  planStatus: string | null;
+  workflowStatus: AssistantDomainWorkflowStatus | null;
+  currentFreeTextRevisionInstruction: string;
+  source: DomainReviewRevisionContextSource;
+  selectedDay: number | null;
+  selectedDate: string | null;
+};
+
+export function buildDomainReviewRevisionContext(input: {
+  athleteId: string;
+  domain: TrainingPlanGenerationDomain;
+  selectedPlanId?: string | null;
+  selectedVersionId?: string | null;
+  planStatus?: string | null;
+  workflowStatus?: AssistantDomainWorkflowStatus | null;
+  currentFreeTextRevisionInstruction: string;
+  source?: DomainReviewRevisionContextSource;
+  selectedDay?: number | null;
+  selectedDate?: string | null;
+}): DomainReviewRevisionContext {
+  const normalizeOptionalString = (value: string | null | undefined): string | null => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? null : trimmed;
+  };
+
+  return {
+    athleteId: input.athleteId.trim(),
+    domain: input.domain,
+    selectedPlanId: normalizeOptionalString(input.selectedPlanId),
+    selectedVersionId: normalizeOptionalString(input.selectedVersionId),
+    planStatus: normalizeOptionalString(input.planStatus),
+    workflowStatus: input.workflowStatus ?? null,
+    currentFreeTextRevisionInstruction: input.currentFreeTextRevisionInstruction.trim(),
+    source: input.source ?? "domain_review_drawer",
+    selectedDay: input.selectedDay ?? null,
+    selectedDate: normalizeOptionalString(input.selectedDate),
+  };
+}
+
 type HeadCoachDomainPlanState = {
   loading: boolean;
   error: string | null;
@@ -743,6 +857,35 @@ type HeadCoachDomainPlanState = {
   summaryStatus: string | null;
   summaryPlanId: string | null;
   summaryVersionId: string | null;
+};
+
+type DomainReviewSurfaceModel = {
+  domain: TrainingPlanGenerationDomain;
+  domainLabel: string;
+  state: HeadCoachDomainPlanState;
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
+  assignedCoachLabel: string;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  statusLabel: string;
+  planStatusLabel: string;
+  nextActionLabel: string;
+  availableActionLabels: string[];
+  allowedActions: Set<GovernedTrainingPlanWorkflowAction>;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  planId: string;
+  versionId: string;
+  versionNumber: number | null;
+  trainingDays: number | null;
+  isCurrentReviewPlan: boolean;
+  showWorkflow2DraftPendingNotice: boolean;
+  reviseComingSoonVisible: boolean;
+  canShowViewPlan: boolean;
+  canShowSubmitForReview: boolean;
+  canShowApproveAction: boolean;
+  canShowRequestRevisionAction: boolean;
+  canShowReleaseAction: boolean;
+  actionContext: GovernedPlanContext | null;
+  viewPlanContext: WorkspaceDomainViewPlanContext | null;
 };
 
 function createEmptyHeadCoachDomainPlanStates(): Record<
@@ -933,6 +1076,24 @@ function reviewPlanButtonLabel(domain: TrainingPlanGenerationDomain): string {
   return "Review S&C Plan";
 }
 
+function domainPlanReviewTitle(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Skills Plan Review";
+  if (domain === "NUTRITION") return "Nutrition Plan Review";
+  return "Strength & Conditioning Plan Review";
+}
+
+function openDomainPlanReviewLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Open Skills Plan Review";
+  if (domain === "NUTRITION") return "Open Nutrition Plan Review";
+  return "Open S&C Plan Review";
+}
+
+function viewDomainInPlanViewerLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "View Skills in Plan Viewer";
+  if (domain === "NUTRITION") return "View Nutrition in Plan Viewer";
+  return "View S&C in Plan Viewer";
+}
+
 function normalizeHeadCoachDomainWorkflowStatus(
   status: string | null | undefined,
 ): AssistantDomainWorkflowStatus | null {
@@ -954,10 +1115,10 @@ function normalizeHeadCoachDomainWorkflowStatus(
 }
 
 function headCoachDomainStatusLabel(kind: AssistantDomainWorkflowStatus): string {
-  if (kind === "released") return "Released to Athlete";
+  if (kind === "released") return "Domain Released to Athlete";
   if (kind === "approved") return "Head Coach Approved";
   if (kind === "revision_requested") return "Revision Requested";
-  if (kind === "submitted_for_review") return "Submitted for Head Coach Review";
+  if (kind === "submitted_for_review") return "Submitted for Review";
   if (kind === "draft_generated") return "Draft Created";
   return "Not Created";
 }
@@ -1084,13 +1245,146 @@ type AssistantDomainWorkflowStatus =
   | "approved"
   | "released";
 
-function assistantWorkflowStatusLabelForKind(kind: AssistantDomainWorkflowStatus): string {
+export function assistantWorkflowStatusLabelForKind(
+  kind: AssistantDomainWorkflowStatus,
+): string {
   if (kind === "draft_generated") return "Draft Generated";
-  if (kind === "submitted_for_review") return "Submitted for Head Coach Review";
+  if (kind === "submitted_for_review") return "Submitted for Review";
   if (kind === "revision_requested") return "Revision Requested";
   if (kind === "approved") return "Approved by Head Coach";
-  if (kind === "released") return "Released to Athlete";
+  if (kind === "released") return "Domain Released to Athlete";
   return "Not Created";
+}
+
+export function domainIntegrationOwnerLabel(
+  domain: TrainingPlanGenerationDomain,
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined,
+): string {
+  return domainIntegrationAssignedCoachLabel(domain, assignmentDomainContext);
+}
+
+function assignedDomainCoachFallbackLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Assigned Skills Coach";
+  if (domain === "NUTRITION") return "Assigned Nutrition Coach";
+  return "Assigned S&C Coach";
+}
+
+export function domainIntegrationAssignedCoachLabel(
+  domain: TrainingPlanGenerationDomain,
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined,
+): string {
+  if (assignmentDomainContext === null || assignmentDomainContext === undefined) {
+    return "Unassigned";
+  }
+  const assignedCoachName =
+    assignmentDomainContext.assignedCoachDisplayName ??
+    assignmentDomainContext.assignedCoachName ??
+    assignmentDomainContext.ownerDisplayName ??
+    assignmentDomainContext.ownerName ??
+    null;
+  if (assignedCoachName !== null) {
+    return assignedCoachName;
+  }
+  if (assignmentDomainContext.ownerType === "HEAD_COACH_SELF") {
+    return "Head Coach";
+  }
+  if (assignmentDomainContext.ownerType === "ASSIGNED_DOMAIN_COACH") {
+    return assignedDomainCoachFallbackLabel(domain);
+  }
+  return "Unassigned";
+}
+
+function domainIntegrationStatusTone(kind: AssistantDomainWorkflowStatus): string {
+  if (kind === "released" || kind === "approved") {
+    return "border-green-200 bg-green-50 text-green-700";
+  }
+  if (kind === "submitted_for_review" || kind === "revision_requested") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  if (kind === "draft_generated") {
+    return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+  return "border-slate-200 bg-slate-50 text-textSecondary";
+}
+
+export function domainIntegrationNextActionLabel(input: {
+  workflowStatus: AssistantDomainWorkflowStatus;
+  assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
+  planningContextLocked: boolean;
+  loading: boolean;
+  hasError: boolean;
+  canGenerate: boolean;
+  canSubmitForReview: boolean;
+  canViewPlan: boolean;
+  canReview: boolean;
+  canRelease: boolean;
+  isCurrentReviewPlan: boolean;
+}): string {
+  if (input.loading) return "Loading the latest plan state.";
+  if (input.hasError) return "Resolve the status warning, then refresh this track.";
+
+  if (input.workflowStatus === "not_created") {
+    if (input.canGenerate) return "Ready to generate this domain plan.";
+    if (!input.planningContextLocked) {
+      return "Waiting for planning context to be locked.";
+    }
+    if (input.assignmentDomainContext?.ownerType === "NONE") {
+      return "No domain owner is assigned.";
+    }
+    return "Waiting for the assigned coach to generate a plan.";
+  }
+
+  if (input.workflowStatus === "draft_generated") {
+    if (input.canSubmitForReview) return "Ready to submit for review.";
+    return "Waiting for the assigned coach to submit for review.";
+  }
+
+  if (input.workflowStatus === "submitted_for_review") {
+    if (input.canReview) return "Open review to approve or request changes.";
+    if (input.canViewPlan) return "Ready for Head Coach review.";
+    return "Waiting for review access.";
+  }
+
+  if (input.workflowStatus === "revision_requested") {
+    if (input.assignmentDomainContext?.ownedByCurrentUser === true) {
+      return "Revision requested; revise and resubmit.";
+    }
+    return "Waiting for the assigned coach to revise and resubmit.";
+  }
+
+  if (input.workflowStatus === "approved") {
+    return input.canRelease
+      ? "Approved and ready to release."
+      : "Approved; waiting for release.";
+  }
+
+  return "This domain is released to the athlete.";
+}
+
+export type DomainIntegrationAvailableAction =
+  | "GENERATE"
+  | "VIEW_OR_REVIEW_PLAN"
+  | "SUBMIT_FOR_REVIEW"
+  | "HEAD_COACH_REVIEW"
+  | "RELEASE_DOMAIN"
+  | "REVISE_INSTRUCTIONS";
+
+export function domainIntegrationAvailableActionLabels(input: {
+  canGenerate: boolean;
+  canViewPlan: boolean;
+  canSubmitForReview: boolean;
+  canReview: boolean;
+  canRelease: boolean;
+  canRevise: boolean;
+}): string[] {
+  const actions: string[] = [];
+  if (input.canGenerate) actions.push("Generate domain plan");
+  if (input.canViewPlan) actions.push("View / review domain plan");
+  if (input.canSubmitForReview) actions.push("Submit for Head Coach review");
+  if (input.canReview) actions.push("Approve or request changes");
+  if (input.canRelease) actions.push("Release this plan to athlete");
+  if (input.canRevise) actions.push("Revise instructions");
+  return actions;
 }
 
 export function deriveAssistantDomainWorkflowStatus(input: {
@@ -1149,6 +1443,147 @@ export function canShowDomainReviseAction(input: {
     input.workflowStatus === "draft_generated" ||
     input.workflowStatus === "revision_requested"
   );
+}
+
+export type DomainReviseAvailability = {
+  domain: TrainingPlanGenerationDomain;
+  planId: string | null;
+  versionId: string | null;
+  baseVersionId: string | null;
+  requesterCanRevise: boolean;
+  baseVersionAvailable: boolean;
+  mutationEnabled: boolean;
+  placeholderVisible: boolean;
+  reason:
+    | "ready_existing_editable_version"
+    | "future_base_version_ready"
+    | "missing_plan_id"
+    | "missing_version_id"
+    | "missing_base_version"
+    | "not_authorized"
+    | "unsupported_workflow_status";
+};
+
+export function resolveDomainReviseAvailability(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  planId: string | null | undefined;
+  versionId: string | null | undefined;
+  baseVersionId?: string | null | undefined;
+  assignmentDomainContext:
+    | TrainingPlanWorkspaceAssignmentDomainContext
+    | null
+    | undefined;
+  legacyRequesterOwnsDomain: boolean;
+}): DomainReviseAvailability {
+  const assignmentDomainContext = input.assignmentDomainContext;
+  const requesterCanRevise =
+    assignmentDomainContext === null || assignmentDomainContext === undefined
+      ? input.legacyRequesterOwnsDomain
+      : assignmentDomainContext.ownedByCurrentUser &&
+        assignmentDomainContext.canRevise &&
+        assignmentDomainContext.ownerType !== "NONE";
+  const planId = input.planId?.trim() || null;
+  const versionId = input.versionId?.trim() || null;
+  const baseVersionId = input.baseVersionId?.trim() || null;
+  const baseVersionAvailable =
+    input.workflowStatus === "approved" || input.workflowStatus === "released"
+      ? baseVersionId !== null || versionId !== null
+      : false;
+
+  if (!requesterCanRevise) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "not_authorized",
+    };
+  }
+  if (planId === null) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "missing_plan_id",
+    };
+  }
+  if (versionId === null) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: false,
+      reason: "missing_version_id",
+    };
+  }
+  if (
+    input.workflowStatus === "draft_generated" ||
+    input.workflowStatus === "revision_requested"
+  ) {
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: true,
+      placeholderVisible: true,
+      reason: "ready_existing_editable_version",
+    };
+  }
+  if (input.workflowStatus === "approved" || input.workflowStatus === "released") {
+    if (!baseVersionAvailable) {
+      return {
+        domain: input.domain,
+        planId,
+        versionId,
+        baseVersionId,
+        requesterCanRevise,
+        baseVersionAvailable,
+        mutationEnabled: false,
+        placeholderVisible: true,
+        reason: "missing_base_version",
+      };
+    }
+    return {
+      domain: input.domain,
+      planId,
+      versionId,
+      baseVersionId: baseVersionId ?? versionId,
+      requesterCanRevise,
+      baseVersionAvailable,
+      mutationEnabled: false,
+      placeholderVisible: true,
+      reason: "future_base_version_ready",
+    };
+  }
+
+  return {
+    domain: input.domain,
+    planId,
+    versionId,
+    baseVersionId,
+    requesterCanRevise,
+    baseVersionAvailable,
+    mutationEnabled: false,
+    placeholderVisible: false,
+    reason: "unsupported_workflow_status",
+  };
 }
 
 export type Workflow2SubmittedDomainSkillsSlotProjection = {
@@ -1279,6 +1714,13 @@ const WORKFLOW_STEP_SEQUENCE_LIST: GuidedWorkflowStepKey[] = [
   "plan-dates",
   "generate",
 ];
+const CONTEXT_BUILDER_STEP_SEQUENCE_LIST: ContextBuilderStepKey[] = [
+  "context-app",
+  "level-validation",
+  "workload",
+  "season-goals",
+  "plan-dates",
+];
 type GuidedWorkflowStepStatus = "completed" | "active" | "available" | "locked";
 
 /** Props for tab strip / rail derived from readiness + tab selection */
@@ -1308,6 +1750,255 @@ function guidedWorkflowRailSubtitle(status: GuidedWorkflowStepStatus): string {
 function railGapSegmentClass(sideHidden: boolean): string {
   const base = "h-[3px] flex-1 rounded-full bg-slate-200";
   return sideHidden ? `${base} pointer-events-none opacity-0` : base;
+}
+
+const TRAINING_PLAN_WORKSPACE_DOMAINS: TrainingPlanGenerationDomain[] = [
+  "SKILLS",
+  "NUTRITION",
+  "S_AND_C",
+];
+
+export type TrainingPlanWorkspaceVisualMode =
+  | "context-builder"
+  | "domain-integration"
+  | "plan-viewer";
+
+export type TrainingPlanWorkspaceLifecycleStepState =
+  | "completed"
+  | "active"
+  | "available"
+  | "locked";
+
+export type TrainingPlanWorkspaceLifecycleStep = {
+  key: TrainingPlanWorkspaceVisualMode;
+  title: string;
+  description: string;
+  state: TrainingPlanWorkspaceLifecycleStepState;
+};
+
+export function resolveTrainingPlanWorkspaceDomainIntegrationComplete(
+  workspace: TrainingPlanWorkspace | null,
+): boolean {
+  if (workspace === null) return false;
+
+  const assignedDomains =
+    workspace.assignmentContext !== undefined
+      ? TRAINING_PLAN_WORKSPACE_DOMAINS.filter(
+          (domain) => workspace.assignmentContext?.domains[domain].ownerType !== "NONE",
+        )
+      : TRAINING_PLAN_WORKSPACE_DOMAINS.filter((domain) => {
+          const entry = workspace.domains[domain];
+          return (
+            entry.canOpen ||
+            entry.submittedForReview ||
+            entry.allowedActions.length > 0 ||
+            (entry.summary.trainingPlanId?.trim() ?? "") !== "" ||
+            (entry.summary.status?.trim() ?? "") !== ""
+          );
+        });
+
+  return (
+    assignedDomains.length > 0 &&
+    assignedDomains.every(
+      (domain) => deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[domain]) === "released",
+    )
+  );
+}
+
+export function resolveTrainingPlanWorkspaceHasReleasedDomain(
+  workspace: TrainingPlanWorkspace | null,
+): boolean {
+  if (workspace === null) return false;
+
+  return TRAINING_PLAN_WORKSPACE_DOMAINS.some(
+    (domain) => deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[domain]) === "released",
+  );
+}
+
+export function resolveTrainingPlanWorkspaceLifecycleSteps(input: {
+  activeMode: TrainingPlanWorkspaceVisualMode;
+  contextComplete: boolean;
+  domainAvailable: boolean;
+  planViewerAvailable: boolean;
+  domainIntegrationComplete: boolean;
+}): TrainingPlanWorkspaceLifecycleStep[] {
+  return [
+    {
+      key: "context-builder",
+      title: "Context Builder",
+      description: "Validate athlete context and lock the planning inputs.",
+      state:
+        input.activeMode === "context-builder"
+          ? "active"
+          : input.contextComplete
+            ? "completed"
+            : "available",
+    },
+    {
+      key: "domain-integration",
+      title: "Domain Plans Integration",
+      description: "Coordinate domain plans and governance actions.",
+      state: !input.domainAvailable
+        ? "locked"
+        : input.domainIntegrationComplete
+          ? "completed"
+          : input.activeMode === "domain-integration" || input.activeMode === "plan-viewer"
+            ? "active"
+            : "available",
+    },
+    {
+      key: "plan-viewer",
+      title: "Plan Viewer",
+      description: "Review selected, active, or released domain plan details.",
+      state:
+        input.activeMode === "plan-viewer"
+          ? "active"
+          : input.planViewerAvailable
+            ? "available"
+            : "locked",
+    },
+  ];
+}
+
+function workspaceLifecycleStateLabel(
+  state: TrainingPlanWorkspaceLifecycleStepState,
+): string {
+  if (state === "completed") return "Complete";
+  if (state === "active") return "Active";
+  if (state === "available") return "Available";
+  return "Locked";
+}
+
+function workspaceLifecycleStepClass(
+  state: TrainingPlanWorkspaceLifecycleStepState,
+): string {
+  if (state === "completed") return "border-green-300 bg-green-50 text-green-700";
+  if (state === "active") return "border-primary bg-primary text-white";
+  if (state === "available") return "border-slate-300 bg-white text-textPrimary";
+  return "border-slate-200 bg-slate-100 text-textMuted";
+}
+
+function TrainingPlanWorkspaceLifecycleHeader({
+  steps,
+}: {
+  steps: TrainingPlanWorkspaceLifecycleStep[];
+}) {
+  return (
+    <nav
+      aria-label="Training plan workspace lifecycle"
+      className="border-y border-border/70 py-3"
+    >
+      <ol className="grid gap-y-4 md:grid-cols-3">
+        {steps.map((step, index) => (
+          <li
+            key={step.key}
+            className="min-w-0"
+          >
+            <div className="flex items-center">
+              <div
+                className={cn(
+                  "hidden h-px flex-1 md:block",
+                  index === 0 ? "bg-transparent" : "bg-border",
+                )}
+                aria-hidden="true"
+              />
+              <span
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs",
+                  workspaceLifecycleStepClass(step.state),
+                )}
+              >
+                {step.state === "completed" ? "✓" : index + 1}
+              </span>
+              <div
+                className={cn(
+                  "hidden h-px flex-1 md:block",
+                  index === steps.length - 1 ? "bg-transparent" : "bg-border",
+                )}
+                aria-hidden="true"
+              />
+            </div>
+            <div className="mt-2 space-y-0.5 px-2 text-center">
+              <div className="text-xs uppercase tracking-wide text-textMuted">
+                Phase {index + 1}
+              </div>
+              <div className="text-sm font-medium text-textPrimary">{step.title}</div>
+              <div className="text-xs text-textSecondary">
+                {workspaceLifecycleStateLabel(step.state)}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+function workspaceModeShellModeLabel(mode: TrainingPlanWorkspaceVisualMode): string {
+  if (mode === "context-builder") return "Context Builder";
+  if (mode === "domain-integration") return "Domain Plans Integration";
+  return "Plan Viewer";
+}
+
+function TrainingPlanWorkspaceModeShell({
+  mode,
+  header,
+  summary,
+  primary,
+  secondary,
+  activity,
+}: {
+  mode: TrainingPlanWorkspaceVisualMode;
+  header: ReactNode;
+  summary?: ReactNode;
+  primary: ReactNode;
+  secondary?: ReactNode;
+  activity?: ReactNode;
+}) {
+  const hasSecondary = secondary !== null && secondary !== undefined;
+  const isContextBuilder = mode === "context-builder";
+  const usesSeparatorShell = isContextBuilder || mode === "domain-integration";
+  const usesPlainSummary = mode === "plan-viewer";
+  return (
+    <section
+      className={cn(
+        "space-y-4",
+        usesSeparatorShell
+          ? "border-t border-border/70 pt-4"
+          : "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5",
+      )}
+      data-workspace-mode={mode}
+    >
+      <div className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">{header}</div>
+        <span className="w-fit shrink-0 border-l border-border pl-3 text-xs text-textSecondary">
+          {workspaceModeShellModeLabel(mode)}
+        </span>
+      </div>
+      {summary !== null && summary !== undefined ? (
+        <div
+          className={
+            usesPlainSummary
+              ? ""
+              : usesSeparatorShell
+                ? "border-y border-border/70 py-3"
+                : "rounded-lg border border-slate-200 bg-slate-50 p-3"
+          }
+        >
+          {summary}
+        </div>
+      ) : null}
+      <div className={hasSecondary ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]" : ""}>
+        <div className="min-w-0">{primary}</div>
+        {hasSecondary ? <aside className="min-w-0">{secondary}</aside> : null}
+      </div>
+      {activity !== null && activity !== undefined ? (
+        <div className={usesSeparatorShell ? "border-y border-border/70 py-3" : "rounded-lg border border-slate-200 bg-slate-50 p-3"}>
+          {activity}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function TrainingPlanWorkflowProgressRail({
@@ -1575,30 +2266,32 @@ function WorkflowGeminiPlanSetupPanel({
     currentCoachGenerationDomain === "NUTRITION";
 
   return (
-    <section className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm md:p-6">
+    <section className="space-y-4">
       <div className="space-y-3">
         {planSeasonBoundsUi === "invalid" ? (
-          <Alert variant="danger">Plan dates must be within the selected season.</Alert>
+          <DashboardStatusNotice type="error" compact>
+            Plan dates must be within the selected season.
+          </DashboardStatusNotice>
         ) : planSeasonBoundsUi === "valid" ? (
-          <WorkflowNeutralNotice>
+          <DashboardStatusNotice type="success" compact>
             Plan dates are within the selected season.
-          </WorkflowNeutralNotice>
+          </DashboardStatusNotice>
         ) : null}
 
         {!currentPhaseDetected ? (
-          <Alert variant="warning">
+          <DashboardStatusNotice type="warning" compact>
             Current phase must be detected from season phase dates before the plan window can be
             validated.
-          </Alert>
+          </DashboardStatusNotice>
         ) : !planWindowInsideCurrentPhase ? (
-          <Alert variant="danger">
+          <DashboardStatusNotice type="error" compact>
             Selected plan window crosses the current season phase. Choose a shorter duration or
             adjust phase dates.
-          </Alert>
+          </DashboardStatusNotice>
         ) : (
-          <WorkflowNeutralNotice>
+          <DashboardStatusNotice type="info" compact>
             Plan window fits inside the detected current phase.
-          </WorkflowNeutralNotice>
+          </DashboardStatusNotice>
         )}
       </div>
 
@@ -1698,7 +2391,7 @@ function WorkflowCompactSummaryStrip({
   values: Array<{ label: string; value: string }>;
 }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4">
+    <section className="border-y border-border/70 py-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-100">
@@ -2275,6 +2968,7 @@ export function resolveDomainViewPlanVisible(input: {
 }
 
 export function resolveDomainRevisePlanVisible(input: {
+  domain?: TrainingPlanGenerationDomain;
   assignmentDomainContext:
     | TrainingPlanWorkspaceAssignmentDomainContext
     | null
@@ -2284,16 +2978,15 @@ export function resolveDomainRevisePlanVisible(input: {
   reviseIds: DomainRevisePlanIds | null;
 }): boolean {
   const assignmentDomainContext = input.assignmentDomainContext;
-  const requesterOwnsDomain =
-    assignmentDomainContext === null || assignmentDomainContext === undefined
-      ? input.legacyRequesterOwnsDomain
-      : assignmentDomainContext.ownedByCurrentUser && assignmentDomainContext.canRevise;
 
-  return canShowDomainReviseAction({
+  return resolveDomainReviseAvailability({
+    domain: input.domain ?? "SKILLS",
     workflowStatus: input.workflowStatus,
-    reviseIds: input.reviseIds,
-    requesterOwnsDomain,
-  });
+    planId: input.reviseIds?.trainingPlanId,
+    versionId: input.reviseIds?.versionId,
+    assignmentDomainContext,
+    legacyRequesterOwnsDomain: input.legacyRequesterOwnsDomain,
+  }).mutationEnabled;
 }
 
 export function resolveDomainSubmitForReviewVisible(input: {
@@ -2797,7 +3490,7 @@ function governedPlanActionButtonLabel(
   }
   if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
-  return "Release to Athlete";
+  return "Release Plan to Athlete";
 }
 
 export function canShowHeadCoachReviewReleaseAction(input: {
@@ -2816,7 +3509,7 @@ function governedPlanActionSuccessMessage(
   if (action === "SUBMIT_REVIEW") return "Plan submitted for Head Coach review.";
   if (action === "HEAD_APPROVE") return "Plan approved.";
   if (action === "REQUEST_REVISION") return "Revision requested.";
-  return "Plan released to athlete.";
+  return "Domain plan released to athlete.";
 }
 
 function governedPlanActionErrorFallback(
@@ -2856,34 +3549,6 @@ function normalizeReadinessStatus(value: string | null): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toUpperCase();
   return normalized === "" ? null : normalized;
-}
-
-function hasReadinessContent(input: {
-  readinessStatus: string | null;
-  appCompleteness: string | null;
-  validationStatus: string | null;
-  validatedLevel: string | null;
-  planningEligibility: string | null;
-  isReady: boolean | null;
-  canGenerate: boolean | null;
-  blockers: string[];
-  missingRequiredFields: string[];
-  completenessStatus: string | null;
-  completenessSummary: string | null;
-}): boolean {
-  return (
-    input.readinessStatus !== null ||
-    input.appCompleteness !== null ||
-    input.validationStatus !== null ||
-    input.validatedLevel !== null ||
-    input.planningEligibility !== null ||
-    input.isReady !== null ||
-    input.canGenerate !== null ||
-    input.blockers.length > 0 ||
-    input.missingRequiredFields.length > 0 ||
-    input.completenessStatus !== null ||
-    input.completenessSummary !== null
-  );
 }
 
 function canRunWorkloadAssessment(input: {
@@ -2933,7 +3598,17 @@ function readinessAllowsPlanGeneration(input: {
 
 function formatBackendReadinessBlockers(blockers: string[]): string | null {
   if (blockers.length === 0) return null;
-  return `Backend readiness blockers: ${blockers.join(", ")}`;
+  const coachFacingBlockers = coachFacingPlanningContextBlockers(blockers);
+  if (coachFacingBlockers.length === 0) {
+    return "Complete required planning context before generating.";
+  }
+  return `Complete planning context: ${coachFacingBlockers.join(", ")}`;
+}
+
+function coachFacingPlanningContextBlockers(blockers: string[]): string[] {
+  return blockers
+    .map((blocker) => humanizePlanningContextBlockerCode(blocker))
+    .filter((blocker): blocker is string => blocker !== null);
 }
 
 function hasWorkloadAssessmentResult(
@@ -3006,7 +3681,7 @@ function TrainingPlanWorkloadAssessmentStep({
     workloadComplete && showWorkloadCompletionState && workloadAssessmentResult !== null;
 
   return (
-    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+    <section className="space-y-4">
       <div className="space-y-1">
         <h3 className="text-base font-normal text-textPrimary">Step 3 — Workload Assessment</h3>
         <p className="text-sm text-textSecondary">
@@ -3015,27 +3690,22 @@ function TrainingPlanWorkloadAssessmentStep({
       </div>
 
       {workloadAssessmentLoading ? (
-        <div
-          className="flex flex-wrap items-center gap-2 rounded-md border border-primary/25 bg-primary/10 px-3 py-3 text-sm font-medium text-textPrimary"
-          role="status"
-          aria-live="polite"
+        <DashboardStatusNotice
+          type="loading"
+          icon={<Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden />}
+          compact
         >
-          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden />
           Running workload assessment...
-        </div>
+        </DashboardStatusNotice>
       ) : null}
 
       {transientCompletionVisible ? (
-        <div
-          className="space-y-3 rounded-md border border-emerald-200/90 bg-emerald-50 px-4 py-4 text-textPrimary"
-          role="status"
-          aria-live="polite"
+        <DashboardStatusNotice
+          type="success"
+          title="Workload Assessment Complete"
+          icon={<Check className="h-4 w-4 text-emerald-600" aria-hidden />}
         >
-          <div className="flex flex-wrap items-center gap-2 text-sm font-normal text-emerald-900">
-            <Check className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
-            Workload Assessment Complete
-          </div>
-          <div className="space-y-1 border-t border-emerald-200/80 pt-3">
+          <div className="space-y-1">
             <p className="text-xs font-normal uppercase tracking-wide text-emerald-800/90">
               Training Load Status
             </p>
@@ -3043,7 +3713,7 @@ function TrainingPlanWorkloadAssessmentStep({
               {displayValue(workloadAssessmentResult.workloadClassification?.status)}
             </p>
           </div>
-        </div>
+        </DashboardStatusNotice>
       ) : null}
 
       {!transientCompletionVisible &&
@@ -3072,12 +3742,12 @@ function TrainingPlanWorkloadAssessmentStep({
       ) : null}
 
       {workloadAssessmentError ? (
-        <Alert variant="danger">{workloadAssessmentError}</Alert>
+        <DashboardStatusNotice type="error">{workloadAssessmentError}</DashboardStatusNotice>
       ) : null}
 
       {workloadAssessmentResult &&
       !(workloadComplete && showWorkloadCompletionState) ? (
-        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="space-y-3 border-y border-border/70 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h4 className="text-sm font-normal text-textPrimary">Workload Assessment Result</h4>
             <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-textSecondary">
@@ -3088,7 +3758,7 @@ function TrainingPlanWorkloadAssessmentStep({
           </div>
           {hasWorkloadAssessmentResult(workloadAssessmentResult) ? (
             <>
-              <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+              <div className="space-y-3 border-t border-border/70 pt-3">
                 <h5 className="text-sm font-normal text-textPrimary">Training Load Classification</h5>
                 {workloadAssessmentResult.workloadClassification ? (
                   <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -3248,6 +3918,17 @@ function formatSportLabel(sportCode: string): string {
     .filter((part) => part !== "")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function coachFacingGoalTitle(goal: {
+  goalName?: string | null;
+  competitionEventId?: string | null;
+}): string {
+  const goalName = goal.goalName?.trim();
+  if (goalName) return goalName;
+  const competitionLabel = goal.competitionEventId?.trim();
+  if (competitionLabel) return competitionLabel;
+  return "Unnamed goal";
 }
 
 export function formatSeasonOptionLabel(season: SeasonCycleSummary): string {
@@ -4322,6 +5003,14 @@ export function CoachAthletePlanningProfileView({
   const [workflowRequestedPlanId, setWorkflowRequestedPlanId] = useState<
     string | null
   >(null);
+  const [releasedPlanViewerIntent, setReleasedPlanViewerIntent] = useState<{
+    domain: TrainingPlanGenerationDomain;
+    planId: string;
+  } | null>(null);
+  const [releasedPlanViewerVisibleDetail, setReleasedPlanViewerVisibleDetail] = useState<{
+    domain: TrainingPlanGenerationDomain;
+    detail: CoachPersistedTrainingPlanActiveDetail;
+  } | null>(null);
   const requestedPlanId = workflowRequestedPlanId;
   const requestedPlanIdDep = requestedPlanId ?? null;
   const urlPlanCandidateDep = urlPlanCandidate ?? null;
@@ -4379,6 +5068,12 @@ export function CoachAthletePlanningProfileView({
     completeness: null,
   });
   const [levelValidationModalOpen, setLevelValidationModalOpen] = useState(false);
+  const [contextBuilderDrawerStep, setContextBuilderDrawerStep] =
+    useState<ContextBuilderDrawerStepKey | null>(null);
+  const [contextBuilderDrawerClosing, setContextBuilderDrawerClosing] = useState(false);
+  const contextBuilderDrawerCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [workloadAssessmentLoading, setWorkloadAssessmentLoading] = useState(false);
   const [workloadAssessmentError, setWorkloadAssessmentError] = useState<string | null>(
     null,
@@ -4518,6 +5213,13 @@ export function CoachAthletePlanningProfileView({
   /** Set only when Head Coach opens Submitted Domain Plans review — not URL persisted-plan sync. */
   const [headCoachSubmittedReviewDomain, setHeadCoachSubmittedReviewDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
+  const [domainReviewDrawerOpen, setDomainReviewDrawerOpen] = useState(false);
+  const [domainReviewDrawerDomain, setDomainReviewDrawerDomain] =
+    useState<TrainingPlanGenerationDomain | null>(null);
+  const [domainReviewDrawerClosing, setDomainReviewDrawerClosing] = useState(false);
+  const domainReviewDrawerCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [step6WorkflowInternalLoading, setStep6WorkflowInternalLoading] = useState(false);
   const [step6WorkflowInternalError, setStep6WorkflowInternalError] = useState<string | null>(
     null,
@@ -4530,6 +5232,8 @@ export function CoachAthletePlanningProfileView({
   const [governedPlanActionSuccessFeedback, setGovernedPlanActionSuccessFeedback] =
     useState<string | null>(null);
   const [requestRevisionModalOpen, setRequestRevisionModalOpen] = useState(false);
+  const [requestRevisionDrawerComposerOpen, setRequestRevisionDrawerComposerOpen] =
+    useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
   const [requestRevisionActionContext, setRequestRevisionActionContext] =
     useState<GovernedPlanContext | null>(null);
@@ -6117,6 +6821,9 @@ export function CoachAthletePlanningProfileView({
     if (currentCoachGenerationDomain !== null) {
       return currentCoachGenerationDomain;
     }
+    if (headCoachSubmittedReviewDomain !== null) {
+      return headCoachSubmittedReviewDomain;
+    }
     const persistedDomain = persistedSkillsPlanDetail?.generationDomain?.trim().toUpperCase();
     if (
       persistedDomain === "SKILLS" ||
@@ -6129,6 +6836,7 @@ export function CoachAthletePlanningProfileView({
   }, [
     allowedGenerationDomains,
     currentCoachGenerationDomain,
+    headCoachSubmittedReviewDomain,
     persistedSkillsPlanDetail?.generationDomain,
   ]);
   const visibleActiveGoals = useMemo(
@@ -7744,7 +8452,120 @@ export function CoachAthletePlanningProfileView({
     useState<GuidedWorkflowStepKey>(() =>
       urlPlanCandidate !== null ? "generate" : "context-app",
     );
+  const [showLockedContextBuilderView, setShowLockedContextBuilderView] = useState(false);
   const selectedWorkflowTabDep = selectedWorkflowTab;
+
+  const clearContextBuilderDrawerCloseTimeout = useCallback(() => {
+    if (contextBuilderDrawerCloseTimeoutRef.current === null) return;
+    clearTimeout(contextBuilderDrawerCloseTimeoutRef.current);
+    contextBuilderDrawerCloseTimeoutRef.current = null;
+  }, []);
+
+  const clearDomainReviewDrawerCloseTimeout = useCallback(() => {
+    if (domainReviewDrawerCloseTimeoutRef.current === null) return;
+    clearTimeout(domainReviewDrawerCloseTimeoutRef.current);
+    domainReviewDrawerCloseTimeoutRef.current = null;
+  }, []);
+
+  const handleOpenDomainReviewDrawer = useCallback(
+    (domain: TrainingPlanGenerationDomain) => {
+      clearDomainReviewDrawerCloseTimeout();
+      setDomainReviewDrawerClosing(false);
+      setDomainReviewDrawerDomain(domain);
+      setDomainReviewDrawerOpen(true);
+    },
+    [clearDomainReviewDrawerCloseTimeout],
+  );
+
+  const handleCloseDomainReviewDrawer = useCallback(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerClosing) return;
+    clearDomainReviewDrawerCloseTimeout();
+    setDomainReviewDrawerClosing(true);
+    domainReviewDrawerCloseTimeoutRef.current = setTimeout(() => {
+      setDomainReviewDrawerOpen(false);
+      setDomainReviewDrawerDomain(null);
+      setDomainReviewDrawerClosing(false);
+      domainReviewDrawerCloseTimeoutRef.current = null;
+    }, DOMAIN_REVIEW_DRAWER_ANIMATION_MS);
+  }, [
+    clearDomainReviewDrawerCloseTimeout,
+    domainReviewDrawerClosing,
+    domainReviewDrawerOpen,
+  ]);
+
+  const handleCloseContextBuilderDrawer = useCallback(() => {
+    if (contextBuilderDrawerStep === null || contextBuilderDrawerClosing) return;
+    clearContextBuilderDrawerCloseTimeout();
+    setContextBuilderDrawerClosing(true);
+    contextBuilderDrawerCloseTimeoutRef.current = setTimeout(() => {
+      setContextBuilderDrawerStep(null);
+      setContextBuilderDrawerClosing(false);
+      contextBuilderDrawerCloseTimeoutRef.current = null;
+    }, CONTEXT_BUILDER_DRAWER_ANIMATION_MS);
+  }, [
+    clearContextBuilderDrawerCloseTimeout,
+    contextBuilderDrawerClosing,
+    contextBuilderDrawerStep,
+  ]);
+
+  useEffect(() => {
+    if (contextBuilderDrawerStep === null || isContextBuilderStep(selectedWorkflowTab)) return;
+    clearContextBuilderDrawerCloseTimeout();
+    setContextBuilderDrawerStep(null);
+    setContextBuilderDrawerClosing(false);
+  }, [clearContextBuilderDrawerCloseTimeout, contextBuilderDrawerStep, selectedWorkflowTab]);
+
+  useEffect(() => {
+    if (contextBuilderDrawerStep === null) return;
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        handleCloseContextBuilderDrawer();
+      }
+    }
+    document.addEventListener("keydown", handleDrawerKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDrawerKeyDown);
+    };
+  }, [contextBuilderDrawerClosing, contextBuilderDrawerStep, handleCloseContextBuilderDrawer]);
+
+  useEffect(() => {
+    if (!domainReviewDrawerOpen) return;
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        handleCloseDomainReviewDrawer();
+      }
+    }
+    document.addEventListener("keydown", handleDrawerKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDrawerKeyDown);
+    };
+  }, [domainReviewDrawerOpen, handleCloseDomainReviewDrawer]);
+
+  useEffect(() => {
+    if (selectedWorkflowTab === "generate") return;
+    setShowLockedContextBuilderView(false);
+  }, [selectedWorkflowTab]);
+
+  useEffect(() => {
+    if (!domainReviewDrawerOpen) return;
+    if (selectedWorkflowTab === "generate" && headCoachReviewMode) return;
+    clearDomainReviewDrawerCloseTimeout();
+    setDomainReviewDrawerOpen(false);
+    setDomainReviewDrawerDomain(null);
+    setDomainReviewDrawerClosing(false);
+  }, [
+    clearDomainReviewDrawerCloseTimeout,
+    domainReviewDrawerOpen,
+    headCoachReviewMode,
+    selectedWorkflowTab,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearContextBuilderDrawerCloseTimeout();
+      clearDomainReviewDrawerCloseTimeout();
+    };
+  }, [clearContextBuilderDrawerCloseTimeout, clearDomainReviewDrawerCloseTimeout]);
 
   const step6WorkflowOrchestrationActive =
     accessGateReady &&
@@ -7854,6 +8675,8 @@ export function CoachAthletePlanningProfileView({
     setStep6WorkflowInternalError(null);
     setStep6WorkflowInternalLoading(false);
     setWorkflowRequestedPlanId(null);
+    setReleasedPlanViewerIntent(null);
+    setReleasedPlanViewerVisibleDetail(null);
     setPersistedSkillsPlanDetail(null);
     setPersistedVerifiedDomain(null);
     setHeadCoachSubmittedReviewDomain(null);
@@ -7941,6 +8764,8 @@ export function CoachAthletePlanningProfileView({
     workflowStep6FetchFailedForKeyRef.current = null;
     setStep6WorkflowInternalError(null);
     setStep6WorkflowInternalLoading(false);
+    setReleasedPlanViewerIntent(null);
+    setReleasedPlanViewerVisibleDetail(null);
     setPersistedSkillsPlanDetail(null);
     setPersistedVerifiedDomain(null);
     setPersistedSkillsPlanError(null);
@@ -8266,6 +9091,8 @@ export function CoachAthletePlanningProfileView({
       const owner = detail.plan.athleteId?.trim() ?? "";
       if (owner !== "" && owner !== athleteIdTrimmed) {
         setWorkflowRequestedPlanId(null);
+        setReleasedPlanViewerIntent(null);
+        setReleasedPlanViewerVisibleDetail(null);
         setPersistedSkillsPlanDetail(null);
         setPersistedSkillsPlanError(null);
         setPersistedPlanErrorDomain(null);
@@ -8326,6 +9153,9 @@ export function CoachAthletePlanningProfileView({
     domain: TrainingPlanGenerationDomain,
     context: WorkspaceDomainViewPlanContext | null,
   ) {
+    if (headCoachReviewMode) {
+      setHeadCoachSubmittedReviewDomain(domain);
+    }
     logTrainingPlanViewPlanDiagnostic({
       clickedDomain: domain,
       workspace,
@@ -8356,10 +9186,19 @@ export function CoachAthletePlanningProfileView({
     const fetchUrl = `/training-plan-management/${encodeURIComponent(
       context.planId,
     )}/active/detail?generationDomain=${encodeURIComponent(domain)}`;
+    setReleasedPlanViewerIntent({ domain, planId: context.planId });
+    setWorkflowRequestedPlanId(context.planId);
+    setPersistedVerifiedDomain(domain);
+    setPersistedSkillsPlanLoading(true);
+    setPersistedSkillsPlanError(null);
+    setPersistedPlanErrorDomain(null);
     try {
       const detail = await refreshPersistedPlanDetail(context.planId, domain, {
         updateWorkflowRequestedPlanId: true,
       });
+      if (detail !== null) {
+        setReleasedPlanViewerVisibleDetail({ domain, detail });
+      }
       logTrainingPlanViewPlanDiagnostic({
         clickedDomain: domain,
         workspace,
@@ -8401,7 +9240,21 @@ export function CoachAthletePlanningProfileView({
         formatApiError(e, `Could not open ${trainingPlanDomainLabel(domain)}.`),
       );
       setPersistedPlanErrorDomain(domain);
+    } finally {
+      setPersistedSkillsPlanLoading(false);
     }
+  }
+
+  function handleBackToDomainPlansIntegration() {
+    setShowLockedContextBuilderView(false);
+    setReleasedPlanViewerIntent(null);
+    setReleasedPlanViewerVisibleDetail(null);
+    setWorkflowRequestedPlanId(null);
+    setPersistedSkillsPlanDetail(null);
+    setPersistedVerifiedDomain(null);
+    setPersistedSkillsPlanError(null);
+    setPersistedPlanErrorDomain(null);
+    router.replace(planningProfileHrefForAthlete(athleteIdTrimmed));
   }
 
   const refreshAssistantGovernedDetailFromLatestDraft = useCallback(
@@ -8750,6 +9603,61 @@ export function CoachAthletePlanningProfileView({
       ) as Record<GuidedWorkflowStepKey, GuidedWorkflowStepStatus>,
     [workflowStepperModel],
   );
+
+  const resolvePreLockContextBuilderTab = useCallback((): ContextBuilderStepKey => {
+    const firstIncomplete: ContextBuilderStepKey =
+      !appStepComplete
+        ? "context-app"
+        : !levelStepComplete
+          ? "level-validation"
+          : !workloadComplete
+            ? "workload"
+            : !seasonGoalsGateComplete
+              ? "season-goals"
+              : "plan-dates";
+
+    if (workflowStepStatusByKey[firstIncomplete] !== "locked") {
+      return firstIncomplete;
+    }
+
+    return (
+      CONTEXT_BUILDER_STEP_SEQUENCE_LIST.find(
+        (step) => workflowStepStatusByKey[step] !== "locked",
+      ) ?? "context-app"
+    );
+  }, [
+    appStepComplete,
+    levelStepComplete,
+    seasonGoalsGateComplete,
+    workloadComplete,
+    workflowStepStatusByKey,
+  ]);
+
+  useEffect(() => {
+    if (!trainingPlanShellModel.ready) return;
+    if (shouldResolveSpecialistDomainWorkspace) return;
+    if (!isHeadCoachPlanningContextOwner || isDownstreamDomainCoach) return;
+    if (
+      trainingPlanShellModel.shell !== "head_coach_planning" &&
+      trainingPlanShellModel.shell !== "head_coach_function_aware" &&
+      trainingPlanShellModel.shell !== "head_coach_review"
+    ) {
+      return;
+    }
+    if (planningContextLocked) return;
+    if (isContextBuilderStep(selectedWorkflowTab)) return;
+
+    setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+  }, [
+    isDownstreamDomainCoach,
+    isHeadCoachPlanningContextOwner,
+    planningContextLocked,
+    resolvePreLockContextBuilderTab,
+    selectedWorkflowTab,
+    shouldResolveSpecialistDomainWorkspace,
+    trainingPlanShellModel.ready,
+    trainingPlanShellModel.shell,
+  ]);
 
   const loadWorkloadAssessment = useCallback(
     async (resetGenerationState: boolean): Promise<boolean> => {
@@ -9193,6 +10101,8 @@ export function CoachAthletePlanningProfileView({
       if (urlPlanCandidate === null) {
         if (prevUrlPlan !== undefined && prevUrlPlan !== null) {
           setWorkflowRequestedPlanId(null);
+          setReleasedPlanViewerIntent(null);
+          setReleasedPlanViewerVisibleDetail(null);
           setPersistedSkillsPlanDetail(null);
           setPersistedVerifiedDomain(null);
           setPersistedSkillsPlanError(null);
@@ -9210,6 +10120,8 @@ export function CoachAthletePlanningProfileView({
 
       if (persistedPlanQueryDomain === null) {
         setWorkflowRequestedPlanId(null);
+        setReleasedPlanViewerIntent(null);
+        setReleasedPlanViewerVisibleDetail(null);
         setPersistedSkillsPlanDetail(null);
         setPersistedSkillsPlanError(
           "Unable to load the saved training plan because no coach generation domain is available yet.",
@@ -9229,6 +10141,8 @@ export function CoachAthletePlanningProfileView({
         const owner = detail.plan.athleteId?.trim() ?? "";
         if (owner !== "" && owner !== athleteIdTrimmed) {
           setWorkflowRequestedPlanId(null);
+          setReleasedPlanViewerIntent(null);
+          setReleasedPlanViewerVisibleDetail(null);
           setPersistedSkillsPlanDetail(null);
           setPersistedVerifiedDomain(null);
           setPersistedSkillsPlanError(null);
@@ -9469,7 +10383,10 @@ export function CoachAthletePlanningProfileView({
       return;
     }
     if (action === "REQUEST_REVISION") {
-      setRequestRevisionModalOpen(true);
+      const useDrawerComposer =
+        domainReviewDrawerOpen && domainReviewDrawerDomain === actionContext.generationDomain;
+      setRequestRevisionDrawerComposerOpen(useDrawerComposer);
+      setRequestRevisionModalOpen(!useDrawerComposer);
       setRequestRevisionActionContext(actionContext);
       setGovernedPlanActionError(null);
       setGovernedPlanActionSuccess(null);
@@ -9618,6 +10535,14 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  function handleCancelRequestRevision() {
+    setRequestRevisionModalOpen(false);
+    setRequestRevisionDrawerComposerOpen(false);
+    setRequestRevisionActionContext(null);
+    setRequestRevisionFeedback("");
+    setGovernedPlanActionError(null);
+  }
+
   async function handleRequestRevisionSubmit(
     event?: FormEvent<HTMLFormElement>,
     actionContextOverride?: GovernedPlanContext | null,
@@ -9629,7 +10554,18 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
-    const coachFeedback = requestRevisionFeedback.trim();
+    const actionDomain = actionContext.generationDomain;
+    const reviewModel = resolveDomainReviewSurfaceModel(actionDomain);
+    const revisionContext = buildDomainReviewRevisionContext({
+      athleteId: athleteIdTrimmed,
+      domain: actionDomain,
+      selectedPlanId: actionContext.planId,
+      selectedVersionId: actionContext.versionId,
+      planStatus: reviewModel.planStatusLabel,
+      workflowStatus: reviewModel.workflowStatus,
+      currentFreeTextRevisionInstruction: requestRevisionFeedback,
+    });
+    const coachFeedback = revisionContext.currentFreeTextRevisionInstruction;
     if (coachFeedback === "") {
       setGovernedPlanActionError("Revision feedback is required.");
       setGovernedPlanActionSuccess(null);
@@ -9642,7 +10578,6 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccess(null);
     setGovernedPlanActionSuccessFeedback(null);
 
-    const actionDomain = actionContext.generationDomain;
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
 
     try {
@@ -9665,6 +10600,7 @@ export function CoachAthletePlanningProfileView({
       }
       setRequestRevisionFeedback("");
       setRequestRevisionModalOpen(false);
+      setRequestRevisionDrawerComposerOpen(false);
       setRequestRevisionActionContext(null);
       const domainLabel = trainingPlanDomainLabel(actionDomain);
       setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
@@ -9773,8 +10709,19 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  function renderHeadCoachPlanningContextLockAction() {
+  function renderHeadCoachPlanningContextLockAction(options?: {
+    shell?: "panel" | "flat";
+    showHeading?: boolean;
+    showBlockers?: boolean;
+    showStatusDetails?: boolean;
+    inlineNotices?: boolean;
+  }) {
     if (!isPlanningContextAuthority) return null;
+    const shell = options?.shell ?? "panel";
+    const showHeading = options?.showHeading ?? true;
+    const showBlockers = options?.showBlockers ?? true;
+    const showStatusDetails = options?.showStatusDetails ?? true;
+    const inlineNotices = options?.inlineNotices ?? false;
     const upstreamBlockers = upstreamPlanningContext?.blockers ?? [];
     const apiConfirmedLocked = upstreamPlanningContext?.planningContextLocked === true;
     const effectiveLocked = planningContextLocked;
@@ -9808,59 +10755,84 @@ export function CoachAthletePlanningProfileView({
         ? cachedLockedPlanWindow?.endDate ?? fallbackEndFromPlans ?? planEndDate
         : planEndDate);
     return (
-      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <div className="space-y-1">
-          <h4 className="text-sm font-normal text-textPrimary">
-            {headCoachReviewMode
-              ? "Head Coach Planning Context Lock"
-              : "Planning Context Lock"}
-          </h4>
-          <p className="text-sm text-textSecondary">
-            {headCoachReviewMode
-              ? "Lock the confirmed plan window and share APP, level, workload, season, goal, and date context with assigned domain coaches."
-              : "Lock the confirmed plan window so Nutrition and S&C coaches can generate their domain plans."}
-          </p>
-        </div>
+      <div
+        className={cn(
+          "space-y-3",
+          shell === "panel" ? "rounded-md border border-slate-200 bg-slate-50 p-3" : "",
+        )}
+      >
+        {showHeading ? (
+          <div className="space-y-1">
+            <h4 className="text-sm font-normal text-textPrimary">
+              {headCoachReviewMode
+                ? "Head Coach Planning Context Lock"
+                : "Planning Context Lock"}
+            </h4>
+            <p className="text-sm text-textSecondary">
+              {headCoachReviewMode
+                ? "Lock the confirmed plan window and share APP, level, workload, season, goal, and date context with assigned domain coaches."
+                : "Lock the confirmed plan window so Nutrition and S&C coaches can generate their domain plans."}
+            </p>
+          </div>
+        ) : null}
         {upstreamPlanningContextLoading ? (
-          <div className="text-sm text-textSecondary">Checking planning context lock…</div>
+          <DashboardStatusNotice type="loading" compact>
+            Checking planning context lock...
+          </DashboardStatusNotice>
         ) : null}
         {contextRefreshFailed ? (
-          <Alert variant="warning">
+          <DashboardStatusNotice type="warning" compact>
             Unable to refresh locked context. Showing last known locked context.
-          </Alert>
+          </DashboardStatusNotice>
         ) : upstreamPlanningContextError && !effectiveLocked ? (
-          <Alert variant="danger">{upstreamPlanningContextError}</Alert>
-        ) : null}
-        {upstreamBlockers.length > 0 ? (
-          <Alert variant="warning">
-            <div className="space-y-2">
-              <div className="font-medium">Planning context blockers</div>
-              <ul className="list-inside list-disc space-y-1">
-                {upstreamBlockers.map((blocker) => (
-                  <li key={blocker} className="whitespace-pre-wrap break-words">
-                    {blocker}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Alert>
+          <DashboardStatusNotice type="error" compact>
+            {upstreamPlanningContextError}
+          </DashboardStatusNotice>
         ) : null}
         {planningContextLockError ? (
-          <Alert variant="danger">{planningContextLockError}</Alert>
+          <DashboardStatusNotice type="error" compact>
+            {planningContextLockError}
+          </DashboardStatusNotice>
         ) : null}
         {planningContextLockSuccess ? (
-          <WorkflowNeutralNotice>{planningContextLockSuccess}</WorkflowNeutralNotice>
+          <DashboardStatusNotice type="success" compact>
+            {planningContextLockSuccess}
+          </DashboardStatusNotice>
         ) : null}
-        <dl className="space-y-1">
-          <DetailRow
-            label="Planning context locked"
-            value={effectiveLocked ? "Yes" : "No"}
-          />
-          <DetailRow
-            label="Plan window"
-            value={formatDateRange(displayStartDate, displayEndDate)}
-          />
-        </dl>
+        {showStatusDetails ? (
+          <dl className="space-y-1">
+            <DetailRow
+              label="Planning context locked"
+              value={effectiveLocked ? "Yes" : "No"}
+            />
+            <DetailRow
+              label="Plan window"
+              value={formatDateRange(displayStartDate, displayEndDate)}
+            />
+          </dl>
+        ) : null}
+        {showBlockers && upstreamBlockers.length > 0 && !effectiveLocked ? (
+          (() => {
+            const coachFacingBlockers = upstreamBlockers
+              .map((blocker) => humanizePlanningContextBlockerCode(blocker))
+              .filter((blocker): blocker is string => blocker !== null);
+            if (coachFacingBlockers.length === 0) return null;
+            return inlineNotices ? (
+              <DashboardStatusNotice
+                type="blocker"
+                title="Resolve blockers before locking context"
+                items={coachFacingBlockers}
+                compact
+              />
+            ) : (
+              <DashboardStatusNotice
+                type="blocker"
+                title="Resolve blockers before locking context"
+                items={coachFacingBlockers}
+              />
+            );
+          })()
+        ) : null}
         {!effectiveLocked ? (
           <Button
             type="button"
@@ -9918,8 +10890,11 @@ export function CoachAthletePlanningProfileView({
     });
   }
 
-  function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
+  function resolveDomainReviewSurfaceModel(
+    domain: TrainingPlanGenerationDomain,
+  ): DomainReviewSurfaceModel {
     const state = headCoachDomainPlanStates[domain];
+    const assignmentDomainContext = workspace?.assignmentContext?.domains[domain];
     const workflow2SkillsSlotProjection =
       headCoachFunctionAwareMode && headCoachOwnedSkillsGrouping && domain === "SKILLS"
         ? resolveWorkflow2SubmittedDomainSkillsSlotProjection({
@@ -9943,10 +10918,10 @@ export function CoachAthletePlanningProfileView({
           });
     const status = headCoachDomainStatusLabel(workflowStatus);
     const activeDetail = state.activeDetail;
-    const workspaceDomainEntry = workspace?.domains[domain];
+    const workspaceDomainEntry = workspace?.domains[domain] ?? null;
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
     const workspaceVersionId =
-      workspaceDomainEntry !== undefined
+      workspaceDomainEntry !== null
         ? (resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary) ?? "")
         : "";
     const planId =
@@ -9970,7 +10945,7 @@ export function CoachAthletePlanningProfileView({
           }
         : null;
     const canShowViewPlan = resolveDomainViewPlanVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+      assignmentDomainContext,
       legacyCanOpen: planContext !== null,
       planId,
       versionId,
@@ -9982,45 +10957,242 @@ export function CoachAthletePlanningProfileView({
       headCoachOwnedSkillsGrouping &&
       domain === "SKILLS" &&
       workflowStatus === "draft_generated";
+    const rawPlanStatus =
+      [
+        workspaceDomainEntry?.summary.status,
+        state.summaryStatus,
+        activeDetail?.version.status,
+        activeDetail?.plan.status,
+      ].find((value) => (value?.trim() ?? "") !== "") ?? null;
+    const planStatusLabel =
+      rawPlanStatus !== null
+        ? formatEnumeratedLabel(rawPlanStatus)
+        : isNotCreated
+          ? "No plan yet"
+          : "Unavailable";
+    const allowedActions =
+      workspace !== null
+        ? workspaceAllowedActionsSet(workspace, domain)
+        : new Set<GovernedTrainingPlanWorkflowAction>();
+    for (const action of activeDetail?.allowedActions ?? []) {
+      allowedActions.add(action);
+    }
+    const canShowSubmitForReview = resolveDomainSubmitForReviewVisible({
+      assignmentDomainContext,
+      legacyCanSubmitForReview:
+        workspace !== null
+          ? workspaceShowsDomainSubmitReview(workspace, domain)
+          : allowedActions.has("SUBMIT_REVIEW"),
+      workflowStatus,
+      planId,
+      versionId,
+    });
+    const canShowReviewAction =
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext,
+        legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
+        planId,
+        versionId,
+      }) ||
+      resolveDomainHeadCoachReviewActionVisible({
+        assignmentDomainContext,
+        reviewAction: "REQUEST_REVISION",
+        legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
+        planId,
+        versionId,
+      });
+    const canShowReleaseAction = resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext,
+      requiredReleaseMode: "HEAD_COACH_APPROVAL",
+      legacyCanRelease: allowedActions.has("RELEASE"),
+      planId,
+      versionId,
+    });
+    const reviseAvailability = resolveDomainReviseAvailability({
+      domain,
+      workflowStatus,
+      planId,
+      versionId,
+      baseVersionId:
+        workspaceDomainEntry?.summary.approvedVersionId ??
+        workspaceDomainEntry?.summary.activeVersionId ??
+        null,
+      assignmentDomainContext,
+      legacyRequesterOwnsDomain: !isHeadCoachReviewerOnlyForDomain(domain),
+    });
+    const generatePermission = resolveGeneratePermissionForDomain(domain);
+    const assignedCoachLabel = domainIntegrationAssignedCoachLabel(domain, assignmentDomainContext);
+    const nextActionLabel = domainIntegrationNextActionLabel({
+      workflowStatus,
+      assignmentDomainContext,
+      planningContextLocked:
+        workspace?.planningContext.locked ??
+        upstreamPlanningContext?.planningContextLocked === true,
+      loading: state.loading,
+      hasError: state.error !== null,
+      canGenerate: generatePermission.canShowGenerate,
+      canSubmitForReview: canShowSubmitForReview,
+      canViewPlan: canShowViewPlan,
+      canReview: canShowReviewAction,
+      canRelease: canShowReleaseAction,
+      isCurrentReviewPlan,
+    });
+    const availableActionLabels = domainIntegrationAvailableActionLabels({
+      canGenerate: generatePermission.canShowGenerate,
+      canViewPlan: canShowViewPlan,
+      canSubmitForReview: canShowSubmitForReview,
+      canReview: canShowReviewAction,
+      canRelease: canShowReleaseAction,
+      canRevise:
+        reviseAvailability.mutationEnabled ||
+        reviseAvailability.reason === "future_base_version_ready",
+    });
+    const reviseComingSoonVisible =
+      reviseAvailability.reason === "future_base_version_ready";
+    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext,
+      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
+      planId,
+      versionId,
+    });
+    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
+      assignmentDomainContext,
+      reviewAction: "REQUEST_REVISION",
+      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
+      planId,
+      versionId,
+    });
+    const viewPlanContext = resolveWorkspaceDomainViewPlanContext({
+      workspace,
+      domain,
+      fallbackPlanId: planId,
+      fallbackVersionId: versionId,
+      fallbackStatus: rawPlanStatus,
+      fallbackSource: "domain review surface",
+    });
+
+    return {
+      domain,
+      domainLabel: trainingPlanDomainLabel(domain),
+      state,
+      assignmentDomainContext,
+      assignedCoachLabel,
+      workflowStatus,
+      statusLabel: status,
+      planStatusLabel,
+      nextActionLabel,
+      availableActionLabels,
+      allowedActions,
+      activeDetail,
+      planId,
+      versionId,
+      versionNumber:
+        workspaceDomainEntry?.summary.versionNumber ?? activeDetail?.version.versionNumber ?? null,
+      trainingDays: activeDetail?.days.filter((day) => day.sessions.length > 0).length ?? null,
+      isCurrentReviewPlan,
+      showWorkflow2DraftPendingNotice,
+      reviseComingSoonVisible,
+      canShowViewPlan,
+      canShowSubmitForReview,
+      canShowApproveAction,
+      canShowRequestRevisionAction,
+      canShowReleaseAction,
+      actionContext: planContext,
+      viewPlanContext,
+    };
+  }
+
+  function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
+    const reviewModel = resolveDomainReviewSurfaceModel(domain);
+    const {
+      state,
+      domainLabel,
+      assignedCoachLabel,
+      planStatusLabel,
+      workflowStatus,
+      statusLabel,
+      nextActionLabel,
+      availableActionLabels,
+      actionContext,
+      canShowViewPlan,
+      viewPlanContext,
+      showWorkflow2DraftPendingNotice,
+      reviseComingSoonVisible,
+    } = reviewModel;
+    const canOpenReleasedPlanViewer =
+      workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null;
 
     return (
-      <div
-        key={domain}
-        className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
-      >
-        <div className="space-y-1">
-          <h4 className="text-sm font-normal text-textPrimary">
-            {trainingPlanDomainLabel(domain)}
-          </h4>
-          <p className="text-sm text-textSecondary">Status: {status}</p>
-        </div>
-        {state.loading ? (
-          <div className="text-sm text-textSecondary">Loading plan status…</div>
-        ) : null}
-        {state.error ? <Alert variant="warning">{state.error}</Alert> : null}
-        {!state.loading && !state.error && showWorkflow2DraftPendingNotice ? (
-          <div className="text-sm text-textSecondary">
-            Draft generated — not yet submitted for review.
+      <tr key={domain} className="border-t border-border/70 align-top first:border-t-0">
+        <th scope="row" className="py-3 pr-3 text-left text-sm font-normal text-textPrimary">
+          {domainLabel}
+        </th>
+        <td className="px-3 py-3 text-sm text-textPrimary">{assignedCoachLabel}</td>
+        <td className="px-3 py-3 text-sm text-textPrimary">
+          <div className="space-y-1">
+            <div>{planStatusLabel}</div>
+            {state.loading ? (
+              <div className="text-xs text-textMuted">Loading plan status...</div>
+            ) : null}
+            {state.error ? (
+              <div className="text-xs text-amber-700">{state.error}</div>
+            ) : null}
+            {!state.loading && !state.error && showWorkflow2DraftPendingNotice ? (
+              <div className="text-xs text-textMuted">Draft generated; not yet submitted.</div>
+            ) : null}
           </div>
-        ) : null}
-        {!state.loading && !state.error && isNotCreated ? (
-          <div className="text-sm text-textSecondary">
-            No plan submitted yet for this domain.
-          </div>
-        ) : null}
-        {planContext !== null && canShowViewPlan && !isCurrentReviewPlan ? (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => openHeadCoachDomainPlanReview(planContext)}
+        </td>
+        <td className="px-3 py-3">
+          <span
+            className={cn(
+              "inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs",
+              domainIntegrationStatusTone(workflowStatus),
+            )}
           >
-            {reviewPlanButtonLabel(domain)}
-          </Button>
-        ) : null}
-        {isCurrentReviewPlan ? (
-          <div className="text-sm font-medium text-blue-600">Currently reviewing this plan above.</div>
-        ) : null}
-      </div>
+            {statusLabel}
+          </span>
+        </td>
+        <td className="min-w-[12rem] px-3 py-3 text-sm text-textPrimary">
+          {nextActionLabel}
+        </td>
+        <td className="px-3 py-3 text-sm text-textPrimary">
+          <div className="flex flex-col items-start gap-2">
+            <span>
+              {availableActionLabels.length > 0
+                ? availableActionLabels.join(", ")
+                : "No action available now"}
+            </span>
+            {canOpenReleasedPlanViewer ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleViewWorkspaceDomainPlan(domain, viewPlanContext);
+                }}
+              >
+                {viewDomainInPlanViewerLabel(domain)}
+              </Button>
+            ) : actionContext !== null && canShowViewPlan ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  handleOpenDomainReviewDrawer(domain);
+                  openHeadCoachDomainPlanReview(actionContext);
+                }}
+              >
+                {reviewPlanButtonLabel(domain)}
+              </Button>
+            ) : null}
+            {reviseComingSoonVisible ? (
+              <Button type="button" variant="secondary" disabled>
+                Revise Instructions Coming Soon
+              </Button>
+            ) : null}
+          </div>
+        </td>
+      </tr>
     );
   }
 
@@ -10035,201 +11207,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderWorkflow1HeadCoachReviewActionPanel() {
-    if (
-      !workflow1HeadCoachReviewActionPanelMode ||
-      !headCoachReviewMode ||
-      headCoachSubmittedReviewDomain === null
-    ) {
-      return null;
-    }
-
-    const reviewDomain = headCoachSubmittedReviewDomain;
-    const domainState = headCoachDomainPlanStates[reviewDomain];
-    const activeDetail = domainState.activeDetail;
-    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
-    const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const reviewActionContext = resolveHeadCoachReviewActionContext({
-      workspace,
-      domain: reviewDomain,
-      fallbackPlanId: activeDetail?.plan.id,
-      fallbackVersionId: activeDetail?.version.id,
-    });
-    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
-    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
-    const workspaceAllowedActions =
-      workspace !== null
-        ? workspaceAllowedActionsSet(workspace, reviewDomain)
-        : new Set<GovernedTrainingPlanWorkflowAction>();
-    const allowedActions = new Set<GovernedTrainingPlanWorkflowAction>([
-      ...workspaceAllowedActions,
-      ...(activeDetail?.allowedActions ?? []),
-    ]);
-    const status =
-      workspaceDomainEntry?.summary.status?.trim() ??
-      domainState.summaryStatus ??
-      activeDetail?.version.status ??
-      activeDetail?.plan.status ??
-      "";
-    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
-      planId,
-      versionId,
-    });
-    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      reviewAction: "REQUEST_REVISION",
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
-      planId,
-      versionId,
-    });
-    const canShowReleaseAction = resolveDomainReleaseVisible({
-      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      requiredReleaseMode: "HEAD_COACH_APPROVAL",
-      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
-        allowedActions,
-        status,
-      }),
-      planId,
-      versionId,
-    });
-
-    return (
-      <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h4 className="text-sm font-normal text-textPrimary">
-              Head Coach Review Actions
-            </h4>
-            <p className="text-sm text-textSecondary">
-              Review governance for the opened {reviewDomainLabel} plan.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={governedPlanActionLoading !== null}
-            onClick={closeHeadCoachPlanReview}
-          >
-            Close Review
-          </Button>
-        </div>
-        <dl className="space-y-1">
-          <DetailRow label="Domain" value={reviewDomainLabel} />
-          <DetailRow label="Status" value={displayValue(status)} />
-        </dl>
-        <div className="flex flex-wrap gap-2">
-          {canShowApproveAction ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={governedPlanActionLoading === "HEAD_APPROVE"}
-              disabled={governedPlanActionLoading !== null}
-              onClick={() =>
-                void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
-              }
-            >
-              Approve Plan
-            </Button>
-          ) : null}
-          {canShowRequestRevisionAction ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={governedPlanActionLoading !== null}
-              onClick={() => {
-                setRequestRevisionActionContext(reviewActionContext);
-                setRequestRevisionModalOpen(true);
-                setGovernedPlanActionError(null);
-                setGovernedPlanActionSuccess(null);
-                setGovernedPlanActionSuccessFeedback(null);
-              }}
-            >
-              Request Changes
-            </Button>
-          ) : null}
-          {canShowReleaseAction ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={governedPlanActionLoading === "RELEASE"}
-              disabled={governedPlanActionLoading !== null}
-              onClick={() =>
-                void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
-              }
-            >
-              Release to Athlete
-            </Button>
-          ) : null}
-        </div>
-        {requestRevisionModalOpen ? (
-          <form
-            className="space-y-3 rounded-md border border-slate-200 bg-white p-3"
-            onSubmit={(event) => void handleRequestRevisionSubmit(event, reviewActionContext)}
-          >
-            <div className="space-y-1">
-              <h5 className="text-sm font-normal text-textPrimary">Request Changes</h5>
-              <p className="text-sm text-textSecondary">
-                Explain what the coach should change before resubmitting.
-              </p>
-            </div>
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Revision feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={requestRevisionFeedback}
-                onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                placeholder="Describe the required changes."
-                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-              />
-            </label>
-            <div className="flex flex-wrap justify-end gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                onClick={() => {
-                  setRequestRevisionModalOpen(false);
-                  setRequestRevisionActionContext(null);
-                  setRequestRevisionFeedback("");
-                  setGovernedPlanActionError(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                disabled={
-                  governedPlanActionLoading === "REQUEST_REVISION" ||
-                  requestRevisionFeedback.trim() === ""
-                }
-              >
-                Send Request
-              </Button>
-            </div>
-          </form>
-        ) : null}
-        {governedPlanActionError ? (
-          <Alert variant="danger">{governedPlanActionError}</Alert>
-        ) : null}
-        {governedPlanActionSuccess ? (
-          <WorkflowNeutralNotice>
-            <div className="space-y-2">
-              <div>{governedPlanActionSuccess}</div>
-              {governedPlanActionSuccessFeedback ? (
-                <div className="text-sm text-textSecondary">
-                  Head Coach Notes: {governedPlanActionSuccessFeedback}
-                </div>
-              ) : null}
-            </div>
-          </WorkflowNeutralNotice>
-        ) : null}
-      </section>
-    );
+    return null;
   }
 
   function renderHeadCoachPlanReviewPanel() {
@@ -10238,95 +11216,48 @@ export function CoachAthletePlanningProfileView({
     }
 
     const reviewDomain = headCoachSubmittedReviewDomain;
-    const domainState = headCoachDomainPlanStates[reviewDomain];
-    const activeDetail = domainState.activeDetail;
-    const isLoading = domainState.loading;
-    const loadError = domainState.error;
-    const showSubmittedPlanLoading = shouldShowSubmittedPlanLoading({
-      loading: isLoading,
-      hasActiveDetail: activeDetail !== null,
-      workflow1HeadCoachReviewActionPanelMode,
-    });
-    const workspaceDomainEntry = workspace?.domains[reviewDomain] ?? null;
-    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? null;
-    const workspaceVersionId =
-      workspaceDomainEntry !== null
-        ? resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary)
+    const reviewModel = resolveDomainReviewSurfaceModel(reviewDomain);
+    const { state, activeDetail } = reviewModel;
+    const persistedTrainingDaysForDomain =
+      persistedDetailDomain === reviewDomain
+        ? persistedSkillsPlanDetail?.days.filter((day) => day.sessions.length > 0).length ?? null
         : null;
-
-    const reviewDomainLabel = trainingPlanDomainLabel(reviewDomain);
-    const allowedActions =
-      workspace && headCoachSubmittedReviewDomain !== null
-        ? workspaceAllowedActionsSet(workspace, headCoachSubmittedReviewDomain)
-        : new Set(activeDetail?.allowedActions ?? []);
-    const reviewActionContext = resolveHeadCoachReviewActionContext({
-      workspace,
-      domain: reviewDomain,
-      fallbackPlanId: activeDetail?.plan.id,
-      fallbackVersionId: activeDetail?.version.id,
-    });
-    const planId = reviewActionContext?.planId ?? activeDetail?.plan.id?.trim() ?? "";
-    const versionId = reviewActionContext?.versionId ?? activeDetail?.version.id?.trim() ?? "";
-    const versionNumber = activeDetail?.version.versionNumber ?? null;
-    const status =
-      workspaceDomainEntry?.summary.status?.trim() ??
-      domainState.summaryStatus ??
-      activeDetail?.version.status ??
-      activeDetail?.plan.status ??
-      "";
-    const canShowApproveAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      legacyCanShowReviewAction: allowedActions.has("HEAD_APPROVE"),
-      planId,
-      versionId,
-    });
-    const canShowRequestRevisionAction = resolveDomainHeadCoachReviewActionVisible({
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      reviewAction: "REQUEST_REVISION",
-      legacyCanShowReviewAction: allowedActions.has("REQUEST_REVISION"),
-      planId,
-      versionId,
-    });
-    const canShowReleaseAction = resolveDomainReleaseVisible({
-      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-      assignmentDomainContext: workspace?.assignmentContext?.domains[reviewDomain],
-      requiredReleaseMode: "HEAD_COACH_APPROVAL",
-      legacyCanRelease: canShowHeadCoachReviewReleaseAction({
-        allowedActions,
-        status,
-      }),
-      planId,
-      versionId,
-    });
+    const inspectorTrainingDays = reviewModel.trainingDays ?? persistedTrainingDaysForDomain;
+    const canOpenReleasedPlanViewer =
+      reviewModel.workflowStatus === "released" &&
+      reviewModel.canShowViewPlan &&
+      reviewModel.viewPlanContext !== null;
 
     return (
-      <section className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+      <section className="space-y-4 border-t border-border/70 pt-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h4 className="text-base font-normal text-textPrimary">
-              Reviewing {reviewDomainLabel}
+              Selected Domain Current State
             </h4>
             <p className="text-sm text-textSecondary">
-              Review the submitted plan content, then approve or request revision.
+              Track the selected domain and continue review actions.
             </p>
           </div>
-          {!workflow1HeadCoachReviewActionPanelMode ? (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={closeHeadCoachPlanReview}
-            >
-              Close Review
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={closeHeadCoachPlanReview}
+          >
+            Clear selected domain
+          </Button>
         </div>
 
-        {showSubmittedPlanLoading ? (
+        {shouldShowSubmittedPlanLoading({
+          loading: state.loading,
+          hasActiveDetail: activeDetail !== null,
+          workflow1HeadCoachReviewActionPanelMode,
+        }) ? (
           <div className="text-sm text-textSecondary">Loading submitted plan…</div>
         ) : null}
 
-        {loadError ? (
-          <Alert variant="danger">Unable to load submitted plan. {loadError}</Alert>
+        {state.error ? (
+          <Alert variant="danger">Unable to load submitted plan. {state.error}</Alert>
         ) : null}
 
         {governedPlanActionError && !workflow1HeadCoachReviewActionPanelMode ? (
@@ -10337,141 +11268,47 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="success">{governedPlanActionSuccess}</Alert>
         ) : null}
 
-        {!showSubmittedPlanLoading && !loadError && activeDetail ? (
+        {!state.loading && !state.error ? (
           <>
             <dl className="grid gap-2 sm:grid-cols-2">
-              <DetailRow label="Training Plan ID" value={displayValue(planId)} />
-              <DetailRow label="Version ID" value={displayValue(versionId)} />
-              <DetailRow label="Version" value={displayValue(versionNumber)} />
-              <DetailRow label="Status" value={displayValue(status)} />
-              <DetailRow
-                label="Training Days"
-                value={displayValue(activeDetail.days.filter((d) => d.sessions.length > 0).length)}
-              />
+              <DetailRow label="Domain" value={reviewModel.domainLabel} />
+              <DetailRow label="Assigned Coach" value={reviewModel.assignedCoachLabel} />
+              <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
+              <DetailRow label="Workflow status" value={reviewModel.statusLabel} />
+              <DetailRow label="Next action" value={reviewModel.nextActionLabel} />
+              <DetailRow label="Version" value={displayValue(reviewModel.versionNumber)} />
+              {inspectorTrainingDays !== null ? (
+                <DetailRow label="Training Days" value={displayValue(inspectorTrainingDays)} />
+              ) : null}
             </dl>
 
-            {!workflow1HeadCoachReviewActionPanelMode ? (
             <div className="flex flex-wrap gap-2">
-              {canShowApproveAction ? (
+              {canOpenReleasedPlanViewer ? (
                 <Button
                   type="button"
                   variant="primary"
-                  loading={governedPlanActionLoading === "HEAD_APPROVE"}
-                  disabled={governedPlanActionLoading !== null}
-                  onClick={() =>
-                    void handlePersistedGovernedPlanAction("HEAD_APPROVE", reviewActionContext)
-                  }
-                >
-                  Approve Plan
-                </Button>
-              ) : null}
-              {canShowRequestRevisionAction ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={governedPlanActionLoading !== null}
                   onClick={() => {
-                    setRequestRevisionActionContext(reviewActionContext);
-                    setRequestRevisionModalOpen(true);
+                    void handleViewWorkspaceDomainPlan(reviewDomain, reviewModel.viewPlanContext);
                   }}
                 >
-                  Request Revision
+                  {viewDomainInPlanViewerLabel(reviewDomain)}
                 </Button>
               ) : null}
-              {canShowReleaseAction ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  loading={governedPlanActionLoading === "RELEASE"}
-                  disabled={governedPlanActionLoading !== null}
-                  onClick={() =>
-                    void handlePersistedGovernedPlanAction("RELEASE", reviewActionContext)
-                  }
-                >
-                  Release to Athlete
-                </Button>
-              ) : null}
+              <Button
+                type="button"
+                variant={canOpenReleasedPlanViewer ? "secondary" : "primary"}
+                onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
+              >
+                {openDomainPlanReviewLabel(reviewDomain)}
+              </Button>
             </div>
-            ) : null}
-
-            {activeDetail.days.length > 0 ? (
-              <div className="space-y-3">
-                <h5 className="text-sm font-normal text-textPrimary">Plan Content</h5>
-                <div className="max-h-[400px] space-y-3 overflow-y-auto rounded-md border border-slate-200 bg-white p-3">
-                  {activeDetail.days
-                    .filter((day) => day.sessions.length > 0)
-                    .map((day, dayOffset) => (
-                      <div
-                        key={day.id ?? `day-${dayOffset}`}
-                        className="space-y-2 rounded-md border border-slate-100 bg-slate-50 p-2"
-                      >
-                        <div className="text-sm font-medium text-textPrimary">
-                          {day.date ? formatDateOnly(day.date) : `Day ${day.dayIndex ?? dayOffset + 1}`}
-                        </div>
-                        {day.sessions.map((session, sessionOffset) => (
-                          <div
-                            key={session.id ?? `session-${sessionOffset}`}
-                            className="space-y-1 rounded-md border border-slate-200 bg-white p-2"
-                          >
-                            <dl className="space-y-1">
-                              {hasRenderableValue(session.title) ? (
-                                <DetailRow label="Session" value={displayLabelTitleCase(session.title)} />
-                              ) : null}
-                              {hasRenderableValue(session.objective) ? (
-                                <DetailRow label="Objective" value={displayValue(session.objective)} />
-                              ) : null}
-                              <DetailRow
-                                label="Duration"
-                                value={formatMinutesAsHoursMinutes(readSessionDurationMinutes(session))}
-                              />
-                            </dl>
-                            {session.sessionStructureSections.length > 0 ? (
-                              <div className="mt-2 space-y-2">
-                                {session.sessionStructureSections.map((section, sectionOffset) => (
-                                  <div key={`${section.key}-${sectionOffset}`} className="space-y-1">
-                                    <div className="text-xs font-medium text-textSecondary">
-                                      {displayLabelTitleCase(section.key)} ({section.items.length} item{section.items.length !== 1 ? "s" : ""})
-                                    </div>
-                                    {section.items.length > 0 ? (
-                                      <div className="space-y-1 pl-2">
-                                        {section.items.slice(0, 5).map((item, itemOffset) => (
-                                          <div key={`item-${itemOffset}`} className="space-y-0.5">
-                                            <div className="text-xs text-textSecondary">
-                                              {displayLabelTitleCase(item.label) || item.summary || `Item ${itemOffset + 1}`}
-                                              {hasRenderableValue(item.durationMinutes) ? ` • ${formatMinutesAsHoursMinutes(item.durationMinutes)}` : ""}
-                                              {hasRenderableValue(item.reps) ? ` • ${item.reps} reps` : ""}
-                                              {hasRenderableValue(item.sets) ? ` • ${item.sets} sets` : ""}
-                                            </div>
-                                            <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
-                                          </div>
-                                        ))}
-                                        {section.items.length > 5 ? (
-                                          <div className="text-xs text-textSecondary italic">
-                                            …and {section.items.length - 5} more
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-textSecondary">No training days in this plan.</div>
-            )}
           </>
         ) : shouldShowHeadCoachReviewEmptyState({
           activeDetail,
-          workspacePlanId,
-          workspaceVersionId,
-          isLoading,
-          loadError,
+          workspacePlanId: reviewModel.planId || null,
+          workspaceVersionId: reviewModel.versionId || null,
+          isLoading: state.loading,
+          loadError: state.error,
         }) ? (
           <div className="text-sm text-textSecondary">No submitted plan data available for this domain.</div>
         ) : null}
@@ -10479,33 +11316,604 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  function formatDrawerWeekdayName(date: string | null | undefined): string | null {
+    const value = date?.trim() ?? "";
+    if (value === "") return null;
+    const parsed = new Date(value.includes("T") ? value : `${value}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    }).format(parsed);
+  }
+
+  function renderDomainReviewDrawerFact(label: string, value: ReactNode) {
+    return (
+      <div className="min-w-0 space-y-0.5">
+        <div className="text-xs uppercase tracking-wide text-textMuted">{label}</div>
+        <div className="min-w-0 break-words text-sm text-textPrimary">{value}</div>
+      </div>
+    );
+  }
+
+  function renderDomainReviewDrawerStructureItem(
+    item: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number]["sessionStructureSections"][number]["items"][number],
+    itemOffset: number,
+    options: { showNutritionCalories?: boolean } = {},
+  ) {
+    const title = (item as { title?: DisplayableValue }).title;
+    const instructions = (item as { instructions?: DisplayableValue }).instructions;
+    const balls = (item as { balls?: DisplayableValue }).balls;
+    const sets = (item as { sets?: DisplayableValue }).sets;
+    const primaryText =
+      hasRenderableValue(title)
+        ? displayValue(title)
+        : hasRenderableValue(item.label)
+          ? displayLabelTitleCase(item.label)
+          : hasRenderableValue(item.summary)
+            ? displayValue(item.summary)
+            : `Item ${itemOffset + 1}`;
+    const measures = [
+      options.showNutritionCalories && item.calories !== null
+        ? formatNutritionCaloriesDisplay(item.calories)
+        : null,
+      hasRenderableValue(item.durationMinutes)
+        ? formatMinutesAsHoursMinutes(Number(item.durationMinutes))
+        : null,
+      hasRenderableValue(item.reps) ? `${displayValue(item.reps)} reps` : null,
+      hasRenderableValue(sets) ? `${displayValue(sets)} sets` : null,
+      hasRenderableValue(balls) ? `${displayValue(balls)} balls` : null,
+      hasRenderableValue(item.intensity) ? displayValue(item.intensity) : null,
+    ].filter((value): value is string => value !== null && value.trim() !== "");
+
+    return (
+      <li key={`${item.label ?? item.summary ?? "item"}-${itemOffset}`} className="space-y-1">
+        <div className="text-sm text-textPrimary">{primaryText}</div>
+        {measures.length > 0 ? (
+          <div className="text-xs text-textSecondary">{measures.join(" · ")}</div>
+        ) : null}
+        {hasRenderableValue(instructions) ? (
+          <div className="text-sm text-textSecondary">{displayValue(instructions)}</div>
+        ) : hasRenderableValue(item.summary) && primaryText !== displayValue(item.summary) ? (
+          <div className="text-sm text-textSecondary">{displayValue(item.summary)}</div>
+        ) : null}
+        {hasRenderableValue(item.notes) ? (
+          <div className="text-sm text-textSecondary">Notes: {displayValue(item.notes)}</div>
+        ) : null}
+        <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+      </li>
+    );
+  }
+
+  function renderDomainReviewDrawerSession(
+    session: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number],
+    sessionOffset: number,
+    options: { showNutritionCalories?: boolean } = {},
+  ) {
+    const sessionNotes = (session as { notes?: DisplayableValue }).notes;
+    const sessionItems = session.sessionStructureSections.flatMap((section) => section.items);
+    const sessionCalories = options.showNutritionCalories
+      ? sumNutritionMetric(sessionItems, "calories")
+      : null;
+    const sessionHeading = hasRenderableValue(session.title)
+      ? displayLabelTitleCase(session.title)
+      : `Session ${sessionOffset + 1}`;
+    const sessionDetails = [
+      hasRenderableValue(session.objective) ? displayValue(session.objective) : null,
+      hasRenderableValue(session.plannedDurationMinutes)
+        ? formatMinutesAsHoursMinutes(readSessionDurationMinutes(session))
+        : null,
+      hasRenderableValue(session.intensity) ? displayValue(session.intensity) : null,
+      sessionCalories !== null ? formatNutritionCaloriesDisplay(sessionCalories) : null,
+    ].filter((value): value is string => value !== null && value.trim() !== "");
+
+    return (
+      <div key={session.id ?? `session-${sessionOffset}`} className="space-y-3 py-4">
+        <div className="space-y-1">
+          <h5 className="text-sm font-medium text-textPrimary">{sessionHeading}</h5>
+          {sessionDetails.length > 0 ? (
+            <div className="text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
+          ) : null}
+          {hasRenderableValue(session.description) ? (
+            <div className="text-sm text-textSecondary">{displayValue(session.description)}</div>
+          ) : null}
+          {hasRenderableValue(sessionNotes) ? (
+            <div className="text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
+          ) : null}
+        </div>
+        {session.sessionStructureSections.length > 0 ? (
+          <div className="space-y-3">
+            {session.sessionStructureSections.map((section, sectionOffset) => (
+              <div key={`${section.key}-${sectionOffset}`} className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-textMuted">
+                  {persistedSessionStructureLabel(section.key)}
+                </div>
+                {section.items.length > 0 ? (
+                  <ul className="space-y-3 pl-4">
+                    {section.items.map((item, itemOffset) =>
+                      renderDomainReviewDrawerStructureItem(item, itemOffset, {
+                        showNutritionCalories: options.showNutritionCalories,
+                      }),
+                    )}
+                  </ul>
+                ) : (
+                  <div className="text-sm text-textSecondary">No content in this section.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-textSecondary">No detailed session structure available.</div>
+        )}
+      </div>
+    );
+  }
+
+  function resolveNutritionDayCalories(
+    day: CoachPersistedTrainingPlanActiveDetail["days"][number],
+  ): number | null {
+    return sumNutritionMetric(
+      day.sessions.flatMap((session) =>
+        session.sessionStructureSections.flatMap((section) => section.items),
+      ),
+      "calories",
+    );
+  }
+
+  function renderNutritionPlanCalorieSummary(
+    days: CoachPersistedTrainingPlanActiveDetail["days"],
+  ) {
+    const dailyCalories = days
+      .map(resolveNutritionDayCalories)
+      .filter((value): value is number => value !== null);
+    if (dailyCalories.length === 0) return null;
+
+    const totalCalories = dailyCalories.reduce((sum, value) => sum + value, 0);
+    const averageDailyCalories = totalCalories / dailyCalories.length;
+    return (
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-textSecondary">
+        <span>Total plan calories: {formatNutritionCaloriesDisplay(totalCalories)}</span>
+        <span>
+          Average daily calories: {formatNutritionCaloriesDisplay(averageDailyCalories)}
+        </span>
+      </div>
+    );
+  }
+
+  function renderDomainPlanDaySchedule(
+    detail: CoachPersistedTrainingPlanActiveDetail,
+    domainLabel: string,
+    description = "Review the submitted plan by day and session.",
+    domain: TrainingPlanGenerationDomain | null = null,
+  ) {
+    const sortedDays = [...detail.days].sort((a, b) => {
+      const aIndex = typeof a.dayIndex === "number" ? a.dayIndex : Number.MAX_SAFE_INTEGER;
+      const bIndex = typeof b.dayIndex === "number" ? b.dayIndex : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      return String(a.date ?? "").localeCompare(String(b.date ?? ""));
+    });
+    const hasSessions = sortedDays.some((day) => day.sessions.length > 0);
+    const showNutritionCalories = domain === "NUTRITION";
+
+    return (
+      <section className="space-y-4 border-t border-border/70 pt-5">
+        <div className="space-y-1">
+          <h4 className="text-sm font-normal text-textPrimary">{domainLabel} Schedule</h4>
+          <p className="text-sm text-textSecondary">{description}</p>
+          {showNutritionCalories ? renderNutritionPlanCalorieSummary(sortedDays) : null}
+        </div>
+        {!hasSessions ? (
+          <div className="text-sm text-textSecondary">No scheduled sessions are available.</div>
+        ) : (
+          <div className="divide-y divide-border/70">
+            {sortedDays.map((day, dayOffset) => {
+              const dayNumber = day.dayIndex ?? dayOffset + 1;
+              const weekdayName = formatDrawerWeekdayName(day.date);
+              const dayFocus = (day as { dayFocus?: DisplayableValue }).dayFocus;
+              const dayCalories = showNutritionCalories
+                ? resolveNutritionDayCalories(day)
+                : null;
+              return (
+                <section key={day.id ?? `day-${dayOffset}`} className="space-y-3 py-5 first:pt-0">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <h5 className="text-base font-medium text-textPrimary">Day {dayNumber}</h5>
+                      {weekdayName ? (
+                        <span className="text-sm text-textSecondary">{weekdayName}</span>
+                      ) : null}
+                      {day.date ? (
+                        <span className="text-sm text-textSecondary">
+                          {formatDateOnly(day.date)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {hasRenderableValue(dayFocus) ? (
+                      <div className="text-sm text-textSecondary">Focus: {displayValue(dayFocus)}</div>
+                    ) : null}
+                    {dayCalories !== null ? (
+                      <div className="text-sm text-textSecondary">
+                        Daily calories: {formatNutritionCaloriesDisplay(dayCalories)}
+                      </div>
+                    ) : null}
+                    {hasRenderableValue(day.notes) ? (
+                      <div className="text-sm text-textSecondary">Notes: {displayValue(day.notes)}</div>
+                    ) : null}
+                  </div>
+                  {day.sessions.length === 0 ? (
+                    <div className="text-sm text-textSecondary">No sessions scheduled.</div>
+                  ) : (
+                    <div className="divide-y divide-border/70">
+                      {day.sessions.map((session, sessionOffset) =>
+                        renderDomainReviewDrawerSession(session, sessionOffset, {
+                          showNutritionCalories,
+                        }),
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  function renderDomainReviewDrawer() {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain === null) return null;
+
+    const reviewModel = resolveDomainReviewSurfaceModel(domainReviewDrawerDomain);
+    const {
+      domain: reviewDomain,
+      domainLabel: reviewDomainLabel,
+      state: domainState,
+      assignedCoachLabel,
+      workflowStatus,
+      statusLabel,
+      planStatusLabel,
+      nextActionLabel,
+      activeDetail,
+      versionNumber,
+      trainingDays,
+      canShowViewPlan,
+      canShowApproveAction,
+      canShowRequestRevisionAction,
+      canShowReleaseAction,
+      actionContext,
+      viewPlanContext,
+    } = reviewModel;
+    const hasDrawerWorkflowActions =
+      (workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null) ||
+      canShowApproveAction ||
+      canShowRequestRevisionAction ||
+      canShowReleaseAction;
+    const drawerRevisionComposerOpen =
+      requestRevisionDrawerComposerOpen &&
+      requestRevisionActionContext?.generationDomain === reviewDomain;
+    const planWindowStart = activeDetail?.version.startDate ?? null;
+    const planWindowEnd = activeDetail?.version.endDate ?? null;
+    const planWindowLabel =
+      planWindowStart !== null || planWindowEnd !== null
+        ? formatDateRange(planWindowStart, planWindowEnd)
+        : null;
+
+    return (
+      <div
+        className="fixed inset-0 z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="domain-review-drawer-title"
+      >
+        <style>
+          {`
+            @keyframes domainReviewDrawerSlideIn {
+              from { opacity: 0; transform: translateX(1.5rem); }
+              to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes domainReviewDrawerSlideOut {
+              from { opacity: 1; transform: translateX(0); }
+              to { opacity: 0; transform: translateX(1.5rem); }
+            }
+            @keyframes domainReviewBackdropFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes domainReviewBackdropFadeOut {
+              from { opacity: 1; }
+              to { opacity: 0; }
+            }
+          `}
+        </style>
+        <button
+          type="button"
+          className={cn(
+            "absolute inset-0 cursor-default bg-slate-950/25",
+            domainReviewDrawerClosing
+              ? "motion-safe:animate-[domainReviewBackdropFadeOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
+          )}
+          aria-label="Close Domain Review Drawer"
+          onClick={handleCloseDomainReviewDrawer}
+        />
+        <aside
+          className={cn(
+            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
+            domainReviewDrawerClosing
+              ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
+          )}
+        >
+          <header className="space-y-2 border-b border-border px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3
+                  id="domain-review-drawer-title"
+                  className="text-lg font-medium text-textPrimary"
+                >
+                  {domainPlanReviewTitle(reviewDomain)}
+                </h3>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleCloseDomainReviewDrawer}
+              >
+                Close
+              </Button>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div className="space-y-5">
+              <section className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-normal text-textPrimary">Current State</h4>
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2 py-0.5 text-xs",
+                      domainIntegrationStatusTone(workflowStatus),
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
+                </div>
+                <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                  {renderDomainReviewDrawerFact("Assigned Coach", assignedCoachLabel)}
+                  {planWindowLabel !== null
+                    ? renderDomainReviewDrawerFact("Plan Window", planWindowLabel)
+                    : null}
+                  {versionNumber !== null
+                    ? renderDomainReviewDrawerFact("Version", displayValue(versionNumber))
+                    : null}
+                  {renderDomainReviewDrawerFact("Plan Status", planStatusLabel)}
+                  {renderDomainReviewDrawerFact(
+                    "Workflow Status",
+                    assistantWorkflowStatusLabelForKind(workflowStatus),
+                  )}
+                  {renderDomainReviewDrawerFact("Current Step / Next Action", nextActionLabel)}
+                  {trainingDays !== null
+                    ? renderDomainReviewDrawerFact("Training Days", displayValue(trainingDays))
+                    : null}
+                </dl>
+                {domainState.loading ? (
+                  <DashboardStatusNotice type="loading" compact>
+                    Loading submitted plan detail...
+                  </DashboardStatusNotice>
+                ) : null}
+                {domainState.error ? (
+                  <DashboardStatusNotice type="warning" compact>
+                    Unable to load submitted plan detail. {domainState.error}
+                  </DashboardStatusNotice>
+                ) : null}
+                {governedPlanActionError ? (
+                  <Alert variant="danger">{governedPlanActionError}</Alert>
+                ) : null}
+                {governedPlanActionSuccess ? (
+                  <WorkflowNeutralNotice>
+                    <div className="space-y-2">
+                      <div>{governedPlanActionSuccess}</div>
+                      {governedPlanActionSuccessFeedback ? (
+                        <div className="text-sm text-textSecondary">
+                          Head Coach Notes: {governedPlanActionSuccessFeedback}
+                        </div>
+                      ) : null}
+                    </div>
+                  </WorkflowNeutralNotice>
+                ) : null}
+              </section>
+
+              <section className="space-y-3 border-t border-border/70 pt-5">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-normal text-textPrimary">Review Actions</h4>
+                  <p className="text-sm text-textSecondary">
+                    Continue authorized workflow actions for this domain.
+                  </p>
+                </div>
+                {hasDrawerWorkflowActions ? (
+                  <div className="flex flex-wrap gap-2">
+                    {workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={persistedSkillsPlanLoading}
+                        onClick={() => {
+                          void handleViewWorkspaceDomainPlan(reviewDomain, viewPlanContext);
+                        }}
+                      >
+                        View in Plan Viewer
+                      </Button>
+                    ) : null}
+                    {canShowApproveAction ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "HEAD_APPROVE"}
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction("HEAD_APPROVE", actionContext)
+                        }
+                      >
+                        Approve Plan
+                      </Button>
+                    ) : null}
+                    {canShowRequestRevisionAction && !drawerRevisionComposerOpen ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction(
+                            "REQUEST_REVISION",
+                            actionContext,
+                          )
+                        }
+                      >
+                        Request Changes
+                      </Button>
+                    ) : null}
+                    {canShowReleaseAction ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "RELEASE"}
+                        disabled={governedPlanActionLoading !== null || actionContext === null}
+                        onClick={() =>
+                          void handlePersistedGovernedPlanAction("RELEASE", actionContext)
+                        }
+                      >
+                        Release Plan to Athlete
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-sm text-textSecondary">
+                    No authorized workflow action is available for this domain right now.
+                  </div>
+                )}
+              </section>
+
+              {drawerRevisionComposerOpen ? (
+                <section className="space-y-3 border-t border-border/70 pt-5">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-normal text-textPrimary">Request Changes</h4>
+                    <p className="text-sm text-textSecondary">
+                      Tell the domain coach what needs to change.
+                    </p>
+                  </div>
+                  <form
+                    className="space-y-3"
+                    onSubmit={(event) => void handleRequestRevisionSubmit(event, actionContext)}
+                  >
+                    <label className="space-y-1 text-sm text-textPrimary">
+                      <span className="font-medium">Revision feedback</span>
+                      <textarea
+                        rows={5}
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={requestRevisionFeedback}
+                        onChange={(event) => setRequestRevisionFeedback(event.target.value)}
+                        placeholder="Describe the required changes."
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                      />
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                        onClick={handleCancelRequestRevision}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                        disabled={
+                          governedPlanActionLoading === "REQUEST_REVISION" ||
+                          requestRevisionFeedback.trim() === ""
+                        }
+                      >
+                        Submit Request Changes
+                      </Button>
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
+              {activeDetail !== null ? (
+                renderDomainPlanDaySchedule(activeDetail, reviewDomainLabel, undefined, reviewDomain)
+              ) : !domainState.loading && domainState.error === null ? (
+                <div className="text-sm text-textSecondary">
+                  No submitted plan data available for this domain.
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <footer className="flex justify-end border-t border-border px-5 py-4">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleCloseDomainReviewDrawer}
+            >
+              Close
+            </Button>
+          </footer>
+        </aside>
+      </div>
+    );
+  }
+
+  function renderDomainPlansIntegrationSection() {
+    if (!headCoachReviewMode) return null;
+    const reviewDomains = GENERATION_DOMAIN_ORDER;
+    return (
+      <section className="space-y-4">
+        <div className="space-y-2">
+          <h4 className="text-sm font-normal text-textPrimary">Domain Coordination Matrix</h4>
+          <div className="overflow-x-auto border-y border-border/70">
+            <table className="min-w-full border-collapse text-left">
+              <thead>
+                <tr className="text-xs font-normal uppercase tracking-wide text-textMuted">
+                  <th scope="col" className="py-2 pr-3 font-normal">Domain</th>
+                  <th scope="col" className="px-3 py-2 font-normal">Assigned Coach</th>
+                  <th scope="col" className="px-3 py-2 font-normal">Plan status</th>
+                  <th scope="col" className="px-3 py-2 font-normal">Workflow status</th>
+                  <th scope="col" className="px-3 py-2 font-normal">Next action</th>
+                  <th scope="col" className="px-3 py-2 font-normal">Available action</th>
+                </tr>
+              </thead>
+              <tbody>{reviewDomains.map(renderHeadCoachDomainPlanCard)}</tbody>
+            </table>
+          </div>
+        </div>
+        <section className="space-y-3 border-t border-border/70 pt-4">
+          <div className="space-y-1">
+            <h4 className="text-sm font-normal text-textPrimary">Selected Domain Inspector</h4>
+            {headCoachSubmittedReviewDomain === null ? (
+              <p className="text-sm text-textSecondary">
+                Select a domain row to view ownership, plan state, and available actions.
+              </p>
+            ) : (
+              <p className="text-sm text-textSecondary">
+                Reviewing {trainingPlanDomainLabel(headCoachSubmittedReviewDomain)}.
+              </p>
+            )}
+          </div>
+          {headCoachSubmittedReviewDomain !== null ? (
+            <>
+              {renderWorkflow1HeadCoachReviewActionPanel()}
+              {renderPlanViewerReviewPanel()}
+            </>
+          ) : null}
+        </section>
+      </section>
+    );
+  }
+
   /** Head Coach submitted-plan cards + inline review panel (shared by pure HC Step 6 and HC-with-domain Step 6). */
   function renderHeadCoachSubmittedDomainPlansSection() {
     if (!headCoachReviewMode) return null;
-    const locked = upstreamPlanningContext?.planningContextLocked === true;
-    const reviewDomains = resolveHeadCoachSubmittedReviewCardDomains({
-      shell: trainingPlanShellModel.shell,
-      headCoachOwnsSkills: headCoachOwnedSkillsGrouping,
-      workspace,
-    });
     return (
-      <div className="space-y-4">
-        {renderWorkflow1HeadCoachReviewActionPanel()}
-        {renderHeadCoachPlanReviewPanel()}
-        <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <div className="space-y-1">
-            <h4 className="text-sm font-normal text-textPrimary">Submitted Domain Plans</h4>
-            <p className="text-sm text-textSecondary">
-              {locked
-                ? "Assigned domain coaches can create their plans using this locked context."
-                : "Lock planning context first, then review submitted plans from the assigned domain coaches here."}
-            </p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            {reviewDomains.map(renderHeadCoachDomainPlanCard)}
-          </div>
-        </section>
-      </div>
+      <div className="space-y-4">{renderDomainPlansIntegrationSection()}</div>
     );
   }
 
@@ -10788,6 +12196,24 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  function renderPlanViewerReviewPanel() {
+    return renderHeadCoachPlanReviewPanel();
+  }
+
+  function renderPlanViewerPersistedPlanDetail(
+    detail: CoachPersistedTrainingPlanActiveDetail,
+    options: {
+      title?: string;
+      showRevisePanel?: boolean;
+    } = {},
+  ) {
+    return renderPersistedSkillsPlanDetail(detail, options);
+  }
+
+  function renderPlanViewerWorkflowActions() {
+    return renderStep6WorkflowActionsStrip();
+  }
+
   function renderHeadCoachOwnedSkillsPlanPanel(
     options: { showWorkflowActions?: boolean } = {},
   ) {
@@ -10893,7 +12319,7 @@ export function CoachAthletePlanningProfileView({
           ) : null}
         </div>
         {visibleSkillsPlanDetail !== null
-          ? renderPersistedSkillsPlanDetail(visibleSkillsPlanDetail)
+          ? renderPlanViewerPersistedPlanDetail(visibleSkillsPlanDetail)
           : null}
         {headCoachSkillsRevisePanelOpen ? (
           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
@@ -10940,7 +12366,7 @@ export function CoachAthletePlanningProfileView({
             </div>
           </div>
         ) : null}
-        {options.showWorkflowActions === false ? null : renderStep6WorkflowActionsStrip()}
+        {options.showWorkflowActions === false ? null : renderPlanViewerWorkflowActions()}
       </div>
     );
   }
@@ -10950,9 +12376,9 @@ export function CoachAthletePlanningProfileView({
     const skillsCreateError = generatePlanLocalErrorsByDomain.SKILLS ?? null;
     return (
       <div className="space-y-4">
-        {renderHeadCoachPlanningContextLockAction()}
+        {renderLockedPlanningContextSummaryForDomainIntegration()}
         {headCoachFunctionAwareMode && headCoachSkillsCreateVisible ? (
-          <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <section className="space-y-2 border-y border-border/70 py-3">
             <h4 className="text-sm font-normal text-textPrimary">Skills Plan Generation</h4>
             <p className="text-sm text-textSecondary">
               Create the Skills plan for this athlete when assignment allows generation and
@@ -10973,7 +12399,7 @@ export function CoachAthletePlanningProfileView({
             >
               {renderGenerationJobButtonLabel("SKILLS", generatePlanJobsByDomain.SKILLS ?? null)}
             </Button>
-          </div>
+          </section>
         ) : null}
         {headCoachFunctionAwareMode ? renderHeadCoachOwnedSkillsPlanPanel() : null}
         {renderHeadCoachSubmittedDomainPlansSection()}
@@ -12166,7 +13592,9 @@ export function CoachAthletePlanningProfileView({
             </Button>
           ) : null}
         </div>
-        {governedPlanActionError && !requestRevisionModalOpen ? (
+        {governedPlanActionError &&
+        !requestRevisionModalOpen &&
+        !requestRevisionDrawerComposerOpen ? (
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
         {governedPlanActionSuccess ? (
@@ -12182,6 +13610,171 @@ export function CoachAthletePlanningProfileView({
           </WorkflowNeutralNotice>
         ) : null}
       </div>
+    );
+  }
+
+  function renderLockedPlanningContextSummaryForDomainIntegration() {
+    if (!isPlanningContextAuthority || isDownstreamDomainCoach) return null;
+    const locked =
+      workspace?.planningContext.locked ??
+      upstreamPlanningContext?.planningContextLocked ??
+      planningContextLocked;
+    return (
+      <DashboardStatusNotice
+        type={locked ? "success" : "warning"}
+        compact
+      >
+        {locked
+          ? `Context locked and shared · Plan window: ${formatDateRange(planStartDate, planEndDate)} · Domain coaches can now generate and submit plans.`
+          : `Context not locked · Plan window: ${formatDateRange(planStartDate, planEndDate)} · Lock and share context before domain generation starts.`}
+      </DashboardStatusNotice>
+    );
+  }
+
+  function renderStep6DomainIntegrationContent() {
+    return (
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-normal text-textPrimary">
+                            Domain Integration
+                          </h4>
+                          <p className="text-sm text-textSecondary">
+                            Confirm planning context, readiness, blockers, and generation status.
+                          </p>
+                        </div>
+                      {renderLockedPlanningContextSummaryForDomainIntegration()}
+                      {isDownstreamDomainCoach &&
+                      !upstreamPlanningContextLoading &&
+                      !upstreamPlanningContextError &&
+                      !effectiveDownstreamPlanningContextLocked ? (
+                        <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
+                      ) : null}
+                      {isDownstreamDomainCoach ? (
+                        renderDownstreamUpstreamPlanningReadOnlySection()
+                      ) : step6ShowsPreGenerationReadiness ? (
+                        <dl className="space-y-2">
+                          <DetailRow
+                            label="Readiness status"
+                            value={displayValue(readinessPanel.readinessStatus)}
+                          />
+                          <DetailRow
+                            label="Generation allowed"
+                            value={generationReadinessFromApis ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="APP complete"
+                            value={readinessPanel.appCompleteness === "COMPLETE" ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Level validation confirmed"
+                            value={readinessPanel.validationStatus === "CONFIRMED" ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Workload assessment complete"
+                            value={workloadComplete ? "Yes" : "Pending — not ready"}
+                          />
+                          <DetailRow
+                            label="Season selected"
+                            value={seasonReady ? "Yes" : "Pending — not ready"}
+                          />
+                          <DetailRow
+                            label="Current phase detected"
+                            value={currentPhaseDetected ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="Plan window inside current phase"
+                            value={planWindowInsideCurrentPhase ? "Yes" : "No"}
+                          />
+                          <DetailRow
+                            label="At least one ACTIVE goal selected"
+                            value={goalsReadyForGeneration ? "Yes" : "Pending — not ready"}
+                          />
+                        </dl>
+                      ) : step6ShowsGeneratedDraftSummary ? (
+                        <WorkflowNeutralNotice>
+                          <div className="space-y-1 text-sm">
+                            <div className="font-medium text-textPrimary">
+                              Plan status:{" "}
+                              {assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus)}
+                            </div>
+                            <p className="text-textSecondary">
+                              A generated plan is available for this athlete. Review the plan
+                              details below.
+                            </p>
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      {step6ShowsPreGenerationReadiness &&
+                      readinessPanel.blockers.length > 0 ? (
+                        (() => {
+                          const coachFacingBlockers =
+                            coachFacingPlanningContextBlockers(readinessPanel.blockers);
+                          return (
+                            <DashboardStatusNotice
+                              type="blocker"
+                              title="Complete planning context before generating"
+                              items={
+                                coachFacingBlockers.length > 0
+                                  ? coachFacingBlockers
+                                  : ["Complete required planning context"]
+                              }
+                              compact
+                            />
+                          );
+                        })()
+                      ) : null}
+                      {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
+                      {(trainingPlanShellModel.shell !== "skills_coach_planning" ||
+                        step6GenerationLifecyclePhase === "generating") &&
+                      currentDomainGenerationJob !== null
+                        ? renderGenerationJobProgress(currentDomainGenerationJob)
+                        : null}
+                      {generatePlanRecoveryMessage ? (
+                        <WorkflowNeutralNotice>
+                          <div className="text-sm font-medium text-textPrimary">
+                            {generatePlanRecoveryMessage}
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      {generatePlanSuccess ? (
+                        <WorkflowNeutralNotice>
+                          <div className="space-y-2">
+                            <div className="font-medium">Training plan draft generated successfully.</div>
+                            <dl className="space-y-1">
+                              <DetailRow
+                                label="Training Plan ID"
+                                value={displayValue(generatePlanSuccess.trainingPlanId)}
+                              />
+                              <DetailRow
+                                label="Training Plan Version ID"
+                                value={displayValue(generatePlanSuccess.trainingPlanVersionId)}
+                              />
+                              <DetailRow
+                                label="Version Number"
+                                value={displayValue(generatePlanSuccess.versionNumber)}
+                              />
+                              <DetailRow
+                                label="Status"
+                                value={displayValue(generatePlanSuccess.status)}
+                              />
+                              <DetailRow
+                                label="Days Created"
+                                value={displayValue(generatePlanSuccess.daysCreated)}
+                              />
+                              <DetailRow
+                                label="Sessions Created"
+                                value={displayValue(generatePlanSuccess.sessionsCreated)}
+                              />
+                              <DetailRow
+                                label="Items Persisted"
+                                value={displayValue(generatePlanSuccess.itemsPersisted)}
+                              />
+                            </dl>
+                          </div>
+                        </WorkflowNeutralNotice>
+                      ) : null}
+                      </div>
+
     );
   }
 
@@ -13202,312 +14795,15 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  const trainingPlanPageHeader = (
-    <PageHeader
-      title="Training Plan"
-      subtitle="Step-based plan creation workflow"
-    />
-  );
-
-  if (loading) {
+  function renderLevelValidationStepContent() {
     return (
-      <div className="w-full max-w-5xl space-y-4">
-        {trainingPlanPageHeader}
-        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
-          Loading athlete planning profile…
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full max-w-5xl space-y-4">
-      {trainingPlanPageHeader}
-
-      {error ? <Alert variant="danger">{error}</Alert> : null}
-      {missingPlanningProfile ? (
-        <Alert variant="warning">
-          Planning Profile Pending. The athlete must complete APP before training
-          plan validation.
-        </Alert>
-      ) : null}
-
-      {!error && !missingPlanningProfile && !profile ? (
-        <Alert variant="warning">No planning profile data available.</Alert>
-      ) : null}
-
-
-      {profile ? (
-        <>
-          {workflowViewSelectionLoading ? (
-            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
-                Loading training plan workspace...
-              </div>
-            </Card>
-          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
-            renderAssistantDomainWorkspace()
-          ) : trainingPlanShellModel.shell === "head_coach_review" ||
-            trainingPlanShellModel.shell === "head_coach_function_aware" ||
-            trainingPlanShellModel.shell === "head_coach_planning" ||
-            trainingPlanShellModel.shell === "skills_coach_planning" ? (
-          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
-            <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
-              <TrainingPlanWorkflowProgressRail
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-              />
-            </div>
-            <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
-              <WorkflowConnectedTabStrip
-                selectedTab={selectedWorkflowTab}
-                steps={[...workflowStepperModel]}
-                headCoachReviewMode={headCoachReviewMode}
-                reviewReviseStepLabel={reviewReviseStepLabel}
-                onSelect={(tab) => {
-                  if (workflowStepStatusByKey[tab] === "locked") return;
-                  setSelectedWorkflowTab(tab);
-                }}
-              />
-            </div>
-            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
-              {selectedWorkflowTab === "context-app" ? (
-                <>
-                <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
-                  <div className="space-y-1">
-                    <h3 className="text-base font-normal text-textPrimary">
-                      Step 1 — Context / APP
-                    </h3>
-                    <p className="text-sm text-textSecondary">
-                      Athlete planning profile (APP) completeness, eligibility, and required fields from
-                      the backend.
-                    </p>
-                  </div>
-
-                  {readinessLoading ? (
-                    <div className="text-sm text-textSecondary">Loading readiness details…</div>
-                  ) : (
-                    <div className="space-y-3">
-                      {readinessError ? <Alert variant="warning">{readinessError}</Alert> : null}
-                      {hasReadinessContent(readinessPanel) ? (
-                        <dl className="space-y-2">
-                          <DetailRow
-                            label="Readiness Status"
-                            value={displayValue(readinessPanel.readinessStatus)}
-                          />
-                          <DetailRow
-                            label="APP Completeness"
-                            value={displayValue(readinessPanel.appCompleteness)}
-                          />
-                          <DetailRow
-                            label="Planning Eligibility"
-                            value={displayValue(readinessPanel.planningEligibility)}
-                          />
-                          <DetailRow
-                            label="Backend Can Generate"
-                            value={
-                              readinessPanel.canGenerate === null
-                                ? displayValue(readinessPanel.canGenerate)
-                                : readinessPanel.canGenerate
-                                  ? "Yes"
-                                  : "No"
-                            }
-                          />
-                          <DetailRow
-                            label="Backend Is Ready"
-                            value={
-                              readinessPanel.isReady === null
-                                ? displayValue(readinessPanel.isReady)
-                                : readinessPanel.isReady
-                                  ? "Yes"
-                                  : "No"
-                            }
-                          />
-                          <DetailRow
-                            label="Backend Blockers"
-                            value={formatMissingRequiredFields(readinessPanel.blockers)}
-                          />
-                          <DetailRow
-                            label="Missing Required Fields"
-                            value={formatMissingRequiredFields(
-                              readinessPanel.missingRequiredFields,
-                            )}
-                          />
-                          {readinessPanel.completenessSummary ? (
-                            <DetailRow
-                              label="Completeness Summary"
-                              value={displayValue(readinessPanel.completenessSummary)}
-                            />
-                          ) : null}
-                        </dl>
-                      ) : (
-                        <div className="text-sm text-textSecondary">
-                          No readiness details available.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </section>
-
-                <div className="space-y-4">
-                  <CoachPlanningCardShell accent={false} majorOuter title="Planning Status">
-                    <dl className="space-y-2">
-                      <DetailRow
-                        label="Completeness Status"
-                        value={displayValue(profile.completenessStatus)}
-                      />
-                      <DetailRow
-                        label="Freshness Status"
-                        value={displayValue(profile.freshnessStatus)}
-                      />
-                      <DetailRow
-                        label="Planning Eligibility"
-                        value={displayValue(profile.planningEligibilityStatus)}
-                      />
-                      <DetailRow label="Stage" value={displayValue(profile.stage)} />
-                      <DetailRow label="Revision" value={displayValue(profile.revision)} />
-                      <DetailRow
-                        label="Last Confirmed At"
-                        value={formatPlanningProfileDateDisplay(profile.lastConfirmedAt)}
-                      />
-                      <DetailRow label="Updated At" value={formatPlanningProfileDateDisplay(profile.updatedAt)} />
-                    </dl>
-                  </CoachPlanningCardShell>
-
-                  <CoachPlanningCardShell accent={false} majorOuter title="Derived Values">
-                    <dl className="space-y-2">
-                      <DetailRow label="Derived Age" value={displayValue(profile.derivedAge)} />
-                      <DetailRow label="Derived BMI" value={displayValue(profile.derivedBmi)} />
-                    </dl>
-                  </CoachPlanningCardShell>
-
-                  <CoachPlanningCardShell accent={false} majorOuter title="Athlete Planning Fields">
-                    <dl className="space-y-2">
-                      <DetailRow label="Date of Birth" value={formatPlanningProfileDateDisplay(profile.dateOfBirth)} />
-                      <DetailRow label="Sex" value={displayValue(profile.sex)} />
-                      <DetailRow label="Primary Sport" value={displayValue(profile.primarySport)} />
-                      <DetailRow
-                        label="Discipline / Event"
-                        value={displayValue(profile.disciplineOrEvent)}
-                      />
-                      <DetailRow
-                        label="Self-Reported Level"
-                        value={displayValue(profile.selfReportedLevel)}
-                      />
-                      <DetailRow
-                        label="Validated Level"
-                        value={displayValue(profile.validatedLevel)}
-                      />
-                      <DetailRow
-                        label="Training Age Years"
-                        value={displayValue(profile.trainingAgeYears)}
-                      />
-                      <DetailRow
-                        label="Weekly Training Exposure Hours"
-                        value={displayValue(profile.currentWeeklyTrainingExposureHours)}
-                      />
-                      <DetailRow
-                        label="Weekly Availability Days"
-                        value={displayValue(profile.weeklyAvailabilityDays)}
-                      />
-                      <DetailRow
-                        label="Weekly Availability Hours"
-                        value={displayValue(profile.weeklyAvailabilityHours)}
-                      />
-                      <DetailRow label="Diet Type" value={displayValue(profile.dietType)} />
-                      <DetailRow
-                        label="Regional Cuisine Preference"
-                        value={displayValue(profile.regionalCuisinePreference)}
-                      />
-                      <DetailRow
-                        label="Allergies / Intolerances"
-                        value={displayValue(profile.allergiesOrIntolerances)}
-                      />
-                      <DetailRow label="Height (cm)" value={displayValue(profile.heightCm)} />
-                      <DetailRow label="Weight (kg)" value={displayValue(profile.weightKg)} />
-                      <DetailRow
-                        label="Uses Wearable"
-                        value={displayValue(profile.wearableStatus)}
-                      />
-                      <DetailRow
-                        label="Wearable Provider"
-                        value={displayValue(profile.wearableProvider)}
-                      />
-                      <DetailRow label="Device Model" value={displayValue(profile.deviceModel)} />
-                      <DetailRow label="Last Sync At" value={formatPlanningProfileDateDisplay(profile.lastSyncAt)} />
-                      <DetailRow
-                        label="Avg Resting Heart Rate"
-                        value={displayValue(profile.avgRestingHeartRate)}
-                      />
-                      <DetailRow
-                        label="Avg Sleep Duration (hours)"
-                        value={displayValue(profile.avgSleepDurationHours)}
-                      />
-                      <DetailRow
-                        label="Avg Daily Activity Volume"
-                        value={displayValue(profile.avgDailyActivityVolume)}
-                      />
-                      <DetailRow
-                        label="Recent Activity Days Count"
-                        value={displayValue(profile.recentActivityDaysCount)}
-                      />
-                      <DetailRow
-                        label="Wearable Data Quality"
-                        value={displayValue(profile.wearableDataQuality)}
-                      />
-                    </dl>
-                  </CoachPlanningCardShell>
-
-                  <DetailGroupCard
-                    title="Blood Report Parameters"
-                    group={profile.bloodReportParameters}
-                    preferredOrder={[
-                      "hemoglobin",
-                      "vitaminD",
-                      "vitaminB12",
-                      "ferritin",
-                      "crp",
-                      "fastingBloodGlucoseFBS",
-                      "postprandialBloodGlucosePPBS",
-                    ]}
-                  />
-
-                  <DetailGroupCard
-                    title="Body Composition Parameters"
-                    group={profile.bodyCompositionParameters}
-                    preferredOrder={[
-                      "bodyFatPercent",
-                      "skeletalLeanMassKg",
-                      "skeletalFatMassKg",
-                      "visceralFatLevel",
-                      "visceralFatArea",
-                      "bmrKcalDay",
-                      "muscleMassKg",
-                    ]}
-                  />
-
-                  <DetailGroupCard
-                    title="Blood Report Comparisons"
-                    group={profile.bloodReportComparisons}
-                  />
-
-                  <DetailGroupCard
-                    title="Body Composition Comparisons"
-                    group={profile.bodyCompositionComparisons}
-                  />
-                </div>
-                </>
-              ) : null}
-
-              {selectedWorkflowTab === "level-validation" ? (
                 !workflowPrecMap["level-validation"] ? (
                   <WorkflowLockedCard
                     title="Step 2 — Level Validation"
                     message="Finish APP completeness (required fields and eligibility) before Level Validation."
                   />
                 ) : (
-                  <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
+                  <section className="space-y-4">
                     <div className="space-y-1">
                       <h3 className="text-base font-normal text-textPrimary">
                         Step 2 — Level Validation
@@ -13517,19 +14813,33 @@ export function CoachAthletePlanningProfileView({
                       </p>
                     </div>
                     {readinessLoading ? (
-                      <div className="text-sm text-textSecondary">Loading readiness details…</div>
+                      <DashboardStatusNotice type="loading" compact>
+                        Loading readiness details...
+                      </DashboardStatusNotice>
                     ) : (
                       <div className="space-y-3">
-                        {readinessError ? <Alert variant="warning">{readinessError}</Alert> : null}
-                        <dl className="space-y-2">
-                          <DetailRow
-                            label="Level Validation Status"
-                            value={displayValue(readinessPanel.validationStatus)}
-                          />
-                          <DetailRow
-                            label="Validated Level"
-                            value={displayValue(readinessPanel.validatedLevel)}
-                          />
+                        {readinessError ? (
+                          <DashboardStatusNotice type="warning" compact>
+                            {readinessError}
+                          </DashboardStatusNotice>
+                        ) : null}
+                        <dl className="divide-y divide-border/70 border-y border-border/70">
+                          <div className="py-3">
+                            <dt className="text-xs font-medium uppercase tracking-wide text-textMuted">
+                              Level Validation Status
+                            </dt>
+                            <dd className="mt-1 break-words text-sm text-textPrimary">
+                              {displayValue(readinessPanel.validationStatus)}
+                            </dd>
+                          </div>
+                          <div className="py-3">
+                            <dt className="text-xs font-medium uppercase tracking-wide text-textMuted">
+                              Validated Level
+                            </dt>
+                            <dd className="mt-1 break-words text-sm text-textPrimary">
+                              {displayValue(readinessPanel.validatedLevel)}
+                            </dd>
+                          </div>
                         </dl>
                         {showValidateLevel ? (
                           <div className="pt-1">
@@ -13558,14 +14868,99 @@ export function CoachAthletePlanningProfileView({
                     {levelStepComplete ? (
                       <WorkflowTabNextButton
                         label="Next → Workload Assessment"
-                        onClick={() => setSelectedWorkflowTab("workload")}
+                        onClick={() => handleAdvanceContextBuilderStep("workload")}
                       />
                     ) : null}
                   </section>
                 )
-              ) : null}
 
-              {selectedWorkflowTab === "season-goals" ? (
+    );
+  }
+
+  function renderWorkloadAssessmentStepContent() {
+    return (
+                isDownstreamDomainCoach ? (
+                  <div className="space-y-3">
+                    <h3 className="text-base font-normal text-textPrimary">
+                      Step 3 — Workload Assessment
+                    </h3>
+                    {renderDownstreamUpstreamPlanningReadOnlySection()}
+                  </div>
+                ) : !workflowPrecMap.workload ? (
+                  <WorkflowLockedCard
+                    title="Step 3 — Workload Assessment"
+                    message="Confirm level validation before running workload assessment."
+                  />
+                ) : (
+                  <>
+                    {workloadComplete && !showWorkloadCompletionState ? (
+                      <WorkflowCompactSummaryStrip
+                        title="Step 3 — Workload Assessment"
+                        values={[
+                          {
+                            label: "Current Weekly Training Hours",
+                            value: displayValue(
+                              workloadAssessmentResult?.workloadClassification?.weeklyTrainingHours,
+                            ),
+                          },
+                          {
+                            label: "Recommended Range",
+                            value: formatWeeklyRange(
+                              workloadAssessmentResult?.workloadClassification?.recommendedMinHours ??
+                                null,
+                              workloadAssessmentResult?.workloadClassification?.recommendedMaxHours ??
+                                null,
+                            ),
+                          },
+                          {
+                            label: "Training Load Status",
+                            value: displayValue(
+                              workloadAssessmentResult?.workloadClassification?.status,
+                            ),
+                          },
+                          {
+                            label: "Sport",
+                            value: displayValue(workloadAssessmentResult?.workloadClassification?.sportCode),
+                          },
+                          {
+                            label: "Age Band",
+                            value: displayValue(workloadAssessmentResult?.workloadClassification?.ageBand),
+                          },
+                        ]}
+                      />
+                    ) : (
+                      <TrainingPlanWorkloadAssessmentStep
+                        showValidateLevel={showValidateLevel}
+                        readinessLoading={readinessLoading}
+                        workloadAssessmentLoading={workloadAssessmentLoading}
+                        workloadAssessmentError={workloadAssessmentError}
+                        workloadAssessmentResult={workloadAssessmentResult}
+                        workloadComplete={workloadComplete}
+                        showWorkloadCompletionState={showWorkloadCompletionState}
+                        readinessGate={{
+                          appCompleteness: readinessPanel.appCompleteness,
+                          validationStatus: readinessPanel.validationStatus,
+                          planningEligibility: readinessPanel.planningEligibility,
+                        }}
+                        onRunWorkloadAssessment={() => {
+                          void handleRunWorkloadAssessment();
+                        }}
+                      />
+                    )}
+                    {workloadComplete ? (
+                      <WorkflowTabNextButton
+                        label="Next → Goals"
+                        onClick={() => handleAdvanceContextBuilderStep("season-goals")}
+                      />
+                    ) : null}
+                  </>
+                )
+
+    );
+  }
+
+  function renderSeasonGoalsStepContent() {
+    return (
                 isDownstreamDomainCoach ? (
                   <div className="space-y-3">
                     <h3 className="text-base font-normal text-textPrimary">Step 4 — Season & Goals</h3>
@@ -13577,32 +14972,31 @@ export function CoachAthletePlanningProfileView({
                     message="Finish workload assessment before configuring season, phases, competition, and goals."
                   />
                 ) : setupLoading ? (
-                  <div className="text-sm text-textSecondary">
-                    Loading goals and season setup…
-                  </div>
+                  <DashboardStatusNotice type="loading" compact>
+                    Loading goals and season setup...
+                  </DashboardStatusNotice>
                 ) : (
-                  <section className="space-y-5 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
-                    <div className="space-y-1">
-                      <h3 className="text-base font-normal text-textPrimary">
-                        Step 4 — Season & Goals
-                      </h3>
-                      <p className="text-sm text-textSecondary">
-                        Set up the athlete&apos;s season and goals for planning. This helps the
-                        system structure training phases and generate the right plan.
-                      </p>
-                    </div>
+                  <section className="space-y-5">
                     <div className="space-y-5">
-                <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+                <section className="space-y-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
                   <div className="space-y-1">
-                    <h3 className="text-sm font-normal text-textPrimary">
-                      Season
+                    <h3 className="text-sm font-medium text-textPrimary">
+                      Setting Season
                     </h3>
                     <p className="text-sm text-textSecondary">
                       Create or select a season to define the training timeline.
                     </p>
                   </div>
-                  {seasonError ? <Alert variant="danger">{seasonError}</Alert> : null}
-                  {seasonSuccess ? <WorkflowNeutralNotice>{seasonSuccess}</WorkflowNeutralNotice> : null}
+                  {seasonError ? (
+                    <DashboardStatusNotice type="error" compact>
+                      {seasonError}
+                    </DashboardStatusNotice>
+                  ) : null}
+                  {seasonSuccess ? (
+                    <DashboardStatusNotice type="success" compact>
+                      {seasonSuccess}
+                    </DashboardStatusNotice>
+                  ) : null}
 
                   {hasEntitySeasons ? (
                     <label className="block space-y-1 text-sm text-textPrimary">
@@ -13648,38 +15042,27 @@ export function CoachAthletePlanningProfileView({
                               : "Pending — not ready"
                           }
                         />
-                        <DetailRow
-                          label="Selected Season Cycle ID"
-                          value={displayValue(selectedSeasonCycleId || null)}
-                        />
                       </dl>
                       {selectedSeason ? (
-                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                        <div className="border-y border-border/70 py-3">
                           <dl className="space-y-2">
                             <DetailRow
-                              label="Selected Season Name"
+                              label="Season Name"
                               value={displayValue(selectedSeason.name)}
                             />
                             <DetailRow
-                              label="Selected Season Sport"
+                              label="Sport"
                               value={displayValue(selectedSeason.sport)}
                             />
                             <DetailRow
-                              label="Selected Season Year"
+                              label="Year"
                               value={displayValue(selectedSeason.year)}
                             />
                             <DetailRow
-                              label="Selected Season Start Date"
-                              value={formatPlanningProfileDateDisplay(selectedSeason.startDate)}
-                            />
-                            <DetailRow
-                              label="Selected Season End Date"
-                              value={formatPlanningProfileDateDisplay(selectedSeason.endDate)}
+                              label="Season Dates"
+                              value={formatDateRange(selectedSeason.startDate, selectedSeason.endDate)}
                             />
                           </dl>
-                          <div className="pt-2 text-xs text-textMuted">
-                            Season Cycle ID: {selectedSeason.id}
-                          </div>
                         </div>
                       ) : null}
                     </>
@@ -13748,9 +15131,9 @@ export function CoachAthletePlanningProfileView({
                         />
                       </dl>
                       {!hasEntitySeasons ? (
-                        <div className="text-sm text-textSecondary">
+                        <DashboardStatusNotice type="empty" compact>
                           No seasons found for this entity. Create one to continue.
-                        </div>
+                        </DashboardStatusNotice>
                       ) : null}
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -13799,18 +15182,25 @@ export function CoachAthletePlanningProfileView({
                   ) : null}
                 </section>
 
-                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
+                <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <h3 className="text-sm font-normal text-textPrimary">
-                      Season Phases
+                    <h3 className="text-sm font-medium text-textPrimary">
+                      Setting Season Phase
                     </h3>
                     <p className="text-sm text-textSecondary">
-                      Break the season into phases, such as Off-season, Pre-season, and In-season.
-                      The system automatically detects the current phase based on today&apos;s date.
+                      Break the season into phases and confirm the current phase for today&apos;s date.
                     </p>
                   </div>
-                  {phaseError ? <Alert variant="danger">{phaseError}</Alert> : null}
-                  {phaseSuccess ? <WorkflowNeutralNotice>{phaseSuccess}</WorkflowNeutralNotice> : null}
+                  {phaseError ? (
+                    <DashboardStatusNotice type="error" compact>
+                      {phaseError}
+                    </DashboardStatusNotice>
+                  ) : null}
+                  {phaseSuccess ? (
+                    <DashboardStatusNotice type="success" compact>
+                      {phaseSuccess}
+                    </DashboardStatusNotice>
+                  ) : null}
                   <dl className="space-y-2">
                     <DetailRow
                       label="Selected Season Range"
@@ -13852,7 +15242,7 @@ export function CoachAthletePlanningProfileView({
                         return (
                           <div
                             key={phase}
-                            className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+                            className="space-y-2 border-l border-border/70 pl-3"
                           >
                             <div className="font-medium text-textPrimary">
                               {toFieldLabel(phase)}
@@ -13916,9 +15306,15 @@ export function CoachAthletePlanningProfileView({
                                 }}
                               />
                             </label>
-                            {editor.error ? <Alert variant="danger">{editor.error}</Alert> : null}
+                            {editor.error ? (
+                              <DashboardStatusNotice type="error" compact>
+                                {editor.error}
+                              </DashboardStatusNotice>
+                            ) : null}
                             {editor.success ? (
-                              <WorkflowNeutralNotice>{editor.success}</WorkflowNeutralNotice>
+                              <DashboardStatusNotice type="success" compact>
+                                {editor.success}
+                              </DashboardStatusNotice>
                             ) : null}
                             {existing ? (
                               isEditing ? (
@@ -13972,29 +15368,44 @@ export function CoachAthletePlanningProfileView({
                   </div>
                 </section>
 
+                <section className="space-y-3 border-t border-border/70 pt-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-medium text-textPrimary">Creation of Goals</h3>
+                    <p className="text-sm text-textSecondary">
+                      Add competition or custom goals, or choose from the goal library for this
+                      phase.
+                    </p>
+                  </div>
+
                 {phaseByType.IN_SEASON ? (
-                  <section className="space-y-3 rounded-lg border border-slate-200 p-4">
+                  <div className="space-y-3">
                     <div className="space-y-1">
-                      <h3 className="text-sm font-normal text-textPrimary">
+                      <h4 className="text-sm font-normal text-textPrimary">
                         Competition schedule
-                      </h3>
+                      </h4>
                       <p className="text-sm text-textSecondary">
                         Competition goals become available once In-season exists.
                       </p>
                     </div>
                     <>
-                      {competitionError ? <Alert variant="danger">{competitionError}</Alert> : null}
+                      {competitionError ? (
+                        <DashboardStatusNotice type="error" compact>
+                          {competitionError}
+                        </DashboardStatusNotice>
+                      ) : null}
                       {competitionSuccess ? (
-                        <WorkflowNeutralNotice>{competitionSuccess}</WorkflowNeutralNotice>
+                        <DashboardStatusNotice type="success" compact>
+                          {competitionSuccess}
+                        </DashboardStatusNotice>
                       ) : null}
                       {activePhaseForSelectedSeason?.phase === "IN_SEASON" ? (
-                        <Alert variant="warning">
+                        <DashboardStatusNotice type="warning" compact>
                           Current phase is In-season. Competition goals are recommended.
-                        </Alert>
+                        </DashboardStatusNotice>
                       ) : null}
                       <div className="grid gap-3 md:grid-cols-3">
                         <label className="space-y-1 text-sm text-textPrimary md:col-span-2">
-                          <span className="font-medium">Competition name / event id text</span>
+                          <span className="font-medium">Competition name</span>
                           <input
                             type="text"
                             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
@@ -14042,42 +15453,49 @@ export function CoachAthletePlanningProfileView({
                       >
                         {competitionCreateLoading ? "Adding Competition Goal..." : "Add Competition Goal"}
                       </Button>
-                      <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="space-y-2 border-y border-border/70 py-3">
                         {competitionGoals.length > 0 ? (
                           competitionGoals.map((goal) => (
-                            <div key={goal.goalId} className="rounded-md border border-slate-200 bg-white p-3">
+                            <div key={goal.goalId} className="border-t border-border/70 pt-3 first:border-t-0 first:pt-0">
                               <GoalDisplayBlock
-                                title={goal.competitionEventId ?? goal.goalId}
+                                title={coachFacingGoalTitle(goal)}
                                 status={goal.status}
                                 targetDate={goal.targetDate}
                               />
                             </div>
                           ))
                         ) : (
-                          <div className="text-sm text-textSecondary">
+                          <DashboardStatusNotice type="empty" compact>
                             No competition goals found for this season.
-                          </div>
+                          </DashboardStatusNotice>
                         )}
                       </div>
                     </>
-                  </section>
+                  </div>
                 ) : null}
 
-                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-normal text-textPrimary">
+                  <div className="space-y-1 border-t border-border/70 pt-3">
+                    <h4 className="text-sm font-normal text-textPrimary">
                       {currentPhaseGoalSectionTitle()}
-                    </h3>
+                    </h4>
                     <p className="text-sm text-textSecondary">
                       {currentPhaseGoalRequirementLabel()}
                     </p>
                   </div>
-                  {goalError ? <Alert variant="danger">{goalError}</Alert> : null}
-                  {goalSuccess ? <WorkflowNeutralNotice>{goalSuccess}</WorkflowNeutralNotice> : null}
+                  {goalError ? (
+                    <DashboardStatusNotice type="error" compact>
+                      {goalError}
+                    </DashboardStatusNotice>
+                  ) : null}
+                  {goalSuccess ? (
+                    <DashboardStatusNotice type="success" compact>
+                      {goalSuccess}
+                    </DashboardStatusNotice>
+                  ) : null}
                   {currentCoachUserId === "" ? (
-                    <Alert variant="warning">
+                    <DashboardStatusNotice type="warning" compact>
                       Authenticated coach user ID is required to create goals.
-                    </Alert>
+                    </DashboardStatusNotice>
                   ) : null}
                   {activePhaseForSelectedSeason ? (
                     <DetailRow
@@ -14085,7 +15503,7 @@ export function CoachAthletePlanningProfileView({
                       value={displayValue(activePhaseForSelectedSeason.phase)}
                     />
                   ) : null}
-                  <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="space-y-3 border-y border-border/70 py-3">
                     <p className="text-sm font-medium text-textPrimary">Goal creation mode</p>
                     <div className="flex flex-wrap gap-4">
                       <label className="flex items-center gap-2 text-sm text-textPrimary">
@@ -14110,7 +15528,7 @@ export function CoachAthletePlanningProfileView({
                   </div>
 
                   {goalCreationMode === "LIBRARY" ? (
-                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="space-y-3 border-y border-border/70 py-3">
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-textPrimary">Goal Library</p>
                         <p className="text-sm text-textSecondary">
@@ -14123,21 +15541,27 @@ export function CoachAthletePlanningProfileView({
                         value={displayValue(goalLibraryLevel)}
                       />
                       {goalLibraryLoading ? (
-                        <p className="text-sm text-textSecondary">Loading Goal Library…</p>
+                        <DashboardStatusNotice type="loading" compact>
+                          Loading Goal Library...
+                        </DashboardStatusNotice>
                       ) : null}
-                      {goalLibraryError ? <Alert variant="warning">{goalLibraryError}</Alert> : null}
+                      {goalLibraryError ? (
+                        <DashboardStatusNotice type="warning" compact>
+                          {goalLibraryError}
+                        </DashboardStatusNotice>
+                      ) : null}
                       {!goalLibraryLoading && !goalLibraryError && goalLibraryLevel === null ? (
-                        <p className="text-sm text-textSecondary">
+                        <DashboardStatusNotice type="empty" compact>
                           Validate athlete level to load Goal Library options.
-                        </p>
+                        </DashboardStatusNotice>
                       ) : null}
                       {!goalLibraryLoading &&
                       !goalLibraryError &&
                       goalLibraryLevel !== null &&
                       goalLibraryCategories.length === 0 ? (
-                        <p className="text-sm text-textSecondary">
+                        <DashboardStatusNotice type="empty" compact>
                           No Goal Library categories matched this athlete context.
-                        </p>
+                        </DashboardStatusNotice>
                       ) : null}
                       {!goalLibraryLoading && !goalLibraryError
                         ? goalLibraryCategories.map((category) => {
@@ -14154,7 +15578,7 @@ export function CoachAthletePlanningProfileView({
                             return (
                               <div
                                 key={category.categoryKey}
-                                className="space-y-2 rounded-md border border-slate-200 bg-white p-3"
+                                className="space-y-2 border-t border-border/70 pt-3 first:border-t-0 first:pt-0"
                               >
                                 <p className="text-sm font-normal text-textPrimary">
                                   {category.categoryLabel}
@@ -14271,12 +15695,17 @@ export function CoachAthletePlanningProfileView({
                   >
                     {goalCreateLoading ? "Creating Goal..." : "Create Goal"}
                   </Button>
-                  <DetailRow
-                    label="Selected Goal IDs"
-                    value={displayValue(selectedActiveGoals.map((goal) => goal.goalId))}
-                  />
-                  <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <div className="space-y-1 border-b border-slate-200 pb-3">
+                </section>
+
+                <section className="space-y-3 border-t border-border/70 pt-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-medium text-textPrimary">Setting / Selecting Goals</h3>
+                    <p className="text-sm text-textSecondary">
+                      Choose the active goals that should shape this training plan.
+                    </p>
+                  </div>
+                  <div className="space-y-2 border-y border-border/70 py-3">
+                    <div className="space-y-1">
                       <p className="text-sm font-medium text-textPrimary">
                         Select at least one active goal to continue to Plan Dates.
                       </p>
@@ -14284,10 +15713,22 @@ export function CoachAthletePlanningProfileView({
                         <p className="text-sm text-textSecondary">Waiting for goal selection.</p>
                       ) : (
                         <p className="text-sm font-medium text-primary">
-                          Goal selected. Use Next to continue to Plan Dates.
+                          {selectedActiveGoals.length} goal
+                          {selectedActiveGoals.length === 1 ? "" : "s"} selected. Use Next to
+                          continue to Plan Dates.
                         </p>
                       )}
                     </div>
+                    {selectedActiveGoals.length > 0 ? (
+                      <dl className="space-y-2 border-b border-border/70 pb-3">
+                        <DetailRow
+                          label="Selected goals"
+                          value={selectedActiveGoals
+                            .map((goal) => coachFacingGoalTitle(goal))
+                            .join(", ")}
+                        />
+                      </dl>
+                    ) : null}
                     {currentPhaseActiveGoals.length > 0 ? (
                       currentPhaseActiveGoals.map((goal) => (
                         <label
@@ -14295,12 +15736,20 @@ export function CoachAthletePlanningProfileView({
                           className="flex items-start gap-2 text-sm text-textPrimary"
                         >
                           <GoalDisplayBlock
-                            title={goal.goalName ?? goal.goalId}
+                            title={coachFacingGoalTitle(goal)}
                             status={goal.status}
                             priority={goal.priority}
                             successCriteria={goal.successCriteria}
                             targetDate={goal.targetDate}
                             domain={goal.domain}
+                            showDomain
+                            secondaryLabel={
+                              goal.competitionEventId
+                                ? "Competition"
+                                : goal.goalType === "LIBRARY"
+                                  ? "Library"
+                                  : "Coach-created"
+                            }
                             control={
                               <input
                                 type="checkbox"
@@ -14327,94 +15776,18 @@ export function CoachAthletePlanningProfileView({
                     {seasonGoalsGateComplete || headCoachLockedContextStepComplete ? (
                       <WorkflowTabNextButton
                         label="Next → Plan Dates"
-                        onClick={() => setSelectedWorkflowTab("plan-dates")}
+                        onClick={() => handleAdvanceContextBuilderStep("plan-dates")}
                       />
                     ) : null}
                     </div>
                   </section>
                 )
-              ) : null}
 
-              {selectedWorkflowTab === "workload" ? (
-                isDownstreamDomainCoach ? (
-                  <div className="space-y-3">
-                    <h3 className="text-base font-normal text-textPrimary">
-                      Step 3 — Workload Assessment
-                    </h3>
-                    {renderDownstreamUpstreamPlanningReadOnlySection()}
-                  </div>
-                ) : !workflowPrecMap.workload ? (
-                  <WorkflowLockedCard
-                    title="Step 3 — Workload Assessment"
-                    message="Confirm level validation before running workload assessment."
-                  />
-                ) : (
-                  <>
-                    {workloadComplete && !showWorkloadCompletionState ? (
-                      <WorkflowCompactSummaryStrip
-                        title="Step 3 — Workload Assessment"
-                        values={[
-                          {
-                            label: "Current Weekly Training Hours",
-                            value: displayValue(
-                              workloadAssessmentResult?.workloadClassification?.weeklyTrainingHours,
-                            ),
-                          },
-                          {
-                            label: "Recommended Range",
-                            value: formatWeeklyRange(
-                              workloadAssessmentResult?.workloadClassification?.recommendedMinHours ??
-                                null,
-                              workloadAssessmentResult?.workloadClassification?.recommendedMaxHours ??
-                                null,
-                            ),
-                          },
-                          {
-                            label: "Training Load Status",
-                            value: displayValue(
-                              workloadAssessmentResult?.workloadClassification?.status,
-                            ),
-                          },
-                          {
-                            label: "Sport",
-                            value: displayValue(workloadAssessmentResult?.workloadClassification?.sportCode),
-                          },
-                          {
-                            label: "Age Band",
-                            value: displayValue(workloadAssessmentResult?.workloadClassification?.ageBand),
-                          },
-                        ]}
-                      />
-                    ) : (
-                      <TrainingPlanWorkloadAssessmentStep
-                        showValidateLevel={showValidateLevel}
-                        readinessLoading={readinessLoading}
-                        workloadAssessmentLoading={workloadAssessmentLoading}
-                        workloadAssessmentError={workloadAssessmentError}
-                        workloadAssessmentResult={workloadAssessmentResult}
-                        workloadComplete={workloadComplete}
-                        showWorkloadCompletionState={showWorkloadCompletionState}
-                        readinessGate={{
-                          appCompleteness: readinessPanel.appCompleteness,
-                          validationStatus: readinessPanel.validationStatus,
-                          planningEligibility: readinessPanel.planningEligibility,
-                        }}
-                        onRunWorkloadAssessment={() => {
-                          void handleRunWorkloadAssessment();
-                        }}
-                      />
-                    )}
-                    {workloadComplete ? (
-                      <WorkflowTabNextButton
-                        label="Next → Goals"
-                        onClick={() => setSelectedWorkflowTab("season-goals")}
-                      />
-                    ) : null}
-                  </>
-                )
-              ) : null}
+    );
+  }
 
-            {selectedWorkflowTab === "plan-dates" ? (
+  function renderPlanDatesStepContent() {
+    return (
               isDownstreamDomainCoach ? (
                 <div className="space-y-3">
                   <h3 className="text-base font-normal text-textPrimary">Step 5 — Plan Dates</h3>
@@ -14445,210 +15818,1109 @@ export function CoachAthletePlanningProfileView({
                   planDatesConfirmedForCurrentAthlete={planDatesConfirmedForCurrentAthlete}
                   onConfirmPlanDates={() => setPlanDatesConfirmedForCurrentAthlete(true)}
                 />
-                  {renderHeadCoachPlanningContextLockAction()}
-                  {planDatesStepComplete || headCoachLockedContextStepComplete ? (
-                    <WorkflowTabNextButton
-                      label="Next → Generate Plan"
-                      onClick={() => setSelectedWorkflowTab("generate")}
+                  {planDatesStepComplete && !headCoachLockedContextStepComplete ? (
+                    <DashboardStatusNotice
+                      type="success"
+                      title="Plan dates confirmed."
+                      nextStep="Close this window to return to Context Builder, then select Lock & Share Context with Coaches."
+                      action={
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={handleCloseContextBuilderDrawer}
+                        >
+                          Close
+                        </Button>
+                      }
+                    />
+                  ) : headCoachLockedContextStepComplete ? (
+                    <DashboardStatusNotice
+                      type="success"
+                      title="Planning context is locked."
+                      nextStep="Close this drawer to continue to Domain Plans Integration."
+                      action={
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={handleCloseContextBuilderDrawer}
+                        >
+                          Close
+                        </Button>
+                      }
                     />
                   ) : null}
                 </section>
               )
-            ) : null}
 
-            {selectedWorkflowTab === "generate" ? (
-              !workflowPrecMap.generate ? (
-                <WorkflowLockedCard
-                  title={`Step 6 — ${headCoachReviewMode ? "Review Plans" : "Generate Plan"}`}
-                  message={
-                    isDownstreamDomainCoach
-                      ? "Finish Context / APP and Level Validation before opening your domain plan panel."
-                      : headCoachReviewMode
-                        ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
-                        : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
-                  }
+    );
+  }
+
+  function appDrawerGroupRows(
+    group: Record<string, DisplayableValue> | null | undefined,
+    preferredOrder: string[] = [],
+  ): Array<{ label: string; value: ReactNode }> {
+    if (!group || typeof group !== "object" || Array.isArray(group)) return [];
+    const rows: Array<{ label: string; value: ReactNode }> = [];
+    const seen = new Set<string>();
+
+    for (const key of preferredOrder) {
+      if (!Object.prototype.hasOwnProperty.call(group, key)) continue;
+      const value = group[key];
+      if (!hasRenderableValue(value)) continue;
+      rows.push({ label: toFieldLabel(key), value: displayValue(value) });
+      seen.add(key);
+    }
+
+    for (const [key, value] of Object.entries(group)) {
+      if (seen.has(key) || !hasRenderableValue(value)) continue;
+      rows.push({ label: toFieldLabel(key), value: displayValue(value) });
+    }
+
+    return rows;
+  }
+
+  function renderAppDrawerSection(
+    title: string,
+    rows: Array<{ label: string; value: ReactNode }>,
+    description?: string,
+  ) {
+    if (rows.length === 0) return null;
+    return (
+      <div className="space-y-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
+        <div className="space-y-1">
+          <h3 className="text-base font-normal text-textPrimary">{title}</h3>
+          {description ? <p className="text-sm text-textSecondary">{description}</p> : null}
+        </div>
+        <dl className="divide-y divide-border/70 border-y border-border/70">
+          {rows.map((row) => (
+            <div key={row.label} className="py-3">
+              <DetailRow label={row.label} value={row.value} />
+            </div>
+          ))}
+        </dl>
+      </div>
+    );
+  }
+
+  function renderContextAppDrawerContent() {
+    const readinessRows = [
+      { label: "Readiness Status", value: displayValue(readinessPanel.readinessStatus) },
+      { label: "APP Completeness", value: displayValue(readinessPanel.appCompleteness) },
+      { label: "Planning Eligibility", value: displayValue(readinessPanel.planningEligibility) },
+      {
+        label: "Backend Can Generate",
+        value:
+          readinessPanel.canGenerate === null
+            ? displayValue(readinessPanel.canGenerate)
+            : readinessPanel.canGenerate
+              ? "Yes"
+              : "No",
+      },
+      {
+        label: "Backend Is Ready",
+        value:
+          readinessPanel.isReady === null
+            ? displayValue(readinessPanel.isReady)
+            : readinessPanel.isReady
+              ? "Yes"
+              : "No",
+      },
+      {
+        label: "Pending Actions",
+        value:
+          coachFacingPlanningContextBlockers(readinessPanel.blockers).join(", ") ||
+          "None",
+      },
+      {
+        label: "Missing Required Fields",
+        value: formatMissingRequiredFields(readinessPanel.missingRequiredFields),
+      },
+      ...(readinessPanel.completenessSummary
+        ? [{ label: "Completeness Summary", value: displayValue(readinessPanel.completenessSummary) }]
+        : []),
+    ];
+    const workloadAgeBand =
+      workloadAssessmentResult?.workloadClassification?.ageBand ?? null;
+    const profileRows = profile
+      ? [
+          {
+            label: "Date of Birth",
+            value: formatPlanningProfileDateDisplay(profile.dateOfBirth),
+          },
+          { label: "Age", value: displayValue(profile.derivedAge) },
+          { label: "Sex", value: displayValue(profile.sex) },
+          { label: "Primary Sport", value: displayValue(profile.primarySport) },
+          { label: "Discipline / Event", value: displayValue(profile.disciplineOrEvent) },
+          { label: "Self-Reported Level", value: displayValue(profile.selfReportedLevel) },
+          { label: "Validated Level", value: displayValue(profile.validatedLevel) },
+          { label: "Category / Age Band", value: displayValue(workloadAgeBand) },
+          { label: "Training Age Years", value: displayValue(profile.trainingAgeYears) },
+          {
+            label: "Weekly Training Exposure Hours",
+            value: displayValue(profile.currentWeeklyTrainingExposureHours),
+          },
+          {
+            label: "Weekly Availability",
+            value: `${displayValue(profile.weeklyAvailabilityDays)} days / ${displayValue(
+              profile.weeklyAvailabilityHours,
+            )} hours`,
+          },
+        ]
+      : [];
+    const bodyRows = profile
+      ? [
+          { label: "Height", value: displayValue(profile.heightCm) },
+          { label: "Weight", value: displayValue(profile.weightKg) },
+          { label: "BMI", value: displayValue(profile.derivedBmi) },
+          ...appDrawerGroupRows(profile.bodyCompositionParameters, [
+            "bodyFatPercent",
+            "skeletalLeanMassKg",
+            "skeletalFatMassKg",
+            "visceralFatLevel",
+            "visceralFatArea",
+            "bmrKcalDay",
+            "muscleMassKg",
+          ]),
+        ].filter((row) => row.value !== "—")
+      : [];
+    const bloodRows = profile
+      ? appDrawerGroupRows(profile.bloodReportParameters, [
+          "hemoglobin",
+          "vitaminD",
+          "vitaminB12",
+          "ferritin",
+          "crp",
+          "fastingBloodGlucoseFBS",
+          "postprandialBloodGlucosePPBS",
+        ])
+      : [];
+    const comparisonRows = profile
+      ? [
+          { label: "Stage", value: displayValue(profile.stage) },
+          { label: "Revision", value: displayValue(profile.revision) },
+          { label: "Freshness Status", value: displayValue(profile.freshnessStatus) },
+          { label: "Last Confirmed At", value: formatPlanningProfileDateDisplay(profile.lastConfirmedAt) },
+          { label: "Updated At", value: formatPlanningProfileDateDisplay(profile.updatedAt) },
+          {
+            label: "Workload Status",
+            value: displayValue(workloadAssessmentResult?.workloadClassification?.status ?? null),
+          },
+          {
+            label: "Recommended Workload Range",
+            value: displayValue(lockedPlanningContextCardFields.weeklyWorkload),
+          },
+          {
+            label: "Validated-Level Comparison",
+            value: displayValue(readinessPanel.validationStatus),
+          },
+          ...appDrawerGroupRows(profile.bloodReportComparisons),
+          ...appDrawerGroupRows(profile.bodyCompositionComparisons),
+        ].filter((row) => row.value !== "—")
+      : [];
+    const youthSafetyApplies =
+      (typeof profile?.derivedAge === "number" && profile.derivedAge < 18) ||
+      (typeof workloadAgeBand === "string" && /youth|junior|u\d+/i.test(workloadAgeBand));
+    const safetyRows = profile
+      ? [
+          { label: "Diet Type", value: displayValue(profile.dietType) },
+          { label: "Regional Cuisine Preference", value: displayValue(profile.regionalCuisinePreference) },
+          { label: "Allergies / Intolerances", value: displayValue(profile.allergiesOrIntolerances) },
+          { label: "Uses Wearable", value: displayValue(profile.wearableStatus) },
+          { label: "Wearable Provider", value: displayValue(profile.wearableProvider) },
+          { label: "Device Model", value: displayValue(profile.deviceModel) },
+          { label: "Last Sync At", value: formatPlanningProfileDateDisplay(profile.lastSyncAt) },
+          { label: "Avg Resting Heart Rate", value: displayValue(profile.avgRestingHeartRate) },
+          { label: "Avg Sleep Duration", value: displayValue(profile.avgSleepDurationHours) },
+          { label: "Avg Daily Activity Volume", value: displayValue(profile.avgDailyActivityVolume) },
+          { label: "Recent Activity Days Count", value: displayValue(profile.recentActivityDaysCount) },
+          { label: "Wearable Data Quality", value: displayValue(profile.wearableDataQuality) },
+          ...(youthSafetyApplies
+            ? [
+                {
+                  label: "Youth Safety Context",
+                  value: "Apply workload and recovery constraints for youth/category context.",
+                },
+              ]
+            : []),
+        ].filter((row) => row.value !== "—")
+      : [];
+
+    return (
+      <div className="space-y-5">
+        {readinessLoading ? (
+          <DashboardStatusNotice type="loading" compact>
+            Loading readiness details...
+          </DashboardStatusNotice>
+        ) : (
+          <>
+            {readinessError ? (
+              <DashboardStatusNotice type="warning" compact>
+                {readinessError}
+              </DashboardStatusNotice>
+            ) : null}
+            {renderAppDrawerSection("APP Readiness", readinessRows)}
+          </>
+        )}
+        {renderAppDrawerSection("Athlete Profile", profileRows)}
+        {renderAppDrawerSection("Body Composition", bodyRows)}
+        {renderAppDrawerSection("Blood Report / Health Markers", bloodRows)}
+        {renderAppDrawerSection("Comparison / Assessment Parameters", comparisonRows)}
+        {renderAppDrawerSection("Injury / Safety / Constraints", safetyRows)}
+      </div>
+    );
+  }
+
+  function renderContextBuilderDrawerStepContent(step: ContextBuilderDrawerStepKey) {
+    if (step === "context-app") return renderContextAppDrawerContent();
+    if (step === "level-validation") return renderLevelValidationStepContent();
+    if (step === "workload") return renderWorkloadAssessmentStepContent();
+    if (step === "season-goals") return renderSeasonGoalsStepContent();
+    return renderPlanDatesStepContent();
+  }
+
+  function isContextBuilderStep(step: GuidedWorkflowStepKey): step is ContextBuilderStepKey {
+    return step !== "generate";
+  }
+
+  function contextBuilderStatusLabel(input: {
+    complete: boolean;
+    active: boolean;
+    workflowStatus?: GuidedWorkflowStepStatus;
+  }): string {
+    if (input.complete) return "Completed";
+    if (input.active) return "Active";
+    if (input.workflowStatus === "locked") return "Locked";
+    return "Pending";
+  }
+
+  function contextBuilderStepComplete(step: ContextBuilderStepKey): boolean {
+    if (step === "context-app") return appStepComplete;
+    if (step === "level-validation") return levelStepComplete;
+    if (step === "workload") return workloadComplete;
+    if (step === "season-goals") return seasonGoalsGateComplete;
+    return planDatesStepComplete;
+  }
+
+  function contextBuilderStepPurpose(step: ContextBuilderStepKey): string {
+    if (step === "context-app") return "Confirm the athlete profile is complete and eligible for planning.";
+    if (step === "level-validation") return "Confirm the validated level that planning should use.";
+    if (step === "workload") return "Check the workload range before dates and goals are finalized.";
+    if (step === "season-goals") return "Select the season, current phase, and active goals.";
+    return "Set and confirm the training plan window before locking context.";
+  }
+
+  function contextBuilderMissingRequirement(step: ContextBuilderStepKey): string | null {
+    if (contextBuilderStepComplete(step)) return null;
+    if (workflowStepStatusByKey[step] === "locked") return "Complete the previous setup section first.";
+    if (step === "context-app") {
+      if (readinessPanel.missingRequiredFields.length > 0) {
+        return `Missing APP fields: ${formatMissingRequiredFields(
+          readinessPanel.missingRequiredFields,
+        )}`;
+      }
+      if (readinessError) return readinessError;
+      return "Confirm APP completeness and planning eligibility.";
+    }
+    if (step === "level-validation") return "Confirm the athlete's validated level.";
+    if (step === "workload") return "Run workload assessment.";
+    if (step === "season-goals") {
+      if (selectedSeasonCycleId === null) return "Select or create a season.";
+      if (!currentPhaseDetected) return "Create or detect the current season phase.";
+      if (!goalsReadyForGeneration) return "Select at least one active goal.";
+      return "Finish season and goal setup.";
+    }
+    if (!planWindowInsideCurrentPhase) return "Choose a plan window inside the current phase.";
+    if (!planDatesConfirmedForCurrentAthlete) return "Confirm plan dates.";
+    return "Lock planning context when ready.";
+  }
+
+  function handleOpenContextBuilderDrawer(step: ContextBuilderDrawerStepKey) {
+    if (workflowStepStatusByKey[step] === "locked") return;
+    clearContextBuilderDrawerCloseTimeout();
+    setContextBuilderDrawerClosing(false);
+    setSelectedWorkflowTab(step);
+    setContextBuilderDrawerStep(step);
+  }
+
+  function handleAdvanceContextBuilderStep(step: ContextBuilderStepKey) {
+    setSelectedWorkflowTab(step);
+    if (contextBuilderDrawerStep !== null) {
+      clearContextBuilderDrawerCloseTimeout();
+      setContextBuilderDrawerClosing(false);
+      setContextBuilderDrawerStep(step);
+    }
+  }
+
+  function contextBuilderStepPillTone(input: {
+    complete: boolean;
+    active: boolean;
+    locked: boolean;
+  }): string {
+    if (input.complete) return "border-green-200 bg-green-50 text-green-700";
+    if (input.active) return "border-primary/30 bg-primaryLight/40 text-primary";
+    if (input.locked) return "border-slate-200 bg-slate-100 text-slate-500";
+    return "border-slate-200 bg-bg text-textSecondary";
+  }
+
+  function contextBuilderProgressStepLabel(step: ContextBuilderStepKey): string {
+    if (step === "context-app") return "APP Context";
+    if (step === "workload") return "Workload";
+    return WORKFLOW_RAIL_LABELS[step];
+  }
+
+  function renderContextBuilderProgressSteps() {
+    const progressSteps: Array<{
+      key: ContextBuilderStepKey | "final-review";
+      title: string;
+      complete: boolean;
+      active: boolean;
+      locked: boolean;
+    }> = [
+      ...CONTEXT_BUILDER_STEP_SEQUENCE_LIST.map((step) => ({
+        key: step,
+        title: contextBuilderProgressStepLabel(step),
+        complete: contextBuilderStepComplete(step),
+        active: selectedWorkflowTab === step,
+        locked: workflowStepStatusByKey[step] === "locked",
+      })),
+      {
+        key: "final-review",
+        title: "Final Review",
+        complete: headCoachLockedContextStepComplete,
+        active: selectedWorkflowTab === "plan-dates" && planDatesStepComplete,
+        locked: !planDatesStepComplete && !headCoachLockedContextStepComplete,
+      },
+    ];
+
+    return (
+      <ol className="grid gap-y-4 border-y border-border/70 py-3 sm:grid-cols-2 lg:grid-cols-6">
+        {progressSteps.map((step, index) => {
+          const stateLabel = contextBuilderStatusLabel({
+            complete: step.complete,
+            active: step.active,
+            workflowStatus: step.locked ? "locked" : undefined,
+          });
+          return (
+            <li
+              key={step.key}
+              className={cn(
+                "relative flex min-w-0 flex-col gap-2 px-2 text-sm lg:px-3",
+                step.locked ? "text-slate-500" : "text-textPrimary",
+              )}
+            >
+              <div className="flex items-center">
+                <div
+                  className={cn(
+                    "hidden h-px flex-1 lg:block",
+                    index === 0
+                      ? "bg-transparent"
+                      : step.locked
+                        ? "bg-slate-200"
+                        : "bg-primary/30",
+                  )}
+                  aria-hidden="true"
                 />
-              ) : (
-                <section className="space-y-3 rounded-lg border border-slate-200 p-4">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-normal text-textPrimary">
-                      {`Step 6 — ${headCoachReviewMode ? "Review Plans" : "Generate Plan"}`}
-                    </h3>
-                    <p className="text-sm text-textSecondary">
-                      {headCoachReviewMode
-                        ? workflow2AHeadCoachStep6Intro(trainingPlanShellModel.shell)
-                        : step6GenerationLifecyclePhase === "generated_draft"
-                          ? "Review the generated plan below and continue with workflow actions when ready."
-                          : step6GenerationLifecyclePhase === "generating"
-                            ? "Plan generation is in progress."
-                            : "Generation follows the backend readiness contract. Any backend blockers are shown here before execution."}
-                    </p>
-                  </div>
-                  {tab6ReviewOnlyMode ? (
-                    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-normal text-textPrimary">
-                          Review &amp; Release
-                        </h4>
-                        <p className="text-sm text-textSecondary">
-                          Review submitted domain plans and complete governance actions.
-                        </p>
-                      </div>
-                      {renderHeadCoachReviewWorkspace()}
-                    </div>
-                  ) : (
-                    <>
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-normal text-textPrimary">
-                            Domain Integration
-                          </h4>
-                          <p className="text-sm text-textSecondary">
-                            Confirm planning context, readiness, blockers, and generation status.
-                          </p>
-                        </div>
-                      {isPlanningContextAuthority && !isDownstreamDomainCoach
-                        ? renderHeadCoachPlanningContextLockAction()
-                        : null}
-                      {isDownstreamDomainCoach &&
-                      !upstreamPlanningContextLoading &&
-                      !upstreamPlanningContextError &&
-                      !effectiveDownstreamPlanningContextLocked ? (
-                        <Alert variant="warning">{UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE}</Alert>
-                      ) : null}
-                      {isDownstreamDomainCoach ? (
-                        renderDownstreamUpstreamPlanningReadOnlySection()
-                      ) : step6ShowsPreGenerationReadiness ? (
-                        <dl className="space-y-2">
-                          <DetailRow
-                            label="Backend readiness status"
-                            value={displayValue(readinessPanel.readinessStatus)}
-                          />
-                          <DetailRow
-                            label="Backend allows generation"
-                            value={generationReadinessFromApis ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="APP complete"
-                            value={readinessPanel.appCompleteness === "COMPLETE" ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Level validation confirmed"
-                            value={readinessPanel.validationStatus === "CONFIRMED" ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Workload assessment complete"
-                            value={workloadComplete ? "Yes" : "Pending — not ready"}
-                          />
-                          <DetailRow
-                            label="Season selected"
-                            value={seasonReady ? "Yes" : "Pending — not ready"}
-                          />
-                          <DetailRow
-                            label="Current phase detected"
-                            value={currentPhaseDetected ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="Plan window inside current phase"
-                            value={planWindowInsideCurrentPhase ? "Yes" : "No"}
-                          />
-                          <DetailRow
-                            label="At least one ACTIVE goal selected"
-                            value={goalsReadyForGeneration ? "Yes" : "Pending — not ready"}
-                          />
-                        </dl>
-                      ) : step6ShowsGeneratedDraftSummary ? (
-                        <WorkflowNeutralNotice>
-                          <div className="space-y-1 text-sm">
-                            <div className="font-medium text-textPrimary">
-                              Plan status:{" "}
-                              {assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus)}
-                            </div>
-                            <p className="text-textSecondary">
-                              A generated plan is available for this athlete. Review the plan
-                              details below.
-                            </p>
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      {step6ShowsPreGenerationReadiness &&
-                      readinessPanel.blockers.length > 0 ? (
-                        <Alert variant="warning">
-                          <div className="space-y-2">
-                            <div className="font-medium">Backend blockers</div>
-                            <ul className="list-inside list-disc space-y-1">
-                              {readinessPanel.blockers.map((blocker) => (
-                                <li key={blocker} className="whitespace-pre-wrap break-words">
-                                  {blocker}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </Alert>
-                      ) : null}
-                      {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
-                      {(trainingPlanShellModel.shell !== "skills_coach_planning" ||
-                        step6GenerationLifecyclePhase === "generating") &&
-                      currentDomainGenerationJob !== null
-                        ? renderGenerationJobProgress(currentDomainGenerationJob)
-                        : null}
-                      {generatePlanRecoveryMessage ? (
-                        <WorkflowNeutralNotice>
-                          <div className="text-sm font-medium text-textPrimary">
-                            {generatePlanRecoveryMessage}
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      {generatePlanSuccess ? (
-                        <WorkflowNeutralNotice>
-                          <div className="space-y-2">
-                            <div className="font-medium">Training plan draft generated successfully.</div>
-                            <dl className="space-y-1">
-                              <DetailRow
-                                label="Training Plan ID"
-                                value={displayValue(generatePlanSuccess.trainingPlanId)}
-                              />
-                              <DetailRow
-                                label="Training Plan Version ID"
-                                value={displayValue(generatePlanSuccess.trainingPlanVersionId)}
-                              />
-                              <DetailRow
-                                label="Version Number"
-                                value={displayValue(generatePlanSuccess.versionNumber)}
-                              />
-                              <DetailRow
-                                label="Status"
-                                value={displayValue(generatePlanSuccess.status)}
-                              />
-                              <DetailRow
-                                label="Days Created"
-                                value={displayValue(generatePlanSuccess.daysCreated)}
-                              />
-                              <DetailRow
-                                label="Sessions Created"
-                                value={displayValue(generatePlanSuccess.sessionsCreated)}
-                              />
-                              <DetailRow
-                                label="Items Persisted"
-                                value={displayValue(generatePlanSuccess.itemsPersisted)}
-                              />
-                            </dl>
-                          </div>
-                        </WorkflowNeutralNotice>
-                      ) : null}
-                      </div>
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-normal text-textPrimary">
-                            Plan Viewer
-                          </h4>
-                          <p className="text-sm text-textSecondary">
-                            Review persisted plan details, latest drafts, and revision content.
-                          </p>
-                        </div>
-                        {headCoachSkillsOwnerWorkflow
-                          ? renderHeadCoachOwnedSkillsPlanPanel({ showWorkflowActions: false })
-                          : null}
+                <span
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs",
+                    contextBuilderStepPillTone(step),
+                  )}
+                >
+                  {step.complete ? "✓" : index + 1}
+                </span>
+                <div
+                  className={cn(
+                    "hidden h-px flex-1 lg:block",
+                    index === progressSteps.length - 1
+                      ? "bg-transparent"
+                      : progressSteps[index + 1]?.locked
+                        ? "bg-slate-200"
+                        : "bg-primary/30",
+                  )}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className="space-y-1 text-center">
+                <div className="whitespace-normal text-sm font-medium leading-snug">
+                  {step.title}
+                </div>
+                <div className="text-[11px] uppercase tracking-wide text-textMuted">
+                  {stateLabel}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    );
+  }
+
+  function renderContextBuilderSummaryRow(label: string, value: ReactNode) {
+    return (
+      <div className="flex items-start justify-between gap-3 text-sm">
+        <span className="text-textMuted">{label}</span>
+        <span className="min-w-0 text-right text-textPrimary">{value}</span>
+      </div>
+    );
+  }
+
+  function renderContextBuilderFactTrail(facts: Array<{ label: string; value: ReactNode }>) {
+    if (facts.length === 0) {
+      return <span className="text-sm text-textSecondary">No captured facts yet.</span>;
+    }
+    return (
+      <dl className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {facts.map((fact) => (
+          <div key={fact.label} className="flex min-w-0 gap-1.5">
+            <dt className="shrink-0 text-textMuted">{fact.label}:</dt>
+            <dd className="min-w-0 break-words text-textPrimary">{fact.value}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+
+  function renderContextBuilderLedgerRow(input: {
+    step: ContextBuilderStepKey;
+    title: string;
+    facts: Array<{ label: string; value: ReactNode }>;
+    readOnly?: boolean;
+  }) {
+    const complete = contextBuilderStepComplete(input.step);
+    const active = selectedWorkflowTab === input.step;
+    const locked = workflowStepStatusByKey[input.step] === "locked";
+    const readOnly = input.readOnly === true;
+    const stateLabel = contextBuilderStatusLabel({
+      complete,
+      active,
+      workflowStatus: locked ? "locked" : undefined,
+    });
+    const missingRequirement = contextBuilderMissingRequirement(input.step);
+    const actionDisabled = input.step !== "context-app" && locked;
+    const actionLabel = contextBuilderLedgerActionLabel({
+      step: input.step,
+      complete,
+      locked,
+    });
+
+    return (
+      <div
+        className={cn(
+          "grid gap-3 px-0 py-4 md:grid-cols-[minmax(10rem,0.8fr)_minmax(0,1.4fr)_auto] md:items-center",
+          readOnly ? "md:grid-cols-[minmax(10rem,0.8fr)_minmax(0,1.4fr)]" : "",
+          locked ? "text-slate-500 opacity-75" : "",
+        )}
+      >
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-medium text-textPrimary">{input.title}</h3>
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-xs",
+                contextBuilderStepPillTone({ complete, active, locked }),
+              )}
+            >
+              {stateLabel}
+            </span>
+          </div>
+          <p className="text-xs text-textSecondary">{contextBuilderStepPurpose(input.step)}</p>
+        </div>
+        <div className="min-w-0">
+          {locked && !readOnly ? (
+            <span className="text-sm text-textSecondary">
+              Locked until previous step is complete.
+            </span>
+          ) : (
+            renderContextBuilderFactTrail(input.facts)
+          )}
+        </div>
+        {readOnly ? null : (
+          <div className="flex md:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={actionDisabled}
+              onClick={() => {
+                if (input.step === "context-app") {
+                  handleOpenContextBuilderDrawer("context-app");
+                  return;
+                }
+                handleOpenContextBuilderDrawer(input.step);
+              }}
+            >
+              {actionLabel}
+            </Button>
+          </div>
+        )}
+        {!readOnly && !locked && missingRequirement ? (
+          <div className="text-xs text-textSecondary md:col-span-3">
+            Next: {missingRequirement}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderContextBuilderStatusLedger(options: { readOnly?: boolean } = {}) {
+    const readOnly = options.readOnly === true;
+    const workloadClassification = workloadAssessmentResult?.workloadClassification ?? null;
+    const selectedGoalsSummary =
+      selectedActiveGoals.length > 0
+        ? selectedActiveGoals
+            .map((goal) => goal.goalName ?? goal.goalId)
+            .filter((value) => value.trim() !== "")
+            .join(", ")
+        : null;
+    const planDurationLabel =
+      typeof durationDays === "number" && Number.isFinite(durationDays)
+        ? `${durationDays} days`
+        : null;
+
+    return (
+      <section className="space-y-3">
+        <div className="space-y-1">
+          <h3 className="text-base font-medium text-textPrimary">Planning Context Inputs</h3>
+        </div>
+        <div className="divide-y divide-border/70 border-y border-border/70">
+          {renderContextBuilderLedgerRow({
+          step: "context-app",
+          title: "APP Context",
+          readOnly,
+          facts: [
+            { label: "APP status", value: displayValue(readinessPanel.appCompleteness) },
+            { label: "Eligibility", value: displayValue(readinessPanel.planningEligibility) },
+            {
+              label: "Age / BMI",
+              value: `${displayValue(profile?.derivedAge)} / ${displayValue(profile?.derivedBmi)}`,
+            },
+            {
+              label: "Missing fields",
+              value:
+                readinessPanel.missingRequiredFields.length > 0
+                  ? formatMissingRequiredFields(readinessPanel.missingRequiredFields)
+                  : "None",
+            },
+          ],
+        })}
+          {renderContextBuilderLedgerRow({
+          step: "level-validation",
+          title: "Level Validation",
+          readOnly,
+          facts: [
+            { label: "Validated level", value: displayValue(readinessPanel.validatedLevel) },
+            { label: "Validation status", value: displayValue(readinessPanel.validationStatus) },
+            { label: "Self-reported level", value: displayValue(profile?.selfReportedLevel) },
+          ],
+        })}
+          {renderContextBuilderLedgerRow({
+          step: "workload",
+          title: "Workload Assessment",
+          readOnly,
+          facts: [
+            { label: "Workload status", value: displayValue(workloadClassification?.status) },
+            {
+              label: "Weekly hours",
+              value: displayValue(workloadClassification?.weeklyTrainingHours),
+            },
+            {
+              label: "Recommended range",
+              value: displayValue(lockedPlanningContextCardFields.weeklyWorkload),
+            },
+            { label: "Age band", value: displayValue(workloadClassification?.ageBand) },
+          ],
+        })}
+          {renderContextBuilderLedgerRow({
+          step: "season-goals",
+          title: "Season & Goals",
+          readOnly,
+          facts: [
+            { label: "Season", value: displayValue(selectedSeason?.name ?? null) },
+            {
+              label: "Current phase",
+              value: displayValue(
+                activePhaseForSelectedSeason?.phase ?? activePhaseForSelectedSeason?.phaseName ?? null,
+              ),
+            },
+            { label: "Selected goals", value: selectedGoalsSummary ?? "None" },
+            { label: "Safety adaptation", value: displayValue(goalLibraryLevel) },
+          ],
+        })}
+          {renderContextBuilderLedgerRow({
+          step: "plan-dates",
+          title: "Plan Dates",
+          readOnly,
+          facts: [
+            { label: "Duration", value: displayValue(planDurationLabel) },
+            { label: "Plan window", value: formatDateRange(planStartDate, planEndDate) },
+            { label: "Inside current phase", value: planWindowInsideCurrentPhase ? "Yes" : "No" },
+            { label: "Dates confirmed", value: planDatesConfirmedForCurrentAthlete ? "Yes" : "No" },
+          ],
+        })}
+        </div>
+      </section>
+    );
+  }
+
+  function renderContextBuilderSafetyNotice() {
+    const age = profile?.derivedAge ?? null;
+    const ageBand = workloadAssessmentResult?.workloadClassification?.ageBand ?? null;
+    const youthSafetyApplies =
+      (typeof age === "number" && age < 18) ||
+      (typeof ageBand === "string" && /youth|junior|u\d+/i.test(ageBand));
+    if (!youthSafetyApplies) return null;
+    return (
+      <DashboardStatusNotice type="warning" compact>
+        Youth athlete safety context is available. Keep workload and recovery constraints in the
+        locked planning context.
+      </DashboardStatusNotice>
+    );
+  }
+
+  function renderContextBuilderReadinessRail() {
+    const seasonPhaseReady = activePhaseForSelectedSeason !== null;
+    const goalsSelected = selectedGoalIds.length > 0;
+    const readyToShare =
+      appStepComplete &&
+      levelStepComplete &&
+      workloadComplete &&
+      seasonPhaseReady &&
+      goalsSelected &&
+      planDatesStepComplete;
+    const progressItems = [
+      { label: "APP", complete: appStepComplete },
+      { label: "Level", complete: levelStepComplete },
+      { label: "Workload", complete: workloadComplete },
+      { label: "Season", complete: seasonPhaseReady && goalsSelected },
+      { label: "Dates", complete: planDatesStepComplete },
+      { label: "Lock", complete: planningContextLocked },
+    ];
+    const progressReadyCount = progressItems.filter((item) => item.complete).length;
+    const nextRequired = contextBuilderNextRequiredLabel({
+      appStepComplete,
+      levelStepComplete,
+      workloadComplete,
+      seasonPhaseReady,
+      goalsSelected,
+      planDatesStepComplete,
+      planningContextLocked,
+    });
+    const pendingBeforeLock = resolveContextBuilderPendingBeforeLock({
+      upstreamBlockers: upstreamPlanningContext?.blockers ?? [],
+      appStepComplete,
+      levelStepComplete,
+      workloadComplete,
+      seasonGoalsComplete: seasonPhaseReady && goalsSelected,
+      planDatesStepComplete,
+    });
+    return (
+      <aside className="space-y-4 border-t border-border/70 pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+        <div className="space-y-1">
+          <h3 className="text-base font-medium text-textPrimary">Context Builder Status</h3>
+        </div>
+        <div className="space-y-2 border-y border-border/70 py-3">
+          {renderContextBuilderSummaryRow(
+            "Progress",
+            `${progressReadyCount} / ${progressItems.length} ready`,
+          )}
+          {renderContextBuilderSummaryRow("Ready to share", readyToShare ? "Yes" : "No")}
+          {renderContextBuilderSummaryRow("Next required", nextRequired)}
+        </div>
+        {!planningContextLocked && pendingBeforeLock.length > 0 ? (
+          <DashboardStatusNotice
+            type="blocker"
+            title="Pending before lock"
+            items={pendingBeforeLock}
+            compact
+          />
+        ) : null}
+        {renderContextBuilderSafetyNotice()}
+        {renderHeadCoachPlanningContextLockAction({
+          shell: "flat",
+          showHeading: false,
+          showBlockers: false,
+          showStatusDetails: false,
+          inlineNotices: true,
+        })}
+      </aside>
+    );
+  }
+
+  function renderContextStepDrawer() {
+    if (contextBuilderDrawerStep === null) return null;
+    const step = contextBuilderDrawerStep;
+    const drawerTitle = contextBuilderProgressStepLabel(step);
+    const drawerDescription = contextBuilderStepPurpose(step);
+    return (
+      <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="context-step-drawer-title">
+        <style>
+          {`
+            @keyframes contextBuilderDrawerSlideIn {
+              from { opacity: 0; transform: translateX(1.5rem); }
+              to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes contextBuilderDrawerSlideOut {
+              from { opacity: 1; transform: translateX(0); }
+              to { opacity: 0; transform: translateX(1.5rem); }
+            }
+            @keyframes contextBuilderBackdropFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes contextBuilderBackdropFadeOut {
+              from { opacity: 1; }
+              to { opacity: 0; }
+            }
+          `}
+        </style>
+        <button
+          type="button"
+          className={cn(
+            "absolute inset-0 cursor-default bg-slate-950/25",
+            contextBuilderDrawerClosing
+              ? "motion-safe:animate-[contextBuilderBackdropFadeOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
+          )}
+          aria-label="Close Context Builder drawer"
+          onClick={handleCloseContextBuilderDrawer}
+        />
+        <aside
+          className={cn(
+            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
+            contextBuilderDrawerClosing
+              ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
+              : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
+          )}
+        >
+          <header className="space-y-2 border-b border-border px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 id="context-step-drawer-title" className="text-lg font-medium text-textPrimary">
+                  {drawerTitle}
+                </h3>
+                <p className="text-sm text-textSecondary">{drawerDescription}</p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleCloseContextBuilderDrawer}
+              >
+                Close
+              </Button>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div className="space-y-5 [&_section]:rounded-none [&_section]:border-0 [&_section]:bg-transparent [&_section]:p-0 [&_section]:shadow-none">
+              {renderContextBuilderDrawerStepContent(step)}
+            </div>
+          </div>
+          <footer className="flex justify-end border-t border-border px-5 py-4">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleCloseContextBuilderDrawer}
+            >
+              Cancel
+            </Button>
+          </footer>
+        </aside>
+      </div>
+    );
+  }
+
+  function resolveTrainingPlanWorkspaceVisualMode(): TrainingPlanWorkspaceVisualMode {
+    if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
+    const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const hasPlanViewerTrigger =
+      releasedPlanViewerIntent !== null ||
+      (hasReleasedDomainPlan &&
+        (requestedPlanId !== null ||
+          persistedSkillsPlanDetail !== null ||
+          latestSkillsDraft !== null ||
+          generatePlanSuccess !== null));
+    if (
+      selectedWorkflowTab === "generate" &&
+      hasPlanViewerTrigger
+    ) {
+      return "plan-viewer";
+    }
+    return "domain-integration";
+  }
+
+  function resolveTrainingPlanWorkspaceLifecycleHeaderSteps(): TrainingPlanWorkspaceLifecycleStep[] {
+    const activeMode = resolveTrainingPlanWorkspaceVisualMode();
+    const contextComplete = planningContextLocked || headCoachLockedContextStepComplete;
+    const domainAvailable = workflowPrecMap.generate;
+    const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const hasPlanViewerTrigger =
+      releasedPlanViewerIntent !== null ||
+      requestedPlanId !== null ||
+      persistedSkillsPlanDetail !== null ||
+      latestSkillsDraft !== null ||
+      generatePlanSuccess !== null;
+    const planViewerAvailable =
+      domainAvailable &&
+      (releasedPlanViewerIntent !== null || (hasReleasedDomainPlan && hasPlanViewerTrigger));
+
+    return resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode,
+      contextComplete,
+      domainAvailable,
+      planViewerAvailable,
+      domainIntegrationComplete:
+        resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+  }
+
+  function renderContextBuilderWorkspace() {
+    if (!isContextBuilderStep(selectedWorkflowTab)) return null;
+    const contextBuilderComplete = planDatesStepComplete || headCoachLockedContextStepComplete;
+
+    return (
+      <TrainingPlanWorkspaceModeShell
+        mode="context-builder"
+        header={
+          <>
+            <h2 className="text-lg font-normal text-textPrimary">Context Builder</h2>
+            <p className="max-w-3xl text-sm text-textSecondary">
+              Build the athlete&apos;s planning context in one guided setup before domain plans
+              are generated, reviewed, or released.
+            </p>
+          </>
+        }
+        primary={
+      <section className="space-y-5">
+        {headCoachLockedContextStepComplete ? (
+          <DashboardStatusNotice type="success" title="Context is locked and ready for domain plans." />
+        ) : contextBuilderComplete ? (
+          <DashboardStatusNotice
+            type="success"
+            title="Context setup is complete."
+            nextStep="Lock Planning Context"
+          />
+        ) : null}
+
+        {renderContextBuilderProgressSteps()}
+
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0">{renderContextBuilderStatusLedger()}</div>
+          <div className="min-w-0">{renderContextBuilderReadinessRail()}</div>
+        </div>
+        {renderContextStepDrawer()}
+      </section>
+        }
+      />
+    );
+  }
+
+  function renderLockedContextBuilderBackView() {
+    return (
+      <TrainingPlanWorkspaceModeShell
+        mode="context-builder"
+        header={
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-lg font-normal text-textPrimary">Locked Context Builder</h2>
+              <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs text-green-700">
+                Read-only
+              </span>
+            </div>
+            <p className="max-w-3xl text-sm text-textSecondary">
+              Planning context is locked. Domain plans are generated from this snapshot.
+            </p>
+          </>
+        }
+        primary={
+          <section className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <DashboardStatusNotice type="success" compact className="min-w-[16rem] flex-1">
+                Planning context is locked. Domain plans are generated from this snapshot.
+              </DashboardStatusNotice>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowLockedContextBuilderView(false)}
+              >
+                Back to Domain Plans Integration
+              </Button>
+            </div>
+            {renderContextBuilderProgressSteps()}
+            {renderContextBuilderStatusLedger({ readOnly: true })}
+            {renderContextBuilderSafetyNotice()}
+          </section>
+        }
+      />
+    );
+  }
+
+  function resolvePlanViewerSelectedDomain(): TrainingPlanGenerationDomain | null {
+    if (headCoachSubmittedReviewDomain !== null) return headCoachSubmittedReviewDomain;
+    return (
+      normalizeTrainingPlanGenerationDomain(persistedPlanDisplayDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(persistedDetailDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(persistedVerifiedDomain ?? undefined) ??
+      normalizeTrainingPlanGenerationDomain(latestDraftDisplayDomain ?? undefined) ??
+      currentCoachGenerationDomain ??
+      resolvedWorkflowGenerationDomain ??
+      null
+    );
+  }
+
+  function resolvePlanViewerSelectedDomainLabel(): string {
+    const domain = resolvePlanViewerSelectedDomain();
+    return domain !== null ? trainingPlanDomainLabel(domain) : "No domain selected";
+  }
+
+  function resolvePlanViewerStatusLabel(): string {
+    if (headCoachSubmittedReviewDomain !== null) {
+      const reviewDomain = headCoachSubmittedReviewDomain;
+      const state = headCoachDomainPlanStates[reviewDomain];
+      const workflowStatus =
+        workspace !== null
+          ? deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[reviewDomain])
+          : deriveHeadCoachDomainWorkflowStatus({
+              summaryStatus: state.summaryStatus,
+              summaryPlanId: state.summaryPlanId,
+              summaryVersionId: state.summaryVersionId,
+              activeDetail: state.activeDetail,
+            });
+      return assistantWorkflowStatusLabelForKind(workflowStatus);
+    }
+
+    if (assistantPlanDiscoveryLoading || persistedSkillsPlanLoading) {
+      return "Loading plan";
+    }
+
+    const selectedDomain = resolvePlanViewerSelectedDomain();
+    if (selectedDomain !== null && workspace !== null) {
+      return assistantWorkflowStatusLabelForKind(
+        deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[selectedDomain]),
+      );
+    }
+
+    const persistedStatus =
+      persistedSkillsPlanDetail?.version.status ?? persistedSkillsPlanDetail?.plan.status ?? null;
+    if (hasRenderableValue(persistedStatus)) {
+      return formatEnumeratedLabel(persistedStatus);
+    }
+
+    if (latestSkillsDraft !== null) {
+      return assistantWorkflowStatusLabelForKind(step6GeneratedDraftWorkflowStatus);
+    }
+
+    if (generatePlanSuccess !== null && hasRenderableValue(generatePlanSuccess.status)) {
+      return formatEnumeratedLabel(generatePlanSuccess.status);
+    }
+
+    return assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
+  }
+
+  function renderPlanViewerFact(label: string, value: ReactNode) {
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5 py-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <dt className="text-xs uppercase tracking-wide text-textMuted">{label}</dt>
+        <dd className="min-w-0 break-words text-sm text-textPrimary sm:text-right">{value}</dd>
+      </div>
+    );
+  }
+
+  function renderPlanViewerContent(children: ReactNode) {
+    const selectedDomain = resolvePlanViewerSelectedDomain();
+    const reviewModel =
+      selectedDomain !== null ? resolveDomainReviewSurfaceModel(selectedDomain) : null;
+    const selectedDomainLabel =
+      reviewModel?.domainLabel ?? resolvePlanViewerSelectedDomainLabel();
+    const planStatusLabel =
+      reviewModel?.planStatusLabel ?? resolvePlanViewerStatusLabel();
+    const workflowStatusLabel =
+      reviewModel?.statusLabel ?? resolvePlanViewerStatusLabel();
+    const visibleReleasedDetail =
+      releasedPlanViewerIntent !== null &&
+      releasedPlanViewerVisibleDetail?.domain === releasedPlanViewerIntent.domain
+        ? releasedPlanViewerVisibleDetail.detail
+        : persistedSkillsPlanDetail;
+    const planWindowStart = visibleReleasedDetail?.version.startDate ?? null;
+    const planWindowEnd = visibleReleasedDetail?.version.endDate ?? null;
+    const planWindowLabel =
+      planWindowStart !== null || planWindowEnd !== null
+        ? formatDateRange(planWindowStart, planWindowEnd)
+        : null;
+    const versionNumber =
+      visibleReleasedDetail?.version.versionNumber ?? reviewModel?.versionNumber ?? null;
+    const currentPlanPeriodLabel =
+      planWindowLabel !== null
+        ? `Current released window: ${planWindowLabel}${
+            versionNumber !== null ? ` · Version ${displayValue(versionNumber)}` : ""
+          }`
+        : "Current released window unavailable";
+    const canOpenLockedContextBuilderView =
+      planningContextLocked ||
+      headCoachLockedContextStepComplete ||
+      workspace?.planningContext.locked === true ||
+      upstreamPlanningContext?.planningContextLocked === true;
+
+    return (
+      <TrainingPlanWorkspaceModeShell
+        mode="plan-viewer"
+        header={
+          <>
+            <h2 className="text-lg font-normal text-textPrimary">Plan Viewer</h2>
+            <p className="text-sm text-textSecondary">
+              View released domain plans by week, day, and domain.
+            </p>
+          </>
+        }
+        summary={
+          <section className="space-y-4 border-y border-border/70 py-4">
+            <div className="space-y-1">
+              <div className="text-sm text-textPrimary">{currentPlanPeriodLabel}</div>
+              <div className="text-sm text-textSecondary">
+                Only the current released window is available here.
+              </div>
+            </div>
+            <dl className="divide-y divide-border/70 border-t border-border/70">
+              {renderPlanViewerFact("Selected domain", selectedDomainLabel)}
+              {renderPlanViewerFact("Plan status", planStatusLabel)}
+              {renderPlanViewerFact("Workflow status", workflowStatusLabel)}
+              {renderPlanViewerFact("Plan window", displayValue(planWindowLabel))}
+              {renderPlanViewerFact("Version", displayValue(versionNumber))}
+            </dl>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleBackToDomainPlansIntegration}
+              >
+                Back to Domain Plans Integration
+              </Button>
+              {canOpenLockedContextBuilderView ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowLockedContextBuilderView(true)}
+                >
+                  View Context
+                </Button>
+              ) : null}
+            </div>
+          </section>
+        }
+        primary={<div className="space-y-3">{children}</div>}
+      />
+    );
+  }
+
+
+  function renderPlanViewerEmptyState(domain: TrainingPlanGenerationDomain) {
+    return (
+      <div className="text-sm text-textSecondary">
+        {generationDraftEmptyState(domain)}
+      </div>
+    );
+  }
+
+  function renderPlanViewerPersistedDetailSection() {
+    return (
+      <>
                   {requestedPlanId !== null && !shouldHidePersistedGeneratorPanel ? (
                         isDownstreamDomainCoach && persistedPlanDisplayDomain === "SKILLS" ? (
                           <WorkflowNeutralNotice>
@@ -15001,6 +17273,13 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
+      </>
+    );
+  }
+
+  function renderPlanViewerLatestDraftDetail() {
+    return (
+      <>
                   {shouldShowLatestDraftPlanViewer &&
                   !isHeadCoachReviewerOnlyForDomain(
                     latestDraftDisplayDomain ?? effectiveCoachGenerationDomain,
@@ -15021,9 +17300,7 @@ export function CoachAthletePlanningProfileView({
                         draftMissing: latestSkillsDraftMissing,
                         generationInProgress: step6GenerationInProgress,
                       }) ? (
-                      <div className="text-sm text-textSecondary">
-                        {generationDraftEmptyState(latestDraftDisplayDomain ?? "SKILLS")}
-                      </div>
+                      renderPlanViewerEmptyState(latestDraftDisplayDomain ?? "SKILLS")
                     ) : latestSkillsDraft ? (
                       <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
                         <h4 className="text-sm font-normal text-textPrimary">
@@ -15315,8 +17592,180 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : null}
+      </>
+    );
+  }
+
+  function renderPlanViewerSelectedDomainContent() {
+    const planViewerRequestedPlanId = releasedPlanViewerIntent?.planId ?? requestedPlanId;
+    const visibleReleasedDetail =
+      releasedPlanViewerIntent !== null &&
+      releasedPlanViewerVisibleDetail?.domain === releasedPlanViewerIntent.domain
+        ? releasedPlanViewerVisibleDetail.detail
+        : persistedSkillsPlanDetail !== null &&
+            (releasedPlanViewerIntent === null ||
+              persistedDetailDomain === releasedPlanViewerIntent.domain)
+          ? persistedSkillsPlanDetail
+          : null;
+    if (planViewerRequestedPlanId !== null && visibleReleasedDetail !== null) {
+      const selectedDomain = resolvePlanViewerSelectedDomain();
+      return renderDomainPlanDaySchedule(
+        visibleReleasedDetail,
+        resolvePlanViewerSelectedDomainLabel(),
+        "View the released plan by day and session.",
+        selectedDomain,
+      );
+    }
+    if (planViewerRequestedPlanId !== null) {
+      const selectedDomain = resolvePlanViewerSelectedDomain();
+      const renderedDomain =
+        normalizeTrainingPlanGenerationDomain(persistedPlanDisplayDomain ?? undefined) ??
+        selectedDomain;
+      const persistedError =
+        renderedDomain !== null
+          ? errorForRenderedDomain({
+              error: persistedSkillsPlanError,
+              errorDomain: persistedPlanErrorDomain,
+              renderedDomain,
+            })
+          : persistedSkillsPlanError;
+      if (persistedError) {
+        return <Alert variant="danger">{persistedError}</Alert>;
+      }
+      return (
+        <div className="text-sm text-textSecondary">
+          Loading released {resolvePlanViewerSelectedDomainLabel()} plan...
+        </div>
+      );
+    }
+
+    return (
+      <>
+                        {headCoachSkillsOwnerWorkflow
+                          ? renderHeadCoachOwnedSkillsPlanPanel({ showWorkflowActions: false })
+                          : null}
+        {renderPlanViewerPersistedDetailSection()}
+        {renderPlanViewerLatestDraftDetail()}
+      </>
+    );
+  }
+
+  function renderPlanViewerLowerContent() {
+    return renderPlanViewerSelectedDomainContent();
+  }
+
+  function renderDomainPlansIntegrationWorkspace() {
+    if (selectedWorkflowTab !== "generate") return null;
+    const canOpenLockedContextBuilderView =
+      planningContextLocked ||
+      headCoachLockedContextStepComplete ||
+      workspace?.planningContext.locked === true ||
+      upstreamPlanningContext?.planningContextLocked === true;
+    const persistedReleasedPlanViewerDomain =
+      releasedPlanViewerIntent?.domain ??
+      (requestedPlanId !== null
+        ? persistedDetailDomain ?? persistedVerifiedDomain ?? headCoachSubmittedReviewDomain
+        : null);
+    const releasedPlanViewerWorkflowStatus =
+      persistedReleasedPlanViewerDomain !== null
+        ? workspace !== null
+          ? deriveWorkflowStatusFromWorkspaceDomain(
+              workspace.domains[persistedReleasedPlanViewerDomain],
+            )
+          : deriveHeadCoachDomainWorkflowStatus({
+              summaryStatus:
+                headCoachDomainPlanStates[persistedReleasedPlanViewerDomain].summaryStatus,
+              summaryPlanId:
+                headCoachDomainPlanStates[persistedReleasedPlanViewerDomain].summaryPlanId,
+              summaryVersionId:
+                headCoachDomainPlanStates[persistedReleasedPlanViewerDomain].summaryVersionId,
+              activeDetail:
+                headCoachDomainPlanStates[persistedReleasedPlanViewerDomain].activeDetail,
+            })
+        : null;
+    const showReleasedPlanViewerInReviewOnlyMode =
+      tab6ReviewOnlyMode &&
+      persistedReleasedPlanViewerDomain !== null &&
+      (releasedPlanViewerIntent !== null || requestedPlanId !== null) &&
+      (releasedPlanViewerIntent !== null || releasedPlanViewerWorkflowStatus === "released");
+    if (showLockedContextBuilderView && canOpenLockedContextBuilderView) {
+      return renderLockedContextBuilderBackView();
+    }
+    if (showReleasedPlanViewerInReviewOnlyMode) {
+      return renderPlanViewerContent(renderPlanViewerLowerContent());
+    }
+    return (
+              !workflowPrecMap.generate ? (
+                <TrainingPlanWorkspaceModeShell
+                  mode="domain-integration"
+                  header={
+                    <>
+                      <h2 className="text-lg font-normal text-textPrimary">
+                        Domain Plans Integration
+                      </h2>
+                      <p className="text-sm text-textSecondary">
+                        Coordinate Skills, Nutrition, and S&amp;C from locked context through
+                        domain-level generation, review, and release.
+                      </p>
+                    </>
+                  }
+                  primary={
+                    <WorkflowLockedCard
+                      title="Domain Plans Integration"
+                      message={
+                        isDownstreamDomainCoach
+                          ? "Finish Context / APP and Level Validation before opening your domain plan panel."
+                          : headCoachReviewMode
+                            ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
+                            : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
+                      }
+                    />
+                  }
+                />
+              ) : (
+                <TrainingPlanWorkspaceModeShell
+                  mode="domain-integration"
+                  header={
+                    <>
+                      <h2 className="text-lg font-normal text-textPrimary">
+                        Domain Plans Integration
+                      </h2>
+                      <p className="text-sm text-textSecondary">
+                        Coordinate Skills, Nutrition, and S&amp;C plans from the locked planning
+                        context through generation, submission, review, and release.
+                      </p>
+                    </>
+                  }
+                  primary={
+                    <div className="space-y-3">
+                  {canOpenLockedContextBuilderView ? (
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setShowLockedContextBuilderView(true)}
+                      >
+                        View Context
+                      </Button>
+                    </div>
+                  ) : null}
+                  {tab6ReviewOnlyMode ? (
+                    <section className="space-y-3">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-normal text-textPrimary">
+                          Domain Plans Coordination
+                        </h4>
+                        <p className="text-sm text-textSecondary">
+                          Coordinate domain plan status, ownership, and available actions.
+                        </p>
                       </div>
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      {renderHeadCoachReviewWorkspace()}
+                    </section>
+                  ) : (
+                    <>
+                      {renderStep6DomainIntegrationContent()}
+                      {renderPlanViewerContent(renderPlanViewerLowerContent())}
+                      <section className="space-y-3 border-t border-border/70 pt-4">
                         <div className="space-y-1">
                           <h4 className="text-sm font-normal text-textPrimary">
                             Domain Actions
@@ -15334,12 +17783,9 @@ export function CoachAthletePlanningProfileView({
                       </div>
                     ) : null
                   ) : trainingPlanShellModel.shell === "head_coach_planning" ? (
-                    <div className="space-y-3">
-                      {renderHeadCoachPlanningContextLockAction()}
-                      <div className="text-sm text-textSecondary">
-                        Head Coach planning context can be locked and shared without assigning a
-                        generation function to the Head Coach.
-                      </div>
+                    <div className="text-sm text-textSecondary">
+                      Head Coach planning context can be shared without assigning a generation
+                      function to the Head Coach.
                     </div>
                   ) : allowedGenerationDomains.length === 0 ? (
                     <div className="text-sm text-textSecondary">
@@ -15407,29 +17853,114 @@ export function CoachAthletePlanningProfileView({
                   )}
                   {trainingPlanShellModel.shell !== "head_coach_planning" &&
                   !isHeadCoachReviewerOnlyForDomain(resolvedWorkflowGenerationDomain)
-                    ? renderStep6WorkflowActionsStrip()
+                    ? renderPlanViewerWorkflowActions()
                     : null}
-                      </div>
+                      </section>
                   {headCoachReviewMode
                     ? (
-                      <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <section className="space-y-3 border-t border-border/70 pt-4">
                         <div className="space-y-1">
                           <h4 className="text-sm font-normal text-textPrimary">
-                            Review &amp; Release
+                            Domain Plans Coordination
                           </h4>
                           <p className="text-sm text-textSecondary">
-                            Review submitted domain plans and complete governance actions.
+                            Coordinate domain plan status, ownership, and available actions.
                           </p>
                         </div>
                         {renderHeadCoachSubmittedDomainPlansSection()}
-                      </div>
+                      </section>
                     )
                     : null}
                   </>
                   )}
-              </section>
+                    </div>
+                  }
+                />
               )
+
+    );
+  }
+
+  const trainingPlanPageHeader = (
+    <PageHeader
+      title="Training Plan"
+      subtitle="Build context, coordinate domain plans, and review athlete plans"
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-4")}>
+        {trainingPlanPageHeader}
+        <div className="flex min-h-[30vh] items-center justify-center text-sm text-textSecondary">
+          Loading athlete planning profile…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-4")}>
+      {trainingPlanPageHeader}
+
+      {error ? <Alert variant="danger">{error}</Alert> : null}
+      {missingPlanningProfile ? (
+        <Alert variant="warning">
+          Planning Profile Pending. The athlete must complete APP before training
+          plan validation.
+        </Alert>
+      ) : null}
+
+      {!error && !missingPlanningProfile && !profile ? (
+        <Alert variant="warning">No planning profile data available.</Alert>
+      ) : null}
+
+
+      {profile ? (
+        <>
+          {workflowViewSelectionLoading ? (
+            <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+              <div className="flex min-h-[20vh] items-center justify-center px-4 py-10 text-sm text-textSecondary sm:px-6">
+                Loading training plan workspace...
+              </div>
+            </Card>
+          ) : trainingPlanShellModel.shell === "specialist_domain" ? (
+            renderAssistantDomainWorkspace()
+          ) : trainingPlanShellModel.shell === "head_coach_review" ||
+            trainingPlanShellModel.shell === "head_coach_function_aware" ||
+            trainingPlanShellModel.shell === "head_coach_planning" ||
+            trainingPlanShellModel.shell === "skills_coach_planning" ? (
+          <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
+            {!isContextBuilderStep(selectedWorkflowTab) && selectedWorkflowTab !== "generate" ? (
+              <>
+                <div className="space-y-4 border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
+                  <TrainingPlanWorkflowProgressRail
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                  />
+                </div>
+                <div className="w-full min-w-0 max-w-full overflow-hidden px-4 sm:px-6">
+                  <WorkflowConnectedTabStrip
+                    selectedTab={selectedWorkflowTab}
+                    steps={[...workflowStepperModel]}
+                    headCoachReviewMode={headCoachReviewMode}
+                    reviewReviseStepLabel={reviewReviseStepLabel}
+                    onSelect={(tab) => {
+                      if (workflowStepStatusByKey[tab] === "locked") return;
+                      setSelectedWorkflowTab(tab);
+                    }}
+                  />
+                </div>
+              </>
             ) : null}
+            <div className="space-y-6 bg-card px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 md:px-10 md:py-10">
+              <TrainingPlanWorkspaceLifecycleHeader
+                steps={resolveTrainingPlanWorkspaceLifecycleHeaderSteps()}
+              />
+              {renderContextBuilderWorkspace()}
+
+              {renderDomainPlansIntegrationWorkspace()}
             </div>
           </Card>
           ) : (
@@ -15451,7 +17982,9 @@ export function CoachAthletePlanningProfileView({
             levelValidationSnapshot={readinessSources.levelValidation}
             onAfterSaveConfirmed={refreshProfileAndReadinessAfterLevelValidation}
           />
-          {requestRevisionModalOpen && !workflow1HeadCoachReviewActionPanelMode ? (
+          {renderDomainReviewDrawer()}
+          {requestRevisionModalOpen &&
+          (!workflow1HeadCoachReviewActionPanelMode || domainReviewDrawerOpen) ? (
             <Modal
               className="w-full max-w-lg overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
               aria-labelledby="request-revision-modal-title"
@@ -15493,12 +18026,7 @@ export function CoachAthletePlanningProfileView({
                     type="button"
                     variant="secondary"
                     disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                    onClick={() => {
-                      setRequestRevisionModalOpen(false);
-                      setRequestRevisionActionContext(null);
-                      setRequestRevisionFeedback("");
-                      setGovernedPlanActionError(null);
-                    }}
+                    onClick={handleCancelRequestRevision}
                   >
                     Cancel
                   </Button>

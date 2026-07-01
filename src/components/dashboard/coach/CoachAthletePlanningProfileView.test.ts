@@ -1747,7 +1747,7 @@ describe("Step 3D domain workflow contract", () => {
         canRelease: true,
         canRevise: false,
       }),
-    ).toEqual(["View / review domain plan", "Release this domain"]);
+    ).toEqual(["View / review domain plan", "Release this plan to athlete"]);
   });
 
   it("locks future revise availability to owned domains with an approved or released base version", () => {

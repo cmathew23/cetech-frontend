@@ -1088,6 +1088,12 @@ function openDomainPlanReviewLabel(domain: TrainingPlanGenerationDomain): string
   return "Open S&C Plan Review";
 }
 
+function viewDomainInPlanViewerLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "View Skills in Plan Viewer";
+  if (domain === "NUTRITION") return "View Nutrition in Plan Viewer";
+  return "View S&C in Plan Viewer";
+}
+
 function normalizeHeadCoachDomainWorkflowStatus(
   status: string | null | undefined,
 ): AssistantDomainWorkflowStatus | null {
@@ -1376,7 +1382,7 @@ export function domainIntegrationAvailableActionLabels(input: {
   if (input.canViewPlan) actions.push("View / review domain plan");
   if (input.canSubmitForReview) actions.push("Submit for Head Coach review");
   if (input.canReview) actions.push("Approve or request changes");
-  if (input.canRelease) actions.push("Release this domain");
+  if (input.canRelease) actions.push("Release this plan to athlete");
   if (input.canRevise) actions.push("Revise instructions");
   return actions;
 }
@@ -3475,7 +3481,7 @@ function governedPlanActionButtonLabel(
   }
   if (action === "HEAD_APPROVE") return "Approve";
   if (action === "REQUEST_REVISION") return "Request Revision";
-  return "Release Domain to Athlete";
+  return "Release Plan to Athlete";
 }
 
 export function canShowHeadCoachReviewReleaseAction(input: {
@@ -9120,6 +9126,9 @@ export function CoachAthletePlanningProfileView({
     domain: TrainingPlanGenerationDomain,
     context: WorkspaceDomainViewPlanContext | null,
   ) {
+    if (headCoachReviewMode) {
+      setHeadCoachSubmittedReviewDomain(domain);
+    }
     logTrainingPlanViewPlanDiagnostic({
       clickedDomain: domain,
       workspace,
@@ -9196,6 +9205,16 @@ export function CoachAthletePlanningProfileView({
       );
       setPersistedPlanErrorDomain(domain);
     }
+  }
+
+  function handleBackToDomainPlansIntegration() {
+    setShowLockedContextBuilderView(false);
+    setWorkflowRequestedPlanId(null);
+    setPersistedSkillsPlanDetail(null);
+    setPersistedVerifiedDomain(null);
+    setPersistedSkillsPlanError(null);
+    setPersistedPlanErrorDomain(null);
+    router.replace(planningProfileHrefForAthlete(athleteIdTrimmed));
   }
 
   const refreshAssistantGovernedDetailFromLatestDraft = useCallback(
@@ -11051,9 +11070,12 @@ export function CoachAthletePlanningProfileView({
       availableActionLabels,
       actionContext,
       canShowViewPlan,
+      viewPlanContext,
       showWorkflow2DraftPendingNotice,
       reviseComingSoonVisible,
     } = reviewModel;
+    const canOpenReleasedPlanViewer =
+      workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null;
 
     return (
       <tr key={domain} className="border-t border-border/70 align-top first:border-t-0">
@@ -11095,7 +11117,17 @@ export function CoachAthletePlanningProfileView({
                 ? availableActionLabels.join(", ")
                 : "No action available now"}
             </span>
-            {actionContext !== null && canShowViewPlan ? (
+            {canOpenReleasedPlanViewer ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleViewWorkspaceDomainPlan(domain, viewPlanContext);
+                }}
+              >
+                {viewDomainInPlanViewerLabel(domain)}
+              </Button>
+            ) : actionContext !== null && canShowViewPlan ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -11140,6 +11172,10 @@ export function CoachAthletePlanningProfileView({
     const reviewDomain = headCoachSubmittedReviewDomain;
     const reviewModel = resolveDomainReviewSurfaceModel(reviewDomain);
     const { state, activeDetail } = reviewModel;
+    const canOpenReleasedPlanViewer =
+      reviewModel.workflowStatus === "released" &&
+      reviewModel.canShowViewPlan &&
+      reviewModel.viewPlanContext !== null;
 
     return (
       <section className="space-y-4 border-t border-border/70 pt-4">
@@ -11194,9 +11230,20 @@ export function CoachAthletePlanningProfileView({
             </dl>
 
             <div className="flex flex-wrap gap-2">
+              {canOpenReleasedPlanViewer ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => {
+                    void handleViewWorkspaceDomainPlan(reviewDomain, reviewModel.viewPlanContext);
+                  }}
+                >
+                  {viewDomainInPlanViewerLabel(reviewDomain)}
+                </Button>
+              ) : null}
               <Button
                 type="button"
-                variant="primary"
+                variant={canOpenReleasedPlanViewer ? "secondary" : "primary"}
                 onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
               >
                 {openDomainPlanReviewLabel(reviewDomain)}
@@ -11337,9 +11384,10 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function renderDomainReviewDrawerPlanBody(
+  function renderDomainPlanDaySchedule(
     detail: CoachPersistedTrainingPlanActiveDetail,
     domainLabel: string,
+    description = "Review the submitted plan by day and session.",
   ) {
     const sortedDays = [...detail.days].sort((a, b) => {
       const aIndex = typeof a.dayIndex === "number" ? a.dayIndex : Number.MAX_SAFE_INTEGER;
@@ -11353,9 +11401,7 @@ export function CoachAthletePlanningProfileView({
       <section className="space-y-4 border-t border-border/70 pt-5">
         <div className="space-y-1">
           <h4 className="text-sm font-normal text-textPrimary">{domainLabel} Schedule</h4>
-          <p className="text-sm text-textSecondary">
-            Review the submitted plan by day and session.
-          </p>
+          <p className="text-sm text-textSecondary">{description}</p>
         </div>
         {!hasSessions ? (
           <div className="text-sm text-textSecondary">No scheduled sessions are available.</div>
@@ -11625,7 +11671,7 @@ export function CoachAthletePlanningProfileView({
                           void handlePersistedGovernedPlanAction("RELEASE", actionContext)
                         }
                       >
-                        Release Domain to Athlete
+                        Release Plan to Athlete
                       </Button>
                     ) : null}
                   </div>
@@ -11685,7 +11731,7 @@ export function CoachAthletePlanningProfileView({
               ) : null}
 
               {activeDetail !== null ? (
-                renderDomainReviewDrawerPlanBody(activeDetail, reviewDomainLabel)
+                renderDomainPlanDaySchedule(activeDetail, reviewDomainLabel)
               ) : !domainState.loading && domainState.error === null ? (
                 <div className="text-sm text-textSecondary">
                   No submitted plan data available for this domain.
@@ -16658,65 +16704,78 @@ export function CoachAthletePlanningProfileView({
     return assistantWorkflowStatusLabelForKind(assistantDomainWorkflowStatus);
   }
 
-  function resolvePlanViewerDomainReleaseLabel(): string {
-    const selectedDomain = resolvePlanViewerSelectedDomain();
-    if (selectedDomain !== null && workspace !== null) {
-      const workflowStatus = deriveWorkflowStatusFromWorkspaceDomain(
-        workspace.domains[selectedDomain],
-      );
-      return workflowStatus === "released"
-        ? `${trainingPlanDomainLabel(selectedDomain)} domain active/released`
-        : `${trainingPlanDomainLabel(selectedDomain)} domain not released`;
-    }
-
-    return "Selected domain release status unavailable";
-  }
-
-  function resolvePlanViewerModeLabel(): string {
-    if (headCoachSubmittedReviewDomain !== null) return "Reviewing";
-    if (assistantRevisePanelDomain !== null) return "Revising";
-    if (assistantPlanDiscoveryLoading || persistedSkillsPlanLoading) return "Loading";
-    if (isGenerationJobInProgress(currentDomainGenerationJob)) return "Generating";
-    if (requestedPlanId !== null && persistedSkillsPlanDetail !== null) return "Viewing saved plan";
-    if (latestSkillsDraft !== null) return "Viewing latest draft";
-    if (generatePlanSuccess !== null) return "Generated draft";
-    return "Waiting for plan";
-  }
-
-  function renderPlanViewerSummaryItem(label: string, value: string) {
+  function renderPlanViewerFact(label: string, value: ReactNode) {
     return (
-      <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-        <div className="text-xs text-textMuted">{label}</div>
-        <div className="mt-0.5 break-words text-sm text-textPrimary">{value}</div>
+      <div className="min-w-0 space-y-0.5">
+        <div className="text-xs uppercase tracking-wide text-textMuted">{label}</div>
+        <div className="min-w-0 break-words text-sm text-textPrimary">{value}</div>
       </div>
     );
   }
 
   function renderPlanViewerContent(children: ReactNode) {
-    const selectedDomainLabel = resolvePlanViewerSelectedDomainLabel();
-    const statusLabel = resolvePlanViewerStatusLabel();
-    const releaseLabel = resolvePlanViewerDomainReleaseLabel();
-    const modeLabel = resolvePlanViewerModeLabel();
+    const selectedDomain = resolvePlanViewerSelectedDomain();
+    const reviewModel =
+      selectedDomain !== null ? resolveDomainReviewSurfaceModel(selectedDomain) : null;
+    const selectedDomainLabel =
+      reviewModel?.domainLabel ?? resolvePlanViewerSelectedDomainLabel();
+    const planStatusLabel =
+      reviewModel?.planStatusLabel ?? resolvePlanViewerStatusLabel();
+    const workflowStatusLabel =
+      reviewModel?.statusLabel ?? resolvePlanViewerStatusLabel();
+    const planWindowStart = persistedSkillsPlanDetail?.version.startDate ?? null;
+    const planWindowEnd = persistedSkillsPlanDetail?.version.endDate ?? null;
+    const planWindowLabel =
+      planWindowStart !== null || planWindowEnd !== null
+        ? formatDateRange(planWindowStart, planWindowEnd)
+        : null;
+    const versionNumber =
+      persistedSkillsPlanDetail?.version.versionNumber ?? reviewModel?.versionNumber ?? null;
+    const canOpenLockedContextBuilderView =
+      planningContextLocked ||
+      headCoachLockedContextStepComplete ||
+      workspace?.planningContext.locked === true ||
+      upstreamPlanningContext?.planningContextLocked === true;
 
     return (
       <TrainingPlanWorkspaceModeShell
         mode="plan-viewer"
         header={
           <>
-            <h3 className="text-base font-normal text-textPrimary">Plan Viewer</h3>
+            <h2 className="text-lg font-normal text-textPrimary">Plan Viewer</h2>
             <p className="text-sm text-textSecondary">
-              Review the selected domain plan, draft, revision feedback, and available workflow
-              actions.
+              View released domain plans by week, day, and domain.
             </p>
           </>
         }
         summary={
-        <div className="grid gap-3 md:grid-cols-4">
-          {renderPlanViewerSummaryItem("Selected domain", selectedDomainLabel)}
-          {renderPlanViewerSummaryItem("Plan status", statusLabel)}
-          {renderPlanViewerSummaryItem("Domain release", releaseLabel)}
-          {renderPlanViewerSummaryItem("Mode", modeLabel)}
-        </div>
+          <section className="space-y-4 border-y border-border/70 py-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {renderPlanViewerFact("Selected domain", selectedDomainLabel)}
+              {renderPlanViewerFact("Plan status", planStatusLabel)}
+              {renderPlanViewerFact("Workflow status", workflowStatusLabel)}
+              {renderPlanViewerFact("Plan window", displayValue(planWindowLabel))}
+              {renderPlanViewerFact("Version", displayValue(versionNumber))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleBackToDomainPlansIntegration}
+              >
+                Back to Domain Plans Integration
+              </Button>
+              {canOpenLockedContextBuilderView ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowLockedContextBuilderView(true)}
+                >
+                  View Context
+                </Button>
+              ) : null}
+            </div>
+          </section>
         }
         primary={<div className="space-y-3">{children}</div>}
       />
@@ -17411,6 +17470,14 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderPlanViewerSelectedDomainContent() {
+    if (requestedPlanId !== null && persistedSkillsPlanDetail !== null) {
+      return renderDomainPlanDaySchedule(
+        persistedSkillsPlanDetail,
+        resolvePlanViewerSelectedDomainLabel(),
+        "View the released plan by day and session.",
+      );
+    }
+
     return (
       <>
                         {headCoachSkillsOwnerWorkflow
@@ -17433,8 +17500,25 @@ export function CoachAthletePlanningProfileView({
       headCoachLockedContextStepComplete ||
       workspace?.planningContext.locked === true ||
       upstreamPlanningContext?.planningContextLocked === true;
+    const persistedReleasedPlanViewerDomain =
+      requestedPlanId !== null && persistedSkillsPlanDetail !== null
+        ? persistedDetailDomain
+        : null;
+    const showReleasedPlanViewerInReviewOnlyMode =
+      tab6ReviewOnlyMode &&
+      persistedReleasedPlanViewerDomain !== null &&
+      (workspace !== null
+        ? deriveWorkflowStatusFromWorkspaceDomain(
+            workspace.domains[persistedReleasedPlanViewerDomain],
+          ) === "released"
+        : normalizeHeadCoachDomainWorkflowStatus(
+            persistedSkillsPlanDetail?.version.status ?? persistedSkillsPlanDetail?.plan.status,
+          ) === "released");
     if (showLockedContextBuilderView && canOpenLockedContextBuilderView) {
       return renderLockedContextBuilderBackView();
+    }
+    if (showReleasedPlanViewerInReviewOnlyMode) {
+      return renderPlanViewerContent(renderPlanViewerLowerContent());
     }
     return (
               !workflowPrecMap.generate ? (

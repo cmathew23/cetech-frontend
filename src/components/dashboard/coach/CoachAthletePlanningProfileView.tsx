@@ -1258,7 +1258,6 @@ export function domainIntegrationNextActionLabel(input: {
 }): string {
   if (input.loading) return "Loading the latest plan state.";
   if (input.hasError) return "Resolve the status warning, then refresh this track.";
-  if (input.isCurrentReviewPlan) return "Review is open in the inspector.";
 
   if (input.workflowStatus === "not_created") {
     if (input.canGenerate) return "Ready to generate this domain plan.";
@@ -10894,7 +10893,7 @@ export function CoachAthletePlanningProfileView({
     });
     const availableActionLabels = domainIntegrationAvailableActionLabels({
       canGenerate: generatePermission.canShowGenerate,
-      canViewPlan: canShowViewPlan && !isCurrentReviewPlan,
+      canViewPlan: canShowViewPlan,
       canSubmitForReview: canShowSubmitForReview,
       canReview: canShowReviewAction,
       canRelease: canShowReleaseAction,
@@ -10970,7 +10969,6 @@ export function CoachAthletePlanningProfileView({
       availableActionLabels,
       actionContext,
       canShowViewPlan,
-      isCurrentReviewPlan,
       showWorkflow2DraftPendingNotice,
       reviseComingSoonVisible,
     } = reviewModel;
@@ -11024,11 +11022,8 @@ export function CoachAthletePlanningProfileView({
                   openHeadCoachDomainPlanReview(actionContext);
                 }}
               >
-                {isCurrentReviewPlan ? "Open Review Drawer" : reviewPlanButtonLabel(domain)}
+                {reviewPlanButtonLabel(domain)}
               </Button>
-            ) : null}
-            {isCurrentReviewPlan ? (
-              <span className="text-xs font-medium text-blue-600">Open in inspector</span>
             ) : null}
             {reviseComingSoonVisible ? (
               <Button type="button" variant="secondary" disabled>
@@ -11052,69 +11047,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderWorkflow1HeadCoachReviewActionPanel() {
-    if (
-      !workflow1HeadCoachReviewActionPanelMode ||
-      !headCoachReviewMode ||
-      headCoachSubmittedReviewDomain === null
-    ) {
-      return null;
-    }
-
-    const reviewDomain = headCoachSubmittedReviewDomain;
-    const reviewModel = resolveDomainReviewSurfaceModel(reviewDomain);
-
-    return (
-      <section className="space-y-3 border-y border-border/70 py-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h4 className="text-sm font-normal text-textPrimary">
-              Domain Review Status
-            </h4>
-            <p className="text-sm text-textSecondary">
-              Use the Domain Review Drawer for approve, request changes, and release actions.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={governedPlanActionLoading !== null}
-            onClick={closeHeadCoachPlanReview}
-          >
-            Close Review
-          </Button>
-        </div>
-        <dl className="space-y-1">
-          <DetailRow label="Domain" value={reviewModel.domainLabel} />
-          <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
-          <DetailRow label="Workflow status" value={reviewModel.statusLabel} />
-          <DetailRow label="Next action" value={reviewModel.nextActionLabel} />
-        </dl>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
-          >
-            Open Domain Review Drawer
-          </Button>
-        </div>
-        {governedPlanActionError ? (
-          <Alert variant="danger">{governedPlanActionError}</Alert>
-        ) : null}
-        {governedPlanActionSuccess ? (
-          <WorkflowNeutralNotice>
-            <div className="space-y-2">
-              <div>{governedPlanActionSuccess}</div>
-              {governedPlanActionSuccessFeedback ? (
-                <div className="text-sm text-textSecondary">
-                  Head Coach Notes: {governedPlanActionSuccessFeedback}
-                </div>
-              ) : null}
-            </div>
-          </WorkflowNeutralNotice>
-        ) : null}
-      </section>
-    );
+    return null;
   }
 
   function renderHeadCoachPlanReviewPanel() {
@@ -11131,21 +11064,19 @@ export function CoachAthletePlanningProfileView({
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h4 className="text-base font-normal text-textPrimary">
-              Selected Domain Summary
+              Selected Domain Current State
             </h4>
             <p className="text-sm text-textSecondary">
-              Open the Domain Review Drawer to inspect details and continue authorized workflow actions.
+              Track the selected domain here; open the drawer to inspect the plan and continue actions.
             </p>
           </div>
-          {!workflow1HeadCoachReviewActionPanelMode ? (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={closeHeadCoachPlanReview}
-            >
-              Close Review
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={closeHeadCoachPlanReview}
+          >
+            Clear selected domain
+          </Button>
         </div>
 
         {shouldShowSubmittedPlanLoading({
@@ -11176,8 +11107,6 @@ export function CoachAthletePlanningProfileView({
               <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
               <DetailRow label="Workflow status" value={reviewModel.statusLabel} />
               <DetailRow label="Next action" value={reviewModel.nextActionLabel} />
-              <DetailRow label="Training Plan ID" value={displayValue(reviewModel.planId)} />
-              <DetailRow label="Version ID" value={displayValue(reviewModel.versionId)} />
               <DetailRow label="Version" value={displayValue(reviewModel.versionNumber)} />
               <DetailRow label="Training Days" value={displayValue(reviewModel.trainingDays)} />
             </dl>
@@ -11219,8 +11148,6 @@ export function CoachAthletePlanningProfileView({
       planStatusLabel,
       nextActionLabel,
       activeDetail,
-      planId,
-      versionId,
       versionNumber,
       trainingDays,
       canShowViewPlan,
@@ -11325,8 +11252,6 @@ export function CoachAthletePlanningProfileView({
                     value={assistantWorkflowStatusLabelForKind(workflowStatus)}
                   />
                   <DetailRow label="Current step / next action" value={nextActionLabel} />
-                  <DetailRow label="Training Plan ID" value={displayValue(planId)} />
-                  <DetailRow label="Version ID" value={displayValue(versionId)} />
                   <DetailRow label="Version" value={displayValue(versionNumber)} />
                   <DetailRow label="Training Days" value={displayValue(trainingDays)} />
                 </dl>

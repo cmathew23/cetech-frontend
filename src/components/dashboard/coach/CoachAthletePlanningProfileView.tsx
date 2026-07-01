@@ -1742,6 +1742,16 @@ export function resolveTrainingPlanWorkspaceDomainIntegrationComplete(
   );
 }
 
+export function resolveTrainingPlanWorkspaceHasReleasedDomain(
+  workspace: TrainingPlanWorkspace | null,
+): boolean {
+  if (workspace === null) return false;
+
+  return TRAINING_PLAN_WORKSPACE_DOMAINS.some(
+    (domain) => deriveWorkflowStatusFromWorkspaceDomain(workspace.domains[domain]) === "released",
+  );
+}
+
 export function resolveTrainingPlanWorkspaceLifecycleSteps(input: {
   activeMode: TrainingPlanWorkspaceVisualMode;
   contextComplete: boolean;
@@ -16209,11 +16219,13 @@ export function CoachAthletePlanningProfileView({
 
   function resolveTrainingPlanWorkspaceVisualMode(): TrainingPlanWorkspaceVisualMode {
     if (isContextBuilderStep(selectedWorkflowTab)) return "context-builder";
+    const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
     const hasPlanViewerTrigger =
-      requestedPlanId !== null ||
-      persistedSkillsPlanDetail !== null ||
-      latestSkillsDraft !== null ||
-      generatePlanSuccess !== null;
+      hasReleasedDomainPlan &&
+      (requestedPlanId !== null ||
+        persistedSkillsPlanDetail !== null ||
+        latestSkillsDraft !== null ||
+        generatePlanSuccess !== null);
     if (
       selectedWorkflowTab === "generate" &&
       hasPlanViewerTrigger
@@ -16227,6 +16239,7 @@ export function CoachAthletePlanningProfileView({
     const activeMode = resolveTrainingPlanWorkspaceVisualMode();
     const contextComplete = planningContextLocked || headCoachLockedContextStepComplete;
     const domainAvailable = workflowPrecMap.generate;
+    const hasReleasedDomainPlan = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
     const hasPlanViewerTrigger =
       requestedPlanId !== null ||
       persistedSkillsPlanDetail !== null ||
@@ -16234,6 +16247,7 @@ export function CoachAthletePlanningProfileView({
       generatePlanSuccess !== null;
     const planViewerAvailable =
       domainAvailable &&
+      hasReleasedDomainPlan &&
       hasPlanViewerTrigger;
 
     return resolveTrainingPlanWorkspaceLifecycleSteps({

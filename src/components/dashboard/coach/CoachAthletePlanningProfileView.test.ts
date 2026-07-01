@@ -59,6 +59,7 @@ import {
   domainIntegrationNextActionLabel,
   resolveDomainReviseAvailability,
   resolveTrainingPlanWorkspaceDomainIntegrationComplete,
+  resolveTrainingPlanWorkspaceHasReleasedDomain,
   resolveTrainingPlanWorkspaceLifecycleSteps,
   resolveContextAppStepCompleteForNavigation,
   resolveSetupStateAfterSeasonCreate,
@@ -1831,6 +1832,74 @@ describe("Step 3D domain workflow contract", () => {
 });
 
 describe("Training Plan Workspace lifecycle display", () => {
+  it("keeps Plan Viewer locked when domains are submitted for review but not released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const submittedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      submittedForReview: true,
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "ASSISTANT_COACH_APPROVED",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: submittedDomain("SKILLS"),
+        NUTRITION: submittedDomain("NUTRITION"),
+        S_AND_C: submittedDomain("S_AND_C"),
+      },
+    });
+    const hasReleasedDomain = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: hasReleasedDomain ? "plan-viewer" : "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: hasReleasedDomain,
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(hasReleasedDomain).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("keeps Plan Viewer locked when domains are Head Coach approved but not released", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const approvedDomain = (domain: "SKILLS" | "NUTRITION" | "S_AND_C") => ({
+      ...base.domains[domain],
+      submittedForReview: false,
+      summary: {
+        trainingPlanId: `${domain.toLowerCase()}-plan`,
+        versionId: `${domain.toLowerCase()}-version`,
+        generationDomain: domain,
+        status: "HEAD_COACH_APPROVED",
+        versionNumber: 1,
+      },
+    });
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: approvedDomain("SKILLS"),
+        NUTRITION: approvedDomain("NUTRITION"),
+        S_AND_C: approvedDomain("S_AND_C"),
+      },
+    });
+    const hasReleasedDomain = resolveTrainingPlanWorkspaceHasReleasedDomain(workspace);
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: hasReleasedDomain ? "plan-viewer" : "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: hasReleasedDomain,
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(hasReleasedDomain).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
   it("keeps Domain Plans Integration active for W1 partial domain release", () => {
     const base = workflow1OwnedSkillsWorkspace();
     const workspace = workflow1OwnedSkillsWorkspace({
@@ -1868,6 +1937,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     });
 
     expect(domainIntegrationComplete).toBe(false);
+    expect(resolveTrainingPlanWorkspaceHasReleasedDomain(workspace)).toBe(true);
     expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
     expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
   });

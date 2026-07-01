@@ -803,6 +803,52 @@ export type GovernedPlanContext = {
   generationDomain: TrainingPlanGenerationDomain;
 };
 
+export type DomainReviewRevisionContextSource = "domain_review_drawer";
+
+export type DomainReviewRevisionContext = {
+  athleteId: string;
+  domain: TrainingPlanGenerationDomain;
+  selectedPlanId: string | null;
+  selectedVersionId: string | null;
+  planStatus: string | null;
+  workflowStatus: AssistantDomainWorkflowStatus | null;
+  currentFreeTextRevisionInstruction: string;
+  source: DomainReviewRevisionContextSource;
+  selectedDay: number | null;
+  selectedDate: string | null;
+};
+
+export function buildDomainReviewRevisionContext(input: {
+  athleteId: string;
+  domain: TrainingPlanGenerationDomain;
+  selectedPlanId?: string | null;
+  selectedVersionId?: string | null;
+  planStatus?: string | null;
+  workflowStatus?: AssistantDomainWorkflowStatus | null;
+  currentFreeTextRevisionInstruction: string;
+  source?: DomainReviewRevisionContextSource;
+  selectedDay?: number | null;
+  selectedDate?: string | null;
+}): DomainReviewRevisionContext {
+  const normalizeOptionalString = (value: string | null | undefined): string | null => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed === "" ? null : trimmed;
+  };
+
+  return {
+    athleteId: input.athleteId.trim(),
+    domain: input.domain,
+    selectedPlanId: normalizeOptionalString(input.selectedPlanId),
+    selectedVersionId: normalizeOptionalString(input.selectedVersionId),
+    planStatus: normalizeOptionalString(input.planStatus),
+    workflowStatus: input.workflowStatus ?? null,
+    currentFreeTextRevisionInstruction: input.currentFreeTextRevisionInstruction.trim(),
+    source: input.source ?? "domain_review_drawer",
+    selectedDay: input.selectedDay ?? null,
+    selectedDate: normalizeOptionalString(input.selectedDate),
+  };
+}
+
 type HeadCoachDomainPlanState = {
   loading: boolean;
   error: string | null;
@@ -1028,6 +1074,18 @@ function reviewPlanButtonLabel(domain: TrainingPlanGenerationDomain): string {
   if (domain === "SKILLS") return "Review Skills Plan";
   if (domain === "NUTRITION") return "Review Nutrition Plan";
   return "Review S&C Plan";
+}
+
+function domainPlanReviewTitle(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Skills Plan Review";
+  if (domain === "NUTRITION") return "Nutrition Plan Review";
+  return "Strength & Conditioning Plan Review";
+}
+
+function openDomainPlanReviewLabel(domain: TrainingPlanGenerationDomain): string {
+  if (domain === "SKILLS") return "Open Skills Plan Review";
+  if (domain === "NUTRITION") return "Open Nutrition Plan Review";
+  return "Open S&C Plan Review";
 }
 
 function normalizeHeadCoachDomainWorkflowStatus(
@@ -5151,6 +5209,8 @@ export function CoachAthletePlanningProfileView({
   const [governedPlanActionSuccessFeedback, setGovernedPlanActionSuccessFeedback] =
     useState<string | null>(null);
   const [requestRevisionModalOpen, setRequestRevisionModalOpen] = useState(false);
+  const [requestRevisionDrawerComposerOpen, setRequestRevisionDrawerComposerOpen] =
+    useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
   const [requestRevisionActionContext, setRequestRevisionActionContext] =
     useState<GovernedPlanContext | null>(null);
@@ -10258,7 +10318,10 @@ export function CoachAthletePlanningProfileView({
       return;
     }
     if (action === "REQUEST_REVISION") {
-      setRequestRevisionModalOpen(true);
+      const useDrawerComposer =
+        domainReviewDrawerOpen && domainReviewDrawerDomain === actionContext.generationDomain;
+      setRequestRevisionDrawerComposerOpen(useDrawerComposer);
+      setRequestRevisionModalOpen(!useDrawerComposer);
       setRequestRevisionActionContext(actionContext);
       setGovernedPlanActionError(null);
       setGovernedPlanActionSuccess(null);
@@ -10407,6 +10470,14 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  function handleCancelRequestRevision() {
+    setRequestRevisionModalOpen(false);
+    setRequestRevisionDrawerComposerOpen(false);
+    setRequestRevisionActionContext(null);
+    setRequestRevisionFeedback("");
+    setGovernedPlanActionError(null);
+  }
+
   async function handleRequestRevisionSubmit(
     event?: FormEvent<HTMLFormElement>,
     actionContextOverride?: GovernedPlanContext | null,
@@ -10418,7 +10489,18 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
-    const coachFeedback = requestRevisionFeedback.trim();
+    const actionDomain = actionContext.generationDomain;
+    const reviewModel = resolveDomainReviewSurfaceModel(actionDomain);
+    const revisionContext = buildDomainReviewRevisionContext({
+      athleteId: athleteIdTrimmed,
+      domain: actionDomain,
+      selectedPlanId: actionContext.planId,
+      selectedVersionId: actionContext.versionId,
+      planStatus: reviewModel.planStatusLabel,
+      workflowStatus: reviewModel.workflowStatus,
+      currentFreeTextRevisionInstruction: requestRevisionFeedback,
+    });
+    const coachFeedback = revisionContext.currentFreeTextRevisionInstruction;
     if (coachFeedback === "") {
       setGovernedPlanActionError("Revision feedback is required.");
       setGovernedPlanActionSuccess(null);
@@ -10431,7 +10513,6 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccess(null);
     setGovernedPlanActionSuccessFeedback(null);
 
-    const actionDomain = actionContext.generationDomain;
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
 
     try {
@@ -10454,6 +10535,7 @@ export function CoachAthletePlanningProfileView({
       }
       setRequestRevisionFeedback("");
       setRequestRevisionModalOpen(false);
+      setRequestRevisionDrawerComposerOpen(false);
       setRequestRevisionActionContext(null);
       const domainLabel = trainingPlanDomainLabel(actionDomain);
       setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
@@ -11067,7 +11149,7 @@ export function CoachAthletePlanningProfileView({
               Selected Domain Current State
             </h4>
             <p className="text-sm text-textSecondary">
-              Track the selected domain here; open the drawer to inspect the plan and continue actions.
+              Track the selected domain and continue review actions.
             </p>
           </div>
           <Button
@@ -11117,7 +11199,7 @@ export function CoachAthletePlanningProfileView({
                 variant="primary"
                 onClick={() => handleOpenDomainReviewDrawer(reviewDomain)}
               >
-                Open Domain Review Drawer
+                {openDomainPlanReviewLabel(reviewDomain)}
               </Button>
             </div>
           </>
@@ -11130,6 +11212,194 @@ export function CoachAthletePlanningProfileView({
         }) ? (
           <div className="text-sm text-textSecondary">No submitted plan data available for this domain.</div>
         ) : null}
+      </section>
+    );
+  }
+
+  function formatDrawerWeekdayName(date: string | null | undefined): string | null {
+    const value = date?.trim() ?? "";
+    if (value === "") return null;
+    const parsed = new Date(value.includes("T") ? value : `${value}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    }).format(parsed);
+  }
+
+  function renderDomainReviewDrawerFact(label: string, value: ReactNode) {
+    return (
+      <div className="min-w-0 space-y-0.5">
+        <div className="text-xs uppercase tracking-wide text-textMuted">{label}</div>
+        <div className="min-w-0 break-words text-sm text-textPrimary">{value}</div>
+      </div>
+    );
+  }
+
+  function renderDomainReviewDrawerStructureItem(
+    item: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number]["sessionStructureSections"][number]["items"][number],
+    itemOffset: number,
+  ) {
+    const title = (item as { title?: DisplayableValue }).title;
+    const instructions = (item as { instructions?: DisplayableValue }).instructions;
+    const balls = (item as { balls?: DisplayableValue }).balls;
+    const sets = (item as { sets?: DisplayableValue }).sets;
+    const primaryText =
+      hasRenderableValue(title)
+        ? displayValue(title)
+        : hasRenderableValue(item.label)
+          ? displayLabelTitleCase(item.label)
+          : hasRenderableValue(item.summary)
+            ? displayValue(item.summary)
+            : `Item ${itemOffset + 1}`;
+    const measures = [
+      hasRenderableValue(item.durationMinutes)
+        ? formatMinutesAsHoursMinutes(Number(item.durationMinutes))
+        : null,
+      hasRenderableValue(item.reps) ? `${displayValue(item.reps)} reps` : null,
+      hasRenderableValue(sets) ? `${displayValue(sets)} sets` : null,
+      hasRenderableValue(balls) ? `${displayValue(balls)} balls` : null,
+      hasRenderableValue(item.intensity) ? displayValue(item.intensity) : null,
+    ].filter((value): value is string => value !== null && value.trim() !== "");
+
+    return (
+      <li key={`${item.label ?? item.summary ?? "item"}-${itemOffset}`} className="space-y-1">
+        <div className="text-sm text-textPrimary">{primaryText}</div>
+        {measures.length > 0 ? (
+          <div className="text-xs text-textSecondary">{measures.join(" · ")}</div>
+        ) : null}
+        {hasRenderableValue(instructions) ? (
+          <div className="text-sm text-textSecondary">{displayValue(instructions)}</div>
+        ) : hasRenderableValue(item.summary) && primaryText !== displayValue(item.summary) ? (
+          <div className="text-sm text-textSecondary">{displayValue(item.summary)}</div>
+        ) : null}
+        {hasRenderableValue(item.notes) ? (
+          <div className="text-sm text-textSecondary">Notes: {displayValue(item.notes)}</div>
+        ) : null}
+        <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+      </li>
+    );
+  }
+
+  function renderDomainReviewDrawerSession(
+    session: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number],
+    sessionOffset: number,
+  ) {
+    const sessionNotes = (session as { notes?: DisplayableValue }).notes;
+    const sessionHeading = hasRenderableValue(session.title)
+      ? displayLabelTitleCase(session.title)
+      : `Session ${sessionOffset + 1}`;
+    const sessionDetails = [
+      hasRenderableValue(session.objective) ? displayValue(session.objective) : null,
+      hasRenderableValue(session.plannedDurationMinutes)
+        ? formatMinutesAsHoursMinutes(readSessionDurationMinutes(session))
+        : null,
+      hasRenderableValue(session.intensity) ? displayValue(session.intensity) : null,
+    ].filter((value): value is string => value !== null && value.trim() !== "");
+
+    return (
+      <div key={session.id ?? `session-${sessionOffset}`} className="space-y-3 py-4">
+        <div className="space-y-1">
+          <h5 className="text-sm font-medium text-textPrimary">{sessionHeading}</h5>
+          {sessionDetails.length > 0 ? (
+            <div className="text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
+          ) : null}
+          {hasRenderableValue(session.description) ? (
+            <div className="text-sm text-textSecondary">{displayValue(session.description)}</div>
+          ) : null}
+          {hasRenderableValue(sessionNotes) ? (
+            <div className="text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
+          ) : null}
+        </div>
+        {session.sessionStructureSections.length > 0 ? (
+          <div className="space-y-3">
+            {session.sessionStructureSections.map((section, sectionOffset) => (
+              <div key={`${section.key}-${sectionOffset}`} className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-textMuted">
+                  {persistedSessionStructureLabel(section.key)}
+                </div>
+                {section.items.length > 0 ? (
+                  <ul className="space-y-3 pl-4">
+                    {section.items.map((item, itemOffset) =>
+                      renderDomainReviewDrawerStructureItem(item, itemOffset),
+                    )}
+                  </ul>
+                ) : (
+                  <div className="text-sm text-textSecondary">No content in this section.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-textSecondary">No detailed session structure available.</div>
+        )}
+      </div>
+    );
+  }
+
+  function renderDomainReviewDrawerPlanBody(
+    detail: CoachPersistedTrainingPlanActiveDetail,
+    domainLabel: string,
+  ) {
+    const sortedDays = [...detail.days].sort((a, b) => {
+      const aIndex = typeof a.dayIndex === "number" ? a.dayIndex : Number.MAX_SAFE_INTEGER;
+      const bIndex = typeof b.dayIndex === "number" ? b.dayIndex : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      return String(a.date ?? "").localeCompare(String(b.date ?? ""));
+    });
+    const hasSessions = sortedDays.some((day) => day.sessions.length > 0);
+
+    return (
+      <section className="space-y-4 border-t border-border/70 pt-5">
+        <div className="space-y-1">
+          <h4 className="text-sm font-normal text-textPrimary">{domainLabel} Schedule</h4>
+          <p className="text-sm text-textSecondary">
+            Review the submitted plan by day and session.
+          </p>
+        </div>
+        {!hasSessions ? (
+          <div className="text-sm text-textSecondary">No scheduled sessions are available.</div>
+        ) : (
+          <div className="divide-y divide-border/70">
+            {sortedDays.map((day, dayOffset) => {
+              const dayNumber = day.dayIndex ?? dayOffset + 1;
+              const weekdayName = formatDrawerWeekdayName(day.date);
+              const dayFocus = (day as { dayFocus?: DisplayableValue }).dayFocus;
+              return (
+                <section key={day.id ?? `day-${dayOffset}`} className="space-y-3 py-5 first:pt-0">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <h5 className="text-base font-medium text-textPrimary">Day {dayNumber}</h5>
+                      {weekdayName ? (
+                        <span className="text-sm text-textSecondary">{weekdayName}</span>
+                      ) : null}
+                      {day.date ? (
+                        <span className="text-sm text-textSecondary">
+                          {formatDateOnly(day.date)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {hasRenderableValue(dayFocus) ? (
+                      <div className="text-sm text-textSecondary">Focus: {displayValue(dayFocus)}</div>
+                    ) : null}
+                    {hasRenderableValue(day.notes) ? (
+                      <div className="text-sm text-textSecondary">Notes: {displayValue(day.notes)}</div>
+                    ) : null}
+                  </div>
+                  {day.sessions.length === 0 ? (
+                    <div className="text-sm text-textSecondary">No sessions scheduled.</div>
+                  ) : (
+                    <div className="divide-y divide-border/70">
+                      {day.sessions.map((session, sessionOffset) =>
+                        renderDomainReviewDrawerSession(session, sessionOffset),
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
       </section>
     );
   }
@@ -11158,10 +11428,19 @@ export function CoachAthletePlanningProfileView({
       viewPlanContext,
     } = reviewModel;
     const hasDrawerWorkflowActions =
-      (canShowViewPlan && viewPlanContext !== null) ||
+      (workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null) ||
       canShowApproveAction ||
       canShowRequestRevisionAction ||
       canShowReleaseAction;
+    const drawerRevisionComposerOpen =
+      requestRevisionDrawerComposerOpen &&
+      requestRevisionActionContext?.generationDomain === reviewDomain;
+    const planWindowStart = activeDetail?.version.startDate ?? null;
+    const planWindowEnd = activeDetail?.version.endDate ?? null;
+    const planWindowLabel =
+      planWindowStart !== null || planWindowEnd !== null
+        ? formatDateRange(planWindowStart, planWindowEnd)
+        : null;
 
     return (
       <div
@@ -11216,9 +11495,8 @@ export function CoachAthletePlanningProfileView({
                   id="domain-review-drawer-title"
                   className="text-lg font-medium text-textPrimary"
                 >
-                  Domain Review Drawer
+                  {domainPlanReviewTitle(reviewDomain)}
                 </h3>
-                <p className="text-sm text-textSecondary">{reviewDomainLabel}</p>
               </div>
               <Button
                 type="button"
@@ -11231,9 +11509,9 @@ export function CoachAthletePlanningProfileView({
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <div className="space-y-5">
-              <section className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+              <section className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-sm font-normal text-textPrimary">Review Status</h4>
+                  <h4 className="text-sm font-normal text-textPrimary">Current State</h4>
                   <span
                     className={cn(
                       "inline-flex rounded-full border px-2 py-0.5 text-xs",
@@ -11243,17 +11521,23 @@ export function CoachAthletePlanningProfileView({
                     {statusLabel}
                   </span>
                 </div>
-                <dl className="space-y-1">
-                  <DetailRow label="Domain" value={reviewDomainLabel} />
-                  <DetailRow label="Assigned Coach" value={assignedCoachLabel} />
-                  <DetailRow label="Plan status" value={planStatusLabel} />
-                  <DetailRow
-                    label="Workflow status"
-                    value={assistantWorkflowStatusLabelForKind(workflowStatus)}
-                  />
-                  <DetailRow label="Current step / next action" value={nextActionLabel} />
-                  <DetailRow label="Version" value={displayValue(versionNumber)} />
-                  <DetailRow label="Training Days" value={displayValue(trainingDays)} />
+                <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                  {renderDomainReviewDrawerFact("Assigned Coach", assignedCoachLabel)}
+                  {planWindowLabel !== null
+                    ? renderDomainReviewDrawerFact("Plan Window", planWindowLabel)
+                    : null}
+                  {versionNumber !== null
+                    ? renderDomainReviewDrawerFact("Version", displayValue(versionNumber))
+                    : null}
+                  {renderDomainReviewDrawerFact("Plan Status", planStatusLabel)}
+                  {renderDomainReviewDrawerFact(
+                    "Workflow Status",
+                    assistantWorkflowStatusLabelForKind(workflowStatus),
+                  )}
+                  {renderDomainReviewDrawerFact("Current Step / Next Action", nextActionLabel)}
+                  {trainingDays !== null
+                    ? renderDomainReviewDrawerFact("Training Days", displayValue(trainingDays))
+                    : null}
                 </dl>
                 {domainState.loading ? (
                   <DashboardStatusNotice type="loading" compact>
@@ -11282,7 +11566,7 @@ export function CoachAthletePlanningProfileView({
                 ) : null}
               </section>
 
-              <section className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+              <section className="space-y-3 border-t border-border/70 pt-5">
                 <div className="space-y-1">
                   <h4 className="text-sm font-normal text-textPrimary">Review Actions</h4>
                   <p className="text-sm text-textSecondary">
@@ -11291,7 +11575,7 @@ export function CoachAthletePlanningProfileView({
                 </div>
                 {hasDrawerWorkflowActions ? (
                   <div className="flex flex-wrap gap-2">
-                    {canShowViewPlan && viewPlanContext !== null ? (
+                    {workflowStatus === "released" && canShowViewPlan && viewPlanContext !== null ? (
                       <Button
                         type="button"
                         variant="secondary"
@@ -11300,7 +11584,7 @@ export function CoachAthletePlanningProfileView({
                           void handleViewWorkspaceDomainPlan(reviewDomain, viewPlanContext);
                         }}
                       >
-                        View Domain Plan
+                        View in Plan Viewer
                       </Button>
                     ) : null}
                     {canShowApproveAction ? (
@@ -11316,7 +11600,7 @@ export function CoachAthletePlanningProfileView({
                         Approve Plan
                       </Button>
                     ) : null}
-                    {canShowRequestRevisionAction ? (
+                    {canShowRequestRevisionAction && !drawerRevisionComposerOpen ? (
                       <Button
                         type="button"
                         variant="secondary"
@@ -11352,12 +11636,56 @@ export function CoachAthletePlanningProfileView({
                 )}
               </section>
 
+              {drawerRevisionComposerOpen ? (
+                <section className="space-y-3 border-t border-border/70 pt-5">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-normal text-textPrimary">Request Changes</h4>
+                    <p className="text-sm text-textSecondary">
+                      Tell the domain coach what needs to change.
+                    </p>
+                  </div>
+                  <form
+                    className="space-y-3"
+                    onSubmit={(event) => void handleRequestRevisionSubmit(event, actionContext)}
+                  >
+                    <label className="space-y-1 text-sm text-textPrimary">
+                      <span className="font-medium">Revision feedback</span>
+                      <textarea
+                        rows={5}
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={requestRevisionFeedback}
+                        onChange={(event) => setRequestRevisionFeedback(event.target.value)}
+                        placeholder="Describe the required changes."
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                      />
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                        onClick={handleCancelRequestRevision}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                        disabled={
+                          governedPlanActionLoading === "REQUEST_REVISION" ||
+                          requestRevisionFeedback.trim() === ""
+                        }
+                      >
+                        Submit Request Changes
+                      </Button>
+                    </div>
+                  </form>
+                </section>
+              ) : null}
+
               {activeDetail !== null ? (
-                <div className="[&_>div]:border-slate-200 [&_>div]:bg-white">
-                  {renderPlanViewerPersistedPlanDetail(activeDetail, {
-                    title: `${reviewDomainLabel} Detail`,
-                  })}
-                </div>
+                renderDomainReviewDrawerPlanBody(activeDetail, reviewDomainLabel)
               ) : !domainState.loading && domainState.error === null ? (
                 <div className="text-sm text-textSecondary">
                   No submitted plan data available for this domain.
@@ -13109,7 +13437,9 @@ export function CoachAthletePlanningProfileView({
             </Button>
           ) : null}
         </div>
-        {governedPlanActionError && !requestRevisionModalOpen ? (
+        {governedPlanActionError &&
+        !requestRevisionModalOpen &&
+        !requestRevisionDrawerComposerOpen ? (
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
         {governedPlanActionSuccess ? (
@@ -17438,12 +17768,7 @@ export function CoachAthletePlanningProfileView({
                     type="button"
                     variant="secondary"
                     disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                    onClick={() => {
-                      setRequestRevisionModalOpen(false);
-                      setRequestRevisionActionContext(null);
-                      setRequestRevisionFeedback("");
-                      setGovernedPlanActionError(null);
-                    }}
+                    onClick={handleCancelRequestRevision}
                   >
                     Cancel
                   </Button>

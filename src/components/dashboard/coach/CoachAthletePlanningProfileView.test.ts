@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDomainReviewRevisionContext,
   buildCoachWorkflowResetScopeKey,
   deriveHeadCoachDomainWorkflowStatus,
   deriveAssistantDomainWorkflowStatus,
@@ -1827,6 +1828,33 @@ describe("Step 3D domain workflow contract", () => {
       mutationEnabled: false,
       placeholderVisible: false,
       reason: "not_authorized",
+    });
+  });
+});
+
+describe("buildDomainReviewRevisionContext", () => {
+  it("prepares free-text revision context without mutating the instruction flow", () => {
+    expect(
+      buildDomainReviewRevisionContext({
+        athleteId: " athlete-1 ",
+        domain: "SKILLS",
+        selectedPlanId: " plan-1 ",
+        selectedVersionId: " version-1 ",
+        planStatus: " Submitted for Review ",
+        workflowStatus: "submitted_for_review",
+        currentFreeTextRevisionInstruction: "  Add more recovery guidance.  ",
+      }),
+    ).toEqual({
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      selectedPlanId: "plan-1",
+      selectedVersionId: "version-1",
+      planStatus: "Submitted for Review",
+      workflowStatus: "submitted_for_review",
+      currentFreeTextRevisionInstruction: "Add more recovery guidance.",
+      source: "domain_review_drawer",
+      selectedDay: null,
+      selectedDate: null,
     });
   });
 });

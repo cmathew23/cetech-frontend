@@ -857,7 +857,7 @@ describe("parseReadinessPayload", () => {
       trainingPlanVersionId: "version-2",
     });
 
-    await reviseNutritionPlan("entity-1", "athlete-1", {
+    const result = await reviseNutritionPlan("entity-1", "athlete-1", {
       trainingPlanId: "plan-1",
       versionId: "version-2",
       coachFeedback: "Increase protein at breakfast",
@@ -875,6 +875,13 @@ describe("parseReadinessPayload", () => {
         }),
       },
     );
+    expect(result).toMatchObject({
+      planId: "plan-1",
+      versionId: "version-2",
+      versionNumber: null,
+      generationDomain: "NUTRITION",
+      detail: null,
+    });
   });
 
   it("fetches persisted active detail with generationDomain query", async () => {

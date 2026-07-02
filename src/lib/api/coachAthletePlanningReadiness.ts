@@ -358,6 +358,16 @@ export type TrainingPlanStatus =
   | "HEAD_COACH_APPROVED"
   | "ACTIVE";
 
+function readTrainingPlanGenerationDomain(
+  value: string | null | undefined,
+): TrainingPlanGenerationDomain | null {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  if (normalized === "SKILLS" || normalized === "NUTRITION" || normalized === "S_AND_C") {
+    return normalized;
+  }
+  return null;
+}
+
 export type CoachAthleteTrainingPlanExecuteResult = {
   executionDecision: {
     executed: boolean | null;
@@ -643,6 +653,15 @@ export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
   coachFeedback: string;
+};
+
+export type TrainingPlanReviseResult = {
+  planId: string | null;
+  versionId: string | null;
+  versionNumber: number | null;
+  generationDomain: TrainingPlanGenerationDomain | null;
+  detail: CoachPersistedTrainingPlanActiveDetail | null;
+  raw: unknown;
 };
 
 export type PlanningContextLockPayload = {
@@ -1140,6 +1159,45 @@ function parsePersistedTrainingPlanActiveDetailPayload(
           .map(parsePersistedTrainingPlanDetailDay)
           .filter((day): day is CoachPersistedTrainingPlanDetailDay => day !== null)
       : [],
+    raw: data,
+  };
+}
+
+function parseTrainingPlanReviseResult(
+  data: unknown,
+  fallbackPayload: TrainingPlanRevisePayload,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): TrainingPlanReviseResult {
+  const adapted = adaptBackendSuccess(data);
+  let detail: CoachPersistedTrainingPlanActiveDetail | null = null;
+
+  try {
+    detail = parsePersistedTrainingPlanActiveDetailPayload(adapted, fallbackPayload.trainingPlanId);
+  } catch {
+    detail = null;
+  }
+
+  const records = collectRecords(adapted);
+  return {
+    planId:
+      detail?.plan.id ??
+      readStringKey(records, ["trainingPlanId", "planId"]) ??
+      fallbackPayload.trainingPlanId,
+    versionId:
+      detail?.version.id ??
+      readStringKey(records, [
+        "trainingPlanVersionId",
+        "versionId",
+        "latestVersionId",
+        "selectedVersionId",
+      ]) ??
+      fallbackPayload.versionId,
+    versionNumber: detail?.version.versionNumber ?? readNumberKey(records, ["versionNumber"]),
+    generationDomain:
+      readTrainingPlanGenerationDomain(detail?.generationDomain) ??
+      readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain"])) ??
+      fallbackDomain,
+    detail,
     raw: data,
   };
 }
@@ -2515,7 +2573,7 @@ export async function reviseSkillsPlan(
   entityId: string,
   athleteId: string,
   payload: TrainingPlanRevisePayload,
-): Promise<void> {
+): Promise<TrainingPlanReviseResult> {
   const ids = assertIds(entityId, athleteId);
   const normalizedPayload = assertRevisePayload(
     payload,
@@ -2529,22 +2587,22 @@ export async function reviseSkillsPlan(
       body: JSON.stringify(normalizedPayload),
     },
   );
-  void raw;
+  return parseTrainingPlanReviseResult(raw, normalizedPayload, "SKILLS");
 }
 
 export async function reviseCoachAthleteSkillsTrainingPlan(
   entityId: string,
   athleteId: string,
   payload: TrainingPlanRevisePayload,
-): Promise<void> {
-  await reviseSkillsPlan(entityId, athleteId, payload);
+): Promise<TrainingPlanReviseResult> {
+  return reviseSkillsPlan(entityId, athleteId, payload);
 }
 
 export async function reviseNutritionPlan(
   entityId: string,
   athleteId: string,
   payload: TrainingPlanRevisePayload,
-): Promise<void> {
+): Promise<TrainingPlanReviseResult> {
   const ids = assertIds(entityId, athleteId);
   const normalizedPayload = assertRevisePayload(
     payload,
@@ -2558,14 +2616,14 @@ export async function reviseNutritionPlan(
       body: JSON.stringify(normalizedPayload),
     },
   );
-  void raw;
+  return parseTrainingPlanReviseResult(raw, normalizedPayload, "NUTRITION");
 }
 
 export async function reviseSandcPlan(
   entityId: string,
   athleteId: string,
   payload: TrainingPlanRevisePayload,
-): Promise<void> {
+): Promise<TrainingPlanReviseResult> {
   const ids = assertIds(entityId, athleteId);
   const normalizedPayload = assertRevisePayload(
     payload,
@@ -2579,15 +2637,15 @@ export async function reviseSandcPlan(
       body: JSON.stringify(normalizedPayload),
     },
   );
-  void raw;
+  return parseTrainingPlanReviseResult(raw, normalizedPayload, "S_AND_C");
 }
 
 export async function reviseCoachAthleteSandCTrainingPlan(
   entityId: string,
   athleteId: string,
   payload: TrainingPlanRevisePayload,
-): Promise<void> {
-  await reviseSandcPlan(entityId, athleteId, payload);
+): Promise<TrainingPlanReviseResult> {
+  return reviseSandcPlan(entityId, athleteId, payload);
 }
 
 export async function fetchAthleteWeeklyPlanJournal(

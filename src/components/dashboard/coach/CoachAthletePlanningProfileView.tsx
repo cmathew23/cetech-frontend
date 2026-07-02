@@ -2787,10 +2787,12 @@ function WorkflowLockedCard({
   title,
   message,
   actionLabel,
+  onAction,
 }: {
   title: string;
   message: string;
   actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -2801,7 +2803,7 @@ function WorkflowLockedCard({
       <p className="mt-2 text-sm text-slate-500">{message}</p>
       {actionLabel ? (
         <div className="mt-3">
-          <Button type="button" variant="secondary" disabled>
+          <Button type="button" variant="secondary" disabled={onAction === undefined} onClick={onAction}>
             {actionLabel}
           </Button>
         </div>
@@ -3802,10 +3804,24 @@ export function resolveSkillsOwnedDirectReleaseCurrentStep(input: {
   if (input.planningContextLocked && !input.skillsPlanExists) {
     return "generate";
   }
-  if (input.contextHasPlanWindow && !input.skillsPlanExists) {
-    return "generate";
-  }
   return null;
+}
+
+export function resolveSkillsOwnedDirectReleasePreContextTab(input: {
+  workflowMode: TrainingPlanWorkflowMode;
+  selectedTab: GuidedWorkflowStepKey;
+  requestedPlanId: string | null;
+  urlPlanCandidate: string | null;
+  planningContextLocked: boolean;
+  fallbackContextBuilderTab: ContextBuilderStepKey;
+}): GuidedWorkflowStepKey {
+  if (input.workflowMode !== "skills_coach_planning") return input.selectedTab;
+  if (input.selectedTab !== "generate") return input.selectedTab;
+  if (input.planningContextLocked) return input.selectedTab;
+  if (input.requestedPlanId !== null || input.urlPlanCandidate !== null) {
+    return input.selectedTab;
+  }
+  return input.fallbackContextBuilderTab;
 }
 
 function isTerminalBootstrapLoadState(state: TrainingPlanBootstrapLoadState): boolean {
@@ -9851,6 +9867,75 @@ export function CoachAthletePlanningProfileView({
     ],
   );
 
+  const workflowStepperModel = useMemo(
+    () =>
+      WORKFLOW_STEP_SEQUENCE_LIST.map((key) => {
+        const prec = workflowPrecMap[key];
+        const stepDone = workflowStepCompleteForTick[key];
+        let status: GuidedWorkflowStepStatus;
+        if (!prec) {
+          status = "locked";
+        } else if (selectedWorkflowTab === key) {
+          status = "active";
+        } else if (stepDone) {
+          status = "completed";
+        } else {
+          status = "available";
+        }
+        return {
+          key,
+          title: workflowStepLabel(key, headCoachReviewMode, "tab", reviewReviseStepLabel),
+          summary: "",
+          status,
+          markCompleteTick: stepDone,
+        };
+      }) satisfies GuidedWorkflowUiStep[],
+    [
+      headCoachReviewMode,
+      reviewReviseStepLabel,
+      selectedWorkflowTab,
+      workflowPrecMap,
+      workflowStepCompleteForTick,
+    ],
+  );
+
+  const workflowStepStatusByKey = useMemo(
+    () =>
+      Object.fromEntries(
+        workflowStepperModel.map((step) => [step.key, step.status]),
+      ) as Record<GuidedWorkflowStepKey, GuidedWorkflowStepStatus>,
+    [workflowStepperModel],
+  );
+
+  const resolvePreLockContextBuilderTab = useCallback((): ContextBuilderStepKey => {
+    const firstIncomplete: ContextBuilderStepKey =
+      !appStepComplete
+        ? "context-app"
+        : !levelStepComplete
+          ? "level-validation"
+          : !workloadComplete
+            ? "workload"
+            : !seasonGoalsGateComplete
+              ? "season-goals"
+              : "plan-dates";
+
+    if (workflowStepStatusByKey[firstIncomplete] !== "locked") {
+      return firstIncomplete;
+    }
+
+    return (
+      CONTEXT_BUILDER_STEP_SEQUENCE_LIST.find(
+        (step) => workflowStepStatusByKey[step] !== "locked",
+      ) ?? "context-app"
+    );
+  }, [
+    appStepComplete,
+    levelStepComplete,
+    seasonGoalsGateComplete,
+    workloadComplete,
+    workflowStepStatusByKey,
+  ]);
+
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
   useEffect(() => {
     if (!trainingPlanShellModel.ready) return;
@@ -9943,10 +10028,18 @@ export function CoachAthletePlanningProfileView({
         planDatesStepComplete: planDatesStepCompleteDep,
         isDownstreamDomainCoach,
       });
+    const safeResolvedTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode,
+      selectedTab: resolvedTab,
+      requestedPlanId: requestedPlanIdDep,
+      urlPlanCandidate: urlPlanCandidateDep,
+      planningContextLocked: effectiveSkillsPlanningContextLocked,
+      fallbackContextBuilderTab: resolvePreLockContextBuilderTab(),
+    });
 
     workflowInitialTabResolvedRef.current = true;
-    if (resolvedTab !== selectedWorkflowTabDep) {
-      setSelectedWorkflowTab(resolvedTab);
+    if (safeResolvedTab !== selectedWorkflowTabDep) {
+      setSelectedWorkflowTab(safeResolvedTab);
     }
   }, [
     appStepCompleteDep,
@@ -9960,6 +10053,7 @@ export function CoachAthletePlanningProfileView({
     planningContextLocked,
     readinessLoadingDep,
     requestedPlanIdDep,
+    resolvePreLockContextBuilderTab,
     seasonGoalsGateCompleteDep,
     selectedWorkflowTabDep,
     trainingPlanShellModel.shell,
@@ -10042,75 +10136,6 @@ export function CoachAthletePlanningProfileView({
     urlPlanCandidate,
   ]);
 
-  const workflowStepperModel = useMemo(
-    () =>
-      WORKFLOW_STEP_SEQUENCE_LIST.map((key) => {
-        const prec = workflowPrecMap[key];
-        const stepDone = workflowStepCompleteForTick[key];
-        let status: GuidedWorkflowStepStatus;
-        if (!prec) {
-          status = "locked";
-        } else if (selectedWorkflowTab === key) {
-          status = "active";
-        } else if (stepDone) {
-          status = "completed";
-        } else {
-          status = "available";
-        }
-        return {
-          key,
-          title: workflowStepLabel(key, headCoachReviewMode, "tab", reviewReviseStepLabel),
-          summary: "",
-          status,
-          markCompleteTick: stepDone,
-        };
-      }) satisfies GuidedWorkflowUiStep[],
-    [
-      headCoachReviewMode,
-      reviewReviseStepLabel,
-      selectedWorkflowTab,
-      workflowPrecMap,
-      workflowStepCompleteForTick,
-    ],
-  );
-
-  const workflowStepStatusByKey = useMemo(
-    () =>
-      Object.fromEntries(
-        workflowStepperModel.map((step) => [step.key, step.status]),
-      ) as Record<GuidedWorkflowStepKey, GuidedWorkflowStepStatus>,
-    [workflowStepperModel],
-  );
-
-  const resolvePreLockContextBuilderTab = useCallback((): ContextBuilderStepKey => {
-    const firstIncomplete: ContextBuilderStepKey =
-      !appStepComplete
-        ? "context-app"
-        : !levelStepComplete
-          ? "level-validation"
-          : !workloadComplete
-            ? "workload"
-            : !seasonGoalsGateComplete
-              ? "season-goals"
-              : "plan-dates";
-
-    if (workflowStepStatusByKey[firstIncomplete] !== "locked") {
-      return firstIncomplete;
-    }
-
-    return (
-      CONTEXT_BUILDER_STEP_SEQUENCE_LIST.find(
-        (step) => workflowStepStatusByKey[step] !== "locked",
-      ) ?? "context-app"
-    );
-  }, [
-    appStepComplete,
-    levelStepComplete,
-    seasonGoalsGateComplete,
-    workloadComplete,
-    workflowStepStatusByKey,
-  ]);
-
   useEffect(() => {
     if (!trainingPlanShellModel.ready) return;
     if (shouldResolveSpecialistDomainWorkspace) return;
@@ -10135,6 +10160,29 @@ export function CoachAthletePlanningProfileView({
     shouldResolveSpecialistDomainWorkspace,
     trainingPlanShellModel.ready,
     trainingPlanShellModel.shell,
+  ]);
+
+  useEffect(() => {
+    if (!trainingPlanShellModel.ready) return;
+    const safeSelectedTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode: trainingPlanShellModel.workflowMode,
+      selectedTab: selectedWorkflowTab,
+      requestedPlanId,
+      urlPlanCandidate,
+      planningContextLocked: effectiveSkillsPlanningContextLocked,
+      fallbackContextBuilderTab: resolvePreLockContextBuilderTab(),
+    });
+    if (safeSelectedTab === selectedWorkflowTab) return;
+
+    setSelectedWorkflowTab(safeSelectedTab);
+  }, [
+    effectiveSkillsPlanningContextLocked,
+    requestedPlanId,
+    resolvePreLockContextBuilderTab,
+    selectedWorkflowTab,
+    trainingPlanShellModel.ready,
+    trainingPlanShellModel.workflowMode,
+    urlPlanCandidate,
   ]);
 
   const loadWorkloadAssessment = useCallback(
@@ -18494,6 +18542,22 @@ export function CoachAthletePlanningProfileView({
                           : headCoachReviewMode
                             ? "Confirm plan dates in Step 5, then lock and review submitted domain plans here."
                             : "Confirm plan dates in Step 5 (with a valid window inside the current phase), or open an existing saved plan."
+                      }
+                      actionLabel={
+                        trainingPlanShellModel.shell === "skills_coach_planning" &&
+                        !effectiveSkillsPlanningContextLocked &&
+                        requestedPlanId === null &&
+                        urlPlanCandidate === null
+                          ? "Go to Context Builder"
+                          : undefined
+                      }
+                      onAction={
+                        trainingPlanShellModel.shell === "skills_coach_planning" &&
+                        !effectiveSkillsPlanningContextLocked &&
+                        requestedPlanId === null &&
+                        urlPlanCandidate === null
+                          ? () => setSelectedWorkflowTab(resolvePreLockContextBuilderTab())
+                          : undefined
                       }
                     />
                   }

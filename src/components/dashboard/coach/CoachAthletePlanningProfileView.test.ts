@@ -8,6 +8,7 @@ import {
   resolveNoHeadCoachDirectReleaseLockedPlanningContext,
   resolveInitialTrainingPlanWorkflowTab,
   resolveSkillsOwnedDirectReleaseCurrentStep,
+  resolveSkillsOwnedDirectReleasePreContextTab,
   renderGenerationJobButtonLabel,
   resolveStep6GenerationLifecyclePhase,
   resolveTrainingPlanShellOwnership,
@@ -3085,6 +3086,83 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     });
   }
 
+  it("opens Context Builder instead of locked Domain Integration before context lock", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: false,
+        resolved: false,
+      },
+      initialTab: "DOMAIN",
+    });
+    const activeTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode: resolveWorkflowModeFromWorkspace(workspace),
+      selectedTab: "generate",
+      requestedPlanId: null,
+      urlPlanCandidate: null,
+      planningContextLocked: workspace.planningContext.locked,
+      fallbackContextBuilderTab: "context-app",
+    });
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "context-builder",
+      contextComplete: false,
+      domainAvailable: false,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(activeTab).toBe("context-app");
+    expect(steps.find((step) => step.key === "context-builder")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("locked");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("does not strand Workflow 3 on locked Domain Integration without an explicit plan link", () => {
+    expect(
+      resolveSkillsOwnedDirectReleasePreContextTab({
+        workflowMode: "skills_coach_planning",
+        selectedTab: "generate",
+        requestedPlanId: null,
+        urlPlanCandidate: null,
+        planningContextLocked: false,
+        fallbackContextBuilderTab: "plan-dates",
+      }),
+    ).toBe("plan-dates");
+  });
+
+  it("keeps Domain Integration available for Skills after context lock", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: true,
+        resolved: true,
+      },
+    });
+    const activeTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode: resolveWorkflowModeFromWorkspace(workspace),
+      selectedTab: "generate",
+      requestedPlanId: null,
+      urlPlanCandidate: null,
+      planningContextLocked: workspace.planningContext.locked,
+      fallbackContextBuilderTab: "context-app",
+    });
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(activeTab).toBe("generate");
+    expect(workspace.assignmentContext?.domains.SKILLS.canGenerate).toBe(true);
+    expect(workspace.assignmentContext?.domains.NUTRITION.canGenerate).toBe(false);
+    expect(workspace.assignmentContext?.domains.S_AND_C.canGenerate).toBe(false);
+    expect(steps.find((step) => step.key === "context-builder")?.state).toBe("completed");
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
   it("shows the Skills generate, approve, and direct-release path without Head Coach review cards", () => {
     const workspace = workflow3SkillsCoachWorkspace();
     const skillsAssignmentContext = workspace.assignmentContext?.domains.SKILLS;
@@ -5012,7 +5090,7 @@ describe("resolveSkillsOwnedDirectReleaseCurrentStep", () => {
     ).toBe("generate");
   });
 
-  it("resumes to Generate when context has plan window dates even without strict lock flag", () => {
+  it("does not resume to Generate when context has plan window dates without lock", () => {
     expect(
       resolveSkillsOwnedDirectReleaseCurrentStep({
         workflowMode: "skills_coach_planning",
@@ -5022,7 +5100,7 @@ describe("resolveSkillsOwnedDirectReleaseCurrentStep", () => {
         skillsPlanExists: false,
         contextHasPlanWindow: true,
       }),
-    ).toBe("generate");
+    ).toBeNull();
   });
 
   it("does not force Generate before planning context is locked and has no plan window", () => {

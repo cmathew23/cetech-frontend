@@ -2038,6 +2038,80 @@ describe("Training Plan Workspace lifecycle display", () => {
     ).toBe(true);
   });
 
+  it("does not auto-open Plan Viewer for a released domain without explicit view intent", () => {
+    expect(
+      shouldShowReleasedPlanViewerCanvas({
+        selectedWorkflowTab: "generate",
+        selectedDomain: "SKILLS",
+        releasedPlanViewerIntentPresent: false,
+        requestedPlanIdPresent: true,
+        releasedWorkflowStatus: "released",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Workflow 2A partial release on Domain Plans Integration with Plan Viewer available", () => {
+    const base = workflow2AHeadCoachOwnedSkillsWorkspace();
+    const workspace = workflow2AHeadCoachOwnedSkillsWorkspace({
+      domains: {
+        ...base.domains,
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan-v2",
+            versionId: "skills-version-v2",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 2,
+          },
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          submittedForReview: true,
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: "nutrition-version",
+            generationDomain: "NUTRITION",
+            status: "ASSISTANT_COACH_APPROVED",
+            versionNumber: 1,
+          },
+        },
+        S_AND_C: {
+          ...base.domains.S_AND_C,
+          submittedForReview: true,
+          summary: {
+            trainingPlanId: "sandc-plan",
+            versionId: "sandc-version",
+            generationDomain: "S_AND_C",
+            status: "ASSISTANT_COACH_APPROVED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+    const activeMode = shouldShowReleasedPlanViewerCanvas({
+      selectedWorkflowTab: "generate",
+      selectedDomain: "SKILLS",
+      releasedPlanViewerIntentPresent: false,
+      requestedPlanIdPresent: true,
+      releasedWorkflowStatus: "released",
+    })
+      ? "plan-viewer"
+      : "domain-integration";
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode,
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: resolveTrainingPlanWorkspaceHasReleasedDomain(workspace),
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(resolveTrainingPlanWorkspaceHasReleasedDomain(workspace)).toBe(true);
+    expect(resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace)).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("available");
+  });
+
   it("does not open Plan Viewer for unreleased domains without a released intent", () => {
     expect(
       shouldShowReleasedPlanViewerCanvas({
@@ -2046,6 +2120,18 @@ describe("Training Plan Workspace lifecycle display", () => {
         releasedPlanViewerIntentPresent: false,
         requestedPlanIdPresent: true,
         releasedWorkflowStatus: "draft_generated",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not open Plan Viewer for unreleased domains even with explicit view intent", () => {
+    expect(
+      shouldShowReleasedPlanViewerCanvas({
+        selectedWorkflowTab: "generate",
+        selectedDomain: "NUTRITION",
+        releasedPlanViewerIntentPresent: true,
+        requestedPlanIdPresent: true,
+        releasedWorkflowStatus: "submitted_for_review",
       }),
     ).toBe(false);
   });
@@ -2103,6 +2189,64 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(resolveTrainingPlanWorkspaceHasReleasedDomain(workspace)).toBe(true);
     expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("available");
     expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("active");
+  });
+
+  it("keeps Workflow 1 partial release on Domain Plans Integration until Plan Viewer is requested", () => {
+    const base = workflow1OwnedSkillsWorkspace();
+    const workspace = workflow1OwnedSkillsWorkspace({
+      domains: {
+        SKILLS: {
+          ...base.domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: "skills-version",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        },
+        NUTRITION: {
+          ...base.domains.NUTRITION,
+          submittedForReview: true,
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: "nutrition-version",
+            generationDomain: "NUTRITION",
+            status: "ASSISTANT_COACH_APPROVED",
+            versionNumber: 1,
+          },
+        },
+        S_AND_C: base.domains.S_AND_C,
+      },
+      assignmentContext: shellAssignmentContext({
+        domains: {
+          SKILLS: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          NUTRITION: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+          S_AND_C: shellAssignmentDomain({ ownerType: "ASSIGNED_DOMAIN_COACH" }),
+        },
+      }),
+    });
+    const activeMode = shouldShowReleasedPlanViewerCanvas({
+      selectedWorkflowTab: "generate",
+      selectedDomain: "SKILLS",
+      releasedPlanViewerIntentPresent: false,
+      requestedPlanIdPresent: true,
+      releasedWorkflowStatus: "released",
+    })
+      ? "plan-viewer"
+      : "domain-integration";
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode,
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: resolveTrainingPlanWorkspaceHasReleasedDomain(workspace),
+      domainIntegrationComplete: resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace),
+    });
+
+    expect(resolveTrainingPlanWorkspaceHasReleasedDomain(workspace)).toBe(true);
+    expect(resolveTrainingPlanWorkspaceDomainIntegrationComplete(workspace)).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("available");
   });
 
   it("marks Domain Plans Integration complete when all assigned domains are released", () => {

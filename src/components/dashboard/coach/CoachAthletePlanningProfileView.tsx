@@ -2227,8 +2227,8 @@ export function shouldShowReleasedPlanViewerCanvas(input: {
 }): boolean {
   if (input.selectedWorkflowTab !== "generate") return false;
   if (input.selectedDomain === null) return false;
-  if (input.releasedPlanViewerIntentPresent) return true;
-  return input.requestedPlanIdPresent && input.releasedWorkflowStatus === "released";
+  if (!input.releasedPlanViewerIntentPresent) return false;
+  return input.releasedWorkflowStatus === "released";
 }
 
 function workspaceLifecycleStateLabel(

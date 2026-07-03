@@ -1,4 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/coach/athletes/athlete-1/planning",
+  useRouter: () => ({
+    push() {},
+    replace() {},
+    refresh() {},
+  }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/components/ui/Button", async () => {
+  const React = await import("react");
+  return {
+    Button({
+      children,
+      disabled = false,
+      loading = false,
+      type = "button",
+      variant: _variant,
+      className: _className,
+      ...props
+    }) {
+      return React.createElement(
+        "button",
+        { ...props, disabled: disabled || loading, type },
+        loading ? "Loading..." : children,
+      );
+    },
+  };
+});
 
 import {
   buildDomainReviewRevisionContext,
@@ -8,6 +41,7 @@ import {
   resolveNoHeadCoachDirectReleaseLockedPlanningContext,
   resolveInitialTrainingPlanWorkflowTab,
   resolveSkillsOwnedDirectReleaseCurrentStep,
+  resolveSkillsOwnedDirectReleasePreContextTab,
   renderGenerationJobButtonLabel,
   resolveStep6GenerationLifecyclePhase,
   resolveTrainingPlanShellOwnership,
@@ -58,6 +92,11 @@ import {
   resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
   resolveDomainReviewDrawerWorkflowActions,
+  resolveDomainReviewActionPlanIds,
+  resolveDomainReviewWorkflowStatus,
+  isDirectReleaseSkillsDomainOwner,
+  shouldRouteDirectReleaseSkillsOwnerApproval,
+  shouldRenderApproveBeforeReviseInDomainReviewDrawer,
   assistantWorkflowStatusLabelForKind,
   domainIntegrationAvailableActionLabels,
   domainIntegrationNextActionLabel,
@@ -67,6 +106,17 @@ import {
   resolveTrainingPlanWorkspaceLifecycleSteps,
   shouldShowReleasedPlanViewerCanvas,
   resolveContextAppStepCompleteForNavigation,
+  resolveContextAppProfileStatusLabel,
+  resolveContextAppEligibilityNoteLabel,
+  resolveContextBuilderPendingBeforeLock,
+  resolveDomainIntegrationMatrixDomains,
+  shouldRenderEmbeddedPlanViewerInDomainIntegration,
+  shouldUseDomainCoordinationMatrixLayout,
+  shouldKeepDomainReviewDrawerOpenForTab,
+  resolveDomainIntegrationSkillsCreateVisible,
+  resolveDomainIntegrationGenerateDisplayState,
+  resolveDomainGenerationEligibilityModel,
+  shouldAllowWorkflow3SkillsGenerationWithoutGenericBackendReady,
   resolveSetupStateAfterSeasonCreate,
   formatSeasonOptionLabel,
   resolveCompetitionSeasonPhaseForDate,
@@ -76,12 +126,20 @@ import {
   shouldKeepPreviousDomainReviewDetail,
   domainReviewScheduleDescription,
   countDomainReviewTrainingDays,
+  countLatestDomainDraftTrainingDays,
+  resolveDomainReviewDrawerContentSource,
+  shouldShowDomainReviewSubmittedPlanEmptyState,
+  shouldHydrateDirectReleaseSkillsDrawerDetail,
+  reviewPlanButtonLabel,
+  openDomainPlanReviewLabel,
   shouldShowSelectedDomainInspectorActionSuccess,
   resolveHeadCoachReviewActionContext,
   shouldShowSubmittedPlanLoading,
   shouldUseWorkflow1HeadCoachReviewActionPanel,
   isHeadCoachSkillsOwnerWorkflow,
   resolveWorkflowActionContext,
+  DomainReviewDrawerWorkflowActionButtons,
+  resolveDomainReviewDisplayLabels,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -2818,6 +2876,35 @@ describe("resolveDomainReviewDrawerWorkflowActions", () => {
     });
   });
 
+  it("keeps Workflow 2A Head Coach-owned Skills draft drawer on active detail source", () => {
+    const latestDraft = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-version",
+      versionNumber: 1,
+      status: "AI_GENERATED",
+      days: [{ dayIndex: 1, sessions: [{ title: "skills", items: [] }] }],
+    } as never;
+
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "SKILLS",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft,
+      }),
+    ).toBe("none");
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "SKILLS",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        activeDetail: { plan: { id: "skills-plan" }, version: { id: "skills-version" }, days: [] } as never,
+        latestDraft,
+      }),
+    ).toBe("active_detail");
+  });
+
   it("keeps the working drawer Revise Plan action available for editable drafts", () => {
     const actions = resolveDomainReviewDrawerWorkflowActions({
       ...baseInput,
@@ -3085,6 +3172,342 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     });
   }
 
+  it("opens Context Builder instead of locked Domain Integration before context lock", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: false,
+        resolved: false,
+      },
+      initialTab: "DOMAIN",
+    });
+    const activeTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode: resolveWorkflowModeFromWorkspace(workspace),
+      selectedTab: "generate",
+      requestedPlanId: null,
+      urlPlanCandidate: null,
+      planningContextLocked: workspace.planningContext.locked,
+      fallbackContextBuilderTab: "context-app",
+    });
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "context-builder",
+      contextComplete: false,
+      domainAvailable: false,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(activeTab).toBe("context-app");
+    expect(steps.find((step) => step.key === "context-builder")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("locked");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("does not strand Workflow 3 on locked Domain Integration without an explicit plan link", () => {
+    expect(
+      resolveSkillsOwnedDirectReleasePreContextTab({
+        workflowMode: "skills_coach_planning",
+        selectedTab: "generate",
+        requestedPlanId: null,
+        urlPlanCandidate: null,
+        planningContextLocked: false,
+        fallbackContextBuilderTab: "plan-dates",
+      }),
+    ).toBe("plan-dates");
+  });
+
+  it("keeps Domain Integration available for Skills after context lock", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: true,
+        resolved: true,
+      },
+    });
+    const activeTab = resolveSkillsOwnedDirectReleasePreContextTab({
+      workflowMode: resolveWorkflowModeFromWorkspace(workspace),
+      selectedTab: "generate",
+      requestedPlanId: null,
+      urlPlanCandidate: null,
+      planningContextLocked: workspace.planningContext.locked,
+      fallbackContextBuilderTab: "context-app",
+    });
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(activeTab).toBe("generate");
+    expect(workspace.assignmentContext?.domains.SKILLS.canGenerate).toBe(true);
+    expect(workspace.assignmentContext?.domains.NUTRITION.canGenerate).toBe(false);
+    expect(workspace.assignmentContext?.domains.S_AND_C.canGenerate).toBe(false);
+    expect(steps.find((step) => step.key === "context-builder")?.state).toBe("completed");
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("uses the Domain Coordination Matrix layout scoped to Skills only after context lock", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: true,
+        resolved: true,
+      },
+    });
+    const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
+      activeMode: "domain-integration",
+      contextComplete: true,
+      domainAvailable: true,
+      planViewerAvailable: false,
+      domainIntegrationComplete: false,
+    });
+
+    expect(
+      shouldUseDomainCoordinationMatrixLayout({
+        shell: "skills_coach_planning",
+        headCoachReviewMode: false,
+      }),
+    ).toBe(true);
+    expect(resolveDomainIntegrationMatrixDomains("skills_coach_planning")).toEqual(["SKILLS"]);
+    expect(resolveDomainIntegrationMatrixDomains("head_coach_function_aware")).toEqual([
+      "SKILLS",
+      "NUTRITION",
+      "S_AND_C",
+    ]);
+    expect(workspace.assignmentContext?.domains.SKILLS.canGenerate).toBe(true);
+    expect(workspace.assignmentContext?.domains.NUTRITION.canGenerate).toBe(false);
+    expect(workspace.assignmentContext?.domains.S_AND_C.canGenerate).toBe(false);
+    expect(steps.find((step) => step.key === "domain-integration")?.state).toBe("active");
+    expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
+  });
+
+  it("does not embed Plan Viewer content in Workflow 3 Domain Integration before release", () => {
+    expect(shouldRenderEmbeddedPlanViewerInDomainIntegration("skills_coach_planning")).toBe(
+      false,
+    );
+    expect(
+      shouldShowReleasedPlanViewerCanvas({
+        selectedWorkflowTab: "generate",
+        selectedDomain: "SKILLS",
+        releasedPlanViewerIntentPresent: false,
+        requestedPlanIdPresent: false,
+        releasedWorkflowStatus: "not_created",
+      }),
+    ).toBe(false);
+  });
+
+  it("shows Create Skills Plan for Workflow 3 Skills before generation", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      planningContext: {
+        ...workflow3SkillsCoachWorkspace().planningContext,
+        locked: true,
+        resolved: true,
+      },
+    });
+    const skillsAssignmentContext = workspace.assignmentContext?.domains.SKILLS;
+    const skillsGeneratePermission = resolveDomainGeneratePermission({
+      assignmentDomainContext: skillsAssignmentContext,
+      legacyOwnershipFlags: {
+        canGeneratePlan: false,
+        canGenerateCurrentDomainPlan: false,
+      },
+    });
+
+    expect(skillsGeneratePermission.canShowGenerate).toBe(true);
+    expect(
+      resolveDomainIntegrationSkillsCreateVisible({
+        shell: "skills_coach_planning",
+        headCoachFunctionAwareMode: false,
+        domain: "SKILLS",
+        workflowStatus: "not_created",
+        canShowGenerateAction: skillsGeneratePermission.canShowGenerate,
+        skillsCreateVisible: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainIntegrationSkillsCreateVisible({
+        shell: "skills_coach_planning",
+        headCoachFunctionAwareMode: false,
+        domain: "NUTRITION",
+        workflowStatus: "not_created",
+        canShowGenerateAction: true,
+        skillsCreateVisible: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks Workflow 3 Skills generation in the matrix when backend readiness is incomplete", () => {
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: true,
+      generationAllowed: true,
+      backendReadinessComplete: false,
+      backendBlockers: ["LEVEL_VALIDATION_NOT_CONFIRMED"],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+    const nextAction =
+      eligibility.blockerMessage ??
+      domainIntegrationNextActionLabel({
+        workflowStatus: "not_created",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          canGenerate: true,
+        }),
+        planningContextLocked: true,
+        loading: false,
+        hasError: false,
+        canGenerate: eligibility.canStartGeneration,
+        canSubmitForReview: false,
+        canViewPlan: false,
+        canReview: false,
+        canRelease: false,
+        isCurrentReviewPlan: false,
+      });
+
+    expect(eligibility.canStartGeneration).toBe(false);
+    expect(eligibility.blockers).toEqual(["Complete planning context: Confirm athlete level"]);
+    expect(nextAction).toBe("Complete planning context: Confirm athlete level");
+    expect(nextAction).not.toBe("Ready to generate this domain plan.");
+    expect(
+      resolveDomainIntegrationGenerateDisplayState({
+        canGenerateSkillsPlan: true,
+        blockerMessage: eligibility.blockerMessage,
+        fallbackNextActionLabel: "fallback",
+      }),
+    ).toEqual({
+      nextActionLabel: "Complete planning context: Confirm athlete level",
+      availableActionLabels: ["Complete planning context: Confirm athlete level"],
+    });
+  });
+
+  it("allows Workflow 3 Skills generation when canonical readiness is complete", () => {
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: true,
+      generationAllowed: true,
+      backendReadinessComplete: true,
+      backendBlockers: [],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+
+    expect(eligibility.canStartGeneration).toBe(true);
+    expect(eligibility.blockerMessage).toBeNull();
+    expect(
+      resolveDomainIntegrationGenerateDisplayState({
+        canGenerateSkillsPlan: true,
+        blockerMessage: eligibility.blockerMessage,
+        fallbackNextActionLabel: "fallback",
+      }),
+    ).toEqual({
+      nextActionLabel: "Ready to generate this domain",
+      availableActionLabels: ["Generate Skills Plan"],
+    });
+    expect(
+      resolveDomainIntegrationSkillsCreateVisible({
+        shell: "skills_coach_planning",
+        headCoachFunctionAwareMode: false,
+        domain: "SKILLS",
+        workflowStatus: "not_created",
+        canShowGenerateAction: eligibility.generationAllowed,
+        skillsCreateVisible: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("allows Workflow 3 locked Skills generation when backend readiness is generically false with no blockers", () => {
+    const genericBackendReadyBypass = shouldAllowWorkflow3SkillsGenerationWithoutGenericBackendReady({
+      shell: "skills_coach_planning",
+      domain: "SKILLS",
+      contextLocked: true,
+      generationAllowed: true,
+      backendReadinessComplete: false,
+      backendBlockers: [],
+    });
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: true,
+      generationAllowed: true,
+      backendReadinessComplete: genericBackendReadyBypass ? true : false,
+      backendBlockers: [],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+
+    expect(genericBackendReadyBypass).toBe(true);
+    expect(eligibility.canStartGeneration).toBe(true);
+    expect(eligibility.blockerMessage).toBeNull();
+    expect(
+      resolveDomainIntegrationGenerateDisplayState({
+        canGenerateSkillsPlan: true,
+        blockerMessage: eligibility.blockerMessage,
+        fallbackNextActionLabel: "fallback",
+      }),
+    ).toEqual({
+      nextActionLabel: "Ready to generate this domain",
+      availableActionLabels: ["Generate Skills Plan"],
+    });
+  });
+
+  it("does not apply the Workflow 3 generic readiness allowance before context lock", () => {
+    const genericBackendReadyBypass = shouldAllowWorkflow3SkillsGenerationWithoutGenericBackendReady({
+      shell: "skills_coach_planning",
+      domain: "SKILLS",
+      contextLocked: false,
+      generationAllowed: true,
+      backendReadinessComplete: false,
+      backendBlockers: [],
+    });
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: false,
+      generationAllowed: true,
+      backendReadinessComplete: genericBackendReadyBypass ? true : false,
+      backendBlockers: [],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+
+    expect(genericBackendReadyBypass).toBe(false);
+    expect(eligibility.canStartGeneration).toBe(false);
+    expect(eligibility.blockerMessage).toContain("Waiting for locked planning context.");
+  });
+
+  it("does not require Workflow 3-only context state for Workflow 2A Skills generation", () => {
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: true,
+      generationAllowed: true,
+      backendReadinessComplete: true,
+      backendBlockers: [],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+
+    expect(eligibility.canStartGeneration).toBe(true);
+    expect(eligibility.domainAuthority.canGenerate).toBe(true);
+    expect(eligibility.blockers).toEqual([]);
+  });
+
+  it("keeps Workflow 3 Domain Integration locked before context lock in generation eligibility", () => {
+    const eligibility = resolveDomainGenerationEligibilityModel({
+      selectedDomain: "SKILLS",
+      contextLocked: false,
+      generationAllowed: true,
+      backendReadinessComplete: true,
+      backendBlockers: [],
+      localBlocker: null,
+      domainAuthorityLoading: false,
+    });
+
+    expect(eligibility.canStartGeneration).toBe(false);
+    expect(eligibility.blockerMessage).toBe("Waiting for locked planning context.");
+  });
+
   it("shows the Skills generate, approve, and direct-release path without Head Coach review cards", () => {
     const workspace = workflow3SkillsCoachWorkspace();
     const skillsAssignmentContext = workspace.assignmentContext?.domains.SKILLS;
@@ -3104,7 +3527,7 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
         assignmentDomainContext: skillsAssignmentContext,
         domain: "SKILLS",
-        legacyCanApprove: true,
+        legacyCanApprove: false,
         planId: "skills-plan",
         versionId: "skills-version",
       }),
@@ -3126,6 +3549,550 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         workspace,
       }),
     ).toEqual([]);
+  });
+
+  it("uses Workflow 3 Skills draft review copy instead of submit-for-review copy", () => {
+    const nextAction = domainIntegrationNextActionLabel({
+      workflowStatus: "draft_generated",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canOpen: true,
+        canApprove: true,
+        canRevise: true,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+      planningContextLocked: true,
+      loading: false,
+      hasError: false,
+      canGenerate: false,
+      canSubmitForReview: false,
+      canViewPlan: true,
+      canReview: true,
+      canRelease: false,
+      isCurrentReviewPlan: false,
+      directReleaseSkillsDraftReview: true,
+      directReleaseSkillsOwner: true,
+    });
+    const availableActions = domainIntegrationAvailableActionLabels({
+      domain: "SKILLS",
+      workflowStatus: "draft_generated",
+      canGenerate: false,
+      canViewPlan: true,
+      canSubmitForReview: false,
+      canReview: true,
+      canRelease: false,
+      canRevise: true,
+      directReleaseSkillsDraftReview: true,
+      directReleaseSkillsOwner: true,
+    });
+
+    expect(nextAction).toBe("Review the generated Skills draft, then approve or revise.");
+    expect(nextAction).not.toContain("submit for review");
+    expect(availableActions).toEqual(["Review Skills Plan", "Approve or revise Skills draft"]);
+    expect(availableActions.join(", ")).not.toContain("Head Coach review");
+  });
+
+  it("uses generated Skills draft detail as Workflow 3 draft drawer content", () => {
+    const latestDraft = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-version",
+      versionNumber: 1,
+      status: "AI_GENERATED",
+      days: [
+        {
+          dayIndex: 1,
+          date: "2026-07-06",
+          sessions: [
+            {
+              title: "technical skills",
+              plannedDurationMinutes: 60,
+              items: [{ label: "Serve pattern", summary: "Serve plus one", durationMinutes: 20 }],
+            },
+          ],
+        },
+        { dayIndex: 2, date: "2026-07-07", sessions: [] },
+        {
+          dayIndex: 3,
+          date: "2026-07-08",
+          sessions: [{ title: "rally tolerance", items: [{ label: "Cross-court rally" }] }],
+        },
+      ],
+    } as never;
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "draft_generated",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft,
+    });
+
+    expect(contentSource).toBe("latest_domain_draft");
+    expect(countLatestDomainDraftTrainingDays(latestDraft)).toBe(2);
+    expect(
+      shouldShowDomainReviewSubmittedPlanEmptyState({
+        contentSource,
+        loading: false,
+        error: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Workflow 3 approved Skills drawer on generated schedule content", () => {
+    const latestDraft = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-approved-version",
+      versionNumber: 2,
+      status: "HEAD_COACH_APPROVED",
+      days: [
+        {
+          dayIndex: 1,
+          date: "2026-07-06",
+          sessions: [
+            {
+              title: "approved skills session",
+              plannedDurationMinutes: 60,
+              items: [{ label: "Serve pattern", summary: "Serve plus one" }],
+            },
+          ],
+        },
+      ],
+    } as never;
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft,
+    });
+
+    expect(contentSource).toBe("latest_domain_draft");
+    expect(countLatestDomainDraftTrainingDays(latestDraft)).toBe(1);
+    expect(
+      shouldShowDomainReviewSubmittedPlanEmptyState({
+        contentSource,
+        loading: false,
+        error: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("hydrates Workflow 3 Skills drawer active detail when only plan ids are loaded", () => {
+    const skillsAssignment = shellAssignmentDomain({
+      ownerType: "ASSIGNED_DOMAIN_COACH",
+      ownedByCurrentUser: true,
+      releaseMode: "DIRECT_DOMAIN_RELEASE",
+    });
+
+    expect(
+      shouldHydrateDirectReleaseSkillsDrawerDetail({
+        domain: "SKILLS",
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: skillsAssignment,
+        planId: "skills-plan",
+        versionId: "skills-version",
+        activeDetail: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHydrateDirectReleaseSkillsDrawerDetail({
+        domain: "SKILLS",
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: skillsAssignment,
+        planId: "skills-plan",
+        versionId: "skills-version",
+        activeDetail: {
+          plan: { id: "skills-plan" },
+          version: { id: "skills-version" },
+        } as never,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHydrateDirectReleaseSkillsDrawerDetail({
+        domain: "NUTRITION",
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: skillsAssignment,
+        planId: "nutrition-plan",
+        versionId: "nutrition-version",
+        activeDetail: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("uses Review Skills Plan as the canonical drawer button label", () => {
+    expect(reviewPlanButtonLabel("SKILLS")).toBe("Review Skills Plan");
+    expect(openDomainPlanReviewLabel("SKILLS")).toBe("Review Skills Plan");
+  });
+
+  it("keeps the Skills review drawer open from both Workflow 3 review entry points", () => {
+    expect(
+      shouldKeepDomainReviewDrawerOpenForTab({
+        selectedWorkflowTab: "generate",
+        shell: "skills_coach_planning",
+        headCoachReviewMode: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepDomainReviewDrawerOpenForTab({
+        selectedWorkflowTab: "generate",
+        shell: "head_coach_review",
+        headCoachReviewMode: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepDomainReviewDrawerOpenForTab({
+        selectedWorkflowTab: "plan-dates",
+        shell: "skills_coach_planning",
+        headCoachReviewMode: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows Workflow 3 Skills draft drawer Approve Plan and Revise Plan actions", () => {
+    const directReleaseAssignment = shellAssignmentDomain({
+      ownerType: "ASSIGNED_DOMAIN_COACH",
+      ownedByCurrentUser: true,
+      canOpen: true,
+      canRevise: true,
+      canApprove: false,
+      releaseMode: "DIRECT_DOMAIN_RELEASE",
+    });
+    const canShowDirectApprove = resolveDirectReleaseSkillsOwnerApproveVisible({
+      assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+      assignmentDomainContext: directReleaseAssignment,
+      domain: "SKILLS",
+      legacyCanApprove: false,
+      planId: "skills-plan",
+      versionId: "skills-version",
+    });
+    const actions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "draft_generated",
+      canShowViewPlan: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: true,
+      canShowApproveAction: canShowDirectApprove,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: false,
+      hasViewPlanContext: true,
+    });
+
+    expect(canShowDirectApprove).toBe(true);
+    expect(
+      shouldRouteDirectReleaseSkillsOwnerApproval({
+        domain: "SKILLS",
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: directReleaseAssignment,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRouteDirectReleaseSkillsOwnerApproval({
+        domain: "SKILLS",
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "HEAD_COACH_SELF",
+          ownedByCurrentUser: true,
+          canApprove: true,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderApproveBeforeReviseInDomainReviewDrawer({
+        directReleaseSkillsDraftReview: true,
+      }),
+    ).toBe(true);
+    expect(actions).toMatchObject({
+      canShowSubmitForReview: false,
+      canShowReviseAction: true,
+      canShowApproveAction: true,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: false,
+      canShowViewPlan: false,
+      hasAuthorizedWorkflowAction: true,
+    });
+  });
+
+  it("shows Skills Coach approval labels for the Workflow 3 approved Skills drawer", () => {
+    const labels = resolveDomainReviewDisplayLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+
+    expect(labels).toEqual({
+      statusLabel: "Skills Coach Approved",
+      planStatusLabel: "Skills Coach Approved",
+      workflowStatusLabel: "Approved by Skills Coach",
+    });
+  });
+
+  it("uses Workflow 3 Skills Coach approved labels in the matrix and inspector model", () => {
+    const matrixLabels = resolveDomainReviewDisplayLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+    const inspectorLabels = resolveDomainReviewDisplayLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+
+    expect(matrixLabels.planStatusLabel).toBe("Skills Coach Approved");
+    expect(matrixLabels.workflowStatusLabel).toBe("Approved by Skills Coach");
+    expect(inspectorLabels.planStatusLabel).toBe("Skills Coach Approved");
+    expect(inspectorLabels.workflowStatusLabel).toBe("Approved by Skills Coach");
+  });
+
+  it("keeps Head Coach approval labels for Workflow 2A Head Coach-owned Skills", () => {
+    const labels = resolveDomainReviewDisplayLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: false,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+
+    expect(labels).toEqual({
+      statusLabel: "Head Coach Approved",
+      planStatusLabel: "Head Coach Approved",
+      workflowStatusLabel: "Approved by Head Coach",
+    });
+  });
+
+  it("keeps Workflow 1 and Workflow 2B Head Coach approval labels unchanged", () => {
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      const labels = resolveDomainReviewDisplayLabels({
+        domain,
+        workflowStatus: "approved",
+        directReleaseSkillsOwner: false,
+        rawPlanStatus: "HEAD_COACH_APPROVED",
+      });
+
+      expect(labels).toEqual({
+        statusLabel: "Head Coach Approved",
+        planStatusLabel: "Head Coach Approved",
+        workflowStatusLabel: "Approved by Head Coach",
+      });
+    }
+  });
+
+  it("renders Workflow 3 Skills draft drawer actions without a ReferenceError", () => {
+    const drawerWorkflowActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "draft_generated",
+      canShowViewPlan: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: true,
+      canShowApproveAction: true,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: false,
+      hasViewPlanContext: true,
+    });
+
+    const markup = renderToStaticMarkup(
+      createElement(DomainReviewDrawerWorkflowActionButtons, {
+        drawerWorkflowActions,
+        renderApproveBeforeRevise: true,
+        governedPlanActionLoading: null,
+        actionContext: {
+          planId: "skills-plan",
+          versionId: "skills-version",
+          generationDomain: "SKILLS",
+        },
+        drawerReviseLoading: false,
+        onApprove() {},
+        onOpenRevise() {},
+      }),
+    );
+
+    expect(markup).toContain("Approve Plan");
+    expect(markup).toContain("Revise Plan");
+    expect(markup.indexOf("Approve Plan")).toBeLessThan(markup.indexOf("Revise Plan"));
+  });
+
+  it("shows Workflow 3 Skills approved release and released Plan Viewer actions", () => {
+    const approvedDrawerActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "approved",
+      canShowViewPlan: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: true,
+      hasViewPlanContext: true,
+    });
+    const approvedNextAction = domainIntegrationNextActionLabel({
+      workflowStatus: "approved",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canRelease: true,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+      planningContextLocked: true,
+      loading: false,
+      hasError: false,
+      canGenerate: false,
+      canSubmitForReview: false,
+      canViewPlan: true,
+      canReview: false,
+      canRelease: true,
+      isCurrentReviewPlan: false,
+      directReleaseSkillsOwner: true,
+    });
+    const approvedAvailableActions = domainIntegrationAvailableActionLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      canGenerate: false,
+      canViewPlan: true,
+      canSubmitForReview: false,
+      canReview: false,
+      canRelease: true,
+      canRevise: false,
+      directReleaseSkillsOwner: true,
+    });
+    const releasedAvailableActions = domainIntegrationAvailableActionLabels({
+      domain: "SKILLS",
+      workflowStatus: "released",
+      canGenerate: false,
+      canViewPlan: true,
+      canSubmitForReview: false,
+      canReview: false,
+      canRelease: false,
+      canRevise: false,
+      directReleaseSkillsOwner: true,
+    });
+
+    expect(approvedDrawerActions).toMatchObject({
+      canShowViewPlan: false,
+      canShowReleaseAction: true,
+      hasAuthorizedWorkflowAction: true,
+    });
+    expect(approvedNextAction).toBe("Release Plan to Athlete");
+    expect(approvedAvailableActions).toEqual(["Release Plan to Athlete"]);
+    expect(releasedAvailableActions).toEqual(["View Skills in Plan Viewer"]);
+  });
+
+  it("allows direct-release Skills owner release when assignment canRelease is false but legacy release is allowed", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownedByCurrentUser: true,
+          canRelease: false,
+          releaseMode: "DIRECT_DOMAIN_RELEASE",
+        }),
+        requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
+        legacyCanRelease: true,
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(true);
+  });
+
+  it("resolves Workflow 3 review action ids from latest draft when matrix state is empty", () => {
+    expect(
+      resolveDomainReviewActionPlanIds({
+        domain: "SKILLS",
+        workspace: workflow3SkillsCoachWorkspace(),
+        surfacePlanId: "",
+        surfaceVersionId: "",
+        persistedDetailDomain: null,
+        persistedPlanId: null,
+        persistedVersionId: null,
+        latestDraftDomain: "SKILLS",
+        latestDraftPlanId: "skills-plan",
+        latestDraftVersionId: "skills-version",
+      }),
+    ).toEqual({
+      planId: "skills-plan",
+      versionId: "skills-version",
+    });
+  });
+
+  it("prefers refreshed active detail workflow status over stale workspace draft status", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: "skills-version",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace,
+        domain: "SKILLS",
+        summaryStatus: "HEAD_COACH_APPROVED",
+        summaryPlanId: "skills-plan",
+        summaryVersionId: "skills-version",
+        activeDetail: {
+          plan: { id: "skills-plan", status: "DRAFT" },
+          version: { id: "skills-version", status: "HEAD_COACH_APPROVED", versionNumber: 1 },
+        } as never,
+      }),
+    ).toBe("approved");
+  });
+
+  it("does not auto-open Plan Viewer after release for Workflow 3 Skills", () => {
+    expect(
+      shouldShowReleasedPlanViewerCanvas({
+        selectedWorkflowTab: "generate",
+        selectedDomain: "SKILLS",
+        releasedPlanViewerIntentPresent: false,
+        requestedPlanIdPresent: true,
+        releasedWorkflowStatus: "released",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Workflow 1 and 2B separate domain coach drafts on submit-for-review path", () => {
+    const nextAction = domainIntegrationNextActionLabel({
+      workflowStatus: "draft_generated",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canSubmitForReview: true,
+        releaseMode: "HEAD_COACH_APPROVAL",
+      }),
+      planningContextLocked: true,
+      loading: false,
+      hasError: false,
+      canGenerate: false,
+      canSubmitForReview: true,
+      canViewPlan: true,
+      canReview: false,
+      canRelease: false,
+      isCurrentReviewPlan: false,
+    });
+    const availableActions = domainIntegrationAvailableActionLabels({
+      domain: "NUTRITION",
+      workflowStatus: "draft_generated",
+      canGenerate: false,
+      canViewPlan: true,
+      canSubmitForReview: true,
+      canReview: false,
+      canRelease: false,
+      canRevise: true,
+    });
+
+    expect(nextAction).toBe("Ready to submit for review.");
+    expect(availableActions).toEqual([
+      "View / review domain plan",
+      "Submit for Head Coach review",
+      "Revise instructions",
+    ]);
   });
 
   it("does not show Nutrition or S&C review cards for Workflow 3 Skills coach", () => {
@@ -3252,6 +4219,55 @@ describe("resolveContextAppStepCompleteForNavigation", () => {
         skillsOwnedDirectRelease: true,
       }),
     ).toBe(true);
+  });
+
+  it("shows usable APP context as profile complete when level validation is pending", () => {
+    const appStepComplete = resolveContextAppStepCompleteForNavigation({
+      appCompleteness: "INCOMPLETE",
+      planningEligibility: "PENDING_LEVEL_VALIDATION",
+      missingRequiredFields: [],
+      backendBlockers: [],
+      skillsOwnedDirectRelease: true,
+    });
+
+    expect(appStepComplete).toBe(true);
+    expect(
+      resolveContextAppProfileStatusLabel({
+        appStepComplete,
+        appCompleteness: "INCOMPLETE",
+      }),
+    ).toBe("Complete");
+    expect(
+      resolveContextAppEligibilityNoteLabel({
+        planningEligibility: "PENDING_LEVEL_VALIDATION",
+      }),
+    ).toBe("Pending Level Validation");
+  });
+
+  it("keeps level validation pending in the lock blocker list", () => {
+    expect(
+      resolveContextBuilderPendingBeforeLock({
+        upstreamBlockers: ["READINESS_NOT_COMPLETE"],
+        appStepComplete: true,
+        levelStepComplete: false,
+        workloadComplete: true,
+        seasonGoalsComplete: true,
+        planDatesStepComplete: true,
+      }),
+    ).toEqual(["Confirm athlete level"]);
+  });
+
+  it("merges backend blockers with local pending context-builder steps", () => {
+    expect(
+      resolveContextBuilderPendingBeforeLock({
+        upstreamBlockers: ["NO_WORKLOAD_CONTEXT"],
+        appStepComplete: true,
+        levelStepComplete: false,
+        workloadComplete: false,
+        seasonGoalsComplete: true,
+        planDatesStepComplete: true,
+      }),
+    ).toEqual(["Complete workload assessment", "Confirm athlete level"]);
   });
 
   it("keeps Step 2 locked when required APP fields are missing", () => {
@@ -5012,7 +6028,7 @@ describe("resolveSkillsOwnedDirectReleaseCurrentStep", () => {
     ).toBe("generate");
   });
 
-  it("resumes to Generate when context has plan window dates even without strict lock flag", () => {
+  it("does not resume to Generate when context has plan window dates without lock", () => {
     expect(
       resolveSkillsOwnedDirectReleaseCurrentStep({
         workflowMode: "skills_coach_planning",
@@ -5022,7 +6038,7 @@ describe("resolveSkillsOwnedDirectReleaseCurrentStep", () => {
         skillsPlanExists: false,
         contextHasPlanWindow: true,
       }),
-    ).toBe("generate");
+    ).toBeNull();
   });
 
   it("does not force Generate before planning context is locked and has no plan window", () => {
@@ -5742,7 +6758,7 @@ describe("Workflow 1 assistant domain action visibility", () => {
     expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(false);
   });
 
-  it("uses locked downstream context instead of local season selection", () => {
+  it("uses locked/shared downstream context instead of rechecking local season selection", () => {
     const usesLockedContext = shouldUseLockedDownstreamGenerationContext({
       hasHeadCoachConfigured: true,
       isHeadCoachPlanningContextOwner: false,
@@ -5784,7 +6800,7 @@ describe("Workflow 1 assistant domain action visibility", () => {
     expect(localError).toBeNull();
   });
 
-  it("allows Workflow 1 Skills coach locked-context generation without local selected season", () => {
+  it("requires locked downstream context before Workflow 1 Skills coach can skip local season selection", () => {
     const canGenerateFromLockedPlanningContext =
       canGenerateFromLockedPlanningContextForDomain({
         domain: "SKILLS",

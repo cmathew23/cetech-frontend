@@ -2455,6 +2455,43 @@ export async function headApprove(
   await headApproveTrainingPlan(entityId, athleteId, planId, versionId, generationDomain);
 }
 
+export async function domainApproveTrainingPlan(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const trainingPlanId = assertPlanId(planId);
+  const trainingPlanVersionId = assertVersionId(versionId);
+  const domain = assertGenerationDomain(generationDomain);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainApprove(
+      ids.entityId,
+      ids.athleteId,
+      trainingPlanId,
+      trainingPlanVersionId,
+    ),
+    {
+      method: "POST",
+      timeoutMs: TRAINING_PLAN_EXECUTE_TIMEOUT_MS,
+      body: JSON.stringify({ generationDomain: domain }),
+    },
+  );
+  adaptBackendSuccess(raw);
+}
+
+export async function domainApprove(
+  entityId: string,
+  athleteId: string,
+  planId: string,
+  versionId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<void> {
+  await domainApproveTrainingPlan(entityId, athleteId, planId, versionId, generationDomain);
+}
+
 export async function headApproveTrainingPlanVersion(
   entityId: string,
   athleteId: string,

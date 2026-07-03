@@ -217,6 +217,13 @@ export const paths = {
       versionId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/head-approve`,
+    athleteTrainingPlanDomainApprove: (
+      entityId: string,
+      athleteId: string,
+      planId: string,
+      versionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plans/${encodeURIComponent(planId)}/versions/${encodeURIComponent(versionId)}/domain-approve`,
     athleteTrainingPlanRequestRevision: (
       entityId: string,
       athleteId: string,

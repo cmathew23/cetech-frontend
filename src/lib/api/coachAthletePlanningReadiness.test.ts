@@ -22,6 +22,7 @@ import {
   fetchPersistedTrainingPlanActiveDetail,
   headApprove,
   headApproveTrainingPlanVersion,
+  domainApprove,
   lockCoachAthletePlanningContext,
   fetchCoachAthleteTrainingPlanReadiness,
   parseUpstreamPlanningContextPayload,
@@ -736,6 +737,27 @@ describe("parseReadinessPayload", () => {
         method: "POST",
         timeoutMs: 480_000,
         body: JSON.stringify({ generationDomain: "NUTRITION" }),
+      },
+    );
+  });
+
+  it("domain-approves a direct-release Skills plan version with generationDomain", async () => {
+    apiRequestMock.mockResolvedValue({ success: true });
+
+    await domainApprove(
+      "entity-1",
+      "athlete-1",
+      "plan-1",
+      "version-1",
+      "SKILLS",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plans/plan-1/versions/version-1/domain-approve",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({ generationDomain: "SKILLS" }),
       },
     );
   });

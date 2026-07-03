@@ -478,7 +478,7 @@ describe("no-HC downstream assistant Create gating", () => {
     isHeadCoachPlanningContextOwner: false,
   } satisfies Omit<Parameters<typeof isAssistantDomainGeneratePlanDisabled>[0], "skipMainReadinessForGenerationGate" | "planningContextLocked" | "upstreamContextLockedForDownstream">;
 
-  it("enables Create Nutrition Plan when assignment allows and planning context is locked without API readiness", () => {
+  it("enables Create Nutrition Plan after lock without re-running list-page API readiness", () => {
     expect(
       shouldSkipAssistantDomainReadinessGate({
         hasHeadCoachConfigured: false,

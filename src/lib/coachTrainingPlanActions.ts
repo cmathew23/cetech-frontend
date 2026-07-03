@@ -141,8 +141,9 @@ export function isCreatePlanBlockedByPlanningContextLock(input: {
 }
 
 /**
- * Skip list-page readiness.canGenerate for assistant Create when HC defers readiness calls,
- * or when a no-HC downstream coach already has locked upstream context (assignment is source of truth).
+ * Skip only the repeated list-page readiness.canGenerate check after a planning owner
+ * has already locked/shared context for the domain coach. This does not bypass the
+ * locked-context requirement enforced by isCreatePlanBlockedByPlanningContextLock.
  */
 export function shouldSkipAssistantDomainReadinessGate(input: {
   hasHeadCoachConfigured: boolean;
@@ -170,7 +171,7 @@ export function shouldSkipAssistantDomainReadinessGate(input: {
   return false;
 }
 
-/** Assistant/domain workspace Create Plan gate (skips main readiness when HC academy defers it). */
+/** Assistant/domain workspace Create Plan gate; locked-context checks still run before readiness skips. */
 export function isAssistantDomainGeneratePlanDisabled(input: {
   domain: CoachPlanCreationDomain | null;
   baseBusy: boolean;

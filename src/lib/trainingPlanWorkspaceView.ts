@@ -168,11 +168,26 @@ export function workspaceHeadCoachOwnsSkillsForAthlete(
   workspace: TrainingPlanWorkspace,
 ): boolean {
   const assignmentSkillsContext = workspace.assignmentContext?.domains.SKILLS;
-  if (assignmentSkillsContext !== undefined) {
-    return (
-      assignmentSkillsContext.ownerType === "HEAD_COACH_SELF" &&
-      assignmentSkillsContext.ownedByCurrentUser
-    );
+  if (
+    assignmentSkillsContext !== undefined &&
+    assignmentSkillsContext.ownedByCurrentUser &&
+    assignmentSkillsContext.ownerType !== "NONE" &&
+    assignmentSkillsContext.ownerType !== "ASSIGNED_DOMAIN_COACH"
+  ) {
+    return true;
+  }
+  if (
+    assignmentSkillsContext !== undefined &&
+    assignmentSkillsContext.ownerType === "ASSIGNED_DOMAIN_COACH" &&
+    !assignmentSkillsContext.ownedByCurrentUser
+  ) {
+    return false;
+  }
+  if (
+    assignmentSkillsContext !== undefined &&
+    assignmentSkillsContext.releaseMode === "DIRECT_DOMAIN_RELEASE"
+  ) {
+    return false;
   }
 
   const flags = workspace.ownershipFlags;

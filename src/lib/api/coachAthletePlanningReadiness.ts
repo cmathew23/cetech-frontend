@@ -687,6 +687,26 @@ function readStringLike(value: unknown): string | null {
   return typeof value === "boolean" ? String(value) : null;
 }
 
+const NUTRITION_SERVING_TEXT_KEYS = [
+  "serving",
+  "servingSize",
+  "portion",
+  "portions",
+  "amount",
+  "plannedQuantity",
+  "prescribedQuantity",
+];
+const NUTRITION_QUANTITY_KEYS = [
+  "quantity",
+  "servingQuantity",
+  "servingSize",
+  "portion",
+  "portions",
+  "amount",
+  "plannedQuantity",
+  "prescribedQuantity",
+];
+
 function readFirstArray(records: AnyRecord[], keys: string[]): unknown[] {
   for (const key of keys) {
     for (const record of records) {
@@ -709,8 +729,8 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     primaryGoalName: readStringKey([record], ["primaryGoalName"]),
     label: readStringKey([record], ["label", "name", "title"]),
     summary: readStringKey([record], ["summary", "description", "objective"]),
-    serving: readStringKey([record], ["serving"]),
-    quantity: readNumberKey([record], ["quantity"]),
+    serving: readStringKey([record], NUTRITION_SERVING_TEXT_KEYS),
+    quantity: readNumberKey([record], NUTRITION_QUANTITY_KEYS),
     unit: readStringKey([record], ["unit"]),
     calories: readNumberKey([record], ["calories"]),
     protein: readNumberKey([record], ["protein"]),

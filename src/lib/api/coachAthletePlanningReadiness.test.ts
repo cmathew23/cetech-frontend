@@ -1159,6 +1159,19 @@ describe("training plan generation timeouts and helpers", () => {
                     timing: "Pre-training",
                     notes: "Pair with berries",
                   },
+                  {
+                    nutritionCatalogItemId: "nutrition-item-2",
+                    label: "Idli",
+                    servingQuantity: 2,
+                    unit: "pieces",
+                    calories: 138,
+                  },
+                  {
+                    nutritionCatalogItemId: "nutrition-item-3",
+                    label: "Coconut Chutney",
+                    servingSize: "1 bowl",
+                    calories: 266,
+                  },
                 ],
               },
             ],
@@ -1185,6 +1198,20 @@ describe("training plan generation timeouts and helpers", () => {
       fat: 2,
       timing: "Pre-training",
       notes: "Pair with berries",
+    });
+    expect(result.days[0]?.sessions[0]?.items[1]).toMatchObject({
+      nutritionCatalogItemId: "nutrition-item-2",
+      label: "Idli",
+      serving: null,
+      quantity: 2,
+      unit: "pieces",
+      calories: 138,
+    });
+    expect(result.days[0]?.sessions[0]?.items[2]).toMatchObject({
+      nutritionCatalogItemId: "nutrition-item-3",
+      label: "Coconut Chutney",
+      serving: "1 bowl",
+      calories: 266,
     });
   });
 

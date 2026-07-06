@@ -1936,6 +1936,33 @@ export type DomainReviewDrawerWorkflowActions = {
   hasAuthorizedWorkflowAction: boolean;
 };
 
+export function resolveDomainReviewDrawerLayoutClasses(input: {
+  closing: boolean;
+}): {
+  rootClassName: string;
+  backdropClassName: string;
+  panelClassName: string;
+} {
+  return {
+    rootClassName: "fixed inset-0 z-50",
+    backdropClassName: cn(
+      "absolute inset-0 cursor-default bg-slate-950/25",
+      input.closing
+        ? "motion-safe:animate-[domainReviewBackdropFadeOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
+    ),
+    panelClassName: cn(
+      "domain-review-drawer--workspace-scoped absolute right-0 flex h-auto w-full max-w-3xl flex-col",
+      "top-[var(--training-plan-review-drawer-top,5rem)] bottom-[var(--training-plan-review-drawer-bottom,1.5rem)]",
+      "overflow-hidden rounded-l-xl border-l border-border bg-bg shadow-2xl",
+      "[max-height:calc(100dvh-var(--training-plan-review-drawer-top,5rem)-var(--training-plan-review-drawer-bottom,1.5rem))]",
+      input.closing
+        ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
+    ),
+  };
+}
+
 export function resolveDomainReviewDrawerWorkflowActions(input: {
   workflowStatus: AssistantDomainWorkflowStatus;
   canShowViewPlan: boolean;
@@ -6041,6 +6068,10 @@ type NutritionMealItem = Pick<
   | "notes"
 >;
 
+type NutritionMetricKey = "calories" | "protein" | "carbs" | "fat" | "fiber";
+
+type NutritionMetricTotals = Record<NutritionMetricKey, number | null>;
+
 const NUTRITION_SERVING_CANDIDATE_FIELDS = [
   "serving",
   "servingQuantity",
@@ -6054,6 +6085,14 @@ const NUTRITION_SERVING_CANDIDATE_FIELDS = [
   "prescribedQuantity",
 ] as const;
 
+const NUTRITION_METRIC_ALIASES: Record<NutritionMetricKey, readonly string[]> = {
+  calories: ["calories", "kcal", "energyKcal"],
+  protein: ["proteinGrams", "protein"],
+  carbs: ["carbsGrams", "carbohydratesGrams", "carbohydrates", "carbs"],
+  fat: ["fatGrams", "fat"],
+  fiber: ["fiberGrams", "fiber", "dietaryFiberGrams", "dietaryFiber"],
+};
+
 function formatNutritionCaloriesDisplay(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return `${Math.round(value)} kcal`;
@@ -6065,15 +6104,77 @@ function formatNutritionGramsDisplay(value: number | null | undefined): string {
   return `${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)} g`;
 }
 
+function readNutritionMetricNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/,/g, "");
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function readNutritionMetricValue(
+  item: Record<string, unknown> | null,
+  rawItem: Record<string, unknown> | null,
+  metric: NutritionMetricKey,
+): number | null {
+  const aliases = NUTRITION_METRIC_ALIASES[metric];
+  for (const source of [item, rawItem]) {
+    if (source === null) continue;
+    for (const alias of aliases) {
+      const value = readNutritionMetricNumber(source[alias]);
+      if (value !== null) return value;
+    }
+  }
+  return null;
+}
+
+export function summarizeNutritionItems(
+  items: Array<{
+    item: Record<string, unknown> | null;
+    rawItem: Record<string, unknown> | null;
+  }>,
+): NutritionMetricTotals {
+  const totals: NutritionMetricTotals = {
+    calories: null,
+    protein: null,
+    carbs: null,
+    fat: null,
+    fiber: null,
+  };
+
+  for (const item of items) {
+    for (const metric of Object.keys(totals) as NutritionMetricKey[]) {
+      const value = readNutritionMetricValue(item.item, item.rawItem, metric);
+      if (value === null) continue;
+      totals[metric] = (totals[metric] ?? 0) + value;
+    }
+  }
+
+  return totals;
+}
+
+export function formatNutritionDailyTotalsDisplay(totals: NutritionMetricTotals): string {
+  return [
+    `Daily totals: ${formatNutritionCaloriesDisplay(totals.calories)}`,
+    `Protein ${formatNutritionGramsDisplay(totals.protein)}`,
+    `Carbs ${formatNutritionGramsDisplay(totals.carbs)}`,
+    `Fat ${formatNutritionGramsDisplay(totals.fat)}`,
+    totals.fiber === null
+      ? `Fiber: ${formatNutritionGramsDisplay(totals.fiber)}`
+      : `Fiber ${formatNutritionGramsDisplay(totals.fiber)}`,
+  ].join(" · ");
+}
+
 function sumNutritionMetric(
   items: NutritionMealItem[],
-  key: "calories" | "protein" | "carbs" | "fat",
+  key: NutritionMetricKey,
 ): number | null {
   let total = 0;
   let hasNumericValue = false;
   for (const item of items) {
-    const value = item[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const value = readNutritionMetricValue(item as Record<string, unknown>, null, key);
+    if (value === null) continue;
     total += value;
     hasNumericValue = true;
   }
@@ -6221,6 +6322,10 @@ function renderNutritionMacroTotals(
           label="Fat"
           value={formatNutritionGramsDisplay(sumNutritionMetric(items, "fat"))}
         />
+        <DetailRow
+          label="Fiber"
+          value={formatNutritionGramsDisplay(sumNutritionMetric(items, "fiber"))}
+        />
       </dl>
     </div>
   );
@@ -6237,6 +6342,7 @@ function renderNutritionMealItems(items: NutritionMealItem[]): ReactElement | nu
     <div className="space-y-2">
       {items.map((item, itemOffset) => {
         const servingDisplay = formatNutritionServingDisplay(item);
+        const itemFiber = readNutritionMetricValue(item as Record<string, unknown>, null, "fiber");
         return (
           <div
             key={`${item.nutritionCatalogItemId ?? item.label ?? "nutrition-item"}-${itemOffset}`}
@@ -6252,6 +6358,9 @@ function renderNutritionMealItems(items: NutritionMealItem[]): ReactElement | nu
               <DetailRow label="Protein" value={formatNutritionGramsDisplay(item.protein)} />
               <DetailRow label="Carbs" value={formatNutritionGramsDisplay(item.carbs)} />
               <DetailRow label="Fat" value={formatNutritionGramsDisplay(item.fat)} />
+              {itemFiber !== null ? (
+                <DetailRow label="Fiber" value={formatNutritionGramsDisplay(itemFiber)} />
+              ) : null}
               {hasRenderableValue(item.timing) ? (
                 <DetailRow label="Timing" value={displayValue(item.timing)} />
               ) : null}
@@ -13263,6 +13372,21 @@ export function CoachAthletePlanningProfileView({
     const nutritionServing = options.showNutritionCalories
       ? formatNutritionServingDisplay(item, rawItem)
       : null;
+    const nutritionCalories = options.showNutritionCalories
+      ? readNutritionMetricValue(item as Record<string, unknown>, rawItem, "calories")
+      : null;
+    const nutritionProtein = options.showNutritionCalories
+      ? readNutritionMetricValue(item as Record<string, unknown>, rawItem, "protein")
+      : null;
+    const nutritionCarbs = options.showNutritionCalories
+      ? readNutritionMetricValue(item as Record<string, unknown>, rawItem, "carbs")
+      : null;
+    const nutritionFat = options.showNutritionCalories
+      ? readNutritionMetricValue(item as Record<string, unknown>, rawItem, "fat")
+      : null;
+    const nutritionFiber = options.showNutritionCalories
+      ? readNutritionMetricValue(item as Record<string, unknown>, rawItem, "fiber")
+      : null;
     if (options.showNutritionCalories && options.shouldLogNutritionItem === true) {
       logNutritionDrawerRenderItem({
         renderPath: "renderDomainPlanDaySchedule > renderDomainReviewDrawerStructureItem",
@@ -13274,18 +13398,11 @@ export function CoachAthletePlanningProfileView({
     }
     const measures = [
       nutritionServing !== null ? `Serving: ${nutritionServing}` : null,
-      options.showNutritionCalories && item.calories !== null
-        ? formatNutritionCaloriesDisplay(item.calories)
-        : null,
-      options.showNutritionCalories && item.protein !== null
-        ? `Protein: ${formatNutritionGramsDisplay(item.protein)}`
-        : null,
-      options.showNutritionCalories && item.carbs !== null
-        ? `Carbs: ${formatNutritionGramsDisplay(item.carbs)}`
-        : null,
-      options.showNutritionCalories && item.fat !== null
-        ? `Fat: ${formatNutritionGramsDisplay(item.fat)}`
-        : null,
+      nutritionCalories !== null ? formatNutritionCaloriesDisplay(nutritionCalories) : null,
+      nutritionProtein !== null ? `Protein: ${formatNutritionGramsDisplay(nutritionProtein)}` : null,
+      nutritionCarbs !== null ? `Carbs: ${formatNutritionGramsDisplay(nutritionCarbs)}` : null,
+      nutritionFat !== null ? `Fat: ${formatNutritionGramsDisplay(nutritionFat)}` : null,
+      nutritionFiber !== null ? `Fiber: ${formatNutritionGramsDisplay(nutritionFiber)}` : null,
       hasRenderableValue(item.durationMinutes)
         ? formatMinutesAsHoursMinutes(Number(item.durationMinutes))
         : null,
@@ -13446,8 +13563,17 @@ export function CoachAthletePlanningProfileView({
               const dayNumber = day.dayIndex ?? dayOffset + 1;
               const weekdayName = formatDrawerWeekdayName(day.date);
               const dayFocus = (day as { dayFocus?: DisplayableValue }).dayFocus;
-              const dayCalories = showNutritionCalories
-                ? resolveNutritionDayCalories(day)
+              const nutritionDayTotals = showNutritionCalories
+                ? summarizeNutritionItems(
+                    day.sessions.flatMap((session) =>
+                      session.sessionStructureSections.flatMap((section) =>
+                        section.items.map((item, itemOffset) => ({
+                          item: item as Record<string, unknown>,
+                          rawItem: readRawPersistedSectionItemAt(section.raw, itemOffset),
+                        })),
+                      ),
+                    ),
+                  )
                 : null;
               return (
                 <section key={day.id ?? `day-${dayOffset}`} className="space-y-3 py-5 first:pt-0">
@@ -13466,9 +13592,9 @@ export function CoachAthletePlanningProfileView({
                     {hasRenderableValue(dayFocus) ? (
                       <div className="text-sm text-textSecondary">Focus: {displayValue(dayFocus)}</div>
                     ) : null}
-                    {dayCalories !== null ? (
+                    {nutritionDayTotals !== null ? (
                       <div className="text-sm text-textSecondary">
-                        Daily calories: {formatNutritionCaloriesDisplay(dayCalories)}
+                        {formatNutritionDailyTotalsDisplay(nutritionDayTotals)}
                       </div>
                     ) : null}
                     {hasRenderableValue(day.notes) ? (
@@ -13524,6 +13650,21 @@ export function CoachAthletePlanningProfileView({
             {sortedDays.map((day, dayOffset) => {
               const dayNumber = day.dayIndex ?? dayOffset + 1;
               const weekdayName = formatDrawerWeekdayName(day.date);
+              const nutritionDayTotals = showNutritionCalories
+                ? summarizeNutritionItems(
+                    day.sessions.flatMap((session, sessionOffset) =>
+                      session.items.map((item, itemOffset) => ({
+                        item: item as Record<string, unknown>,
+                        rawItem: readRawGeneratedDraftItemAt(
+                          draft.raw,
+                          dayOffset,
+                          sessionOffset,
+                          itemOffset,
+                        ),
+                      })),
+                    ),
+                  )
+                : null;
               return (
                 <section
                   key={`${day.dayIndex ?? dayOffset}-${day.date ?? "draft-day"}`}
@@ -13546,9 +13687,9 @@ export function CoachAthletePlanningProfileView({
                         Focus: {displayValue(day.dayFocus)}
                       </div>
                     ) : null}
-                    {showNutritionCalories && day.estimatedDailyCalories !== null ? (
+                    {nutritionDayTotals !== null ? (
                       <div className="text-sm text-textSecondary">
-                        Daily calories: {formatNutritionCaloriesDisplay(day.estimatedDailyCalories)}
+                        {formatNutritionDailyTotalsDisplay(nutritionDayTotals)}
                       </div>
                     ) : null}
                     {hasRenderableValue(day.notes) ? (
@@ -13611,6 +13752,41 @@ export function CoachAthletePlanningProfileView({
                                 const nutritionServing = showNutritionCalories
                                   ? formatNutritionServingDisplay(item, rawItem)
                                   : null;
+                                const nutritionCalories = showNutritionCalories
+                                  ? readNutritionMetricValue(
+                                      item as Record<string, unknown>,
+                                      rawItem,
+                                      "calories",
+                                    )
+                                  : null;
+                                const nutritionProtein = showNutritionCalories
+                                  ? readNutritionMetricValue(
+                                      item as Record<string, unknown>,
+                                      rawItem,
+                                      "protein",
+                                    )
+                                  : null;
+                                const nutritionCarbs = showNutritionCalories
+                                  ? readNutritionMetricValue(
+                                      item as Record<string, unknown>,
+                                      rawItem,
+                                      "carbs",
+                                    )
+                                  : null;
+                                const nutritionFat = showNutritionCalories
+                                  ? readNutritionMetricValue(
+                                      item as Record<string, unknown>,
+                                      rawItem,
+                                      "fat",
+                                    )
+                                  : null;
+                                const nutritionFiber = showNutritionCalories
+                                  ? readNutritionMetricValue(
+                                      item as Record<string, unknown>,
+                                      rawItem,
+                                      "fiber",
+                                    )
+                                  : null;
                                 if (
                                   showNutritionCalories &&
                                   dayOffset === 0 &&
@@ -13627,17 +13803,20 @@ export function CoachAthletePlanningProfileView({
                                 }
                                 const measures = [
                                   nutritionServing !== null ? `Serving: ${nutritionServing}` : null,
-                                  showNutritionCalories && item.calories !== null
-                                    ? formatNutritionCaloriesDisplay(item.calories)
+                                  nutritionCalories !== null
+                                    ? formatNutritionCaloriesDisplay(nutritionCalories)
                                     : null,
-                                  showNutritionCalories && item.protein !== null
-                                    ? `Protein: ${formatNutritionGramsDisplay(item.protein)}`
+                                  nutritionProtein !== null
+                                    ? `Protein: ${formatNutritionGramsDisplay(nutritionProtein)}`
                                     : null,
-                                  showNutritionCalories && item.carbs !== null
-                                    ? `Carbs: ${formatNutritionGramsDisplay(item.carbs)}`
+                                  nutritionCarbs !== null
+                                    ? `Carbs: ${formatNutritionGramsDisplay(nutritionCarbs)}`
                                     : null,
-                                  showNutritionCalories && item.fat !== null
-                                    ? `Fat: ${formatNutritionGramsDisplay(item.fat)}`
+                                  nutritionFat !== null
+                                    ? `Fat: ${formatNutritionGramsDisplay(nutritionFat)}`
+                                    : null,
+                                  nutritionFiber !== null
+                                    ? `Fiber: ${formatNutritionGramsDisplay(nutritionFiber)}`
                                     : null,
                                   hasRenderableValue(item.durationMinutes)
                                     ? formatMinutesAsHoursMinutes(item.durationMinutes)
@@ -13811,10 +13990,13 @@ export function CoachAthletePlanningProfileView({
         fallbackStartDate: planStartDate,
         fallbackEndDate: planEndDate,
       });
+    const drawerLayoutClasses = resolveDomainReviewDrawerLayoutClasses({
+      closing: domainReviewDrawerClosing,
+    });
 
     return (
       <div
-        className="fixed inset-0 z-50"
+        className={drawerLayoutClasses.rootClassName}
         role="dialog"
         aria-modal="true"
         aria-labelledby="domain-review-drawer-title"
@@ -13841,23 +14023,11 @@ export function CoachAthletePlanningProfileView({
         </style>
         <button
           type="button"
-          className={cn(
-            "absolute inset-0 cursor-default bg-slate-950/25",
-            domainReviewDrawerClosing
-              ? "motion-safe:animate-[domainReviewBackdropFadeOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
-          )}
+          className={drawerLayoutClasses.backdropClassName}
           aria-label="Close Domain Review Drawer"
           onClick={handleCloseDomainReviewDrawer}
         />
-        <aside
-          className={cn(
-            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
-            domainReviewDrawerClosing
-              ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
-          )}
-        >
+        <aside className={drawerLayoutClasses.panelClassName}>
           <header className="space-y-2 border-b border-border px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1">

@@ -94,6 +94,7 @@ import {
   resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
   resolveDomainReviewDrawerWorkflowActions,
+  resolveDomainReviewDrawerLayoutClasses,
   resolveDomainReviewDrawerRequestChangesVisible,
   resolveDomainReviewActionPlanIds,
   resolveDomainReviewWorkflowStatus,
@@ -149,6 +150,9 @@ import {
   resolveDomainReviewDrawerVisibleActionLabels,
   resolveDomainReviewDisplayLabels,
   formatNutritionServingDisplay,
+  formatNutritionDailyTotalsDisplay,
+  readNutritionMetricValue,
+  summarizeNutritionItems,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -2949,6 +2953,15 @@ describe("resolveDomainReviewDrawerWorkflowActions", () => {
       ...overrides,
     });
 
+  it("uses the common workspace-scoped layout for domain review drawers", () => {
+    const layout = resolveDomainReviewDrawerLayoutClasses({ closing: false });
+
+    expect(layout.panelClassName).toContain("domain-review-drawer--workspace-scoped");
+    expect(layout.panelClassName).toContain("[max-height:calc");
+    expect(layout.panelClassName).not.toContain("top-0");
+    expect(layout.panelClassName).not.toContain("h-full");
+  });
+
   it("shows Workflow 2A Head Coach-owned Skills draft approve/revise and hides submit", () => {
     const actions = resolveDomainReviewDrawerWorkflowActions({
       ...baseInput,
@@ -4465,6 +4478,100 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         },
       ),
     ).toBe("1 bowl");
+  });
+
+  it("formats Nutrition day daily totals for calories, protein, carbs, fat, and fiber", () => {
+    const totals = summarizeNutritionItems([
+      {
+        item: {
+          calories: 500,
+          protein: 20,
+          carbs: 60,
+          fat: 12,
+          fiber: 8,
+        },
+        rawItem: null,
+      },
+      {
+        item: {
+          calories: 350,
+          proteinGrams: "15.5",
+          carbohydratesGrams: 45,
+          fatGrams: 9,
+        },
+        rawItem: {
+          fiberGrams: "6.5",
+        },
+      },
+    ]);
+
+    expect(formatNutritionDailyTotalsDisplay(totals)).toBe(
+      "Daily totals: 850 kcal · Protein 35.5 g · Carbs 105 g · Fat 21 g · Fiber 14.5 g",
+    );
+  });
+
+  it("reads individual Nutrition item fiber from parsed and raw aliases", () => {
+    expect(readNutritionMetricValue({ fiber: 4.25 }, null, "fiber")).toBe(4.25);
+    expect(readNutritionMetricValue({}, { fiberGrams: "5.5" }, "fiber")).toBe(5.5);
+    expect(readNutritionMetricValue({}, { dietaryFiberGrams: 6 }, "fiber")).toBe(6);
+  });
+
+  it("does not invent missing Nutrition fiber or display NaN in daily totals", () => {
+    const totals = summarizeNutritionItems([
+      {
+        item: {
+          calories: 100,
+          protein: 5,
+          carbs: 20,
+          fat: 1,
+          fiber: "not-a-number",
+        },
+        rawItem: null,
+      },
+    ]);
+    const display = formatNutritionDailyTotalsDisplay(totals);
+
+    expect(totals.fiber).toBeNull();
+    expect(display).toContain("Fiber: —");
+    expect(display).not.toContain("NaN");
+  });
+
+  it("keeps submitted Nutrition drawer actions unchanged", () => {
+    const drawerWorkflowActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "submitted_for_review",
+      canShowViewPlan: false,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: true,
+      canShowRequestRevisionAction: true,
+      canShowReleaseAction: false,
+      hasViewPlanContext: true,
+    });
+
+    const markup = renderToStaticMarkup(
+      createElement(DomainReviewDrawerWorkflowActionButtons, {
+        drawerWorkflowActions,
+        renderApproveBeforeRevise: false,
+        workflowStatus: "submitted_for_review",
+        directReleaseSkillsDraftReview: false,
+        governedPlanActionLoading: null,
+        actionContext: {
+          planId: "nutrition-plan",
+          versionId: "nutrition-version",
+          generationDomain: "NUTRITION",
+        },
+        drawerReviseLoading: false,
+        requestRevisionFeedback: "Adjust servings.",
+        onApprove() {},
+        onRequestRevisionFeedbackChange() {},
+        onRequestChangesSubmit() {},
+        onOpenRevise() {},
+      }),
+    );
+
+    expect(markup).toContain("Approve Plan");
+    expect(markup).toContain("Request Changes");
+    expect(markup).toContain("Adjust servings.");
   });
 
   it("uses Review Skills Plan as the canonical drawer button label", () => {

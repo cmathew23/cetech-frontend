@@ -26,7 +26,6 @@ import {
   recordNutritionPlannedSessionAdherenceEvent,
   recordPlannedSessionAdherenceEvent,
   type AthleteSessionAdherenceEvent,
-  type NutritionAdherenceEventItem,
   type SessionAdherenceOutcome,
 } from "@/lib/api/athleteSessionAdherence";
 import {
@@ -209,51 +208,14 @@ const CARB_SOURCE_KEYS = [
 
 const FAT_SOURCE_KEYS = ["fat", "Fat", "fatGrams", "totalFat"] as const;
 
-const NUTRITION_MACRO_NEST_KEYS = [
-  "macrosPerBaseServing",
-  "macros",
-  "nutrients",
-  "nutritionFacts",
-  "macroTotals",
-  "adjustedNutrition",
-  "adjustedMacros",
-  "nutrition",
-  "nutrientTotals",
-  "totals",
-  "mealTotals",
-  "dailyTotals",
+const FIBER_SOURCE_KEYS = [
+  "plannedFiberG",
+  "fiberG",
+  "fiber",
+  "Fiber",
+  "fiberGrams",
+  "totalFiber",
 ] as const;
-
-const ALL_CANONICAL_MACRO_SCALAR_KEYS = [
-  ...CALORIE_SOURCE_KEYS,
-  ...PROTEIN_SOURCE_KEYS,
-  ...CARB_SOURCE_KEYS,
-  ...FAT_SOURCE_KEYS,
-];
-
-const MACRO_SCALAR_KEY_SET = new Set<string>(ALL_CANONICAL_MACRO_SCALAR_KEYS);
-const MACRO_NEST_KEY_SET = new Set<string>(NUTRITION_MACRO_NEST_KEYS);
-
-const NUTRITION_UI_SUPPRESSED_KEYS = new Set([
-  "hasItems",
-  "HasItems",
-  "has_items",
-  "itemCount",
-  "item_count",
-  "itemsCount",
-  "items_count",
-  "itemTypes",
-  "item_types",
-  "childItemTypes",
-  "nestedItemCount",
-  "itemType",
-  "ItemType",
-  "order",
-  "Order",
-  "itemOrder",
-  "orderIndex",
-  "index",
-]);
 
 /** Omit noisy planner labels from athlete-facing nutrition card titles/subtitles. */
 const NUTRITION_JOURNAL_PRIMARY_SUPPRESS_KEYS = new Set(["itemType"]);
@@ -292,37 +254,6 @@ const NUTRITION_DIAGNOSTIC_KEYS = new Set([
   "sessionStructure",
   "sessionStructureSections",
 ]);
-
-/** Explicit backend-provided daily / rollup totals — displayed only when present (never summed client-side). */
-const EXPLICIT_DAY_TOTAL_ROW_KEYS = [
-  "estimatedDailyCalories",
-  "dailyTotalCalories",
-  "totalDailyCalories",
-  "dayTotalCalories",
-  "dailyCalorieTotal",
-  "targetDailyCalories",
-  "dailyTotals",
-  "dailyTotalProteinGrams",
-  "dailyTotalCarbsGrams",
-  "dailyTotalFatGrams",
-  "dailyProteinGrams",
-  "dailyCarbsGrams",
-  "dailyFatGrams",
-  "nutrientTotals",
-] as const;
-
-const NUTRITION_SCALAR_ROW_PRIORITY: string[] = [
-  ...EXPLICIT_DAY_TOTAL_ROW_KEYS,
-  "mealType",
-  "timing",
-  "slot",
-  "quantity",
-  "unit",
-  "serving",
-  "notes",
-  "description",
-  "summary",
-];
 
 function parseFiniteNumber(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
@@ -437,17 +368,36 @@ function developmentLogWeeklyJournalNutritionInspection(journal: AthleteWeeklyPl
   });
 }
 
-function formatNutritionMacroInlineClause(merged: Record<string, unknown>): string | null {
+function formatCompactGrams(value: number): string {
+  return `${formatGramsRounded(value)}g`;
+}
+
+export function formatNutritionMacroInlineClause(
+  merged: Record<string, unknown>,
+  options: { compact?: boolean } = {},
+): string | null {
   const parts: string[] = [];
   const cal = pickExplicitMacroNumber(merged, CALORIE_SOURCE_KEYS);
-  if (cal !== null) parts.push(`Calories ${Math.round(cal)} kcal`);
+  if (cal !== null) {
+    parts.push(options.compact ? `${Math.round(cal)} kcal` : `Calories ${Math.round(cal)} kcal`);
+  }
   const p = pickExplicitMacroNumber(merged, PROTEIN_SOURCE_KEYS);
-  if (p !== null) parts.push(`Protein ${formatGramsRounded(p)} g`);
+  if (p !== null) {
+    parts.push(options.compact ? `P ${formatCompactGrams(p)}` : `Protein ${formatGramsRounded(p)} g`);
+  }
   const c = pickExplicitMacroNumber(merged, CARB_SOURCE_KEYS);
-  if (c !== null) parts.push(`Carbs ${formatGramsRounded(c)} g`);
+  if (c !== null) {
+    parts.push(options.compact ? `C ${formatCompactGrams(c)}` : `Carbs ${formatGramsRounded(c)} g`);
+  }
   const f = pickExplicitMacroNumber(merged, FAT_SOURCE_KEYS);
-  if (f !== null) parts.push(`Fat ${formatGramsRounded(f)} g`);
-  return parts.length > 0 ? parts.join(", ") : null;
+  if (f !== null) {
+    parts.push(options.compact ? `F ${formatCompactGrams(f)}` : `Fat ${formatGramsRounded(f)} g`);
+  }
+  const fiber = pickExplicitMacroNumber(merged, FIBER_SOURCE_KEYS);
+  if (fiber !== null) {
+    parts.push(`Fiber ${formatCompactGrams(fiber)}`);
+  }
+  return parts.length > 0 ? parts.join(options.compact ? " · " : ", ") : null;
 }
 
 function formatGramsRounded(value: number): string {
@@ -475,178 +425,12 @@ function nutritionServingPhrase(merged: Record<string, unknown>): string | null 
   return null;
 }
 
-function timingPhrase(merged: Record<string, unknown>): string | null {
-  const timing = merged.timing ?? merged.slot;
-  if (typeof timing === "string" && timing.trim() !== "") return timing.trim();
-  return null;
-}
-
-function appendCalorieGramSuffix(labelKey: string, rawScalar: Scalar): string {
-  const formatted = formatScalarValue(rawScalar);
-  const lk = labelKey.toLowerCase();
-  if (formatted === "—") return formatted;
-  const calorieMeasure =
-    (lk.includes("calorie") || lk.endsWith("kcal")) &&
-    !lk.includes("status") &&
-    !lk.includes("adequacy");
-  if (calorieMeasure) return `${formatted} kcal`;
-  if (
-    lk.includes("protein") ||
-    lk.includes("carbs") ||
-    lk.includes("carbohydrate") ||
-    (lk.includes("fat") && !lk.includes("status")) ||
-    lk.includes("fiber") ||
-    lk.endsWith("grams") ||
-    lk.endsWith("gram")
-  ) {
-    return `${formatted} g`;
-  }
-  return formatted;
-}
-
-function pushCanonicalNutritionMacroRows(
-  merged: Record<string, unknown>,
-  rows: Array<{ label: string; value: string }>,
-  seenKeys: Set<string>,
-) {
-  const cal = pickExplicitMacroNumber(merged, CALORIE_SOURCE_KEYS);
-  if (cal !== null) {
-    rows.push({ label: "Calories", value: `${Math.round(cal)} kcal` });
-    for (const k of CALORIE_SOURCE_KEYS) seenKeys.add(k);
-  }
-  const p = pickExplicitMacroNumber(merged, PROTEIN_SOURCE_KEYS);
-  if (p !== null) {
-    rows.push({ label: "Protein", value: `${formatGramsRounded(p)} g` });
-    for (const k of PROTEIN_SOURCE_KEYS) seenKeys.add(k);
-  }
-  const c = pickExplicitMacroNumber(merged, CARB_SOURCE_KEYS);
-  if (c !== null) {
-    rows.push({ label: "Carbs", value: `${formatGramsRounded(c)} g` });
-    for (const k of CARB_SOURCE_KEYS) seenKeys.add(k);
-  }
-  const f = pickExplicitMacroNumber(merged, FAT_SOURCE_KEYS);
-  if (f !== null) {
-    rows.push({ label: "Fat", value: `${formatGramsRounded(f)} g` });
-    for (const k of FAT_SOURCE_KEYS) seenKeys.add(k);
-  }
-}
-
-function appendDedupedCanonicalMacroRowsWithPrefix(
-  merged: Record<string, unknown>,
-  labelPrefix: string,
-  accumulator: Array<{ label: string; value: string }>,
-  dedupe: Set<string>,
-) {
-  const chunk: Array<{ label: string; value: string }> = [];
-  const consumed = new Set<string>();
-  pushCanonicalNutritionMacroRows(merged, chunk, consumed);
-  for (const row of chunk) {
-    const label = `${labelPrefix} · ${row.label}`;
-    const sig = `${label}:${row.value}`;
-    if (dedupe.has(sig)) continue;
-    dedupe.add(sig);
-    accumulator.push({ label, value: row.value });
-  }
-}
-
-function collectNutritionFacingRows(
-  record: Record<string, unknown>,
-  options?: { omitKeys?: Set<string> },
-): Array<{ label: string; value: string }> {
-  const merged = mergeJournalRecordCandidateFields(record);
-  const omitKeys = options?.omitKeys ?? new Set<string>();
-  const rows: Array<{ label: string; value: string }> = [];
-  const seenKeys = new Set<string>();
-
-  pushCanonicalNutritionMacroRows(merged, rows, seenKeys);
-
-  function pushScalar(key: string, raw: unknown) {
-    if (omitKeys.has(key) || seenKeys.has(key) || NUTRITION_UI_SUPPRESSED_KEYS.has(key)) return;
-    if (JOURNAL_DETAIL_STRUCTURE_KEYS.has(key)) return;
-    if (
-      key === "id" ||
-      key === "trainingDayId" ||
-      key === "nutritionCatalogItemId" ||
-      key === "exerciseCatalogItemId"
-    ) {
-      return;
-    }
-    if (MACRO_SCALAR_KEY_SET.has(key)) {
-      return;
-    }
-    if (MACRO_NEST_KEY_SET.has(key)) {
-      return;
-    }
-
-    let value: string | null = null;
-    if (isScalar(raw)) {
-      const formatted = appendCalorieGramSuffix(key, raw);
-      value = formatted !== "—" ? formatted : null;
-    } else if (isScalarArray(raw)) {
-      const joined = joinScalarArray(raw);
-      value = joined !== "" ? joined : null;
-    }
-    if (!value) return;
-    seenKeys.add(key);
-    rows.push({ label: formatFieldLabel(key), value });
-  }
-
-  for (const key of NUTRITION_SCALAR_ROW_PRIORITY) {
-    pushScalar(key, merged[key]);
-  }
-
-  for (const [key, val] of Object.entries(merged)) {
-    pushScalar(key, val);
-  }
-
-  return rows;
-}
-
-/** Objects that sometimes carry planner-authored daily totals without flattening to root scalars. */
-const OBJECT_DAY_MACRO_CONTAINERS = ["dailyTotals", "nutrientTotals"] as const;
-
-function collectExplicitNutritionDayTotalRows(
-  entries: unknown[],
-): Array<{ label: string; value: string }> {
-  const out: Array<{ label: string; value: string }> = [];
-  const dedupe = new Set<string>();
-
-  for (const entry of entries) {
-    if (!isRecord(entry)) continue;
-    const merged = mergeJournalRecordCandidateFields(entry);
-    for (const key of EXPLICIT_DAY_TOTAL_ROW_KEYS) {
-      if (!objectFieldPresent(merged, key)) continue;
-      const raw = merged[key];
-      if (!isScalar(raw)) continue;
-      const label = formatFieldLabel(key);
-      const value = appendCalorieGramSuffix(key, raw);
-      if (value === "—") continue;
-      const sig = `${label}:${value}`;
-      if (dedupe.has(sig)) continue;
-      dedupe.add(sig);
-      out.push({ label, value });
-    }
-
-    for (const ck of OBJECT_DAY_MACRO_CONTAINERS) {
-      const sub = merged[ck];
-      if (!isRecord(sub)) continue;
-      appendDedupedCanonicalMacroRowsWithPrefix(
-        sub,
-        formatFieldLabel(ck),
-        out,
-        dedupe,
-      );
-    }
-  }
-
-  return out;
-}
-
 type JournalNutritionTotals = {
   calories: number | null;
   protein: number | null;
   carbs: number | null;
   fat: number | null;
+  fiber: number | null;
 };
 
 /** Same leaves used for rendering structured sections — totals only sum explicitly-present per-item macros. */
@@ -672,15 +456,19 @@ function collectNutritionFoodLeavesFromRoots(roots: unknown[]): Record<string, u
   return out;
 }
 
-function deriveNutritionTotalsFromFoodLeaves(leaves: Record<string, unknown>[]): JournalNutritionTotals {
+export function deriveNutritionTotalsFromFoodLeaves(
+  leaves: Record<string, unknown>[],
+): JournalNutritionTotals {
   let calories = 0;
   let protein = 0;
   let carbs = 0;
   let fat = 0;
+  let fiber = 0;
   let hasCalories = false;
   let hasProtein = false;
   let hasCarbs = false;
   let hasFat = false;
+  let hasFiber = false;
 
   for (const leaf of leaves) {
     const merged = mergeJournalRecordCandidateFields(leaf);
@@ -704,6 +492,11 @@ function deriveNutritionTotalsFromFoodLeaves(leaves: Record<string, unknown>[]):
       fat += f;
       hasFat = true;
     }
+    const fi = pickExplicitMacroNumber(merged, FIBER_SOURCE_KEYS);
+    if (fi !== null) {
+      fiber += fi;
+      hasFiber = true;
+    }
   }
 
   return {
@@ -711,33 +504,320 @@ function deriveNutritionTotalsFromFoodLeaves(leaves: Record<string, unknown>[]):
     protein: hasProtein ? protein : null,
     carbs: hasCarbs ? carbs : null,
     fat: hasFat ? fat : null,
+    fiber: hasFiber ? fiber : null,
   };
 }
 
-function nutritionTotalsToRows(totals: JournalNutritionTotals): Array<{ label: string; value: string }> {
-  const derivedRows: Array<{ label: string; value: string }> = [];
+export function nutritionTotalsToRows(
+  totals: JournalNutritionTotals,
+): Array<{ label: string; value: string }> {
+  const hasAnyTotal = Object.values(totals).some((value) => value !== null);
+  if (!hasAnyTotal) return [];
+  return [
+    {
+      label: "Calories",
+      value: totals.calories !== null ? `${Math.round(totals.calories)} kcal` : "—",
+    },
+    {
+      label: "Protein",
+      value: totals.protein !== null ? `${formatGramsRounded(totals.protein)} g` : "—",
+    },
+    {
+      label: "Carbs",
+      value: totals.carbs !== null ? `${formatGramsRounded(totals.carbs)} g` : "—",
+    },
+    {
+      label: "Fat",
+      value: totals.fat !== null ? `${formatGramsRounded(totals.fat)} g` : "—",
+    },
+    {
+      label: "Fiber",
+      value: totals.fiber !== null ? `${formatGramsRounded(totals.fiber)} g` : "—",
+    },
+  ];
+}
+
+export function formatNutritionTotalsCompactLine(
+  totals: JournalNutritionTotals,
+  options: { includeCaloriesLabel?: boolean } = {},
+): string | null {
+  const parts: string[] = [];
   if (totals.calories !== null) {
-    derivedRows.push({ label: "Calories", value: `${Math.round(totals.calories)} kcal` });
+    parts.push(
+      options.includeCaloriesLabel
+        ? `Calories ${Math.round(totals.calories)} kcal`
+        : `${Math.round(totals.calories)} kcal`,
+    );
   }
-  if (totals.protein !== null) {
-    derivedRows.push({ label: "Protein", value: `${formatGramsRounded(totals.protein)} g` });
+  if (totals.protein !== null) parts.push(`Protein ${formatCompactGrams(totals.protein)}`);
+  if (totals.carbs !== null) parts.push(`Carbs ${formatCompactGrams(totals.carbs)}`);
+  if (totals.fat !== null) parts.push(`Fat ${formatCompactGrams(totals.fat)}`);
+  if (totals.fiber !== null) parts.push(`Fiber ${formatCompactGrams(totals.fiber)}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+type PlannedWeeklyNutritionSummaryField = {
+  label: string;
+  aliases: readonly string[];
+  unit: "kcal" | "g";
+};
+
+const PLANNED_WEEKLY_NUTRITION_SUMMARY_FIELDS: readonly PlannedWeeklyNutritionSummaryField[] = [
+  {
+    label: "Calories",
+    aliases: [
+      "calories",
+      "caloriesKcal",
+      "plannedCaloriesKcal",
+      "plannedWeeklyCalories",
+      "plannedWeeklyCaloriesKcal",
+      "weeklyCalories",
+      "weeklyCaloriesKcal",
+      "totalWeeklyCalories",
+      "totalWeeklyCaloriesKcal",
+    ],
+    unit: "kcal",
+  },
+  {
+    label: "Protein",
+    aliases: [
+      "protein",
+      "proteinG",
+      "proteinGrams",
+      "plannedProteinG",
+      "plannedWeeklyProteinG",
+      "plannedWeeklyProteinGrams",
+      "weeklyProteinG",
+      "weeklyProteinGrams",
+      "totalWeeklyProteinG",
+      "totalWeeklyProteinGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Carbs",
+    aliases: [
+      "carbs",
+      "carbsG",
+      "carbsGrams",
+      "carbohydrates",
+      "carbohydrateG",
+      "carbohydrateGrams",
+      "plannedCarbohydrateG",
+      "plannedWeeklyCarbsG",
+      "plannedWeeklyCarbsGrams",
+      "plannedWeeklyCarbohydrateG",
+      "plannedWeeklyCarbohydrateGrams",
+      "weeklyCarbsG",
+      "weeklyCarbsGrams",
+      "weeklyCarbohydrateG",
+      "weeklyCarbohydrateGrams",
+      "totalWeeklyCarbsG",
+      "totalWeeklyCarbsGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Fat",
+    aliases: [
+      "fat",
+      "fatG",
+      "fatGrams",
+      "plannedFatG",
+      "plannedWeeklyFatG",
+      "plannedWeeklyFatGrams",
+      "weeklyFatG",
+      "weeklyFatGrams",
+      "totalWeeklyFatG",
+      "totalWeeklyFatGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Fiber",
+    aliases: [
+      "fiber",
+      "fiberG",
+      "fiberGrams",
+      "plannedFiberG",
+      "plannedWeeklyFiberG",
+      "plannedWeeklyFiberGrams",
+      "weeklyFiberG",
+      "weeklyFiberGrams",
+      "totalWeeklyFiberG",
+      "totalWeeklyFiberGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Average daily calories",
+    aliases: [
+      "averageDailyCalories",
+      "averageDailyCaloriesKcal",
+      "avgDailyCalories",
+      "avgDailyCaloriesKcal",
+      "dailyAverageCalories",
+      "dailyAverageCaloriesKcal",
+      "plannedAverageDailyCalories",
+      "plannedAverageDailyCaloriesKcal",
+    ],
+    unit: "kcal",
+  },
+  {
+    label: "Average daily protein",
+    aliases: [
+      "averageDailyProtein",
+      "averageDailyProteinG",
+      "averageDailyProteinGrams",
+      "avgDailyProtein",
+      "avgDailyProteinG",
+      "avgDailyProteinGrams",
+      "dailyAverageProteinG",
+      "dailyAverageProteinGrams",
+      "plannedAverageDailyProteinG",
+      "plannedAverageDailyProteinGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Average daily carbs",
+    aliases: [
+      "averageDailyCarbs",
+      "averageDailyCarbsG",
+      "averageDailyCarbsGrams",
+      "averageDailyCarbohydrateG",
+      "averageDailyCarbohydrateGrams",
+      "avgDailyCarbs",
+      "avgDailyCarbsG",
+      "avgDailyCarbsGrams",
+      "dailyAverageCarbsG",
+      "dailyAverageCarbsGrams",
+      "plannedAverageDailyCarbsG",
+      "plannedAverageDailyCarbsGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Average daily fat",
+    aliases: [
+      "averageDailyFat",
+      "averageDailyFatG",
+      "averageDailyFatGrams",
+      "avgDailyFat",
+      "avgDailyFatG",
+      "avgDailyFatGrams",
+      "dailyAverageFatG",
+      "dailyAverageFatGrams",
+      "plannedAverageDailyFatG",
+      "plannedAverageDailyFatGrams",
+    ],
+    unit: "g",
+  },
+  {
+    label: "Average daily fiber",
+    aliases: [
+      "averageDailyFiber",
+      "averageDailyFiberG",
+      "averageDailyFiberGrams",
+      "avgDailyFiber",
+      "avgDailyFiberG",
+      "avgDailyFiberGrams",
+      "dailyAverageFiberG",
+      "dailyAverageFiberGrams",
+      "plannedAverageDailyFiberG",
+      "plannedAverageDailyFiberGrams",
+    ],
+    unit: "g",
+  },
+];
+
+const PLANNED_WEEKLY_NUTRITION_SUMMARY_CONTAINERS = [
+  "plannedWeekSummary",
+  "plannedWeeklySummary",
+  "plannedWeeklyNutritionSummary",
+  "plannedWeeklyTotals",
+  "weeklyPlanSummary",
+  "weeklySummary",
+  "weeklyNutritionSummary",
+  "weeklyTotals",
+  "weekSummary",
+  "nutritionWeeklySummary",
+  "plannedSummary",
+  "summary",
+  "totals",
+] as const;
+
+function formatPlannedNutritionSummaryValue(value: unknown, unit: "kcal" | "g"): string | null {
+  const parsed = parseFiniteNumber(value);
+  if (parsed !== null) {
+    return unit === "kcal" ? `${Math.round(parsed)} kcal` : `${formatGramsRounded(parsed)} g`;
   }
-  if (totals.carbs !== null) {
-    derivedRows.push({ label: "Carbs", value: `${formatGramsRounded(totals.carbs)} g` });
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function collectPlannedWeeklyNutritionSummaryCandidates(rawJournal: unknown): Record<string, unknown>[] {
+  const root = isRecord(rawJournal) ? rawJournal : {};
+  const record = isRecord(root.data) ? root.data : root;
+  const domains = isRecord(record.domains) ? record.domains : {};
+  const nutritionDomain = isRecord(domains.NUTRITION) ? domains.NUTRITION : null;
+  const candidates: Record<string, unknown>[] = [];
+
+  const pushRecord = (value: unknown) => {
+    if (isRecord(value)) candidates.push(value);
+  };
+
+  if (nutritionDomain) {
+    for (const key of PLANNED_WEEKLY_NUTRITION_SUMMARY_CONTAINERS) {
+      pushRecord(nutritionDomain[key]);
+    }
+    pushRecord(nutritionDomain);
   }
-  if (totals.fat !== null) {
-    derivedRows.push({ label: "Fat", value: `${formatGramsRounded(totals.fat)} g` });
+
+  for (const key of [
+    "nutritionPlannedWeekSummary",
+    "nutritionPlannedWeeklySummary",
+    "nutritionWeeklyPlanSummary",
+    "nutritionWeeklySummary",
+    "plannedWeeklyNutritionSummary",
+    "weeklyNutritionSummary",
+  ] as const) {
+    pushRecord(record[key]);
   }
-  return derivedRows;
+
+  return candidates;
+}
+
+export function buildNutritionWeeklySummaryRows(rawJournal: unknown): Array<{
+  label: string;
+  value: string;
+}> {
+  const candidates = collectPlannedWeeklyNutritionSummaryCandidates(rawJournal);
+  const rows: Array<{ label: string; value: string }> = [];
+
+  for (const field of PLANNED_WEEKLY_NUTRITION_SUMMARY_FIELDS) {
+    let value: string | null = null;
+    for (const candidate of candidates) {
+      for (const alias of field.aliases) {
+        if (!objectFieldPresent(candidate, alias)) continue;
+        value = formatPlannedNutritionSummaryValue(candidate[alias], field.unit);
+        if (value !== null) break;
+      }
+      if (value !== null) break;
+    }
+    if (value !== null) rows.push({ label: field.label, value });
+  }
+
+  return rows;
 }
 
 function renderNutritionDayTotalsPanel(entries: unknown[]) {
-  const explicitRows = collectExplicitNutritionDayTotalRows(entries);
   const leaves = collectNutritionFoodLeavesFromRoots(entries);
   const derivedTotals = deriveNutritionTotalsFromFoodLeaves(leaves);
   const derivedRows = nutritionTotalsToRows(derivedTotals);
 
-  if (explicitRows.length === 0 && derivedRows.length === 0) return null;
+  if (derivedRows.length === 0) return null;
 
   const renderRows = (rows: Array<{ label: string; value: string }>, keyPrefix: string) =>
     rows.map((row) => (
@@ -753,60 +833,11 @@ function renderNutritionDayTotalsPanel(entries: unknown[]) {
   return (
     <div className="rounded-lg border border-slate-200/90 bg-bg/80 px-3 py-2">
       <p className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
-        Daily Nutrition (Plan)
+        Daily Nutrition Target
       </p>
-      {derivedRows.length > 0 ? (
-        <div className="mt-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-textMuted">
-            Day total (plan items)
-          </p>
-          <dl className="mt-1 space-y-1">{renderRows(derivedRows, "day-derived")}</dl>
-        </div>
-      ) : null}
-      {explicitRows.length > 0 ? (
-        <div className={derivedRows.length > 0 ? "mt-3" : "mt-2"}>
-          {derivedRows.length > 0 ? (
-            <p className="text-[11px] font-medium uppercase tracking-wide text-textMuted">
-              Additional plan totals
-            </p>
-          ) : null}
-          <dl className={`space-y-1 ${derivedRows.length > 0 ? "mt-1" : ""}`}>
-            {renderRows(explicitRows, "day-explicit")}
-          </dl>
-        </div>
-      ) : null}
+      <dl className="mt-2 space-y-1">{renderRows(derivedRows, "day-derived")}</dl>
     </div>
   );
-}
-
-function nutritionStructureItemInlineOmitKeys(rawItem: Record<string, unknown>): Set<string> {
-  const merged = mergeJournalRecordCandidateFields(rawItem);
-  const omit = new Set<string>([
-    "label",
-    "name",
-    "title",
-    "summary",
-    "serving",
-    "timing",
-    "slot",
-    "quantity",
-    "unit",
-  ]);
-  if (nutritionServingPhrase(merged)) {
-    omit.add("serving");
-    omit.add("quantity");
-    omit.add("unit");
-  }
-  const tp = timingPhrase(merged);
-  if (tp) {
-    omit.add("timing");
-    omit.add("slot");
-  }
-  if (formatNutritionMacroInlineClause(merged)) {
-    for (const k of ALL_CANONICAL_MACRO_SCALAR_KEYS) omit.add(k);
-    for (const k of NUTRITION_MACRO_NEST_KEYS) omit.add(k);
-  }
-  return omit;
 }
 
 function formatDurationMinutesLabel(raw: unknown): string | null {
@@ -856,45 +887,38 @@ const JOURNAL_DETAIL_STRUCTURE_KEYS = new Set([
 
 /** Prefer readable athlete-facing rows first; remainder fills from other scalar fields. */
 const JOURNAL_SCALAR_DETAIL_PRIORITY = [
-  "sessionOrder",
-  "sessionType",
   "objective",
   "plannedDurationMinutes",
   "durationMinutes",
-  "plannedStartTime",
-  "plannedEndTime",
   "intensity",
   "description",
-  "mealType",
-  "timing",
-  "quantity",
-  "unit",
-  "serving",
-  "calories",
-  "protein",
-  "carbs",
-  "fat",
-  "estimatedDailyCalories",
-  "targetCalorieMin",
-  "targetCalorieMax",
-  "calorieAdequacyStatus",
-  "estimatedProteinGrams",
-  "estimatedCarbohydrateGrams",
-  "estimatedFatGrams",
-  "estimatedFiberGrams",
-  "macroAdequacyStatus",
-  "sets",
-  "reps",
   "notes",
-  "dayIndex",
-  "weekNumber",
   "plannedLoadMinutes",
   "isRestDay",
 ];
 
+const JOURNAL_DEFAULT_HIDDEN_DETAIL_KEYS = new Set([
+  "name",
+  "title",
+  "label",
+  "sessionOrder",
+  "sessionType",
+  "hasItems",
+  "HasItems",
+  "has_items",
+  "itemCount",
+  "item_count",
+  "itemsCount",
+  "items_count",
+  "itemTypes",
+  "item_types",
+  "childItemTypes",
+  "nestedItemCount",
+]);
+
 const MAX_SCALAR_DETAIL_ROWS = 28;
 
-function collectDetailRows(record: Record<string, unknown>): Array<{ label: string; value: string }> {
+export function collectDetailRows(record: Record<string, unknown>): Array<{ label: string; value: string }> {
   const merged = mergeJournalRecordCandidateFields(record);
   const seen = new Set<string>();
   const rows: Array<{ label: string; value: string }> = [];
@@ -906,18 +930,21 @@ function collectDetailRows(record: Record<string, unknown>): Array<{ label: stri
       key === "trainingDayId" ||
       key === "assignedCoachId" ||
       key === "exerciseCatalogItemId" ||
-      key === "nutritionCatalogItemId"
+      key === "nutritionCatalogItemId" ||
+      JOURNAL_DEFAULT_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
     }
     let value: string | null = null;
-    if (key === "plannedDurationMinutes" || key === "durationMinutes") {
-      const label =
-        key === "plannedDurationMinutes" ? "Planned duration" : "Duration";
+    if (
+      key === "plannedDurationMinutes" ||
+      key === "durationMinutes" ||
+      key === "plannedLoadMinutes"
+    ) {
       const mins = formatDurationMinutesLabel(rawValue);
       if (mins) {
         seen.add(key);
-        rows.push({ label, value: mins });
+        rows.push({ label: "Duration", value: mins });
       }
       return;
     }
@@ -1029,29 +1056,8 @@ function getTotalPrescribedItems(item: Record<string, unknown>): number {
 }
 
 const STRUCTURE_ITEM_ROW_PRIORITY = [
-  "label",
-  "name",
-  "title",
   "summary",
   "description",
-  "mealType",
-  "itemType",
-  "quantity",
-  "unit",
-  "serving",
-  "calories",
-  "totalCalories",
-  "kcal",
-  "energyKcal",
-  "protein",
-  "proteinGrams",
-  "totalProtein",
-  "carbs",
-  "totalCarbs",
-  "carbohydrates",
-  "fat",
-  "totalFat",
-  "timing",
   "sets",
   "reps",
   "durationMinutes",
@@ -1059,7 +1065,20 @@ const STRUCTURE_ITEM_ROW_PRIORITY = [
   "notes",
 ];
 
-function collectStructureItemDetailRows(
+const STRUCTURE_ITEM_HIDDEN_DETAIL_KEYS = new Set([
+  "label",
+  "name",
+  "title",
+  "itemType",
+  "mealType",
+  "order",
+  "Order",
+  "itemOrder",
+  "orderIndex",
+  "index",
+]);
+
+export function collectStructureItemDetailRows(
   item: Record<string, unknown>,
 ): Array<{ label: string; value: string }> {
   const merged = mergeJournalRecordCandidateFields(item);
@@ -1072,9 +1091,7 @@ function collectStructureItemDetailRows(
       key === "id" ||
       key === "exerciseCatalogItemId" ||
       key === "nutritionCatalogItemId" ||
-      key === "order" ||
-      key === "itemOrder" ||
-      key === "orderIndex"
+      STRUCTURE_ITEM_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
     }
@@ -1123,32 +1140,16 @@ function nutritionStructuredItemLeadingLine(opts: {
   hideHeading: boolean;
   serving: string | null;
   macros: string | null;
-  timing: string | null;
 }) {
-  const { heading, hideHeading, serving, macros, timing } = opts;
-  const segments: Array<{ text: string; emphasize: boolean }> = [];
-  if (!hideHeading) segments.push({ text: heading, emphasize: true });
-  if (serving) segments.push({ text: `Serving ${serving}`, emphasize: false });
-  if (macros) segments.push({ text: macros, emphasize: false });
-  if (timing) segments.push({ text: `Timing ${timing}`, emphasize: false });
-
-  if (segments.length === 0) return null;
+  const { heading, hideHeading, serving, macros } = opts;
+  if (hideHeading && !serving && !macros) return null;
 
   return (
-    <p className="text-sm text-textPrimary">
-      {segments.map((seg, idx) => (
-        <span key={`${seg.text}-${idx}`}>
-          {idx > 0 ? <span className="text-textSecondary"> — </span> : null}
-          <span
-            className={
-              seg.emphasize ? "font-medium text-textPrimary" : "text-textSecondary"
-            }
-          >
-            {seg.text}
-          </span>
-        </span>
-      ))}
-    </p>
+    <div className="space-y-1">
+      {!hideHeading ? <p className="text-sm font-medium text-textPrimary">{heading}</p> : null}
+      {serving ? <p className="text-xs text-textSecondary">Serving: {serving}</p> : null}
+      {macros ? <p className="text-xs text-textSecondary">{macros}</p> : null}
+    </div>
   );
 }
 
@@ -1245,27 +1246,12 @@ function renderJournalStructureSections(
   return (
     <div className="space-y-3 border-t border-slate-200/80 pt-2">
       {sections.map((section, sectionIdx) => {
-        const mealExtras = nutritionDomain
-          ? collectNutritionFacingRows(section.mealScalarsSource)
-          : [];
-
         return (
           <div key={`${sectionIdx}-${section.key}`} className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
-              {formatFieldLabel(section.key)}
-            </p>
-            {nutritionDomain && mealExtras.length > 0 ? (
-              <dl className="space-y-0.5 rounded border border-slate-200/70 bg-white/40 px-2 py-1.5">
-                {mealExtras.map((row, ri) => (
-                  <div
-                    key={`${sectionIdx}-meal-${ri}-${row.label}`}
-                    className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
-                  >
-                    <dt className="text-textSecondary">{row.label}</dt>
-                    <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
+            {!nutritionDomain ? (
+              <p className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
+                {formatFieldLabel(section.key)}
+              </p>
             ) : null}
             <div className="space-y-2">
               {section.items.map((rawItem, itemIndex) => {
@@ -1377,22 +1363,16 @@ function renderJournalStructureSections(
                 const mergedItem = mergeJournalRecordCandidateFields(rawItem);
                 const heading = structureItemHeading(rawItem, itemIndex);
                 const serving = nutritionServingPhrase(mergedItem);
-                const macros = formatNutritionMacroInlineClause(mergedItem);
-                const timing = timingPhrase(mergedItem);
-                const omit = nutritionStructureItemInlineOmitKeys(rawItem);
-                const secondary = collectNutritionFacingRows(rawItem, { omitKeys: omit }).filter(
-                  (row) => row.value.trim().toLowerCase() !== heading.trim().toLowerCase(),
-                );
+                const macros = formatNutritionMacroInlineClause(mergedItem, { compact: true });
                 const hideGenericHeading =
                   /^Item\s+\d+$/i.test(heading.trim()) &&
-                  (!!(serving || macros || timing) || secondary.length > 0);
+                  !!(serving || macros);
 
                 const leading = nutritionStructuredItemLeadingLine({
                   heading,
                   hideHeading: hideGenericHeading,
                   serving,
                   macros,
-                  timing,
                 });
 
                 return (
@@ -1401,19 +1381,7 @@ function renderJournalStructureSections(
                     className="rounded border border-slate-200/80 bg-white/60 p-2"
                   >
                     {leading}
-                    {secondary.length > 0 ? (
-                      <dl className={leading ? "mt-1 space-y-0.5" : "space-y-0.5"}>
-                        {secondary.map((row, rowIdx) => (
-                          <div
-                            key={`${sectionIdx}-${section.key}-${itemIndex}-r-${rowIdx}`}
-                            className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
-                          >
-                            <dt className="text-textSecondary">{row.label}</dt>
-                            <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    ) : !leading && heading.startsWith("Item ") ? (
+                    {!leading && heading.startsWith("Item ") ? (
                       <p className="text-xs text-textSecondary">Structured entry</p>
                     ) : null}
                   </div>
@@ -1538,6 +1506,15 @@ function formatAdherenceOccurredAt(value: string | null): string {
   return formatted !== "" ? formatted : value;
 }
 
+export function formatAdherenceStatusLabel(
+  event: Pick<AthleteSessionAdherenceEvent, "adherenceOutcome"> | null,
+): string {
+  if (!event) return "Not logged";
+  return event.adherenceOutcome
+    ? formatEnumeratedLabel(event.adherenceOutcome)
+    : "Logged";
+}
+
 const NUTRITION_PORTION_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 0, label: "Not eaten" },
   { value: 0.5, label: "Half" },
@@ -1545,21 +1522,10 @@ const NUTRITION_PORTION_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 1.25, label: "Extra" },
 ];
 
-const FIBER_SOURCE_KEYS = ["plannedFiberG", "fiberG", "fiber", "Fiber"] as const;
-
-const PLANNED_MINERAL_KEYS = [
-  { label: "Calcium", planned: "plannedCalciumMg", fallbacks: ["calciumMg", "calcium"] as const },
-  { label: "Magnesium", planned: "plannedMagnesiumMg", fallbacks: ["magnesiumMg", "magnesium"] as const },
-  { label: "Potassium", planned: "plannedPotassiumMg", fallbacks: ["potassiumMg", "potassium"] as const },
-  { label: "Sodium", planned: "plannedSodiumMg", fallbacks: ["sodiumMg", "sodium"] as const },
-] as const;
-
 type NutritionAdherenceFoodRow = {
   plannedItemOrder: number;
   label: string;
   serving: string | null;
-  timing: string | null;
-  plannedNutrientRows: Array<{ label: string; value: string }>;
 };
 
 function isNutritionSessionAdherenceEligible(
@@ -1593,69 +1559,6 @@ function resolvePlannedItemOrderFromLeaf(
   return fallbackIndex >= 0 ? fallbackIndex + 1 : null;
 }
 
-function readPresentNutrientNumber(
-  merged: Record<string, unknown>,
-  primaryKey: string,
-  fallbackKeys: readonly string[],
-): number | null | undefined {
-  if (objectFieldPresent(merged, primaryKey)) {
-    if (merged[primaryKey] === null) return null;
-    const primary = parseFiniteNumber(merged[primaryKey]);
-    if (primary !== null) return primary;
-  }
-  const fallback = pickExplicitMacroNumber(merged, fallbackKeys);
-  return fallback === null ? undefined : fallback;
-}
-
-function collectPlannedNutrientDisplayRowsForAdherence(
-  leaf: Record<string, unknown>,
-): Array<{ label: string; value: string }> {
-  const merged = mergeJournalRecordCandidateFields(leaf);
-  const rows: Array<{ label: string; value: string }> = [];
-
-  const calories = readPresentNutrientNumber(
-    merged,
-    "plannedCaloriesKcal",
-    CALORIE_SOURCE_KEYS,
-  );
-  if (typeof calories === "number") {
-    rows.push({ label: "Calories", value: `${Math.round(calories)} kcal` });
-  }
-
-  const protein = readPresentNutrientNumber(merged, "plannedProteinG", PROTEIN_SOURCE_KEYS);
-  if (typeof protein === "number") {
-    rows.push({ label: "Protein", value: `${formatGramsRounded(protein)} g` });
-  }
-
-  const carbs = readPresentNutrientNumber(
-    merged,
-    "plannedCarbohydrateG",
-    CARB_SOURCE_KEYS,
-  );
-  if (typeof carbs === "number") {
-    rows.push({ label: "Carbs", value: `${formatGramsRounded(carbs)} g` });
-  }
-
-  const fat = readPresentNutrientNumber(merged, "plannedFatG", FAT_SOURCE_KEYS);
-  if (typeof fat === "number") {
-    rows.push({ label: "Fat", value: `${formatGramsRounded(fat)} g` });
-  }
-
-  const fiber = readPresentNutrientNumber(merged, "plannedFiberG", FIBER_SOURCE_KEYS);
-  if (typeof fiber === "number") {
-    rows.push({ label: "Fiber", value: `${formatGramsRounded(fiber)} g` });
-  }
-
-  for (const mineral of PLANNED_MINERAL_KEYS) {
-    const value = readPresentNutrientNumber(merged, mineral.planned, mineral.fallbacks);
-    if (typeof value === "number") {
-      rows.push({ label: mineral.label, value: `${formatGramsRounded(value)} mg` });
-    }
-  }
-
-  return rows;
-}
-
 function nutritionFoodLabelFromLeaf(leaf: Record<string, unknown>, index: number): string {
   const merged = mergeJournalRecordCandidateFields(leaf);
   for (const key of ["label", "name", "title", "foodName", "itemName"] as const) {
@@ -1683,66 +1586,43 @@ function collectNutritionAdherenceFoodRows(sessionItem: Record<string, unknown>)
       plannedItemOrder,
       label: nutritionFoodLabelFromLeaf(leaf, index),
       serving: nutritionServingPhrase(mergeJournalRecordCandidateFields(leaf)),
-      timing: timingPhrase(mergeJournalRecordCandidateFields(leaf)),
-      plannedNutrientRows: collectPlannedNutrientDisplayRowsForAdherence(leaf),
     });
   });
 
   return { rows, hasUnresolvedOrder };
 }
 
-function collectConsumedNutrientDisplayRows(
-  item: NutritionAdherenceEventItem,
-): Array<{ label: string; value: string }> {
-  const rows: Array<{ label: string; value: string }> = [];
+function deriveConsumedNutritionTotalsFromEvent(
+  event: AthleteSessionAdherenceEvent | null,
+): JournalNutritionTotals {
+  const totals: JournalNutritionTotals = {
+    calories: null,
+    protein: null,
+    carbs: null,
+    fat: null,
+    fiber: null,
+  };
+  if (!event?.items) return totals;
 
-  if (typeof item.consumedCaloriesKcal === "number") {
-    rows.push({
-      label: "Calories",
-      value: `${Math.round(item.consumedCaloriesKcal)} kcal`,
-    });
-  }
-  if (typeof item.consumedProteinG === "number") {
-    rows.push({ label: "Protein", value: `${formatGramsRounded(item.consumedProteinG)} g` });
-  }
-  if (typeof item.consumedCarbohydrateG === "number") {
-    rows.push({
-      label: "Carbs",
-      value: `${formatGramsRounded(item.consumedCarbohydrateG)} g`,
-    });
-  }
-  if (typeof item.consumedFatG === "number") {
-    rows.push({ label: "Fat", value: `${formatGramsRounded(item.consumedFatG)} g` });
-  }
-  if (typeof item.consumedFiberG === "number") {
-    rows.push({ label: "Fiber", value: `${formatGramsRounded(item.consumedFiberG)} g` });
-  }
-  if (typeof item.consumedCalciumMg === "number") {
-    rows.push({
-      label: "Calcium",
-      value: `${formatGramsRounded(item.consumedCalciumMg)} mg`,
-    });
-  }
-  if (typeof item.consumedMagnesiumMg === "number") {
-    rows.push({
-      label: "Magnesium",
-      value: `${formatGramsRounded(item.consumedMagnesiumMg)} mg`,
-    });
-  }
-  if (typeof item.consumedPotassiumMg === "number") {
-    rows.push({
-      label: "Potassium",
-      value: `${formatGramsRounded(item.consumedPotassiumMg)} mg`,
-    });
-  }
-  if (typeof item.consumedSodiumMg === "number") {
-    rows.push({
-      label: "Sodium",
-      value: `${formatGramsRounded(item.consumedSodiumMg)} mg`,
-    });
+  for (const item of event.items) {
+    if (typeof item.consumedCaloriesKcal === "number") {
+      totals.calories = (totals.calories ?? 0) + item.consumedCaloriesKcal;
+    }
+    if (typeof item.consumedProteinG === "number") {
+      totals.protein = (totals.protein ?? 0) + item.consumedProteinG;
+    }
+    if (typeof item.consumedCarbohydrateG === "number") {
+      totals.carbs = (totals.carbs ?? 0) + item.consumedCarbohydrateG;
+    }
+    if (typeof item.consumedFatG === "number") {
+      totals.fat = (totals.fat ?? 0) + item.consumedFatG;
+    }
+    if (typeof item.consumedFiberG === "number") {
+      totals.fiber = (totals.fiber ?? 0) + item.consumedFiberG;
+    }
   }
 
-  return rows;
+  return totals;
 }
 
 function portionFactorsFromLatestEvent(
@@ -1809,6 +1689,13 @@ function NutritionSessionAdherencePanel({
     () => findLatestAthleteAdherenceEvent(events),
     [events],
   );
+  const loggedIntakeSummary = useMemo(
+    () =>
+      formatNutritionTotalsCompactLine(
+        deriveConsumedNutritionTotalsFromEvent(latestAthleteEvent),
+      ),
+    [latestAthleteEvent],
+  );
 
   useEffect(() => {
     const prefilled = portionFactorsFromLatestEvent(latestAthleteEvent);
@@ -1820,14 +1707,6 @@ function NutritionSessionAdherencePanel({
     setPortionByOrder(next);
     setNotes(latestAthleteEvent?.athleteNotes ?? "");
   }, [foodRows, latestAthleteEvent, plannedSessionId, reloadKey]);
-
-  const consumedByOrder = useMemo(() => {
-    const map = new Map<number, NutritionAdherenceEventItem>();
-    for (const item of latestAthleteEvent?.items ?? []) {
-      map.set(item.plannedItemOrder, item);
-    }
-    return map;
-  }, [latestAthleteEvent]);
 
   const handleSubmit = useCallback(async () => {
     if (!canLogAdherence) {
@@ -1884,14 +1763,20 @@ function NutritionSessionAdherencePanel({
 
   const submitDisabled =
     submitting || !canLogAdherence || hasUnresolvedOrder || foodRows.length === 0;
+  const statusLabel = formatAdherenceStatusLabel(latestAthleteEvent);
 
   return (
-    <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
-      <div className="border-b border-orange-200/60 pb-2">
-        <h4 className="text-sm font-semibold text-textPrimary">Nutrition adherence</h4>
-        <p className="mt-1 text-xs leading-relaxed text-textSecondary">
-          Log how much of each prescribed food you ate.
-        </p>
+    <div className="mt-4 rounded-xl border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/90 p-4 shadow-sm ring-1 ring-orange-100/80">
+      <div className="flex flex-col gap-2 border-b border-orange-200/80 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-textPrimary">Log nutrition intake</h4>
+          <p className="mt-1 text-xs leading-relaxed text-textSecondary">
+            Update the foods you ate for this meal.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-orange-200 bg-white/80 px-2.5 py-1 text-xs font-semibold text-orange-700">
+          {statusLabel}
+        </span>
       </div>
 
       {historyPhase === "loading" ? (
@@ -1905,7 +1790,7 @@ function NutritionSessionAdherencePanel({
       ) : null}
 
       {historyPhase === "ready" && latestAthleteEvent ? (
-        <dl className="mt-2 space-y-1 text-xs">
+        <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
           {latestAthleteEvent.athleteNotes ? (
             <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Note</dt>
@@ -1921,6 +1806,15 @@ function NutritionSessionAdherencePanel({
             </dd>
           </div>
         </dl>
+      ) : null}
+
+      {loggedIntakeSummary ? (
+        <div className="mt-3 rounded-lg border border-orange-100 bg-white/60 px-3 py-2">
+          <p className="text-xs font-semibold text-textPrimary">
+            Logged intake:{" "}
+            <span className="font-medium text-textSecondary">{loggedIntakeSummary}</span>
+          </p>
+        </div>
       ) : null}
 
       {hasUnresolvedOrder ? (
@@ -1943,40 +1837,26 @@ function NutritionSessionAdherencePanel({
       ) : null}
 
       {/* History readiness must not lock past/current adherence. Backend enforces final write rules. */}
-      <fieldset className="mt-3 space-y-3" disabled={submitting || !canLogAdherence}>
-        <legend className="text-xs font-semibold text-textPrimary">
-          {prescribedWorkLabelForAdherenceDomain("NUTRITION")}: {foodRows.length}
+      <fieldset
+        className="mt-4 space-y-3 rounded-lg border border-orange-100 bg-white/65 p-3"
+        disabled={submitting || !canLogAdherence}
+      >
+        <legend className="px-1 text-xs font-semibold text-textPrimary">
+          What did you eat?
         </legend>
+        <p className="text-xs font-medium text-textSecondary">
+          {prescribedWorkLabelForAdherenceDomain("NUTRITION")}: {foodRows.length}
+        </p>
 
         {foodRows.map((row) => {
-          const consumedItem = consumedByOrder.get(row.plannedItemOrder);
-          const consumedRows = consumedItem
-            ? collectConsumedNutrientDisplayRows(consumedItem)
-            : [];
           return (
             <div
               key={`nutrition-adherence-${plannedSessionId}-${row.plannedItemOrder}`}
-              className="rounded border border-orange-200/70 bg-white/50 px-2.5 py-2"
+              className="rounded-lg border border-orange-100 bg-white/55 px-3 py-2.5"
             >
               <p className="text-sm font-medium text-textPrimary">{row.label}</p>
               {row.serving ? (
                 <p className="text-xs text-textSecondary">Serving: {row.serving}</p>
-              ) : null}
-              {row.timing ? (
-                <p className="text-xs text-textSecondary">Timing: {row.timing}</p>
-              ) : null}
-              {row.plannedNutrientRows.length > 0 ? (
-                <dl className="mt-1.5 space-y-0.5 text-xs">
-                  {row.plannedNutrientRows.map((nutrient) => (
-                    <div
-                      key={`${row.plannedItemOrder}-planned-${nutrient.label}`}
-                      className="grid grid-cols-[minmax(0,5.5rem)_1fr] gap-x-2"
-                    >
-                      <dt className="text-textSecondary">{nutrient.label}</dt>
-                      <dd className="text-textPrimary">{nutrient.value}</dd>
-                    </div>
-                  ))}
-                </dl>
               ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 {NUTRITION_PORTION_OPTIONS.map((option) => (
@@ -2002,22 +1882,6 @@ function NutritionSessionAdherencePanel({
                   </label>
                 ))}
               </div>
-              {consumedRows.length > 0 ? (
-                <div className="mt-2 border-t border-orange-200/50 pt-1.5">
-                  <p className="text-xs font-medium text-textSecondary">Logged intake</p>
-                  <dl className="mt-1 space-y-0.5 text-xs">
-                    {consumedRows.map((nutrient) => (
-                      <div
-                        key={`${row.plannedItemOrder}-consumed-${nutrient.label}`}
-                        className="grid grid-cols-[minmax(0,5.5rem)_1fr] gap-x-2"
-                      >
-                        <dt className="text-textSecondary">{nutrient.label}</dt>
-                        <dd className="text-textPrimary">{nutrient.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              ) : null}
             </div>
           );
         })}
@@ -2044,11 +1908,12 @@ function NutritionSessionAdherencePanel({
             variant="primary"
             onClick={() => void handleSubmit()}
             disabled={submitDisabled}
+            className="w-full justify-center sm:w-auto"
           >
             {submitting
               ? "Saving…"
               : latestAthleteEvent
-                ? "Update log"
+                ? "Update your intake"
                 : "Submit"}
           </Button>
           {submitting ? (
@@ -2079,18 +1944,19 @@ function SessionAdherencePanel({
   adherenceDomainKey,
   canLogAdherence = true,
   loggingOpensOn,
+  plannedDurationLabel,
 }: {
   plannedSessionId: string;
   totalPrescribedItems: number;
   adherenceDomainKey: AdherenceJournalDomainKey;
   canLogAdherence?: boolean;
   loggingOpensOn?: string;
+  plannedDurationLabel?: string | null;
 }) {
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
   );
   const [events, setEvents] = useState<AthleteSessionAdherenceEvent[]>([]);
-  const [historyError, setHistoryError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [outcome, setOutcome] = useState<SessionAdherenceOutcome | "">("");
   const [partialCompletedItems, setPartialCompletedItems] = useState("");
@@ -2105,22 +1971,16 @@ function SessionAdherencePanel({
   useEffect(() => {
     let cancelled = false;
     setHistoryPhase("loading");
-    setHistoryError(null);
     void (async () => {
       try {
         const fetched = await fetchPlannedSessionAdherenceEvents(plannedSessionId);
         if (cancelled) return;
         setEvents(fetched);
         setHistoryPhase("ready");
-      } catch (error) {
+      } catch {
         if (cancelled) return;
         setEvents([]);
         setHistoryPhase("error");
-        setHistoryError(
-          isNormalizedApiError(error)
-            ? error.message
-            : "Could not load adherence history.",
-        );
       }
     })();
     return () => {
@@ -2213,14 +2073,20 @@ function SessionAdherencePanel({
   const formFieldsDisabled = submitting || !canLogAdherence;
   const submitDisabled = formFieldsDisabled || outcome === "";
   const hasExistingAthleteLog = Boolean(latestAthleteEvent);
+  const statusLabel = formatAdherenceStatusLabel(latestAthleteEvent);
 
   return (
-    <div className="mt-3 rounded-lg border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/80 p-3.5 shadow-sm">
-      <div className="border-b border-orange-200/60 pb-2">
-        <h4 className="text-sm font-semibold text-textPrimary">Session adherence</h4>
-        <p className="mt-1 text-xs leading-relaxed text-textSecondary">
-          Log whether you completed the prescribed work. Duration is recorded separately.
-        </p>
+    <div className="mt-4 rounded-xl border border-orange-200/90 border-l-4 border-l-orange-500 bg-orange-50/90 p-4 shadow-sm ring-1 ring-orange-100/80">
+      <div className="flex flex-col gap-2 border-b border-orange-200/80 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-textPrimary">Log this session</h4>
+          <p className="mt-1 text-xs leading-relaxed text-textSecondary">
+            Record your completion for this session.
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-orange-200 bg-white/80 px-2.5 py-1 text-xs font-semibold text-orange-700">
+          {statusLabel}
+        </span>
       </div>
 
       {historyPhase === "loading" ? (
@@ -2234,7 +2100,7 @@ function SessionAdherencePanel({
       ) : null}
 
       {historyPhase === "ready" && latestAthleteEvent ? (
-        <dl className="mt-2 space-y-1 text-xs">
+        <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
           <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Status</dt>
             <dd className="text-textPrimary">
@@ -2282,14 +2148,22 @@ function SessionAdherencePanel({
         </p>
       ) : null}
 
-      <fieldset className="mt-3 space-y-2.5" disabled={formFieldsDisabled}>
-        <legend className="text-xs font-semibold text-textPrimary">Log session</legend>
-        {totalPrescribedItems > 0 ? (
-          <p className="text-xs font-medium text-textPrimary">
-            {prescribedWorkLabelForAdherenceDomain(adherenceDomainKey)}:{" "}
-            {totalPrescribedItems}
-          </p>
-        ) : null}
+      <fieldset
+        className="mt-4 space-y-3 rounded-lg border border-orange-100 bg-white/65 p-3"
+        disabled={formFieldsDisabled}
+      >
+        <legend className="px-1 text-xs font-semibold text-textPrimary">
+          How much did you complete?
+        </legend>
+        <div className="flex flex-wrap gap-2 text-xs font-medium text-textSecondary">
+          {totalPrescribedItems > 0 ? (
+            <span>
+              {prescribedWorkLabelForAdherenceDomain(adherenceDomainKey)}:{" "}
+              {totalPrescribedItems}
+            </span>
+          ) : null}
+          {plannedDurationLabel ? <span>Planned duration: {plannedDurationLabel}</span> : null}
+        </div>
         <div className="flex flex-wrap gap-3">
           {ADHERENCE_OUTCOME_OPTIONS.map((option) => (
             <label
@@ -2380,11 +2254,12 @@ function SessionAdherencePanel({
             variant="primary"
             onClick={() => void handleSubmit()}
             disabled={submitDisabled}
+            className="w-full justify-center sm:w-auto"
           >
             {submitting
               ? "Saving…"
               : hasExistingAthleteLog
-                ? "Update log"
+                ? "Update completion"
                 : "Submit"}
           </Button>
         </div>
@@ -2446,7 +2321,7 @@ function renderJournalItem(
     nutritionDomain ? { suppressKeys: NUTRITION_JOURNAL_PRIMARY_SUPPRESS_KEYS } : undefined,
   );
   const detailRows = nutritionDomain
-    ? collectNutritionFacingRows(item)
+    ? []
     : collectDetailRows(item);
   const structureSections = extractJournalStructureSections(item);
   const hasStructuredContent = structureSections.length > 0;
@@ -2456,24 +2331,59 @@ function renderJournalItem(
   const showNutritionAdherencePanel =
     isNutritionSessionAdherenceEligible(nutritionDomain, item) &&
     plannedSessionId !== null;
+  const nutritionLeaves = nutritionDomain ? collectNutritionFoodLeavesFromRoots([item]) : [];
+  const nutritionMealTotalsLine = nutritionDomain
+    ? formatNutritionTotalsCompactLine(deriveNutritionTotalsFromFoodLeaves(nutritionLeaves))
+    : null;
+  const nutritionItemCountLabel =
+    nutritionDomain && nutritionLeaves.length > 0
+      ? `${nutritionLeaves.length} ${nutritionLeaves.length === 1 ? "item" : "items"}`
+      : null;
+  const heading = itemHeading(item, index, { nutritionDomain });
+  const nutritionSummaryLine = nutritionDomain ? nutritionMealSummaryLine(item, heading) : null;
+  const plannedDurationLabel =
+    !nutritionDomain && isRecord(item)
+      ? formatDurationMinutesLabel(
+          mergeJournalRecordCandidateFields(item).plannedDurationMinutes,
+        )
+      : null;
 
   return (
-    <Card key={`record-${index}`} accent={false} padding="compact" className="bg-bg">
+    <div
+      key={`record-${index}`}
+      className="rounded-lg border border-slate-200/80 bg-white/70 p-3"
+    >
       <div className="space-y-2">
         <div>
           <p className="text-sm font-semibold text-textPrimary">
-            {itemHeading(item, index, { nutritionDomain })}
+            {heading}
           </p>
-          {primaryLines.slice(1, 3).map((line) => (
-            <p key={line} className="text-sm text-textSecondary">
-              {line}
-            </p>
-          ))}
+          {nutritionDomain ? (
+            <>
+              {nutritionSummaryLine ? (
+                <p className="mt-1 text-sm text-textSecondary">{nutritionSummaryLine}</p>
+              ) : null}
+              {nutritionItemCountLabel || nutritionMealTotalsLine ? (
+                <p className="mt-1 text-xs text-textSecondary">
+                  {[nutritionItemCountLabel, nutritionMealTotalsLine].filter(Boolean).join(" · ")}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            primaryLines.slice(1, 3).map((line) => (
+              <p key={line} className="text-sm text-textSecondary">
+                {line}
+              </p>
+            ))
+          )}
         </div>
         {detailRows.length > 0 ? (
           <dl className="space-y-1">
             {detailRows.map((row) => (
-              <div key={`${row.label}-${row.value}`} className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm">
+              <div
+                key={`${row.label}-${row.value}`}
+                className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm"
+              >
                 <dt className="font-medium text-textSecondary">{row.label}</dt>
                 <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
               </div>
@@ -2507,10 +2417,11 @@ function renderJournalItem(
             adherenceDomainKey={adherenceDomainKey}
             canLogAdherence={canLogAdherence}
             loggingOpensOn={loggingOpensOn}
+            plannedDurationLabel={plannedDurationLabel}
           />
         ) : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -2530,6 +2441,10 @@ function journalDayKey(day: AthleteWeeklyPlanJournalDay): string | null {
   const parsed = parseToLocalDate(day.date);
   if (parsed === null) return null;
   return getLocalDateKey(parsed);
+}
+
+export function formatJournalDomainItemCount(count: number): string {
+  return `${count} ${count === 1 ? "item" : "items"} released`;
 }
 
 function resolveJournalDayAdherenceLogging(day: AthleteWeeklyPlanJournalDay): {
@@ -2616,6 +2531,18 @@ function renderJournalDaySelector(props: {
   );
 }
 
+function nutritionMealSummaryLine(item: Record<string, unknown>, heading: string): string | null {
+  const merged = mergeJournalRecordCandidateFields(item);
+  for (const key of ["objective", "description", "summary", "dayFocus", "notes"] as const) {
+    const value = merged[key];
+    const formatted = isScalar(value) ? formatScalarValue(value) : null;
+    if (!formatted || formatted === "—") continue;
+    if (formatted.trim().toLowerCase() === heading.trim().toLowerCase()) continue;
+    return formatted;
+  }
+  return null;
+}
+
 function renderJournalDayDomainGrid(
   day: AthleteWeeklyPlanJournalDay,
   journalOptions?: {
@@ -2627,72 +2554,105 @@ function renderJournalDayDomainGrid(
 ): ReactElement {
   const { canLogAdherence, loggingOpensOn, adherenceDayScopeKey } =
     resolveJournalDayAdherenceLogging(day);
+  const domainItemsByKey = {
+    SKILLS: day.skills,
+    NUTRITION: day.nutrition,
+    S_AND_C: day.sandc,
+  } satisfies Record<(typeof DOMAIN_SECTIONS)[number]["key"], unknown[]>;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-3">
-      {DOMAIN_SECTIONS.map((domain) => {
-        const items =
-          domain.key === "SKILLS"
-            ? day.skills
-            : domain.key === "NUTRITION"
-              ? day.nutrition
-              : day.sandc;
-        return (
-          <div key={`${day.date}-${domain.key}`} className="space-y-3">
-            <div className="border-l-2 border-primary/60 pl-3">
-              <h4 className="text-sm font-semibold text-textPrimary">
-                {domain.sectionTitle}
-              </h4>
-              <p className="text-xs text-textSecondary">
-                {items.length > 0
-                  ? `${items.length} item(s) released`
-                  : domain.emptyMessage}
-              </p>
-            </div>
-            {items.length === 0 ? (
-              <Card
-                padding="compact"
-                accent={false}
-                className="bg-bg text-sm text-textSecondary"
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 border-b border-slate-200/80 pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-textMuted">
+            Day {day.dayNumber}
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-textPrimary">
+            {formatDateWithWeekday(day.date)}
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {DOMAIN_SECTIONS.map((domain) => {
+            const items = domainItemsByKey[domain.key];
+            return (
+              <span
+                key={`day-count-${domain.key}`}
+                className="rounded-full border border-orange-100 bg-orange-50 px-2.5 py-1 text-xs font-medium text-textSecondary"
               >
-                {domain.emptyMessage}
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {domain.key === "NUTRITION" ? renderNutritionDayTotalsPanel(items) : null}
-                {items.map((item, index) => {
-                  const skillsSportMetrics =
-                    domain.key === "SKILLS" &&
-                    journalOptions?.skillsSportMetricsBase &&
-                    isRecord(item) &&
-                    readPlannedSessionIdFromItem(item)
-                      ? {
-                          ...journalOptions.skillsSportMetricsBase,
-                          plannedSessionId: readPlannedSessionIdFromItem(item)!,
-                          dayDate: day.date,
-                          sessionTitle: readSessionTitleFromItem(item),
-                        }
-                      : undefined;
-
-                  return renderJournalItem(item, index, {
-                    nutritionDomain: domain.key === "NUTRITION",
-                    showAdherenceForm:
-                      domain.key === "SKILLS" || domain.key === "S_AND_C",
-                    adherenceDomainKey:
-                      domain.key === "SKILLS" || domain.key === "S_AND_C"
-                        ? domain.key
-                        : undefined,
-                    canLogAdherence,
-                    loggingOpensOn,
-                    adherenceDayScopeKey,
-                    skillsSportMetrics,
-                  });
-                })}
+                {domain.label}: {formatJournalDomainItemCount(items.length)}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-3">
+        {DOMAIN_SECTIONS.map((domain, domainIndex) => {
+          const items = domainItemsByKey[domain.key];
+          return (
+            <section
+              key={`${day.date}-${domain.key}`}
+              className="space-y-3 rounded-xl border border-slate-200/90 bg-white/60 p-3"
+            >
+              <div className="flex items-start gap-3 border-b border-slate-200/80 pb-3">
+                <span className="text-lg font-semibold leading-none text-orange-500/80">
+                  {String(domainIndex + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  <h4 className="text-sm font-semibold text-textPrimary">
+                    {domain.sectionTitle}
+                  </h4>
+                  <p className="text-xs text-textSecondary">
+                    {items.length > 0
+                      ? formatJournalDomainItemCount(items.length)
+                      : domain.emptyMessage}
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+              {items.length === 0 ? (
+                <Card
+                  padding="compact"
+                  accent={false}
+                  className="bg-bg text-sm text-textSecondary"
+                >
+                  {domain.emptyMessage}
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {domain.key === "NUTRITION" ? renderNutritionDayTotalsPanel(items) : null}
+                  {items.map((item, index) => {
+                    const skillsSportMetrics =
+                      domain.key === "SKILLS" &&
+                      journalOptions?.skillsSportMetricsBase &&
+                      isRecord(item) &&
+                      readPlannedSessionIdFromItem(item)
+                        ? {
+                            ...journalOptions.skillsSportMetricsBase,
+                            plannedSessionId: readPlannedSessionIdFromItem(item)!,
+                            dayDate: day.date,
+                            sessionTitle: readSessionTitleFromItem(item),
+                          }
+                        : undefined;
+
+                    return renderJournalItem(item, index, {
+                      nutritionDomain: domain.key === "NUTRITION",
+                      showAdherenceForm:
+                        domain.key === "SKILLS" || domain.key === "S_AND_C",
+                      adherenceDomainKey:
+                        domain.key === "SKILLS" || domain.key === "S_AND_C"
+                          ? domain.key
+                          : undefined,
+                      canLogAdherence,
+                      loggingOpensOn,
+                      adherenceDayScopeKey,
+                      skillsSportMetrics,
+                    });
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2838,13 +2798,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
                 const summary = readyJournal.domains[domain.key];
                 const weekTotalsRows =
                   domain.key === "NUTRITION" && summary.status === "RELEASED"
-                    ? nutritionTotalsToRows(
-                        deriveNutritionTotalsFromFoodLeaves(
-                          readyJournal.days.flatMap((d) =>
-                            collectNutritionFoodLeavesFromRoots(d.nutrition),
-                          ),
-                        ),
-                      )
+                    ? buildNutritionWeeklySummaryRows(readyJournal.raw)
                     : [];
                 return (
                   <Card
@@ -2868,7 +2822,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
                       {weekTotalsRows.length > 0 ? (
                         <div className="border-t border-slate-200/80 pt-2">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-textSecondary">
-                            Week total (plan items)
+                            Planned Week Summary
                           </p>
                           <dl className="mt-1 space-y-0.5">
                             {weekTotalsRows.map((row) => (

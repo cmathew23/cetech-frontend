@@ -433,6 +433,20 @@ export function planningProfileHrefForAthlete(
   return `${baseHref}?${params.toString()}`;
 }
 
+export function existingCoachAthletePlanningProfileHref(
+  athleteId: string,
+  planId?: string | null,
+): string {
+  const baseHref = `/coach/athletes/${encodeURIComponent(athleteId)}/planning-profile`;
+  const normalizedPlanId = planId?.trim() ?? "";
+  if (normalizedPlanId === "") return baseHref;
+
+  const params = new URLSearchParams();
+  params.set("planId", normalizedPlanId);
+  params.set("skillsPlanId", normalizedPlanId);
+  return `${baseHref}?${params.toString()}`;
+}
+
 export function resolveCoachPlanDomain(input: {
   assignedFunctions: string[];
   /**
@@ -569,11 +583,15 @@ export function resolveTrainingPlanAction(input: {
   }
 
   if (effectivePlanId !== "") {
+    const editHref =
+      input.hasHeadCoachConfigured !== true && resolvedDomain === "SKILLS"
+        ? existingCoachAthletePlanningProfileHref(athleteIdTrimmed, effectivePlanId)
+        : planningProfileHrefForAthlete(athleteIdTrimmed, effectivePlanId);
     return {
       buttonLabel: editPlanButtonLabel(resolvedDomain),
       disabled: false,
       helperBelowButton: null,
-      href: planningProfileHrefForAthlete(athleteIdTrimmed, effectivePlanId),
+      href: editHref,
       planStatusLabel: planStatusLabel(input.currentPlanStatus),
       resolvedButtonState: "edit_plan",
       resolvedDomain,

@@ -153,6 +153,9 @@ import {
   formatNutritionDailyTotalsDisplay,
   readNutritionMetricValue,
   summarizeNutritionItems,
+  buildTrainingPlanPlanningBriefSections,
+  TrainingPlanPlanningBrief,
+  DomainPlanConstraintComplianceSummarySection,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -4574,6 +4577,141 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(markup).toContain("Adjust servings.");
   });
 
+  it("renders backend constraintComplianceSummary in the review drawer content", () => {
+    const markup = renderToStaticMarkup(
+      createElement(DomainPlanConstraintComplianceSummarySection, {
+        summary: {
+          status: "COMPLIANT",
+          detectedConstraints: [
+            {
+              athleteCategory: "SUB_JUNIOR",
+              validatedLevel: "INTERMEDIATE",
+              workload: {
+                assessmentStatus: "WARN",
+                readinessLevel: "LIMITED",
+                workloadFlags: [
+                  "APP_FRESHNESS_NOT_CURRENT",
+                  "APP_PLANNING_ELIGIBILITY_WARNING",
+                ],
+              },
+              injuryStatus: "HEALTHY",
+              domainSafetyRules: ["SUB_JUNIOR_NO_HEAVY_OR_EXTERNAL_LOADING"],
+            },
+          ],
+          appliedInPlan: [
+            {
+              workloadHandling: {
+                plannedWeeklyLoadMinutes: 150,
+                sessionIntensityDistribution: {
+                  LOW: 5,
+                },
+                intensityCap: "REDUCED",
+                recoveryBias: "ELEVATED",
+              },
+              youthLoadSafety: {
+                stage: "SUB_JUNIOR",
+                totalExerciseItemCount: 20,
+                unsafeExerciseItemCount: 0,
+              },
+            },
+          ],
+          evidence: [
+            {
+              generationContextSnapshot: true,
+              planningContextSnapshotId: "ddfca1d5-a568-4f4f-9c62-871233e91540",
+              lockedPlanningContext: true,
+              planContentEvidence: true,
+              stageSafetyValidation: true,
+            },
+          ],
+          raw: {},
+        },
+      }),
+    );
+
+    expect(markup).toContain("<button");
+    expect(markup).toContain("aria-expanded=\"false\"");
+    expect(markup).toContain("aria-controls=");
+    expect(markup).toContain("aria-label=\"Expand AI Constraint Handling\"");
+    expect(markup).toContain("lucide-chevron-down");
+    expect(markup).toContain("AI Constraint Handling");
+    expect(markup).toContain("Compliant");
+    expect(markup.indexOf("AI Constraint Handling")).toBeLessThan(markup.indexOf("</button>"));
+    expect(markup.indexOf("Compliant")).toBeLessThan(markup.indexOf("</button>"));
+    expect(markup).toContain("Athlete category");
+    expect(markup).toContain("Sub-Junior");
+    expect(markup).toContain("Validated level");
+    expect(markup).toContain("Intermediate");
+    expect(markup).toContain("Workload status");
+    expect(markup).toContain("Warning");
+    expect(markup).toContain("Readiness level");
+    expect(markup).toContain("Limited");
+    expect(markup).toContain("App freshness not current");
+    expect(markup).toContain("App planning eligibility warning");
+    expect(markup).toContain("Injury status");
+    expect(markup).toContain("Healthy");
+    expect(markup).toContain("Sub-Junior: no heavy or external loading");
+    expect(markup).toContain("Planned weekly load");
+    expect(markup).toContain("150");
+    expect(markup).toContain("Low");
+    expect(markup).toContain("Intensity cap");
+    expect(markup).toContain("Reduced");
+    expect(markup).toContain("Recovery bias");
+    expect(markup).toContain("Elevated");
+    expect(markup).toContain("Exercise items");
+    expect(markup).toContain("20");
+    expect(markup).toContain("Unsafe exercise items");
+    expect(markup).toContain("0");
+    expect(markup).toContain("Generation context snapshot");
+    expect(markup).toContain("Available");
+    expect(markup).toContain("Locked planning context");
+    expect(markup).toContain("Used");
+    expect(markup).not.toContain("{&quot;");
+    expect(markup).not.toContain("athleteCategory");
+    expect(markup).not.toContain("ddfca1d5-a568-4f4f-9c62-871233e91540");
+  });
+
+  it("does not warn when backend evidence maps to duplicate human labels", () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const markup = renderToStaticMarkup(
+        createElement(DomainPlanConstraintComplianceSummarySection, {
+          summary: {
+            status: "COMPLIANT",
+            detectedConstraints: [],
+            appliedInPlan: [],
+            evidence: [
+              {
+                planningContextSnapshotId: "ddfca1d5-a568-4f4f-9c62-871233e91540",
+                lockedPlanningContextSnapshot: true,
+              },
+            ],
+            raw: {},
+          },
+        }),
+      );
+
+      expect(markup).toContain("Planning context snapshot");
+      expect(markup).toContain("Available");
+      expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("Encountered two children with the same key"),
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("does not crash review drawer constraint evidence when summary is missing", () => {
+    const markup = renderToStaticMarkup(
+      createElement(DomainPlanConstraintComplianceSummarySection, {
+        summary: null,
+      }),
+    );
+
+    expect(markup).toBe("");
+  });
+
   it("uses Review Skills Plan as the canonical drawer button label", () => {
     expect(reviewPlanButtonLabel("SKILLS")).toBe("Review Skills Plan");
     expect(openDomainPlanReviewLabel("SKILLS")).toBe("Review Skills Plan");
@@ -7654,6 +7792,181 @@ function workflow2AHeadCoachOwnedSkillsWorkspace(
     ...overrides,
   };
 }
+
+describe("Training Plan Planning Brief", () => {
+  const lockedDisplayFields = {
+    seasonName: "2026 Tennis Season",
+    currentPhase: "OFF_SEASON",
+    selectedGoalsSummary: "Improve first serve",
+    selectedGoalCount: 1,
+    planStartDate: "2026-08-01",
+    planEndDate: "2026-08-28",
+    durationDays: 28,
+    insideCurrentPhase: true,
+    datesConfirmed: true,
+    seasonGoalsComplete: true,
+    planDatesComplete: true,
+  };
+  const lockedCardFields = {
+    validatedLevel: "INTERMEDIATE",
+    weeklyWorkload: "8 - 10 hrs/week",
+    weeklyTrainingHours: 9,
+    seasonPhase: "PRE_SEASON",
+  };
+
+  it("renders from existing workspace locked planning data", () => {
+    const workspace = workflow1OwnedSkillsWorkspace({
+      planningContext: {
+        locked: true,
+        resolved: true,
+        lockId: "lock-1",
+        snapshotId: "snapshot-1",
+        startDate: "2026-08-01",
+        endDate: "2026-08-28",
+        durationDays: 28,
+        selectedGoalsSnapshot: [
+          {
+            goalId: "goal-1",
+            goalName: "Improve first serve",
+            taxonomyAreaKey: "approach_shots",
+            competitionEventId: "district-open",
+          },
+        ],
+        athletePlanningContextSnapshot: {
+          ageCategory: "SUB_JUNIOR",
+          injurySafetyNotes: ["Monitor right shoulder"],
+          calorieContext: "2600 kcal/day",
+        },
+      },
+    });
+
+    const sections = buildTrainingPlanPlanningBriefSections({
+      athleteDisplay: "Avery Player",
+      profile: {
+        derivedAge: 16,
+        sportCode: "TENNIS",
+        trainingAgeYears: 5,
+        dietType: "Vegetarian",
+        allergiesOrIntolerances: "Peanuts",
+      } as never,
+      workspace,
+      upstreamPlanningContext: null,
+      lockedPlanningContextCardFields: lockedCardFields,
+      lockedContextDisplayFields: lockedDisplayFields,
+      lockedGoals: [
+        {
+          goalId: "goal-1",
+          goalName: "Improve first serve",
+          successCriteria: "70% first-serve accuracy",
+        },
+      ],
+    });
+    const markup = renderToStaticMarkup(
+      createElement(TrainingPlanPlanningBrief, { sections }),
+    );
+
+    expect(markup).toContain("View Planning Brief");
+    expect(markup).toContain("Avery Player");
+    expect(markup).toContain("Tennis");
+    expect(markup).toContain("Sub-Junior");
+    expect(markup).toContain("Intermediate");
+    expect(markup).toContain("Off-season");
+    expect(markup).toContain("Improve first serve");
+    expect(markup).toContain("Approach shots");
+    expect(markup).toContain("Monitor right shoulder");
+    expect(markup).toContain("2600 kcal/day");
+  });
+
+  it("does not crash when optional planning fields are missing", () => {
+    const sections = buildTrainingPlanPlanningBriefSections({
+      athleteDisplay: "athlete-1",
+      profile: null,
+      workspace: workflow1OwnedSkillsWorkspace({
+        planningContext: {
+          locked: true,
+          resolved: true,
+          lockId: "lock-1",
+          snapshotId: "snapshot-1",
+        },
+      }),
+      upstreamPlanningContext: null,
+      lockedPlanningContextCardFields: {
+        validatedLevel: null,
+        weeklyWorkload: null,
+        weeklyTrainingHours: null,
+        seasonPhase: null,
+      },
+      lockedContextDisplayFields: {
+        ...lockedDisplayFields,
+        seasonName: null,
+        currentPhase: null,
+        planStartDate: null,
+        planEndDate: null,
+        durationDays: null,
+      },
+      lockedGoals: [],
+    });
+    const markup = renderToStaticMarkup(
+      createElement(TrainingPlanPlanningBrief, { sections }),
+    );
+
+    expect(markup).toContain("View Planning Brief");
+    expect(markup).toContain("Not available");
+  });
+
+  it("renders read-only markup with no form or action controls", () => {
+    const sections = buildTrainingPlanPlanningBriefSections({
+      athleteDisplay: "Avery Player",
+      profile: null,
+      workspace: null,
+      upstreamPlanningContext: null,
+      lockedPlanningContextCardFields: lockedCardFields,
+      lockedContextDisplayFields: lockedDisplayFields,
+      lockedGoals: [],
+    });
+    const markup = renderToStaticMarkup(
+      createElement(TrainingPlanPlanningBrief, { sections }),
+    );
+
+    expect(markup).toContain("<details");
+    expect(markup).toContain("<summary");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("<input");
+    expect(markup).not.toContain("<textarea");
+    expect(markup).not.toContain("<select");
+  });
+
+  it("leaves workflow action visibility unchanged", () => {
+    const before = resolveDomainViewPlanVisible({
+      assignmentDomainContext: shellAssignmentDomain({ canOpen: true }),
+      legacyCanOpen: false,
+      planId: "plan-1",
+      versionId: "version-1",
+    });
+    renderToStaticMarkup(
+      createElement(TrainingPlanPlanningBrief, {
+        sections: buildTrainingPlanPlanningBriefSections({
+          athleteDisplay: "Avery Player",
+          profile: null,
+          workspace: null,
+          upstreamPlanningContext: null,
+          lockedPlanningContextCardFields: lockedCardFields,
+          lockedContextDisplayFields: lockedDisplayFields,
+          lockedGoals: [],
+        }),
+      }),
+    );
+    const after = resolveDomainViewPlanVisible({
+      assignmentDomainContext: shellAssignmentDomain({ canOpen: true }),
+      legacyCanOpen: false,
+      planId: "plan-1",
+      versionId: "version-1",
+    });
+
+    expect(before).toBe(true);
+    expect(after).toBe(before);
+  });
+});
 
 describe("Workflow 1 assistant domain action visibility", () => {
   it("enables create for assigned Skills coach with effective locked context and no plan", () => {

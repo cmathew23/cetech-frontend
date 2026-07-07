@@ -16,6 +16,7 @@ import {
   resolveTrainingPlanAction,
   PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL,
   WAITING_FOR_HEAD_COACH_PLANNING_CONTEXT_MESSAGE,
+  existingCoachAthletePlanningProfileHref,
 } from "@/lib/coachTrainingPlanActions";
 
 describe("resolveTrainingPlanAction", () => {
@@ -58,7 +59,7 @@ describe("resolveTrainingPlanAction", () => {
     expect(action.resolvedButtonState).toBe("edit_plan");
   });
 
-  it("shows Edit Skills Plan for a skills coach with a persisted plan", () => {
+  it("routes Workflow 3 Skills coach Edit Skills Plan to the existing workspace page", () => {
     const action = resolveTrainingPlanAction({
       athleteId: "athlete101",
       assignedFunctions: ["SKILLS"],
@@ -67,14 +68,65 @@ describe("resolveTrainingPlanAction", () => {
       currentPlanStatus: "ACTIVE",
       fallbackDomain: "SKILLS",
       hasPlanningProfile: true,
+      hasHeadCoachConfigured: false,
     });
 
     expect(action.buttonLabel).toBe("Edit Skills Plan");
     expect(action.planStatusLabel).toBe("Plan: ACTIVE");
     expect(action.href).toBe(
-      "/coach/training-plans/athlete101/workflow?planId=plan-skills-101&skillsPlanId=plan-skills-101",
+      "/coach/athletes/athlete101/planning-profile?planId=plan-skills-101&skillsPlanId=plan-skills-101",
     );
+    expect(action.href).not.toContain("/workflow");
     expect(action.disabled).toBe(false);
+  });
+
+  it("builds Workflow 3 edit route against the existing planning-profile page", () => {
+    const href = existingCoachAthletePlanningProfileHref("athlete101", "plan-skills-101");
+
+    expect(href).toBe(
+      "/coach/athletes/athlete101/planning-profile?planId=plan-skills-101&skillsPlanId=plan-skills-101",
+    );
+    expect(href).not.toContain("/workflow");
+  });
+
+  it("keeps Head Coach-configured Skills edit navigation on the workflow route", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-2b",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills-2b",
+      currentPlanStatus: "ACTIVE",
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: false,
+      planningContextLocked: true,
+    });
+
+    expect(action.buttonLabel).toBe("Edit Skills Plan");
+    expect(action.href).toBe(
+      "/coach/training-plans/athlete-2b/workflow?planId=plan-skills-2b&skillsPlanId=plan-skills-2b",
+    );
+  });
+
+  it("keeps Head Coach-owned Skills edit navigation on the workflow route", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete-2a",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills-2a",
+      currentPlanStatus: "ACTIVE",
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+      hasHeadCoachConfigured: true,
+      isHeadCoachPlanningContextOwner: true,
+      planningContextLocked: true,
+    });
+
+    expect(action.buttonLabel).toBe("Edit Skills Plan");
+    expect(action.href).toBe(
+      "/coach/training-plans/athlete-2a/workflow?planId=plan-skills-2a&skillsPlanId=plan-skills-2a",
+    );
   });
 
   it("shows Edit Nutrition Plan for a nutrition coach with a persisted plan", () => {

@@ -88,6 +88,7 @@ import {
   type TrainingPlanReviseResult,
   type CoachAthleteTrainingPlanWorkloadAssessment,
   type CoachAthleteUpstreamPlanningContext,
+  type TrainingPlanConstraintComplianceSummary,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import { getTrainingPlanWorkspace } from "@/lib/api/trainingPlanWorkspace";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -173,6 +174,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -777,6 +779,398 @@ function renderPlanningGoalSummaryRows({
       />
       <DetailRow label="Success Criteria" value={renderDetailListValue(successCriteria)} />
     </>
+  );
+}
+
+type PlanningBriefRow = {
+  label: string;
+  value: string | string[];
+};
+
+export type PlanningBriefSection = {
+  title: string;
+  rows: PlanningBriefRow[];
+};
+
+function formatPlanningBriefDisplayText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  const normalized = trimmed.replace(/[_\s]+/g, " ").trim().toLowerCase();
+  const knownLabels: Record<string, string> = {
+    "sub junior": "Sub-Junior",
+    intermediate: "Intermediate",
+    "off season": "Off-season",
+    "pre season": "Pre-season",
+    "in season": "In-season",
+    "approach shots": "Approach shots",
+  };
+  if (knownLabels[normalized]) return knownLabels[normalized];
+
+  if (trimmed.includes("_") || /^[A-Z0-9\s-]+$/.test(trimmed)) {
+    return normalized.replace(/^./, (char) => char.toUpperCase());
+  }
+
+  return trimmed;
+}
+
+function displayUnknownPlanningBriefValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed !== "" ? formatPlanningBriefDisplayText(trimmed) : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return null;
+}
+
+function readPlanningBriefStringFromRecords(
+  records: Record<string, unknown>[],
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    for (const record of records) {
+      const value = displayUnknownPlanningBriefValue(record[key]);
+      if (value !== null) return value;
+    }
+  }
+  return null;
+}
+
+function readPlanningBriefListFromRecords(
+  records: Record<string, unknown>[],
+  keys: string[],
+): string[] {
+  for (const key of keys) {
+    for (const record of records) {
+      const value = record[key];
+      const items = Array.isArray(value)
+        ? value
+            .map(displayUnknownPlanningBriefValue)
+            .filter((item): item is string => item !== null)
+        : [];
+      if (items.length > 0) {
+        return items.filter((item, index, values) => values.indexOf(item) === index);
+      }
+      const scalar = displayUnknownPlanningBriefValue(value);
+      if (scalar !== null) return [scalar];
+    }
+  }
+  return [];
+}
+
+function firstNonEmptyPlanningBriefList(lists: string[][]): string[] {
+  return lists.find((list) => list.length > 0) ?? [];
+}
+
+function joinPlanningBriefParts(parts: Array<string | null | undefined>, separator = " / "): string | null {
+  const values = parts
+    .map((part) => (part ? formatPlanningBriefDisplayText(part) : ""))
+    .filter((part) => part !== "");
+  return values.length > 0 ? values.join(separator) : null;
+}
+
+function planningBriefGoalLabels(goals: PlanningSummaryGoal[]): string[] {
+  return goals
+    .map((goal) => readPlanningGoalTitle(goal) ?? goal.goalId ?? null)
+    .filter((value): value is string => value !== null && value.trim() !== "")
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function addPlanningBriefRow(
+  rows: PlanningBriefRow[],
+  label: string,
+  value: string | string[] | null | undefined,
+): void {
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => formatPlanningBriefDisplayText(item))
+      .filter((item) => item !== "");
+    if (items.length > 0) rows.push({ label, value: items });
+    return;
+  }
+  const text = value ? formatPlanningBriefDisplayText(value) : "";
+  if (text !== "" && text !== "—") rows.push({ label, value: text });
+}
+
+function renderPlanningBriefListValue(items: string[]): ReactNode {
+  return (
+    <ul className="list-disc space-y-1.5 pl-4 text-textPrimary marker:text-textMuted">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`} className="pl-1 leading-relaxed">
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PlanningBriefRowView({ row }: { row: PlanningBriefRow }) {
+  return (
+    <div className="grid gap-1 py-1.5 sm:grid-cols-[9rem_1fr] sm:gap-3">
+      <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "text-xs")}>{row.label}</dt>
+      <dd className="min-w-0 text-sm leading-relaxed text-textPrimary">
+        {Array.isArray(row.value)
+          ? renderPlanningBriefListValue(row.value)
+          : row.value}
+      </dd>
+    </div>
+  );
+}
+
+export function buildTrainingPlanPlanningBriefSections(input: {
+  athleteDisplay: string;
+  profile: CoachAthletePlanningProfileData | null;
+  workspace: TrainingPlanWorkspace | null;
+  upstreamPlanningContext: CoachAthleteUpstreamPlanningContext | null;
+  lockedPlanningContextCardFields: {
+    validatedLevel: string | null;
+    weeklyWorkload: string | null;
+    weeklyTrainingHours: number | null;
+    seasonPhase: string | null;
+  };
+  lockedContextDisplayFields: {
+    seasonName: string | null;
+    currentPhase: string | null;
+    planStartDate: string | null;
+    planEndDate: string | null;
+    durationDays: number | null;
+  };
+  lockedGoals: PlanningSummaryGoal[];
+}): PlanningBriefSection[] {
+  const workspacePlanningContext = input.workspace?.planningContext ?? null;
+  const snapshotRecords = [
+    ...collectObjectRecords(workspacePlanningContext?.athletePlanningContextSnapshot),
+    ...collectObjectRecords(workspacePlanningContext?.selectedGoalsSnapshot),
+  ];
+  const upstreamWorkload =
+    input.upstreamPlanningContext?.planningContext.workload ??
+    input.upstreamPlanningContext?.workload ??
+    null;
+  const selectedGoalLabels = firstNonEmptyPlanningBriefList([
+    planningBriefGoalLabels(input.lockedGoals),
+    readGoalLabelsFromSnapshot(workspacePlanningContext?.selectedGoalsSnapshot),
+    readGoalLabelsFromSnapshot(workspacePlanningContext?.athletePlanningContextSnapshot),
+  ]);
+  const injurySafetyNotes = firstNonEmptyPlanningBriefList([
+    readPlanningBriefListFromRecords(snapshotRecords, [
+      "injurySafetyNotes",
+      "injuryNotes",
+      "injuryHistory",
+      "medicalNotes",
+      "safetyNotes",
+      "restrictions",
+      "constraints",
+    ]),
+    [upstreamWorkload?.restrictionSummary ?? null].filter((item): item is string => item !== null),
+  ]);
+  const competitionContext = firstNonEmptyPlanningBriefList([
+    input.lockedGoals
+      .map((goal) => ("competitionEventId" in goal ? goal.competitionEventId : null))
+      .filter((value): value is string => typeof value === "string" && value.trim() !== ""),
+    readPlanningBriefListFromRecords(snapshotRecords, [
+      "competitionContext",
+      "competitionEvent",
+      "competitionEventId",
+      "competitionName",
+      "targetCompetition",
+      "priorityCompetition",
+    ]),
+  ]);
+
+  const athleteRows: PlanningBriefRow[] = [];
+  const ageCategory = joinPlanningBriefParts([
+    input.profile?.derivedAge !== null && input.profile?.derivedAge !== undefined
+      ? String(input.profile.derivedAge)
+      : readPlanningBriefStringFromRecords(snapshotRecords, ["derivedAge", "age"]),
+    upstreamWorkload?.ageBand ??
+      readPlanningBriefStringFromRecords(snapshotRecords, ["ageBand", "category", "ageCategory"]),
+  ]);
+  const sportRaw =
+    input.profile?.sportCode ??
+    input.profile?.primarySport ??
+    input.profile?.sportContext.primarySport ??
+    input.upstreamPlanningContext?.planningContext.season?.sport ??
+    input.upstreamPlanningContext?.season?.sport ??
+    upstreamWorkload?.sportCode ??
+    upstreamWorkload?.sport ??
+    readPlanningBriefStringFromRecords(snapshotRecords, ["sportCode", "sport", "primarySport"]);
+  addPlanningBriefRow(athleteRows, "Name", input.athleteDisplay);
+  addPlanningBriefRow(athleteRows, "Age / Category", ageCategory);
+  addPlanningBriefRow(athleteRows, "Sport", sportRaw ? formatSportLabel(sportRaw) : null);
+  addPlanningBriefRow(
+    athleteRows,
+    "Validated Level",
+    input.lockedPlanningContextCardFields.validatedLevel ??
+      readPlanningBriefStringFromRecords(snapshotRecords, ["validatedLevel"]),
+  );
+  addPlanningBriefRow(
+    athleteRows,
+    "Training Age",
+    input.profile?.trainingAgeYears !== null && input.profile?.trainingAgeYears !== undefined
+      ? `${input.profile.trainingAgeYears} years`
+      : readPlanningBriefStringFromRecords(snapshotRecords, [
+          "trainingAgeYears",
+          "yearsOfTraining",
+          "trainingAge",
+        ]),
+  );
+  addPlanningBriefRow(athleteRows, "Injury / Safety Notes", injurySafetyNotes);
+
+  const planRows: PlanningBriefRow[] = [];
+  const planStartDate =
+    input.lockedContextDisplayFields.planStartDate ??
+    workspacePlanningContext?.planStartDate ??
+    workspacePlanningContext?.startDate ??
+    input.upstreamPlanningContext?.planWindow?.startDate ??
+    input.upstreamPlanningContext?.startDate ??
+    null;
+  const planEndDate =
+    input.lockedContextDisplayFields.planEndDate ??
+    workspacePlanningContext?.planEndDate ??
+    workspacePlanningContext?.endDate ??
+    input.upstreamPlanningContext?.planWindow?.endDate ??
+    input.upstreamPlanningContext?.endDate ??
+    null;
+  const durationDays =
+    workspacePlanningContext?.durationDays ??
+    input.lockedContextDisplayFields.durationDays ??
+    calculateInclusiveDurationDays(planStartDate, planEndDate);
+  addPlanningBriefRow(planRows, "Start / End Date", formatDateRange(planStartDate, planEndDate));
+  addPlanningBriefRow(
+    planRows,
+    "Duration",
+    durationDays !== null && durationDays !== undefined ? `${durationDays} days` : null,
+  );
+  addPlanningBriefRow(
+    planRows,
+    "Season / Phase",
+    joinPlanningBriefParts([
+      input.lockedContextDisplayFields.seasonName,
+      input.lockedContextDisplayFields.currentPhase ??
+        input.lockedPlanningContextCardFields.seasonPhase,
+    ]),
+  );
+  addPlanningBriefRow(planRows, "Selected Goals", selectedGoalLabels);
+  addPlanningBriefRow(planRows, "Competition Context", competitionContext);
+
+  const skillsRows: PlanningBriefRow[] = [];
+  addPlanningBriefRow(skillsRows, "Relevant Goals", selectedGoalLabels);
+  addPlanningBriefRow(
+    skillsRows,
+    "Taxonomy / Skill Focus",
+    readPlanningBriefListFromRecords(snapshotRecords, [
+      "taxonomyAreaKey",
+      "taxonomyArea",
+      "skillFocus",
+      "skillFocusAreas",
+      "technicalFocus",
+      "tacticalFocus",
+    ]),
+  );
+
+  const nutritionRows: PlanningBriefRow[] = [];
+  addPlanningBriefRow(
+    nutritionRows,
+    "Diet / Allergy / Preferences",
+    firstNonEmptyPlanningBriefList([
+      [
+        input.profile?.dietType ?? null,
+        input.profile?.regionalCuisinePreference ?? null,
+        input.profile?.allergiesOrIntolerances ?? null,
+      ].filter((item): item is string => item !== null && item.trim() !== ""),
+      readPlanningBriefListFromRecords(snapshotRecords, [
+        "dietType",
+        "diet",
+        "allergiesOrIntolerances",
+        "allergies",
+        "preferences",
+        "regionalCuisinePreference",
+      ]),
+    ]),
+  );
+  addPlanningBriefRow(
+    nutritionRows,
+    "Calorie / Macro Context",
+    readPlanningBriefListFromRecords(snapshotRecords, [
+      "calorieContext",
+      "dailyCalories",
+      "calorieTarget",
+      "macroContext",
+      "macroTargets",
+      "proteinTarget",
+      "carbTarget",
+      "fatTarget",
+    ]),
+  );
+
+  const sandCRows: PlanningBriefRow[] = [];
+  addPlanningBriefRow(sandCRows, "Injury / Recovery Constraints", injurySafetyNotes);
+  addPlanningBriefRow(
+    sandCRows,
+    "Youth / Load Constraints",
+    firstNonEmptyPlanningBriefList([
+      [
+        upstreamWorkload?.ageBand ?? null,
+        input.lockedPlanningContextCardFields.weeklyWorkload,
+        input.lockedPlanningContextCardFields.weeklyTrainingHours !== null
+          ? `${input.lockedPlanningContextCardFields.weeklyTrainingHours} hrs/week`
+          : null,
+        upstreamWorkload?.trainingLoadStatus ?? upstreamWorkload?.status ?? null,
+      ].filter((item): item is string => item !== null && item.trim() !== ""),
+      readPlanningBriefListFromRecords(snapshotRecords, [
+        "youthConstraints",
+        "loadConstraints",
+        "trainingLoadConstraints",
+        "recoveryConstraints",
+      ]),
+    ]),
+  );
+
+  return [
+    { title: "Athlete", rows: athleteRows },
+    { title: "Plan Context", rows: planRows },
+    { title: "Skills", rows: skillsRows },
+    { title: "Nutrition", rows: nutritionRows },
+    { title: "S&C", rows: sandCRows },
+  ];
+}
+
+export function TrainingPlanPlanningBrief({
+  sections,
+}: {
+  sections: PlanningBriefSection[];
+}) {
+  return (
+    <details
+      className="rounded-xl border border-border bg-card/80 p-3 text-sm shadow-sm"
+      data-testid="planning-brief"
+    >
+      <summary className="cursor-pointer list-none rounded-lg px-1 py-0.5 font-medium text-textPrimary marker:text-textMuted">
+        <span className="inline-flex items-center gap-2">
+          <ChevronDown className="h-4 w-4 text-textMuted" aria-hidden="true" />
+          View Planning Brief
+        </span>
+      </summary>
+      <div className="mt-3 grid gap-3">
+        {sections.map((section) => (
+          <section
+            key={section.title}
+            className="rounded-lg border border-border/70 bg-bg/60 p-3"
+          >
+            <h4 className="text-sm font-normal text-textPrimary">{section.title}</h4>
+            {section.rows.length > 0 ? (
+              <dl className="mt-2 divide-y divide-border/60">
+                {section.rows.map((row) => (
+                  <PlanningBriefRowView key={`${section.title}-${row.label}`} row={row} />
+                ))}
+              </dl>
+            ) : (
+              <div className="mt-2 text-sm text-textSecondary">Not available</div>
+            )}
+          </section>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -2011,6 +2405,258 @@ export function resolveDomainReviewDrawerRequestChangesVisible(input: {
     input.workflowStatus === "submitted_for_review" &&
     input.canShowApproveAction &&
     input.hasActionContext
+  );
+}
+
+function formatConstraintStatusLabel(status: string | null): string {
+  const normalized = status?.trim().toUpperCase() ?? "";
+  const labels: Record<string, string> = {
+    COMPLIANT: "Compliant",
+    APPLIED: "Applied",
+    PARTIAL_EVIDENCE: "Partial evidence",
+    NOT_AVAILABLE: "Not available",
+  };
+  return labels[normalized] ?? displayValue(status);
+}
+
+function constraintComplianceStatusTone(status: string | null): string {
+  const normalized = status?.trim().toUpperCase() ?? "";
+  if (normalized === "COMPLIANT" || normalized === "APPLIED") {
+    return "border-green-200 bg-green-50 text-green-700";
+  }
+  if (normalized === "PARTIAL_EVIDENCE") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  return "border-border bg-bg text-textSecondary";
+}
+
+function formatHumanLabel(key: string): string {
+  const normalized = key.trim();
+  const labels: Record<string, string> = {
+    athleteCategory: "Athlete category",
+    validatedLevel: "Validated level",
+    workload: "Workload",
+    assessmentStatus: "Workload status",
+    readinessLevel: "Readiness level",
+    restrictionSummary: "Restriction summary",
+    workloadFlags: "Workload flags",
+    injuryStatus: "Injury status",
+    domainSafetyRules: "Domain safety rule",
+    workloadHandling: "Workload handling",
+    plannedWeeklyLoadMinutes: "Planned weekly load",
+    sessionIntensityDistribution: "Session intensity distribution",
+    intensityCap: "Intensity cap",
+    recoveryBias: "Recovery bias",
+    youthLoadSafety: "Youth load safety",
+    stage: "Stage",
+    totalExerciseItemCount: "Exercise items",
+    unsafeExerciseItemCount: "Unsafe exercise items",
+    generationContextSnapshot: "Generation context snapshot",
+    planningContextSnapshotId: "Planning context snapshot",
+    lockedPlanningContext: "Locked planning context",
+    lockedPlanningContextSnapshot: "Planning context snapshot",
+    planContentEvidence: "Plan content evidence",
+    stageSafetyValidation: "Stage safety validation",
+  };
+  if (labels[normalized]) return labels[normalized];
+
+  return normalized
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function formatEnumValue(value: string): string {
+  const normalized = value.trim();
+  const labels: Record<string, string> = {
+    SUB_JUNIOR: "Sub-Junior",
+    INTERMEDIATE: "Intermediate",
+    LIMITED: "Limited",
+    WARN: "Warning",
+    LOW: "Low",
+    REDUCED: "Reduced",
+    ELEVATED: "Elevated",
+    APP_FRESHNESS_NOT_CURRENT: "App freshness not current",
+    APP_PLANNING_ELIGIBILITY_WARNING: "App planning eligibility warning",
+    NO_HEAVY_OR_EXTERNAL_LOADING: "No heavy or external loading",
+    SUB_JUNIOR_NO_HEAVY_OR_EXTERNAL_LOADING: "Sub-Junior: no heavy or external loading",
+    HEALTHY: "Healthy",
+    COMPLIANT: "Compliant",
+    APPLIED: "Applied",
+    PARTIAL_EVIDENCE: "Partial evidence",
+    NOT_AVAILABLE: "Not available",
+  };
+  if (labels[normalized]) return labels[normalized];
+  if (/^[A-Z0-9_]+$/.test(normalized)) {
+    return normalized
+      .toLowerCase()
+      .replace(/_/g, " ")
+      .replace(/^./, (char) => char.toUpperCase());
+  }
+  return normalized;
+}
+
+function isLongInternalId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
+}
+
+function isInternalIdKey(key: string | null): boolean {
+  return key !== null && /(^id$|id$)/i.test(key);
+}
+
+function formatConstraintBooleanValue(key: string | null, value: boolean): string {
+  const normalized = key?.trim().toLowerCase() ?? "";
+  if (normalized.includes("locked") && normalized.includes("context")) {
+    return value ? "Used" : "Not used";
+  }
+  if (
+    normalized.includes("snapshot") ||
+    normalized.includes("evidence") ||
+    normalized.includes("validation") ||
+    normalized.includes("available")
+  ) {
+    return value ? "Available" : "Not available";
+  }
+  return value ? "Yes" : "No";
+}
+
+function renderKeyValueList(rows: Array<{ label: string; value: ReactNode }>): ReactNode {
+  if (rows.length === 0) return null;
+  return (
+    <dl className="space-y-1.5">
+      {rows.map((row, index) => (
+        <div key={`${row.label}-${index}`} className="grid gap-1 sm:grid-cols-[12rem_1fr] sm:gap-3">
+          <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "text-xs")}>{row.label}</dt>
+          <dd className="min-w-0 text-sm text-textPrimary">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function renderSummaryValue(value: unknown, key: string | null = null): ReactNode {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return formatConstraintBooleanValue(key, value);
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : null;
+  if (typeof value === "string") {
+    if (isInternalIdKey(key) && isLongInternalId(value)) return "Available";
+    return formatEnumValue(value);
+  }
+  if (Array.isArray(value)) {
+    const renderedItems = value
+      .map((item, index) => ({ key: `${key ?? "item"}-${index}`, value: renderSummaryValue(item) }))
+      .filter((item): item is { key: string; value: ReactNode } => item.value !== null);
+    if (renderedItems.length === 0) return null;
+    return (
+      <ul className="list-disc space-y-1 pl-5">
+        {renderedItems.map((item) => (
+          <li key={item.key}>{item.value}</li>
+        ))}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    const rows = Object.entries(value as Record<string, unknown>)
+      .map(([entryKey, entryValue]) => {
+        const renderedValue = renderSummaryValue(entryValue, entryKey);
+        if (renderedValue === null) return null;
+        return {
+          label: formatHumanLabel(entryKey),
+          value: renderedValue,
+        };
+      })
+      .filter((row): row is { label: string; value: ReactNode } => row !== null);
+    return renderKeyValueList(rows);
+  }
+  return null;
+}
+
+function renderConstraintComplianceList(items: unknown[]): ReactNode {
+  if (items.length === 0) return null;
+  if (items.length === 1) return renderSummaryValue(items[0]);
+  const renderedItems = items
+    .map((item, index) => ({ key: `summary-${index}`, value: renderSummaryValue(item) }))
+    .filter((item): item is { key: string; value: ReactNode } => item.value !== null);
+  if (renderedItems.length === 0) return null;
+  return (
+    <ul className="list-disc space-y-1 pl-5">
+      {renderedItems.map((item) => (
+        <li key={item.key}>{item.value}</li>
+      ))}
+    </ul>
+  );
+}
+
+export function DomainPlanConstraintComplianceSummarySection({
+  summary,
+}: {
+  summary: TrainingPlanConstraintComplianceSummary | null;
+}): ReactElement | null {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  if (summary === null) return null;
+  const rows = [
+    {
+      label: "Detected constraints",
+      value: renderConstraintComplianceList(summary.detectedConstraints),
+    },
+    {
+      label: "Applied in this plan",
+      value: renderConstraintComplianceList(summary.appliedInPlan),
+    },
+    {
+      label: "Evidence",
+      value: renderConstraintComplianceList(summary.evidence),
+    },
+  ].filter((row): row is { label: string; value: ReactNode } => row.value !== null);
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-bg/60 p-3">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 rounded-md text-left text-sm font-normal text-textPrimary transition-colors hover:bg-card/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        aria-label={`${expanded ? "Collapse" : "Expand"} AI Constraint Handling`}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span className="inline-flex min-w-0 flex-wrap items-center gap-2 px-1 py-1">
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 shrink-0 text-textMuted transition-transform",
+              expanded ? "rotate-180" : "-rotate-90",
+            )}
+            aria-hidden="true"
+          />
+          <span>AI Constraint Handling</span>
+        {summary.status !== null ? (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 text-xs",
+              constraintComplianceStatusTone(summary.status),
+            )}
+          >
+            {formatConstraintStatusLabel(summary.status)}
+          </span>
+        ) : null}
+        </span>
+      </button>
+      <div id={contentId} hidden={!expanded}>
+        {rows.length > 0 ? (
+          <dl className="mt-3 space-y-2">
+            {rows.map((row, index) => (
+              <DetailRow key={`${row.label}-${index}`} label={row.label} value={row.value} />
+            ))}
+          </dl>
+        ) : (
+          <div className="mt-3 text-sm text-textSecondary">Constraint evidence not available</div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -8643,6 +9289,46 @@ export function CoachAthletePlanningProfileView({
     },
     [setupState.goals, upstreamPlanningContext],
   );
+  const planningBriefLockedContextDisplayFields = useMemo(
+    () =>
+      resolveLockedPlanningContextDisplayFields({
+        workspacePlanningContext: workspace?.planningContext ?? null,
+        upstreamPlanningContext,
+        seasons: setupState.seasons,
+        selectedSeason,
+        activePhaseForSelectedSeason,
+        lockedPlanningContextSeasonPhase: lockedPlanningContextCardFields.seasonPhase,
+      }),
+    [
+      activePhaseForSelectedSeason,
+      lockedPlanningContextCardFields.seasonPhase,
+      selectedSeason,
+      setupState.seasons,
+      upstreamPlanningContext,
+      workspace?.planningContext,
+    ],
+  );
+  const planningBriefSections = useMemo(
+    () =>
+      buildTrainingPlanPlanningBriefSections({
+        athleteDisplay: assistantAthleteDisplay,
+        profile,
+        workspace,
+        upstreamPlanningContext,
+        lockedPlanningContextCardFields,
+        lockedContextDisplayFields: planningBriefLockedContextDisplayFields,
+        lockedGoals: lockedUpstreamGoals,
+      }),
+    [
+      assistantAthleteDisplay,
+      lockedPlanningContextCardFields,
+      lockedUpstreamGoals,
+      planningBriefLockedContextDisplayFields,
+      profile,
+      upstreamPlanningContext,
+      workspace,
+    ],
+  );
   const assistantDomainWorkflowStatus = useMemo(
     () => {
       if (assistantPlanDiscoveryLoading) return "not_created";
@@ -13555,6 +14241,9 @@ export function CoachAthletePlanningProfileView({
           <p className="text-sm text-textSecondary">{description}</p>
           {showNutritionCalories ? renderNutritionPlanCalorieSummary(sortedDays) : null}
         </div>
+        <DomainPlanConstraintComplianceSummarySection
+          summary={detail.constraintComplianceSummary}
+        />
         {!hasSessions ? (
           <div className="text-sm text-textSecondary">No scheduled sessions are available.</div>
         ) : (
@@ -14932,6 +15621,7 @@ export function CoachAthletePlanningProfileView({
             planningGoalLabel,
           })}
         </dl>
+        <TrainingPlanPlanningBrief sections={planningBriefSections} />
       </section>
     );
   }
@@ -15589,6 +16279,7 @@ export function CoachAthletePlanningProfileView({
             />
             <DetailRow label="Plan Window" value={formatDateRange(planWindowStart, planWindowEnd)} />
           </dl>
+          <TrainingPlanPlanningBrief sections={planningBriefSections} />
         </div>
 
         <div className="space-y-6 bg-card px-4 py-6 sm:px-6 sm:py-8 md:px-10 md:py-10">
@@ -16414,6 +17105,7 @@ export function CoachAthletePlanningProfileView({
               value={locked ? "Context locked" : "Not locked"}
             />
           </dl>
+          <TrainingPlanPlanningBrief sections={planningBriefSections} />
         </div>
       </DashboardStatusNotice>
     );

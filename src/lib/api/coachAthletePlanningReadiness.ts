@@ -543,6 +543,21 @@ export type CoachPersistedTrainingPlanVersion = {
   raw: unknown;
 };
 
+export type TrainingPlanConstraintComplianceStatus =
+  | "COMPLIANT"
+  | "APPLIED"
+  | "PARTIAL_EVIDENCE"
+  | "NOT_AVAILABLE"
+  | string;
+
+export type TrainingPlanConstraintComplianceSummary = {
+  status: TrainingPlanConstraintComplianceStatus | null;
+  detectedConstraints: unknown[];
+  appliedInPlan: unknown[];
+  evidence: unknown[];
+  raw: unknown;
+};
+
 export type GovernedTrainingPlanWorkflowAction =
   | "SUBMIT_REVIEW"
   | "HEAD_APPROVE"
@@ -608,6 +623,7 @@ export type CoachPersistedTrainingPlanActiveDetail = {
   generationDomain: string | null;
   allowedActions: GovernedTrainingPlanWorkflowAction[];
   releaseMode: string | null;
+  constraintComplianceSummary: TrainingPlanConstraintComplianceSummary | null;
   plan: CoachPersistedTrainingPlan;
   version: CoachPersistedTrainingPlanVersion;
   days: CoachPersistedTrainingPlanDetailDay[];
@@ -1147,6 +1163,31 @@ function parsePersistedTrainingPlanDetailDay(
   };
 }
 
+function readConstraintComplianceList(value: unknown): unknown[] {
+  const source = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  return source.filter((item) => item !== null && item !== undefined);
+}
+
+function parseConstraintComplianceSummary(
+  value: unknown,
+): TrainingPlanConstraintComplianceSummary | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const summary: TrainingPlanConstraintComplianceSummary = {
+    status: readStringKey([record], ["status"]),
+    detectedConstraints: readConstraintComplianceList(record.detectedConstraints),
+    appliedInPlan: readConstraintComplianceList(record.appliedInPlan),
+    evidence: readConstraintComplianceList(record.evidence),
+    raw: value,
+  };
+  const hasAnyField =
+    summary.status !== null ||
+    summary.detectedConstraints.length > 0 ||
+    summary.appliedInPlan.length > 0 ||
+    summary.evidence.length > 0;
+  return hasAnyField ? summary : null;
+}
+
 function parsePersistedTrainingPlanActiveDetailPayload(
   data: unknown,
   fallbackPlanId?: string,
@@ -1169,6 +1210,9 @@ function parsePersistedTrainingPlanActiveDetailPayload(
     generationDomain: readStringKey([record], ["generationDomain"]),
     allowedActions: parseGovernedTrainingPlanWorkflowActionList(record.allowedActions),
     releaseMode: readStringKey([record], ["releaseMode"]),
+    constraintComplianceSummary: parseConstraintComplianceSummary(
+      record.constraintComplianceSummary,
+    ),
     plan,
     version: {
       ...version,

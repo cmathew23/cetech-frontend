@@ -490,6 +490,38 @@ export type CoachAthleteLatestDomainDraft = {
   raw: unknown;
 };
 
+export type CoachAthleteDomainDraftRevisionContextRef = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  trainingPlanId: string | null;
+  trainingPlanVersionId: string | null;
+  versionId: string | null;
+  versionNumber: number | null;
+  status: string | null;
+  raw: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionChangeOption = {
+  changeType: string | null;
+  label: string | null;
+  description: string | null;
+  raw: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionContext = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  draft: CoachAthleteLatestDomainDraft | null;
+  ref: CoachAthleteDomainDraftRevisionContextRef | null;
+  status: string | null;
+  version: unknown;
+  targetMap: unknown;
+  planningBriefSummary: unknown;
+  lockedPlanningContextSummary: unknown;
+  allowedChangeTypes: string[];
+  changeOptions: CoachAthleteDomainDraftRevisionChangeOption[];
+  requiredInput: unknown;
+  raw: unknown;
+};
+
 /** When persist-draft times out client-side but the draft exists, map latest draft → persist result shape. */
 export function persistDraftResultFromLatestDomainDraft(
   draft: CoachAthleteLatestDomainDraft,
@@ -935,6 +967,106 @@ function parseLatestDomainDraftPayload(data: unknown): CoachAthleteLatestDomainD
     itemsPersisted: readNumberKey(records, ["itemsPersisted"]),
     days,
     raw: data,
+  };
+}
+
+function parseDomainDraftRevisionContextRef(
+  value: unknown,
+  fallbackDraft: CoachAthleteLatestDomainDraft | null,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionContextRef | null {
+  const record = asRecord(value);
+  if (!record && fallbackDraft === null) return null;
+  const records = record ? [record] : [];
+  const generationDomain =
+    readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+    fallbackDomain;
+  const trainingPlanVersionId =
+    readStringKey(records, ["trainingPlanVersionId", "versionId"]) ??
+    fallbackDraft?.trainingPlanVersionId ??
+    null;
+  return {
+    generationDomain,
+    trainingPlanId:
+      readStringKey(records, ["trainingPlanId", "planId"]) ??
+      fallbackDraft?.trainingPlanId ??
+      null,
+    trainingPlanVersionId,
+    versionId: readStringKey(records, ["versionId"]) ?? trainingPlanVersionId,
+    versionNumber: readNumberKey(records, ["versionNumber"]) ?? fallbackDraft?.versionNumber ?? null,
+    status: readStringKey(records, ["status"]) ?? fallbackDraft?.status ?? null,
+    raw: value ?? fallbackDraft?.raw ?? null,
+  };
+}
+
+function parseDomainDraftRevisionChangeOption(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionChangeOption | null {
+  const record = asRecord(value);
+  if (!record) {
+    const label = readScalarText(value);
+    return label === null
+      ? null
+      : {
+          changeType: label,
+          label,
+          description: null,
+          raw: value,
+        };
+  }
+  const label = readStringKey([record], ["label", "name", "title", "changeType", "type"]);
+  const changeType = readStringKey([record], ["changeType", "type", "value", "key"]) ?? label;
+  return changeType || label || readStringKey([record], ["description", "summary"])
+    ? {
+        changeType,
+        label,
+        description: readStringKey([record], ["description", "summary"]),
+        raw: value,
+      }
+    : null;
+}
+
+function parseDomainDraftRevisionContextPayload(
+  data: unknown,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionContext {
+  const adapted = adaptBackendSuccess(data);
+  const adaptedRecord = asRecord(adapted) ?? {};
+  const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
+  const records = [record];
+  const draftRecord = asRecord(record.draft);
+  const draft =
+    draftRecord !== null || readStringKey(records, ["trainingPlanId", "trainingPlanVersionId"])
+      ? parseLatestDomainDraftPayload(draftRecord ?? record)
+      : null;
+  const ref = parseDomainDraftRevisionContextRef(record.ref, draft, fallbackDomain);
+  const allowedChangeTypes = readStringListKey(records, [
+    "allowedChangeTypes",
+    "changeTypes",
+    "allowedChanges",
+  ]);
+  const changeOptions = readFirstArray(records, ["changeOptions", "allowedChangeOptions", "options"])
+    .map(parseDomainDraftRevisionChangeOption)
+    .filter(
+      (option): option is CoachAthleteDomainDraftRevisionChangeOption => option !== null,
+    );
+
+  return {
+    generationDomain:
+      readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+      ref?.generationDomain ??
+      fallbackDomain,
+    draft,
+    ref,
+    status: readStringKey(records, ["status"]) ?? ref?.status ?? draft?.status ?? null,
+    version: record.version ?? draftRecord?.version ?? null,
+    targetMap: record.targetMap ?? null,
+    planningBriefSummary: record.planningBriefSummary ?? null,
+    lockedPlanningContextSummary: record.lockedPlanningContextSummary ?? null,
+    allowedChangeTypes,
+    changeOptions,
+    requiredInput: record.requiredInput ?? null,
+    raw: adapted,
   };
 }
 
@@ -2504,6 +2636,28 @@ export async function fetchLatestCoachAthleteDomainDraft(
   options?: { timeoutMs?: number },
 ): Promise<CoachAthleteLatestDomainDraft> {
   return fetchLatestDomainDraft(entityId, athleteId, generationDomain, options);
+}
+
+export async function fetchCoachAthleteDomainDraftRevisionContext(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<CoachAthleteDomainDraftRevisionContext> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(generationDomain);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainDraftRevisionContext(
+      ids.entityId,
+      ids.athleteId,
+      domain,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS,
+    },
+  );
+  return parseDomainDraftRevisionContextPayload(raw, domain);
 }
 
 export async function fetchPersistedTrainingPlanById(

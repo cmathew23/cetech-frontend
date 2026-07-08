@@ -58,6 +58,7 @@ import {
   fetchDomainPlanSummary,
   fetchCoachTrainingPlanDomainHistory,
   fetchCoachTrainingPlanDomainHistoryDetail,
+  fetchCoachAthleteDomainDraftRevisionContext,
   fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
   fetchPersistedTrainingPlanVersions,
@@ -86,6 +87,7 @@ import {
   type GovernedTrainingPlanWorkflowAction,
   type CoachAthleteTrainingPlanPersistDraftResult,
   type CoachAthleteTrainingPlanReadiness,
+  type CoachAthleteDomainDraftRevisionContext,
   type CoachTrainingPlanDomainHistoryDetail,
   type CoachTrainingPlanDomainHistoryRow,
   type TrainingPlanGenerationDomain,
@@ -2159,6 +2161,381 @@ function assistantCreatePlanLabel(domain: TrainingPlanGenerationDomain | null): 
   if (domain === "NUTRITION") return "Create Nutrition Plan";
   if (domain === "S_AND_C") return "Create S&C Plan";
   return "Create Plan";
+}
+
+export type FynRevisionComposerSelection = {
+  changeType: string;
+  target: string;
+  goal: string;
+  reason: string;
+  constraintsToPreserve: string;
+};
+
+type FynRevisionContextState = {
+  context: CoachAthleteDomainDraftRevisionContext | null;
+  loading: boolean;
+  error: string | null;
+};
+
+const EMPTY_FYN_REVISION_SELECTION: FynRevisionComposerSelection = {
+  changeType: "",
+  target: "",
+  goal: "",
+  reason: "",
+  constraintsToPreserve: "",
+};
+
+const FYN_REVISION_CHANGE_OPTIONS: Record<TrainingPlanGenerationDomain, string[]> = {
+  SKILLS: ["Change drill", "Replace drill", "Change day/session", "Replace session"],
+  NUTRITION: [
+    "Change meal item",
+    "Replace meal item",
+    "Adjust day target",
+    "Change meal slot content",
+  ],
+  S_AND_C: ["Change exercise", "Replace exercise", "Reduce load", "Replace session"],
+};
+
+export function fynRevisionChangeOptionsForDomain(
+  domain: TrainingPlanGenerationDomain,
+): string[] {
+  return FYN_REVISION_CHANGE_OPTIONS[domain];
+}
+
+function compactUnknownText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) {
+    const items = value.map(compactUnknownText).filter((item): item is string => item !== null);
+    return items.length > 0 ? items.join(", ") : null;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const preferred = [
+      "summary",
+      "brief",
+      "description",
+      "goals",
+      "workload",
+      "safetyNotes",
+      "notes",
+    ];
+    for (const key of preferred) {
+      const text = compactUnknownText(record[key]);
+      if (text !== null) return text;
+    }
+    const parts = Object.entries(record)
+      .map(([key, item]) => {
+        const text = compactUnknownText(item);
+        return text !== null ? `${toTitleCaseInput(key.replace(/([A-Z])/g, " $1"))}: ${text}` : null;
+      })
+      .filter((item): item is string => item !== null);
+    return parts.length > 0 ? parts.slice(0, 4).join("; ") : null;
+  }
+  return null;
+}
+
+function revisionContextSummaryLine(
+  context: CoachAthleteDomainDraftRevisionContext | null,
+): string | null {
+  if (context === null) return null;
+  return (
+    compactUnknownText(context.planningBriefSummary) ??
+    compactUnknownText(context.lockedPlanningContextSummary)
+  );
+}
+
+export function fynRevisionContextTextLines(value: unknown, limit = 6): string[] {
+  if (value === null || value === undefined) return [];
+  if (typeof value !== "object") {
+    const text = compactUnknownText(value);
+    return text !== null ? [text] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map(compactUnknownText)
+      .filter((item): item is string => item !== null)
+      .slice(0, limit);
+  }
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => {
+      const text = compactUnknownText(item);
+      return text !== null ? `${toTitleCaseInput(key.replace(/([A-Z])/g, " $1"))}: ${text}` : null;
+    })
+    .filter((item): item is string => item !== null)
+    .slice(0, limit);
+}
+
+function fynRevisionContextNamedLines(
+  context: CoachAthleteDomainDraftRevisionContext | null,
+  keys: string[],
+): string[] {
+  if (context === null) return [];
+  const sources = [context.planningBriefSummary, context.lockedPlanningContextSummary];
+  const lines: string[] = [];
+  for (const source of sources) {
+    const record = source && typeof source === "object" && !Array.isArray(source)
+      ? (source as Record<string, unknown>)
+      : null;
+    if (record === null) continue;
+    for (const key of keys) {
+      const value = record[key];
+      const text = compactUnknownText(value);
+      if (text !== null) {
+        lines.push(`${toTitleCaseInput(key.replace(/([A-Z])/g, " $1"))}: ${text}`);
+      }
+    }
+  }
+  return [...new Set(lines)].slice(0, 6);
+}
+
+function collectTargetMapLabels(value: unknown): string[] {
+  const labels: string[] = [];
+  const seen = new Set<unknown>();
+
+  function visit(node: unknown): void {
+    if (node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "object") seen.add(node);
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (trimmed !== "") labels.push(trimmed);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    const directLabel = compactUnknownText(
+      record.label ?? record.name ?? record.title ?? record.displayName ?? record.summary,
+    );
+    if (directLabel !== null) labels.push(directLabel);
+    for (const child of Object.values(record)) visit(child);
+  }
+
+  visit(value);
+  return [...new Set(labels)].slice(0, 20);
+}
+
+export function fynRevisionTargetOptions(
+  domain: TrainingPlanGenerationDomain,
+  context: CoachAthleteDomainDraftRevisionContext | null,
+): string[] {
+  const targetMapLabels = collectTargetMapLabels(context?.targetMap);
+  if (targetMapLabels.length > 0) return targetMapLabels;
+  const draft = context?.draft;
+  if (!draft) return [];
+  const targets: string[] = [];
+  for (const day of draft.days) {
+    const dayLabel = `Day ${day.dayIndex ?? "?"}${day.date ? ` (${day.date})` : ""}`;
+    if (domain === "NUTRITION") {
+      for (const session of day.sessions) {
+        const slot = session.title ?? session.objective ?? `Meal slot ${session.sessionIndex ?? "?"}`;
+        targets.push(`${dayLabel} - ${slot}`);
+        for (const item of session.items) {
+          const itemLabel = item.label ?? item.summary ?? item.serving;
+          if (itemLabel) targets.push(`${dayLabel} - ${slot} - ${itemLabel}`);
+        }
+      }
+      continue;
+    }
+    for (const session of day.sessions) {
+      const sessionLabel = session.title ?? session.objective ?? `Session ${session.sessionIndex ?? "?"}`;
+      targets.push(`${dayLabel} - ${sessionLabel}`);
+      for (const item of session.items) {
+        const itemLabel = item.label ?? item.summary;
+        if (itemLabel) targets.push(`${dayLabel} - ${sessionLabel} - ${itemLabel}`);
+      }
+    }
+  }
+  return [...new Set(targets)].slice(0, 30);
+}
+
+export function buildFynRevisionCoachFeedback(input: {
+  selection: FynRevisionComposerSelection;
+  context: CoachAthleteDomainDraftRevisionContext | null;
+}): string {
+  const planningContextLine = revisionContextSummaryLine(input.context);
+  return [
+    `Change type: ${input.selection.changeType.trim() || "Not specified"}`,
+    `Target: ${input.selection.target.trim() || "Not specified"}`,
+    `Goal: ${input.selection.goal.trim() || "Not specified"}`,
+    `Reason: ${input.selection.reason.trim() || "Not specified"}`,
+    `Constraints to preserve: ${
+      input.selection.constraintsToPreserve.trim() || "Not specified"
+    }`,
+    `Planning context considered: ${planningContextLine ?? "Not available"}`,
+  ].join("\n");
+}
+
+export function FynRevisionContextPanel({
+  domain,
+  context,
+  loading,
+  error,
+  selection,
+  onSelectionChange,
+}: {
+  domain: TrainingPlanGenerationDomain;
+  context: CoachAthleteDomainDraftRevisionContext | null;
+  loading: boolean;
+  error: string | null;
+  selection: FynRevisionComposerSelection;
+  onSelectionChange: (selection: FynRevisionComposerSelection) => void;
+}) {
+  const changeOptions = fynRevisionChangeOptionsForDomain(domain);
+  const targetOptions = fynRevisionTargetOptions(domain, context);
+  const planningBriefLines = fynRevisionContextTextLines(context?.planningBriefSummary);
+  const lockedContextLines = fynRevisionContextTextLines(context?.lockedPlanningContextSummary);
+  const goalsWorkloadSafetyLines = fynRevisionContextNamedLines(context, [
+    "goals",
+    "goalSummary",
+    "workload",
+    "workloadSummary",
+    "safetyNotes",
+    "medicalNotes",
+    "constraints",
+  ]);
+  const targetMapLines = fynRevisionContextTextLines(context?.targetMap);
+  const allowedChangeTypes = context?.allowedChangeTypes ?? [];
+  const backendChangeOptions = context?.changeOptions ?? [];
+
+  function updateSelection(patch: Partial<FynRevisionComposerSelection>) {
+    onSelectionChange({ ...selection, ...patch });
+  }
+
+  return (
+    <div className="space-y-4 rounded-md border border-primary/20 bg-primary/5 p-3">
+      <div className="space-y-1">
+        <h5 className="text-sm font-normal text-textPrimary">Revise with Fyn</h5>
+        <p className="text-sm text-textSecondary">
+          Use the context below to structure revision feedback. The plan is revised only when you
+          submit Revise Plan.
+        </p>
+      </div>
+      {loading ? <div className="text-sm text-textSecondary">Loading Fyn revision context...</div> : null}
+      {error ? (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          Fyn guidance could not load. You can still use manual revision feedback.
+        </div>
+      ) : null}
+      {context !== null ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <RevisionContextReadOnlyBlock title="Planning brief summary" lines={planningBriefLines} />
+          <RevisionContextReadOnlyBlock
+            title="Locked planning context summary"
+            lines={lockedContextLines}
+          />
+          <RevisionContextReadOnlyBlock
+            title="Goals, workload, and safety notes"
+            lines={goalsWorkloadSafetyLines}
+          />
+          <RevisionContextReadOnlyBlock title="Target map" lines={targetMapLines} />
+          <RevisionContextReadOnlyBlock
+            title="Backend change options"
+            lines={[
+              ...allowedChangeTypes,
+              ...backendChangeOptions
+                .map((option) => option.label ?? option.changeType ?? option.description)
+                .filter((option): option is string => Boolean(option)),
+            ]}
+          />
+        </div>
+      ) : null}
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1 text-sm text-textPrimary">
+          <span className="font-medium">Change type</span>
+          <select
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+            value={selection.changeType}
+            onChange={(event) => updateSelection({ changeType: event.target.value })}
+            disabled={loading}
+          >
+            <option value="">Select change type</option>
+            {changeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm text-textPrimary">
+          <span className="font-medium">Target</span>
+          <input
+            list={`fyn-revision-targets-${domain}`}
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+            value={selection.target}
+            onChange={(event) => updateSelection({ target: event.target.value })}
+            placeholder={
+              domain === "NUTRITION" ? "Choose day / meal slot / item" : "Choose day / session / item"
+            }
+            disabled={loading}
+          />
+          <datalist id={`fyn-revision-targets-${domain}`}>
+            {targetOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </label>
+        <label className="space-y-1 text-sm text-textPrimary">
+          <span className="font-medium">Change goal</span>
+          <input
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+            value={selection.goal}
+            onChange={(event) => updateSelection({ goal: event.target.value })}
+            placeholder="What should the revision achieve?"
+            disabled={loading}
+          />
+        </label>
+        <label className="space-y-1 text-sm text-textPrimary">
+          <span className="font-medium">Reason</span>
+          <input
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+            value={selection.reason}
+            onChange={(event) => updateSelection({ reason: event.target.value })}
+            placeholder="Why is this change needed?"
+            disabled={loading}
+          />
+        </label>
+      </div>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Constraints to preserve</span>
+        <textarea
+          rows={2}
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+          value={selection.constraintsToPreserve}
+          onChange={(event) => updateSelection({ constraintsToPreserve: event.target.value })}
+          placeholder="Intensity, workload, nutrition targets, safety notes, timing, or other constraints."
+          disabled={loading}
+        />
+      </label>
+    </div>
+  );
+}
+
+function RevisionContextReadOnlyBlock({ title, lines }: { title: string; lines: string[] }) {
+  return (
+    <div className="space-y-1 rounded-md border border-border/70 bg-white/70 p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-textMuted">{title}</div>
+      {lines.length > 0 ? (
+        <ul className="space-y-1 text-sm text-textSecondary">
+          {lines.map((line, index) => (
+            <li key={`${title}-${index}`}>{line}</li>
+          ))}
+        </ul>
+      ) : (
+        <div className="text-sm text-textSecondary">Not available</div>
+      )}
+    </div>
+  );
 }
 
 function assistantViewPlanLabel(domain: TrainingPlanGenerationDomain | null): string {
@@ -7675,6 +8052,16 @@ export function CoachAthletePlanningProfileView({
   const [reviseSandCLoading, setReviseSandCLoading] = useState(false);
   const [reviseSandCError, setReviseSandCError] = useState<string | null>(null);
   const [reviseSandCSuccess, setReviseSandCSuccess] = useState<string | null>(null);
+  const [fynRevisionContexts, setFynRevisionContexts] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, FynRevisionContextState>>
+  >({});
+  const [fynRevisionSelections, setFynRevisionSelections] = useState<
+    Record<TrainingPlanGenerationDomain, FynRevisionComposerSelection>
+  >({
+    SKILLS: EMPTY_FYN_REVISION_SELECTION,
+    NUTRITION: EMPTY_FYN_REVISION_SELECTION,
+    S_AND_C: EMPTY_FYN_REVISION_SELECTION,
+  });
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
     useState(false);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -13051,6 +13438,96 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  function setDomainReviseFeedback(
+    domain: TrainingPlanGenerationDomain,
+    nextFeedback: string,
+  ): void {
+    if (domain === "SKILLS") {
+      setReviseSkillsFeedback(nextFeedback);
+      setReviseSkillsError(null);
+      setReviseSkillsSuccess(null);
+    } else if (domain === "NUTRITION") {
+      setReviseNutritionFeedback(nextFeedback);
+      setReviseNutritionError(null);
+      setReviseNutritionSuccess(null);
+    } else {
+      setReviseSandCFeedback(nextFeedback);
+      setReviseSandCError(null);
+      setReviseSandCSuccess(null);
+    }
+  }
+
+  function handleFynRevisionSelectionChange(
+    domain: TrainingPlanGenerationDomain,
+    selection: FynRevisionComposerSelection,
+  ): void {
+    setFynRevisionSelections((current) => ({ ...current, [domain]: selection }));
+    setDomainReviseFeedback(
+      domain,
+      buildFynRevisionCoachFeedback({
+        selection,
+        context: fynRevisionContexts[domain]?.context ?? null,
+      }),
+    );
+  }
+
+  async function loadFynRevisionContext(domain: TrainingPlanGenerationDomain): Promise<void> {
+    if (entityId === "" || athleteIdTrimmed === "") return;
+    setFynRevisionContexts((current) => ({
+      ...current,
+      [domain]: {
+        context: current[domain]?.context ?? null,
+        loading: true,
+        error: null,
+      },
+    }));
+    try {
+      const context = await fetchCoachAthleteDomainDraftRevisionContext(
+        entityId,
+        athleteIdTrimmed,
+        domain,
+      );
+      setFynRevisionContexts((current) => ({
+        ...current,
+        [domain]: {
+          context,
+          loading: false,
+          error: null,
+        },
+      }));
+      const selection = fynRevisionSelections[domain];
+      if (
+        selection.changeType.trim() !== "" ||
+        selection.target.trim() !== "" ||
+        selection.goal.trim() !== "" ||
+        selection.reason.trim() !== "" ||
+        selection.constraintsToPreserve.trim() !== ""
+      ) {
+        setDomainReviseFeedback(
+          domain,
+          buildFynRevisionCoachFeedback({
+            selection,
+            context,
+          }),
+        );
+      }
+    } catch {
+      setFynRevisionContexts((current) => ({
+        ...current,
+        [domain]: {
+          context: current[domain]?.context ?? null,
+          loading: false,
+          error: "Fyn guidance could not load.",
+        },
+      }));
+    }
+  }
+
+  function openFynGuidedReviseComposer(domain: TrainingPlanGenerationDomain): void {
+    setAssistantRevisePanelDomain(domain);
+    void loadFynRevisionContext(domain);
+  }
+
   async function handlePersistedGovernedPlanAction(
     action: GovernedTrainingPlanWorkflowAction,
     actionContextOverride?: GovernedPlanContext | null,
@@ -14929,6 +15406,12 @@ export function CoachAthletePlanningProfileView({
         : reviewDomain === "NUTRITION"
           ? reviseNutritionFeedback
           : reviseSandCFeedback;
+    const fynRevisionContextState = fynRevisionContexts[reviewDomain] ?? {
+      context: null,
+      loading: false,
+      error: null,
+    };
+    const fynRevisionSelection = fynRevisionSelections[reviewDomain];
     const drawerReviseIds =
       reviewDomain === "SKILLS"
         ? skillsReviseIds
@@ -15149,7 +15632,7 @@ export function CoachAthletePlanningProfileView({
                         void handleRequestRevisionSubmit(event, actionContext);
                       }}
                       onOpenRevise={() => {
-                        setAssistantRevisePanelDomain(reviewDomain);
+                        openFynGuidedReviseComposer(reviewDomain);
                       }}
                     />
                     {drawerWorkflowActions.canShowReleaseAction ? (
@@ -15187,6 +15670,16 @@ export function CoachAthletePlanningProfileView({
                   {drawerReviseSuccess ? (
                     <WorkflowNeutralNotice>{drawerReviseSuccess}</WorkflowNeutralNotice>
                   ) : null}
+                  <FynRevisionContextPanel
+                    domain={reviewDomain}
+                    context={fynRevisionContextState.context}
+                    loading={fynRevisionContextState.loading}
+                    error={fynRevisionContextState.error}
+                    selection={fynRevisionSelection}
+                    onSelectionChange={(selection) => {
+                      handleFynRevisionSelectionChange(reviewDomain, selection);
+                    }}
+                  />
                   <label className="space-y-1 text-sm text-textPrimary">
                     <span className="font-medium">Coach Feedback</span>
                     <textarea
@@ -15205,6 +15698,10 @@ export function CoachAthletePlanningProfileView({
                       disabled={drawerReviseLoading}
                       onClick={() => {
                         setAssistantRevisePanelDomain(null);
+                        setFynRevisionSelections((current) => ({
+                          ...current,
+                          [reviewDomain]: EMPTY_FYN_REVISION_SELECTION,
+                        }));
                         handleDrawerReviseFeedbackChange("");
                       }}
                     >

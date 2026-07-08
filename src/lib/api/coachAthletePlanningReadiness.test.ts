@@ -18,6 +18,7 @@ import {
   fetchCoachAthleteTrainingPlanCompleteness,
   fetchCoachTrainingPlanDomainHistory,
   fetchCoachTrainingPlanDomainHistoryDetail,
+  fetchCoachAthleteDomainDraftRevisionContext,
   fetchCoachAthleteUpstreamPlanningContext,
   fetchDomainPlanSummary,
   fetchLatestCoachAthleteDomainDraft,
@@ -1267,6 +1268,73 @@ describe("training plan generation timeouts and helpers", () => {
         timeoutMs: 60_000,
       }),
     );
+  });
+
+  it("fetches domain draft revision context with generationDomain query", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        draft: {
+          trainingPlanId: "plan-1",
+          trainingPlanVersionId: "version-1",
+          versionNumber: 2,
+          status: "AI_GENERATED",
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  title: "Serve practice",
+                  items: [{ label: "Target serve drill" }],
+                },
+              ],
+            },
+          ],
+        },
+        ref: {
+          trainingPlanId: "plan-1",
+          versionId: "version-1",
+          status: "AI_GENERATED",
+        },
+        targetMap: {
+          days: [{ label: "Day 1 - Serve practice" }],
+        },
+        planningBriefSummary: {
+          goals: ["Improve first serve"],
+          workload: "Moderate",
+        },
+        lockedPlanningContextSummary: {
+          safetyNotes: ["Protect shoulder"],
+        },
+        allowedChangeTypes: ["CHANGE_DRILL"],
+        changeOptions: [{ changeType: "CHANGE_DRILL", label: "Change drill" }],
+        requiredInput: ["changeType", "reason"],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionContext(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/domain-drafts/revision-context?generationDomain=SKILLS",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 60_000,
+      }),
+    );
+    expect(result.generationDomain).toBe("SKILLS");
+    expect(result.draft?.trainingPlanId).toBe("plan-1");
+    expect(result.ref?.versionId).toBe("version-1");
+    expect(result.allowedChangeTypes).toEqual(["CHANGE_DRILL"]);
+    expect(result.changeOptions[0]?.label).toBe("Change drill");
+    expect(result.targetMap).toEqual({
+      days: [{ label: "Day 1 - Serve practice" }],
+    });
   });
 
   it("parses nutrition composition fields on latest domain draft items", async () => {

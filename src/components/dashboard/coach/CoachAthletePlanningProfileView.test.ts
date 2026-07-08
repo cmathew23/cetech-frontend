@@ -170,6 +170,10 @@ import {
   handleDomainCoachWorkspaceTabSelect,
   isDomainCoachPlanViewerContextExpired,
   shouldRenderReleasedDomainPlanViewerSchedule,
+  FynRevisionContextPanel,
+  buildFynRevisionCoachFeedback,
+  fynRevisionChangeOptionsForDomain,
+  fynRevisionTargetOptions,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -2207,6 +2211,265 @@ describe("Training Plan Workspace lifecycle display", () => {
         todayDate: "2026-07-08",
       }),
     ).toBe(true);
+  });
+
+  it("keeps the existing Revise Plan button rendered for editable drafts", () => {
+    const html = renderToStaticMarkup(
+      createElement(DomainReviewDrawerWorkflowActionButtons, {
+        drawerWorkflowActions: {
+          canShowViewPlan: false,
+          canShowSubmitForReview: false,
+          canShowReviseAction: true,
+          canShowApproveAction: false,
+          canShowRequestRevisionAction: false,
+          canShowReleaseAction: false,
+          hasAuthorizedWorkflowAction: true,
+        },
+        renderApproveBeforeRevise: false,
+        workflowStatus: "draft_generated",
+        directReleaseSkillsDraftReview: false,
+        governedPlanActionLoading: null,
+        actionContext: null,
+        drawerReviseLoading: false,
+        requestRevisionFeedback: "",
+        onApprove: vi.fn(),
+        onRequestRevisionFeedbackChange: vi.fn(),
+        onRequestChangesSubmit: vi.fn(),
+        onOpenRevise: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Revise Plan");
+  });
+
+  it("renders the Fyn-guided composer with Skills drill and session options", () => {
+    const context = {
+      generationDomain: "SKILLS" as const,
+      draft: null,
+      ref: null,
+      status: "AI_GENERATED",
+      version: null,
+      targetMap: { sessions: [{ label: "Day 1 - Serve session - Target serve drill" }] },
+      planningBriefSummary: { goals: ["Improve first serve"], workload: "Moderate" },
+      lockedPlanningContextSummary: { safetyNotes: ["Protect shoulder"] },
+      allowedChangeTypes: ["CHANGE_DRILL"],
+      changeOptions: [{ changeType: "CHANGE_DRILL", label: "Change drill", description: null, raw: {} }],
+      requiredInput: ["reason"],
+      raw: {},
+    };
+    const html = renderToStaticMarkup(
+      createElement(FynRevisionContextPanel, {
+        domain: "SKILLS",
+        context,
+        loading: false,
+        error: null,
+        selection: {
+          changeType: "",
+          target: "",
+          goal: "",
+          reason: "",
+          constraintsToPreserve: "",
+        },
+        onSelectionChange: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Revise with Fyn");
+    expect(html).toContain("Change drill");
+    expect(html).toContain("Replace drill");
+    expect(html).toContain("Change day/session");
+    expect(html).toContain("Replace session");
+    expect(html).toContain("Goals, workload, and safety notes");
+    expect(html).toContain("Day 1 - Serve session - Target serve drill");
+  });
+
+  it("renders Nutrition meal and meal-slot options without session wording", () => {
+    const html = renderToStaticMarkup(
+      createElement(FynRevisionContextPanel, {
+        domain: "NUTRITION",
+        context: null,
+        loading: false,
+        error: null,
+        selection: {
+          changeType: "",
+          target: "",
+          goal: "",
+          reason: "",
+          constraintsToPreserve: "",
+        },
+        onSelectionChange: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Change meal item");
+    expect(html).toContain("Replace meal item");
+    expect(html).toContain("Adjust day target");
+    expect(html).toContain("Change meal slot content");
+    expect(html).toContain("Choose day / meal slot / item");
+    expect(html).not.toContain("Choose day / session / item");
+  });
+
+  it("renders S&amp;C exercise and session options", () => {
+    expect(fynRevisionChangeOptionsForDomain("S_AND_C")).toEqual([
+      "Change exercise",
+      "Replace exercise",
+      "Reduce load",
+      "Replace session",
+    ]);
+  });
+
+  it("falls back to manual feedback when Fyn context fails to load", () => {
+    const html = renderToStaticMarkup(
+      createElement(FynRevisionContextPanel, {
+        domain: "SKILLS",
+        context: null,
+        loading: false,
+        error: "Fyn guidance could not load.",
+        selection: {
+          changeType: "",
+          target: "",
+          goal: "",
+          reason: "",
+          constraintsToPreserve: "",
+        },
+        onSelectionChange: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Fyn guidance could not load");
+    expect(html).toContain("You can still use manual revision feedback.");
+    expect(html).toContain("Select change type");
+  });
+
+  it("builds deterministic Fyn feedback for the existing revise payload coachFeedback field", () => {
+    const context = {
+      generationDomain: "SKILLS" as const,
+      draft: null,
+      ref: null,
+      status: "AI_GENERATED",
+      version: null,
+      targetMap: null,
+      planningBriefSummary: { summary: "Serve accuracy focus" },
+      lockedPlanningContextSummary: null,
+      allowedChangeTypes: [],
+      changeOptions: [],
+      requiredInput: null,
+      raw: {},
+    };
+
+    expect(
+      buildFynRevisionCoachFeedback({
+        selection: {
+          changeType: "Change drill",
+          target: "Day 1 - Serve session - Target serve drill",
+          goal: "Increase accuracy",
+          reason: "Athlete reported shoulder fatigue",
+          constraintsToPreserve: "Keep total load moderate",
+        },
+        context,
+      }),
+    ).toBe(
+      [
+        "Change type: Change drill",
+        "Target: Day 1 - Serve session - Target serve drill",
+        "Goal: Increase accuracy",
+        "Reason: Athlete reported shoulder fatigue",
+        "Constraints to preserve: Keep total load moderate",
+        "Planning context considered: Serve accuracy focus",
+      ].join("\n"),
+    );
+  });
+
+  it("derives Nutrition targets with meal wording from draft days", () => {
+    const context = {
+      generationDomain: "NUTRITION" as const,
+      draft: {
+        trainingPlanId: "plan-1",
+        trainingPlanVersionId: "version-1",
+        versionNumber: 1,
+        status: "AI_GENERATED",
+        source: null,
+        revision: null,
+        durationDays: null,
+        daysCreated: null,
+        sessionsCreated: null,
+        itemsPersisted: null,
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-07-08",
+            dayFocus: null,
+            notes: null,
+            estimatedDailyCalories: null,
+            targetCalorieMin: null,
+            targetCalorieMax: null,
+            calorieAdequacyStatus: null,
+            estimatedCarbohydrateGrams: null,
+            targetCarbohydrateMinGrams: null,
+            targetCarbohydrateMaxGrams: null,
+            estimatedProteinGrams: null,
+            targetProteinMinGrams: null,
+            targetProteinMaxGrams: null,
+            estimatedFatGrams: null,
+            targetFatMinGrams: null,
+            targetFatMaxGrams: null,
+            estimatedFiberGrams: null,
+            targetFiberMinGrams: null,
+            targetFiberMaxGrams: null,
+            macroAdequacyStatus: null,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                objective: null,
+                plannedDurationMinutes: null,
+                intensity: null,
+                items: [
+                  {
+                    order: 1,
+                    itemType: null,
+                    exerciseCatalogItemId: null,
+                    nutritionCatalogItemId: "food-1",
+                    primaryGoalId: null,
+                    primaryGoalName: null,
+                    label: "Greek yogurt",
+                    summary: null,
+                    serving: "1 cup",
+                    quantity: 1,
+                    unit: "cup",
+                    calories: 150,
+                    protein: 15,
+                    carbs: 8,
+                    fat: 2,
+                    timing: null,
+                    sets: null,
+                    durationMinutes: null,
+                    reps: null,
+                    intensity: null,
+                    notes: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        raw: {},
+      },
+      ref: null,
+      status: "AI_GENERATED",
+      version: null,
+      targetMap: null,
+      planningBriefSummary: null,
+      lockedPlanningContextSummary: null,
+      allowedChangeTypes: [],
+      changeOptions: [],
+      requiredInput: null,
+      raw: {},
+    };
+
+    expect(fynRevisionTargetOptions("NUTRITION", context)).toContain(
+      "Day 1 (2026-07-08) - Breakfast - Greek yogurt",
+    );
   });
 
   it("renders Plan History rows with a read-only View action and no workflow actions", () => {

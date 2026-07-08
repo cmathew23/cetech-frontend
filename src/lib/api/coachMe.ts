@@ -194,6 +194,7 @@ export type CoachAssignedAthleteRow = {
   currentGenerationDomain: CoachPlanCreationDomain | null;
   currentPlanId: string | null;
   currentPlanStatus: string | null;
+  displayPlanStatus?: string | null;
   /**
    * Backend plan-generation ownership for this athlete row (coach-specific).
    * `null` when the API omits the field — do not infer.
@@ -233,6 +234,7 @@ export function parseAssignedAthleteRow(
     ),
     currentPlanId,
     currentPlanStatus,
+    displayPlanStatus: readStringField(o, "displayPlanStatus") || null,
     canGeneratePlan: readAssignedAthleteOptionalBoolean(o, "canGeneratePlan"),
     canGenerateCurrentDomainPlan: readAssignedAthleteOptionalBoolean(
       o,

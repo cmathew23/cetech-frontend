@@ -56,6 +56,8 @@ import {
   fetchCoachAthleteUpstreamPlanningContext,
   isUpstreamPlanningContextLocked,
   fetchDomainPlanSummary,
+  fetchCoachTrainingPlanDomainHistory,
+  fetchCoachTrainingPlanDomainHistoryDetail,
   fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
   fetchPersistedTrainingPlanVersions,
@@ -84,6 +86,8 @@ import {
   type GovernedTrainingPlanWorkflowAction,
   type CoachAthleteTrainingPlanPersistDraftResult,
   type CoachAthleteTrainingPlanReadiness,
+  type CoachTrainingPlanDomainHistoryDetail,
+  type CoachTrainingPlanDomainHistoryRow,
   type TrainingPlanGenerationDomain,
   type TrainingPlanReviseResult,
   type CoachAthleteTrainingPlanWorkloadAssessment,
@@ -1714,7 +1718,15 @@ export type DomainReviewDrawerContentSource =
   | "latest_domain_draft"
   | "none";
 
-export type DomainCoachWorkspaceTab = "planning-context" | "plan-viewer";
+export type DomainCoachWorkspaceTab = "planning-context" | "plan-viewer" | "plan-history";
+export const DOMAIN_COACH_WORKSPACE_TABS: Array<{
+  key: DomainCoachWorkspaceTab;
+  label: string;
+}> = [
+  { key: "planning-context", label: "Planning Context" },
+  { key: "plan-viewer", label: "Plan Viewer" },
+  { key: "plan-history", label: "Plan History" },
+];
 
 export function resolveDomainCoachPlanViewerAvailability(input: {
   workflowStatus: AssistantDomainWorkflowStatus;
@@ -1732,6 +1744,34 @@ export function resolveDomainCoachPlanViewerAvailability(input: {
     available,
     message: available ? null : "Plan Viewer becomes available after release.",
   };
+}
+
+function comparableDateOnly(value: string | null | undefined): string | null {
+  const normalized = dateOnly(value);
+  if (normalized === null) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+}
+
+export function isDomainCoachPlanViewerContextExpired(input: {
+  viewPlanContext: WorkspaceDomainViewPlanContext | null;
+  releasedPlanEndDate?: string | null;
+  todayDate?: string | null;
+}): boolean {
+  const planWindowEndDate =
+    comparableDateOnly(input.viewPlanContext?.endDate) ??
+    comparableDateOnly(input.releasedPlanEndDate);
+  const todayDate = comparableDateOnly(input.todayDate ?? formatDateInputValue(new Date()));
+  return planWindowEndDate !== null && todayDate !== null && planWindowEndDate < todayDate;
+}
+
+export function shouldRenderReleasedDomainPlanViewerSchedule(input: {
+  releasedDetailAvailable: boolean;
+  viewPlanContext: WorkspaceDomainViewPlanContext | null;
+  releasedPlanEndDate?: string | null;
+  todayDate?: string | null;
+}): boolean {
+  if (!input.releasedDetailAvailable) return false;
+  return !isDomainCoachPlanViewerContextExpired(input);
 }
 
 export function resolveDomainReviewDrawerContentSource(input: {
@@ -1872,6 +1912,232 @@ function trainingPlanDomainLabel(domain: TrainingPlanGenerationDomain): string {
   if (domain === "SKILLS") return "Skills Plan";
   if (domain === "NUTRITION") return "Nutrition Plan";
   return "Strength & Conditioning Plan";
+}
+
+export function domainPlanHistoryDomainLabel(
+  domain: TrainingPlanGenerationDomain | null,
+): string {
+  if (domain === "SKILLS") return "Skills";
+  if (domain === "NUTRITION") return "Nutrition";
+  if (domain === "S_AND_C") return "S&C";
+  return "—";
+}
+
+export function domainPlanHistoryStatusLabel(status: string | null): string {
+  const normalized = status?.trim().toUpperCase() ?? "";
+  if (normalized === "COMPLETED") return "Completed";
+  return displayValue(status);
+}
+
+export function domainPlanHistoryWeekLabel(row: {
+  weekStartDate: string | null;
+  weekEndDate: string | null;
+}): string {
+  if (row.weekStartDate === null && row.weekEndDate === null) return "—";
+  return `${row.weekStartDate ? formatDateOnly(row.weekStartDate) : "—"} – ${
+    row.weekEndDate ? formatDateOnly(row.weekEndDate) : "—"
+  }`;
+}
+
+export function domainPlanHistoryVersionLabel(versionNumber: number | null): string {
+  return versionNumber !== null ? `v${versionNumber}` : "—";
+}
+
+export function domainPlanHistoryReleasedOnLabel(releasedAt: string | null): string {
+  return releasedAt ? formatDateOnly(releasedAt) : "—";
+}
+
+export function DomainPlanHistoryTable({
+  rows,
+  onView,
+}: {
+  rows: CoachTrainingPlanDomainHistoryRow[];
+  onView: (row: CoachTrainingPlanDomainHistoryRow) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-border/70 text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-textMuted">
+            <th className="py-2 pr-4 font-normal">Week</th>
+            <th className="px-4 py-2 font-normal">Version</th>
+            <th className="px-4 py-2 font-normal">Status</th>
+            <th className="px-4 py-2 font-normal">Domain</th>
+            <th className="px-4 py-2 font-normal">Released On</th>
+            <th className="px-4 py-2 font-normal">Released By</th>
+            <th className="py-2 pl-4 font-normal">Action</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/70">
+          {rows.map((row, index) => {
+            const domainPlanId = row.domainPlanId?.trim() || "";
+            return (
+              <tr key={`${row.versionId ?? row.planId ?? "history"}-${index}`}>
+                <td className="py-3 pr-4 text-textPrimary">{domainPlanHistoryWeekLabel(row)}</td>
+                <td className="px-4 py-3 text-textPrimary">
+                  {domainPlanHistoryVersionLabel(row.versionNumber)}
+                </td>
+                <td className="px-4 py-3 text-textPrimary">
+                  {domainPlanHistoryStatusLabel(row.status)}
+                </td>
+                <td className="px-4 py-3 text-textPrimary">
+                  {domainPlanHistoryDomainLabel(row.domain)}
+                </td>
+                <td className="px-4 py-3 text-textPrimary">
+                  {domainPlanHistoryReleasedOnLabel(row.releasedAt)}
+                </td>
+                <td className="px-4 py-3 text-textPrimary">{displayValue(row.releasedBy)}</td>
+                <td className="py-3 pl-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={domainPlanId === ""}
+                    onClick={() => onView(row)}
+                  >
+                    View
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function DomainPlanHistoryTabPanel({
+  rows,
+  loading,
+  error,
+  onView,
+}: {
+  rows: CoachTrainingPlanDomainHistoryRow[];
+  loading: boolean;
+  error: string | null;
+  onView: (row: CoachTrainingPlanDomainHistoryRow) => void;
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
+      <div className="space-y-1">
+        <h3 className="text-base font-normal text-textPrimary">Plan History</h3>
+        <p className="text-sm text-textSecondary">Read-only completed plans for this domain.</p>
+      </div>
+      {loading ? (
+        <div className="text-sm text-textSecondary">Loading plan history...</div>
+      ) : error ? (
+        <Alert variant="warning">{error}</Alert>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-textSecondary">No completed plans in history yet.</div>
+      ) : (
+        <DomainPlanHistoryTable rows={rows} onView={onView} />
+      )}
+    </section>
+  );
+}
+
+export function DomainPlanHistoryDetailPanel({
+  row,
+  detail,
+  loading,
+  error,
+  children,
+}: {
+  row: CoachTrainingPlanDomainHistoryRow;
+  detail?: CoachTrainingPlanDomainHistoryDetail | null;
+  loading?: boolean;
+  error?: string | null;
+  children?: ReactNode;
+}) {
+  const metadataItems = [
+    { label: "Week", value: domainPlanHistoryWeekLabel(row) },
+    { label: "Version", value: domainPlanHistoryVersionLabel(row.versionNumber) },
+    { label: "Status", value: domainPlanHistoryStatusLabel(row.status) },
+    { label: "Domain", value: domainPlanHistoryDomainLabel(row.domain) },
+    { label: "Released On", value: domainPlanHistoryReleasedOnLabel(row.releasedAt) },
+    { label: "Released By", value: displayValue(row.releasedBy) },
+  ];
+
+  return (
+    <div className="min-w-0 space-y-5 overflow-x-hidden">
+      <dl className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {metadataItems.map((item) => (
+          <div
+            key={item.label}
+            className="min-w-0 rounded-xl border border-border/70 bg-bg/60 p-4"
+          >
+            <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "mb-1")}>{item.label}</dt>
+            <dd className="min-w-0 break-words text-sm text-textPrimary">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {loading === true ? (
+        <div className="text-sm text-textSecondary">Loading historical plan detail...</div>
+      ) : error ? (
+        <div role="alert" className="text-sm text-warning">
+          {error}
+        </div>
+      ) : detail ? (
+        <div className="min-w-0 max-w-full overflow-x-hidden">{children ?? null}</div>
+      ) : null}
+    </div>
+  );
+}
+
+export function handleDomainCoachWorkspaceTabSelect(input: {
+  tab: DomainCoachWorkspaceTab;
+  setTab: (tab: DomainCoachWorkspaceTab) => void;
+  planViewerAvailable: boolean;
+  hasViewPlanContext: boolean;
+  planViewerExpired?: boolean;
+  openPlanViewer: () => void;
+  loadPlanHistory: () => void;
+}) {
+  input.setTab(input.tab);
+  if (input.tab === "plan-viewer") {
+    if (
+      input.planViewerAvailable &&
+      input.hasViewPlanContext &&
+      input.planViewerExpired !== true
+    ) {
+      input.openPlanViewer();
+    }
+    return;
+  }
+  if (input.tab === "plan-history") {
+    input.loadPlanHistory();
+  }
+}
+
+export function handleDomainCoachPlanViewerHistoryClick(input: {
+  setTab: (tab: DomainCoachWorkspaceTab) => void;
+  loadPlanHistory: () => void;
+}) {
+  input.setTab("plan-history");
+  input.loadPlanHistory();
+}
+
+export function DomainCoachPlanViewerExpiredEmptyState({
+  onOpenPlanHistory,
+}: {
+  onOpenPlanHistory: () => void;
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
+      <div className="space-y-1">
+        <h3 className="text-base font-normal text-textPrimary">Plan Viewer</h3>
+        <p className="text-sm text-textSecondary">
+          No active released plan for the current week.
+        </p>
+        <p className="text-sm text-textSecondary">
+          Completed plans are available in Plan History.
+        </p>
+      </div>
+      <Button type="button" variant="secondary" onClick={onOpenPlanHistory}>
+        View Plan History
+      </Button>
+    </section>
+  );
 }
 
 function assistantRoleLabel(domain: TrainingPlanGenerationDomain | null): string {
@@ -6540,6 +6806,8 @@ export type WorkspaceDomainViewPlanContext = {
   versionId: string;
   status: string | null;
   source: string;
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 export function resolveWorkspaceDomainViewPlanContext(input: {
@@ -6549,6 +6817,8 @@ export function resolveWorkspaceDomainViewPlanContext(input: {
   fallbackVersionId?: string | null;
   fallbackStatus?: string | null;
   fallbackSource?: string;
+  fallbackStartDate?: string | null;
+  fallbackEndDate?: string | null;
   preferCompleteFallback?: boolean;
 }): WorkspaceDomainViewPlanContext | null {
   const summary = input.workspace?.domains[input.domain]?.summary ?? null;
@@ -6556,30 +6826,42 @@ export function resolveWorkspaceDomainViewPlanContext(input: {
   const workspaceVersionId = summary?.versionId?.trim() ?? "";
   const fallbackPlanId = input.fallbackPlanId?.trim() ?? "";
   const fallbackVersionId = input.fallbackVersionId?.trim() ?? "";
-  if (input.preferCompleteFallback === true && fallbackPlanId !== "" && fallbackVersionId !== "") {
+  const fallbackStartDate = input.fallbackStartDate?.trim() || null;
+  const fallbackEndDate = input.fallbackEndDate?.trim() || null;
+  const withFallbackWindow = (
+    context: Omit<WorkspaceDomainViewPlanContext, "startDate" | "endDate">,
+  ): WorkspaceDomainViewPlanContext => {
+    if (fallbackStartDate === null && fallbackEndDate === null) return context;
     return {
+      ...context,
+      startDate: fallbackStartDate,
+      endDate: fallbackEndDate,
+    };
+  };
+  if (input.preferCompleteFallback === true && fallbackPlanId !== "" && fallbackVersionId !== "") {
+    return withFallbackWindow({
       planId: fallbackPlanId,
       versionId: fallbackVersionId,
       status: input.fallbackStatus?.trim() || null,
       source: input.fallbackSource ?? "legacy fallback",
-    };
+    });
   }
   if (workspacePlanId !== "") {
-    return {
+    return withFallbackWindow({
       planId: workspacePlanId,
       versionId: workspaceVersionId,
       status: summary?.status?.trim() || null,
       source: `workspace.domains.${input.domain}.summary`,
-    };
+    });
   }
 
   if (fallbackPlanId === "") return null;
-  return {
+  return withFallbackWindow({
     planId: fallbackPlanId,
     versionId: fallbackVersionId,
     status: input.fallbackStatus?.trim() || null,
     source: input.fallbackSource ?? "legacy fallback",
-  };
+  });
 }
 
 export type DomainRevisePlanIds = {
@@ -7278,6 +7560,21 @@ export function CoachAthletePlanningProfileView({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [domainCoachWorkspaceTab, setDomainCoachWorkspaceTab] =
     useState<DomainCoachWorkspaceTab>("planning-context");
+  const [domainPlanHistoryRows, setDomainPlanHistoryRows] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, CoachTrainingPlanDomainHistoryRow[]>>
+  >({});
+  const [domainPlanHistoryLoading, setDomainPlanHistoryLoading] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, boolean>>
+  >({});
+  const [domainPlanHistoryError, setDomainPlanHistoryError] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, string | null>>
+  >({});
+  const [domainPlanHistoryDrawer, setDomainPlanHistoryDrawer] = useState<{
+    row: CoachTrainingPlanDomainHistoryRow;
+    detail: CoachTrainingPlanDomainHistoryDetail | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
   const workspaceRefreshGenRef = useRef(0);
   const workspaceHasLoadedRef = useRef(false);
   const assignmentContextMissingWarningScopeRef = useRef<string | null>(null);
@@ -15770,6 +16067,26 @@ export function CoachAthletePlanningProfileView({
         errorDomain: persistedPlanErrorDomain,
         renderedDomain: domain,
       }) ?? model.state.error;
+    const planViewerExpired = isDomainCoachPlanViewerContextExpired({
+      viewPlanContext: model.viewPlanContext,
+      releasedPlanEndDate: releasedDetail?.version.endDate ?? null,
+      todayDate: today,
+    });
+
+    if (planViewerExpired) {
+      return (
+        <DomainCoachPlanViewerExpiredEmptyState
+          onOpenPlanHistory={() => {
+            handleDomainCoachPlanViewerHistoryClick({
+              setTab: setDomainCoachWorkspaceTab,
+              loadPlanHistory: () => {
+                void loadDomainPlanHistory(domain);
+              },
+            });
+          }}
+        />
+      );
+    }
 
     return (
       <section className="space-y-4 rounded-xl border border-border bg-bg/60 p-4 sm:p-5">
@@ -15801,7 +16118,13 @@ export function CoachAthletePlanningProfileView({
           <div className="text-sm text-textSecondary">
             Loading released {model.domainLabel} plan...
           </div>
-        ) : releasedDetail !== null ? (
+        ) : releasedDetail !== null &&
+          shouldRenderReleasedDomainPlanViewerSchedule({
+            releasedDetailAvailable: true,
+            viewPlanContext: model.viewPlanContext,
+            releasedPlanEndDate: releasedDetail.version.endDate,
+            todayDate: today,
+          }) ? (
           renderDomainPlanDaySchedule(
             releasedDetail,
             model.domainLabel,
@@ -15826,12 +16149,156 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
+  async function loadDomainPlanHistory(domain: TrainingPlanGenerationDomain): Promise<void> {
+    if (entityId === "" || athleteIdTrimmed === "") return;
+    setDomainPlanHistoryLoading((current) => ({ ...current, [domain]: true }));
+    setDomainPlanHistoryError((current) => ({ ...current, [domain]: null }));
+    try {
+      const rows = await fetchCoachTrainingPlanDomainHistory(entityId, athleteIdTrimmed, domain);
+      setDomainPlanHistoryRows((current) => ({ ...current, [domain]: rows }));
+    } catch {
+      setDomainPlanHistoryRows((current) => ({ ...current, [domain]: [] }));
+      setDomainPlanHistoryError((current) => ({
+        ...current,
+        [domain]: "Could not load plan history.",
+      }));
+    } finally {
+      setDomainPlanHistoryLoading((current) => ({ ...current, [domain]: false }));
+    }
+  }
+
+  async function openDomainPlanHistoryDetail(
+    row: CoachTrainingPlanDomainHistoryRow,
+    fallbackDomain: TrainingPlanGenerationDomain,
+  ): Promise<void> {
+    const domain = row.domain ?? fallbackDomain;
+    const domainPlanId = row.domainPlanId?.trim() ?? "";
+    setDomainPlanHistoryDrawer({
+      row,
+      detail: null,
+      loading: true,
+      error: null,
+    });
+    try {
+      const detail = await fetchCoachTrainingPlanDomainHistoryDetail(
+        entityId,
+        athleteIdTrimmed,
+        domain,
+        domainPlanId,
+      );
+      setDomainPlanHistoryDrawer((current) =>
+        current?.row.domainPlanId === row.domainPlanId
+          ? {
+              row: {
+                ...current.row,
+                planId: detail.planId,
+                domainPlanId: detail.domainPlanId,
+                versionId: detail.versionId,
+                versionNumber: detail.versionNumber,
+                domain: detail.domain,
+                weekStartDate: detail.weekStartDate,
+                weekEndDate: detail.weekEndDate,
+                status: detail.status,
+                releasedAt: detail.releasedAt,
+                releasedBy: detail.releasedBy,
+                viewOnly: detail.viewOnly,
+                raw: detail.raw,
+              },
+              detail,
+              loading: false,
+              error: null,
+            }
+          : current,
+      );
+    } catch {
+      setDomainPlanHistoryDrawer((current) =>
+        current?.row.domainPlanId === row.domainPlanId
+          ? {
+              ...current,
+              detail: null,
+              loading: false,
+              error: "Could not load historical plan detail.",
+            }
+          : current,
+      );
+    }
+  }
+
+  function renderDomainCoachPlanHistoryTab(domain: TrainingPlanGenerationDomain) {
+    const rows = domainPlanHistoryRows[domain] ?? [];
+    const loading = domainPlanHistoryLoading[domain] === true;
+    const error = domainPlanHistoryError[domain] ?? null;
+    return (
+      <DomainPlanHistoryTabPanel
+        rows={rows}
+        loading={loading}
+        error={error}
+        onView={(row) => {
+          void openDomainPlanHistoryDetail(row, domain);
+        }}
+      />
+    );
+  }
+
+  function renderDomainPlanHistoryDrawer() {
+    if (domainPlanHistoryDrawer === null) return null;
+    const row = domainPlanHistoryDrawer.row;
+    const detail = domainPlanHistoryDrawer.detail;
+    const domain = detail?.domain ?? row.domain;
+    return (
+      <Modal
+        className="max-h-[90vh] w-full max-w-6xl overflow-x-hidden overflow-y-auto rounded-2xl bg-card p-0 shadow-lg"
+        aria-labelledby="domain-plan-history-title"
+      >
+        <div className="min-w-0 space-y-5 overflow-x-hidden px-6 py-6 sm:px-7 sm:py-7">
+          <div className="flex min-w-0 items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1">
+              <h2
+                id="domain-plan-history-title"
+                className="text-lg font-normal text-textPrimary"
+              >
+                Plan History
+              </h2>
+              <p className="text-sm text-textSecondary">Read-only historical plan detail.</p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDomainPlanHistoryDrawer(null)}
+            >
+              Close
+            </Button>
+          </div>
+          <DomainPlanHistoryDetailPanel
+            row={row}
+            detail={detail}
+            loading={domainPlanHistoryDrawer.loading}
+            error={domainPlanHistoryDrawer.error}
+          >
+            {detail !== null
+              ? renderDomainPlanDaySchedule(
+                  detail.planContent,
+                  domainPlanHistoryDomainLabel(domain),
+                  "View the historical plan by day and session.",
+                  domain,
+                )
+              : null}
+          </DomainPlanHistoryDetailPanel>
+        </div>
+      </Modal>
+    );
+  }
+
   function renderUnifiedDomainCoachWorkspace(domain: TrainingPlanGenerationDomain) {
     const model = resolveDomainReviewSurfaceModel(domain);
     const planViewerAvailability = resolveDomainCoachPlanViewerAvailability({
       workflowStatus: model.workflowStatus,
       canShowViewPlan: model.canShowViewPlan,
       hasViewPlanContext: model.viewPlanContext !== null,
+    });
+    const planViewerExpired = isDomainCoachPlanViewerContextExpired({
+      viewPlanContext: model.viewPlanContext,
+      todayDate: today,
     });
     return (
       <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
@@ -15843,32 +16310,40 @@ export function CoachAthletePlanningProfileView({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant={domainCoachWorkspaceTab === "planning-context" ? "primary" : "secondary"}
-              onClick={() => setDomainCoachWorkspaceTab("planning-context")}
-            >
-              Planning Context
-            </Button>
-            <Button
-              type="button"
-              variant={domainCoachWorkspaceTab === "plan-viewer" ? "primary" : "secondary"}
-              onClick={() => {
-                setDomainCoachWorkspaceTab("plan-viewer");
-                if (planViewerAvailability.available && model.viewPlanContext !== null) {
-                  void openReleasedDomainPlanViewer(domain, model.viewPlanContext);
-                }
-              }}
-            >
-              Plan Viewer
-            </Button>
+            {DOMAIN_COACH_WORKSPACE_TABS.map((tab) => (
+              <Button
+                key={tab.key}
+                type="button"
+                variant={domainCoachWorkspaceTab === tab.key ? "primary" : "secondary"}
+                onClick={() => {
+                  handleDomainCoachWorkspaceTabSelect({
+                    tab: tab.key,
+                    setTab: setDomainCoachWorkspaceTab,
+                    planViewerAvailable: planViewerAvailability.available,
+                    hasViewPlanContext: model.viewPlanContext !== null,
+                    planViewerExpired,
+                    openPlanViewer: () => {
+                      void openReleasedDomainPlanViewer(domain, model.viewPlanContext);
+                    },
+                    loadPlanHistory: () => {
+                      void loadDomainPlanHistory(domain);
+                    },
+                  });
+                }}
+              >
+                {tab.label}
+              </Button>
+            ))}
           </div>
         </div>
         <div className="space-y-4 px-4 py-5 sm:px-6 sm:py-6">
           {domainCoachWorkspaceTab === "planning-context"
             ? renderDomainCoachPlanningContextTab(model)
-            : renderDomainCoachPlanViewerTab(model)}
+            : domainCoachWorkspaceTab === "plan-viewer"
+              ? renderDomainCoachPlanViewerTab(model)
+              : renderDomainCoachPlanHistoryTab(domain)}
         </div>
+        {renderDomainPlanHistoryDrawer()}
       </Card>
     );
   }

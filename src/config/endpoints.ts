@@ -203,6 +203,19 @@ export const paths = {
       generationDomain: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/domain-drafts/latest?generationDomain=${encodeURIComponent(generationDomain)}`,
+    athleteTrainingPlanDomainHistory: (
+      entityId: string,
+      athleteId: string,
+      generationDomain: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-management/domains/${encodeURIComponent(generationDomain)}/history`,
+    athleteTrainingPlanDomainHistoryDetail: (
+      entityId: string,
+      athleteId: string,
+      generationDomain: string,
+      domainPlanId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-management/domains/${encodeURIComponent(generationDomain)}/history/${encodeURIComponent(domainPlanId)}`,
     athleteTrainingPlanSubmitReview: (
       entityId: string,
       athleteId: string,

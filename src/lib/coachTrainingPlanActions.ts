@@ -414,9 +414,18 @@ function editPlanButtonLabel(domain: CoachPlanCreationDomain | null): string {
   return `Edit ${domainLabel(domain)} Plan`;
 }
 
+function viewPlanButtonLabel(domain: CoachPlanCreationDomain | null): string {
+  if (domain === null) return "View Plan";
+  return `View ${domainLabel(domain)} Plan`;
+}
+
 function planStatusLabel(status: string | null): string | null {
   const normalizedStatus = status?.trim() ?? "";
   return normalizedStatus !== "" ? `Plan: ${normalizedStatus}` : null;
+}
+
+function isCompletedPlanStatus(status: string | null): boolean {
+  return (status?.trim() ?? "").toUpperCase() === "COMPLETED";
 }
 
 export function planningProfileHrefForAthlete(
@@ -480,6 +489,8 @@ export function resolveTrainingPlanAction(input: {
   athletePlanGenerationDomain: CoachPlanCreationDomain | null;
   currentPlanId: string | null;
   currentPlanStatus: string | null;
+  displayPlanStatus?: string | null;
+  planStatus?: string | null;
   fallbackDomain: CoachPlanCreationDomain | null;
   hasPlanningProfile: boolean;
   hasHeadCoachConfigured?: boolean;
@@ -512,6 +523,8 @@ export function resolveTrainingPlanAction(input: {
     input.athletePlanGenerationDomain === resolvedDomain;
   const effectivePlanId =
     normalizedPlanId !== "" && planAlignedForCoachWorkspace ? normalizedPlanId : "";
+  const effectivePlanStatus =
+    input.displayPlanStatus ?? input.planStatus ?? input.currentPlanStatus;
 
   if (athleteIdTrimmed === "") {
     return {
@@ -588,11 +601,13 @@ export function resolveTrainingPlanAction(input: {
         ? existingCoachAthletePlanningProfileHref(athleteIdTrimmed, effectivePlanId)
         : planningProfileHrefForAthlete(athleteIdTrimmed, effectivePlanId);
     return {
-      buttonLabel: editPlanButtonLabel(resolvedDomain),
+      buttonLabel: isCompletedPlanStatus(effectivePlanStatus)
+        ? viewPlanButtonLabel(resolvedDomain)
+        : editPlanButtonLabel(resolvedDomain),
       disabled: false,
       helperBelowButton: null,
       href: editHref,
-      planStatusLabel: planStatusLabel(input.currentPlanStatus),
+      planStatusLabel: planStatusLabel(effectivePlanStatus),
       resolvedButtonState: "edit_plan",
       resolvedDomain,
     };

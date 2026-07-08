@@ -156,6 +156,20 @@ import {
   buildTrainingPlanPlanningBriefSections,
   TrainingPlanPlanningBrief,
   DomainPlanConstraintComplianceSummarySection,
+  DomainPlanHistoryTable,
+  DomainPlanHistoryTabPanel,
+  DomainPlanHistoryDetailPanel,
+  DomainCoachPlanViewerExpiredEmptyState,
+  DOMAIN_COACH_WORKSPACE_TABS,
+  domainPlanHistoryDomainLabel,
+  domainPlanHistoryReleasedOnLabel,
+  domainPlanHistoryStatusLabel,
+  domainPlanHistoryVersionLabel,
+  domainPlanHistoryWeekLabel,
+  handleDomainCoachPlanViewerHistoryClick,
+  handleDomainCoachWorkspaceTabSelect,
+  isDomainCoachPlanViewerContextExpired,
+  shouldRenderReleasedDomainPlanViewerSchedule,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -2017,6 +2031,431 @@ describe("buildDomainReviewRevisionContext", () => {
 });
 
 describe("Training Plan Workspace lifecycle display", () => {
+  it("exposes Planning Context, Plan Viewer, and Plan History tabs for domain coaches", () => {
+    expect(DOMAIN_COACH_WORKSPACE_TABS.map((tab) => tab.label)).toEqual([
+      "Planning Context",
+      "Plan Viewer",
+      "Plan History",
+    ]);
+    expect(DOMAIN_COACH_WORKSPACE_TABS.map((tab) => tab.key)).toEqual([
+      "planning-context",
+      "plan-viewer",
+      "plan-history",
+    ]);
+  });
+
+  it("formats Plan History table values for read-only display", () => {
+    const row = {
+      weekStartDate: "2026-05-04",
+      weekEndDate: "2026-05-10",
+    };
+
+    expect(domainPlanHistoryWeekLabel(row)).toContain("2026");
+    expect(domainPlanHistoryVersionLabel(3)).toBe("v3");
+    expect(domainPlanHistoryStatusLabel("COMPLETED")).toBe("Completed");
+    expect(domainPlanHistoryDomainLabel("SKILLS")).toBe("Skills");
+    expect(domainPlanHistoryDomainLabel("NUTRITION")).toBe("Nutrition");
+    expect(domainPlanHistoryDomainLabel("S_AND_C")).toBe("S&C");
+    expect(domainPlanHistoryReleasedOnLabel(null)).toBe("—");
+  });
+
+  it("renders the Plan History tab empty state", () => {
+    const html = renderToStaticMarkup(
+      createElement(DomainPlanHistoryTabPanel, {
+        rows: [],
+        loading: false,
+        error: null,
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Plan History");
+    expect(html).toContain("No completed plans in history yet.");
+  });
+
+  it("selecting Plan History requests a history fetch without opening Plan Viewer", () => {
+    const setTab = vi.fn();
+    const loadPlanHistory = vi.fn();
+    const openPlanViewer = vi.fn();
+
+    handleDomainCoachWorkspaceTabSelect({
+      tab: "plan-history",
+      setTab,
+      planViewerAvailable: true,
+      hasViewPlanContext: true,
+      openPlanViewer,
+      loadPlanHistory,
+    });
+
+    expect(setTab).toHaveBeenCalledWith("plan-history");
+    expect(loadPlanHistory).toHaveBeenCalledTimes(1);
+    expect(openPlanViewer).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Plan Viewer tab opening the current released plan viewer", () => {
+    const setTab = vi.fn();
+    const loadPlanHistory = vi.fn();
+    const openPlanViewer = vi.fn();
+
+    handleDomainCoachWorkspaceTabSelect({
+      tab: "plan-viewer",
+      setTab,
+      planViewerAvailable: true,
+      hasViewPlanContext: true,
+      openPlanViewer,
+      loadPlanHistory,
+    });
+
+    expect(setTab).toHaveBeenCalledWith("plan-viewer");
+    expect(openPlanViewer).toHaveBeenCalledTimes(1);
+    expect(loadPlanHistory).not.toHaveBeenCalled();
+  });
+
+  it("does not render an expired completed released plan as active Plan Viewer content", () => {
+    const viewPlanContext = {
+      planId: "completed-plan-1",
+      versionId: "completed-version-1",
+      status: "COMPLETED",
+      source: "legacy fallback",
+      startDate: "2026-06-29",
+      endDate: "2026-07-05",
+    };
+
+    expect(
+      isDomainCoachPlanViewerContextExpired({
+        viewPlanContext,
+        todayDate: "2026-07-08",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRenderReleasedDomainPlanViewerSchedule({
+        releasedDetailAvailable: true,
+        viewPlanContext,
+        releasedPlanEndDate: "2026-07-05",
+        todayDate: "2026-07-08",
+      }),
+    ).toBe(false);
+  });
+
+  it("renders the Plan Viewer empty state for an expired plan window", () => {
+    const html = renderToStaticMarkup(
+      createElement(DomainCoachPlanViewerExpiredEmptyState, {
+        onOpenPlanHistory: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("No active released plan for the current week.");
+    expect(html).toContain("Completed plans are available in Plan History.");
+    expect(html).toContain("View Plan History");
+    expect(html).not.toContain("View the released plan by day and session.");
+  });
+
+  it("switches from the expired Plan Viewer empty state to Plan History", () => {
+    const setTab = vi.fn();
+    const loadPlanHistory = vi.fn();
+
+    handleDomainCoachPlanViewerHistoryClick({
+      setTab,
+      loadPlanHistory,
+    });
+
+    expect(setTab).toHaveBeenCalledWith("plan-history");
+    expect(loadPlanHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not open Plan Viewer from the tab button for an expired plan context", () => {
+    const setTab = vi.fn();
+    const loadPlanHistory = vi.fn();
+    const openPlanViewer = vi.fn();
+
+    handleDomainCoachWorkspaceTabSelect({
+      tab: "plan-viewer",
+      setTab,
+      planViewerAvailable: true,
+      hasViewPlanContext: true,
+      planViewerExpired: true,
+      openPlanViewer,
+      loadPlanHistory,
+    });
+
+    expect(setTab).toHaveBeenCalledWith("plan-viewer");
+    expect(openPlanViewer).not.toHaveBeenCalled();
+    expect(loadPlanHistory).not.toHaveBeenCalled();
+  });
+
+  it("keeps current-week released plans renderable in Plan Viewer", () => {
+    const viewPlanContext = {
+      planId: "active-plan-1",
+      versionId: "active-version-1",
+      status: "ACTIVE",
+      source: "workspace.domains.SKILLS.summary",
+      startDate: "2026-07-06",
+      endDate: "2026-07-12",
+    };
+
+    expect(
+      isDomainCoachPlanViewerContextExpired({
+        viewPlanContext,
+        todayDate: "2026-07-08",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderReleasedDomainPlanViewerSchedule({
+        releasedDetailAvailable: true,
+        viewPlanContext,
+        releasedPlanEndDate: "2026-07-12",
+        todayDate: "2026-07-08",
+      }),
+    ).toBe(true);
+  });
+
+  it("renders Plan History rows with a read-only View action and no workflow actions", () => {
+    const onView = vi.fn();
+    const row = {
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-1",
+      versionNumber: 1,
+      domain: "SKILLS" as const,
+      weekStartDate: "2026-05-04",
+      weekEndDate: "2026-05-10",
+      status: "COMPLETED",
+      releasedAt: null,
+      releasedBy: null,
+      viewOnly: true,
+      raw: {},
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(DomainPlanHistoryTable, { rows: [row], onView }),
+    );
+
+    expect(html).toContain("Week");
+    expect(html).toContain("Version");
+    expect(html).toContain("Status");
+    expect(html).toContain("Domain");
+    expect(html).toContain("Released On");
+    expect(html).toContain("Released By");
+    expect(html).toContain("v1");
+    expect(html).toContain("Completed");
+    expect(html).toContain("Skills");
+    expect(html).toContain("View");
+    expect(html).toContain("—");
+    expect(html).not.toMatch(/<button[^>]*>Approve<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Release<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Revise<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Regenerate<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Submit<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Request Changes<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Edit<\/button>/);
+  });
+
+  it("renders Plan History detail loading state while fetching historical content", () => {
+    const row = {
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-1",
+      versionNumber: 1,
+      domain: "SKILLS" as const,
+      weekStartDate: "2026-05-04",
+      weekEndDate: "2026-05-10",
+      status: "COMPLETED",
+      releasedAt: "2026-05-11T08:00:00.000Z",
+      releasedBy: null,
+      viewOnly: true,
+      raw: {},
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(DomainPlanHistoryDetailPanel, {
+        row,
+        detail: null,
+        loading: true,
+        error: null,
+      }),
+    );
+
+    expect(html).toContain("Loading historical plan detail...");
+    expect(html).not.toContain(
+      "Full historical plan content will be wired after the backend detail endpoint is confirmed.",
+    );
+  });
+
+  it("renders Plan History detail metadata in responsive cards without horizontal overflow", () => {
+    const row = {
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-1",
+      versionNumber: 1,
+      domain: "NUTRITION" as const,
+      weekStartDate: "2026-06-30",
+      weekEndDate: "2026-07-06",
+      status: "COMPLETED",
+      releasedAt: "2026-07-07T08:00:00.000Z",
+      releasedBy: "Coach With A Very Long Display Name That Should Wrap Normally",
+      viewOnly: true,
+      raw: {},
+    };
+    const detail = {
+      ...row,
+      planContent: {
+        selectedVersionRule: null,
+        generationDomain: "NUTRITION",
+        allowedActions: [],
+        releaseMode: null,
+        constraintComplianceSummary: null,
+        plan: null,
+        version: null,
+        days: [],
+        raw: {},
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(
+        DomainPlanHistoryDetailPanel,
+        {
+          row,
+          detail,
+          loading: false,
+          error: null,
+        },
+        createElement("section", null, "Full width historical plan content"),
+      ),
+    );
+
+    expect(html).toContain("grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3");
+    expect(html).toContain("min-w-0 break-words text-sm text-textPrimary");
+    expect(html).toContain("min-w-0 max-w-full overflow-x-hidden");
+    expect(html).toContain("Coach With A Very Long Display Name That Should Wrap Normally");
+    expect(html).toContain("Full width historical plan content");
+  });
+
+  it("renders Plan History detail error state on historical detail failure", () => {
+    const row = {
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-1",
+      versionNumber: 1,
+      domain: "SKILLS" as const,
+      weekStartDate: "2026-05-04",
+      weekEndDate: "2026-05-10",
+      status: "COMPLETED",
+      releasedAt: "2026-05-11T08:00:00.000Z",
+      releasedBy: null,
+      viewOnly: true,
+      raw: {},
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(DomainPlanHistoryDetailPanel, {
+        row,
+        detail: null,
+        loading: false,
+        error: "Could not load historical plan detail.",
+      }),
+    );
+
+    expect(html).toContain("Could not load historical plan detail.");
+  });
+
+  it("renders returned Plan History planContent read-only without workflow actions", () => {
+    const row = {
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-1",
+      versionNumber: 1,
+      domain: "SKILLS" as const,
+      weekStartDate: "2026-05-04",
+      weekEndDate: "2026-05-10",
+      status: "COMPLETED",
+      releasedAt: "2026-05-11T08:00:00.000Z",
+      releasedBy: "Coach Lee",
+      viewOnly: true,
+      raw: {},
+    };
+    const detail = {
+      ...row,
+      planContent: {
+        selectedVersionRule: null,
+        generationDomain: "SKILLS",
+        allowedActions: [],
+        releaseMode: null,
+        constraintComplianceSummary: null,
+        plan: {
+          id: "plan-1",
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          seasonCycleId: null,
+          name: null,
+          description: null,
+          status: "COMPLETED",
+          planSource: null,
+          createdAt: null,
+          updatedAt: null,
+          goals: [],
+          raw: {},
+        },
+        version: {
+          id: "version-1",
+          trainingPlanId: "plan-1",
+          versionNumber: 1,
+          startDate: "2026-05-04",
+          endDate: "2026-05-10",
+          source: null,
+          status: "COMPLETED",
+          isActiveVersion: false,
+          isApproved: true,
+          createdAt: null,
+          updatedAt: null,
+          raw: {},
+        },
+        days: [
+          {
+            id: "day-1",
+            date: "2026-05-04",
+            dayIndex: 1,
+            weekNumber: 1,
+            isRestDay: false,
+            plannedLoadMinutes: 45,
+            notes: null,
+            trainingPlanVersionId: "version-1",
+            sessions: [],
+          },
+        ],
+        raw: {},
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(
+        DomainPlanHistoryDetailPanel,
+        {
+          row,
+          detail,
+          loading: false,
+          error: null,
+        },
+        createElement("section", null, "Target Serve Drill"),
+      ),
+    );
+
+    expect(html).toContain("Completed");
+    expect(html).toContain("Skills");
+    expect(html).toContain("Coach Lee");
+    expect(html).toContain("Target Serve Drill");
+    expect(html).not.toContain(
+      "Full historical plan content will be wired after the backend detail endpoint is confirmed.",
+    );
+    expect(html).not.toMatch(/<button[^>]*>Approve<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Release<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Revise<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Regenerate<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Submit<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Request Changes<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>Edit<\/button>/);
+  });
+
   it("marks Context Builder active when the locked context canvas is visible", () => {
     const steps = resolveTrainingPlanWorkspaceLifecycleSteps({
       activeMode: "context-builder",

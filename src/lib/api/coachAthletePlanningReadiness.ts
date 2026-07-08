@@ -558,6 +558,25 @@ export type TrainingPlanConstraintComplianceSummary = {
   raw: unknown;
 };
 
+export type CoachTrainingPlanDomainHistoryRow = {
+  planId: string | null;
+  domainPlanId: string | null;
+  versionId: string | null;
+  versionNumber: number | null;
+  domain: TrainingPlanGenerationDomain | null;
+  weekStartDate: string | null;
+  weekEndDate: string | null;
+  status: string | null;
+  releasedAt: string | null;
+  releasedBy: string | null;
+  viewOnly: boolean | null;
+  raw: unknown;
+};
+
+export type CoachTrainingPlanDomainHistoryDetail = CoachTrainingPlanDomainHistoryRow & {
+  planContent: CoachPersistedTrainingPlanActiveDetail;
+};
+
 export type GovernedTrainingPlanWorkflowAction =
   | "SUBMIT_REVIEW"
   | "HEAD_APPROVE"
@@ -950,6 +969,18 @@ function assertGenerationDomain(
   } satisfies NormalizedApiError;
 }
 
+function assertDomainPlanId(domainPlanId: string): string {
+  const trimmed = domainPlanId.trim();
+  if (trimmed === "") {
+    throw {
+      message: "domain plan id is required",
+      status: 400,
+      code: "TRAINING_PLAN_DOMAIN_PLAN_ID_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  return trimmed;
+}
+
 function assertVersionId(versionId: string): string {
   const trimmed = versionId.trim();
   if (trimmed === "") {
@@ -1186,6 +1217,89 @@ function parseConstraintComplianceSummary(
     summary.appliedInPlan.length > 0 ||
     summary.evidence.length > 0;
   return hasAnyField ? summary : null;
+}
+
+function parseCoachTrainingPlanDomainHistoryRow(
+  value: unknown,
+): CoachTrainingPlanDomainHistoryRow | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const planId = readStringKey([record], ["planId"]);
+  const domainPlanId = readStringKey([record], ["domainPlanId"]);
+  const versionId = readStringKey([record], ["versionId"]);
+  return {
+    planId,
+    domainPlanId,
+    versionId,
+    versionNumber: readNumberKey([record], ["versionNumber"]),
+    domain: readTrainingPlanGenerationDomain(readStringKey([record], ["domain"])),
+    weekStartDate: readStringKey([record], ["weekStartDate"]),
+    weekEndDate: readStringKey([record], ["weekEndDate"]),
+    status: readStringKey([record], ["status"]),
+    releasedAt: readStringKey([record], ["releasedAt"]),
+    releasedBy: readStringKey([record], ["releasedBy"]),
+    viewOnly: readBooleanKey([record], ["viewOnly"]),
+    raw: value,
+  };
+}
+
+function parseCoachTrainingPlanDomainHistoryPayload(
+  value: unknown,
+): CoachTrainingPlanDomainHistoryRow[] {
+  const adapted = adaptBackendSuccess(value);
+  const adaptedRecord = asRecord(adapted);
+  const source = Array.isArray(adapted)
+    ? adapted
+    : Array.isArray(adaptedRecord?.data)
+      ? adaptedRecord.data
+      : [];
+  return source
+    .map(parseCoachTrainingPlanDomainHistoryRow)
+    .filter((row): row is CoachTrainingPlanDomainHistoryRow => row !== null);
+}
+
+function parseCoachTrainingPlanDomainHistoryDetailPayload(
+  value: unknown,
+  fallbackDomainPlanId: string,
+): CoachTrainingPlanDomainHistoryDetail {
+  const adapted = adaptBackendSuccess(value);
+  const adaptedRecord = asRecord(adapted) ?? {};
+  const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
+  const planContent = asRecord(record.planContent);
+  if (planContent === null) {
+    throw {
+      message: "Historical training plan detail payload missing planContent",
+      status: 500,
+      code: "TRAINING_PLAN_HISTORY_DETAIL_PAYLOAD_INVALID",
+      details: value,
+    } satisfies NormalizedApiError;
+  }
+  const row = parseCoachTrainingPlanDomainHistoryRow(record);
+  const detail = parsePersistedTrainingPlanActiveDetailPayload(
+    planContent,
+    readStringKey([record], ["planId"]) ?? undefined,
+  );
+  return {
+    ...(row ?? {
+      planId: readStringKey([record], ["planId"]),
+      domainPlanId: readStringKey([record], ["domainPlanId"]) ?? fallbackDomainPlanId,
+      versionId: readStringKey([record], ["versionId"]),
+      versionNumber: readNumberKey([record], ["versionNumber"]),
+      domain: readTrainingPlanGenerationDomain(readStringKey([record], ["domain"])),
+      weekStartDate: readStringKey([record], ["weekStartDate"]),
+      weekEndDate: readStringKey([record], ["weekEndDate"]),
+      status: readStringKey([record], ["status"]),
+      releasedAt: readStringKey([record], ["releasedAt"]),
+      releasedBy: readStringKey([record], ["releasedBy"]),
+      viewOnly: readBooleanKey([record], ["viewOnly"]),
+      raw: adapted,
+    }),
+    domainPlanId: row?.domainPlanId ?? fallbackDomainPlanId,
+    planContent: {
+      ...detail,
+      allowedActions: [],
+    },
+  };
 }
 
 function parsePersistedTrainingPlanActiveDetailPayload(
@@ -2433,6 +2547,49 @@ export async function fetchPersistedTrainingPlanActiveDetail(
     console.debug("normalizedPersistedPlan", normalized);
   }
   return normalized;
+}
+
+export async function fetchCoachTrainingPlanDomainHistory(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<CoachTrainingPlanDomainHistoryRow[]> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(generationDomain);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainHistory(ids.entityId, ids.athleteId, domain),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS,
+    },
+  );
+  return parseCoachTrainingPlanDomainHistoryPayload(raw);
+}
+
+export async function fetchCoachTrainingPlanDomainHistoryDetail(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+  domainPlanId: string,
+): Promise<CoachTrainingPlanDomainHistoryDetail> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(generationDomain);
+  const detailId = assertDomainPlanId(domainPlanId);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainHistoryDetail(
+      ids.entityId,
+      ids.athleteId,
+      domain,
+      detailId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_ACTIVE_DETAIL_TIMEOUT_MS,
+    },
+  );
+  return parseCoachTrainingPlanDomainHistoryDetailPayload(raw, detailId);
 }
 
 export async function submitTrainingPlanReview(

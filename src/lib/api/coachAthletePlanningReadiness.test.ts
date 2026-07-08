@@ -16,6 +16,8 @@ import {
   fetchAthleteTodayPlan,
   fetchAthleteWeeklyPlanJournal,
   fetchCoachAthleteTrainingPlanCompleteness,
+  fetchCoachTrainingPlanDomainHistory,
+  fetchCoachTrainingPlanDomainHistoryDetail,
   fetchCoachAthleteUpstreamPlanningContext,
   fetchDomainPlanSummary,
   fetchLatestCoachAthleteDomainDraft,
@@ -1005,6 +1007,142 @@ describe("parseReadinessPayload", () => {
     expect(paths.trainingPlanManagement.activeDetail("plan/x", "S_AND_C")).toBe(
       "/training-plan-management/plan%2Fx/active/detail?generationDomain=S_AND_C",
     );
+  });
+
+  it("fetches domain plan history from the entity athlete endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: [
+        {
+          planId: "plan-1",
+          domainPlanId: "domain-plan-1",
+          versionId: "version-2",
+          versionNumber: 2,
+          domain: "SKILLS",
+          weekStartDate: "2026-05-04",
+          weekEndDate: "2026-05-10",
+          status: "COMPLETED",
+          releasedAt: "2026-05-11T08:00:00.000Z",
+          releasedBy: "Coach Lee",
+          viewOnly: true,
+        },
+      ],
+    });
+
+    const result = await fetchCoachTrainingPlanDomainHistory(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-management/domains/SKILLS/history",
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 60000,
+      },
+    );
+    expect(result).toEqual([
+      expect.objectContaining({
+        planId: "plan-1",
+        domainPlanId: "domain-plan-1",
+        versionId: "version-2",
+        versionNumber: 2,
+        domain: "SKILLS",
+        weekStartDate: "2026-05-04",
+        weekEndDate: "2026-05-10",
+        status: "COMPLETED",
+        releasedAt: "2026-05-11T08:00:00.000Z",
+        releasedBy: "Coach Lee",
+        viewOnly: true,
+      }),
+    ]);
+  });
+
+  it("fetches domain plan history detail and parses planContent read-only", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        planId: "plan-1",
+        domainPlanId: "domain-plan-1",
+        versionId: "version-2",
+        versionNumber: 2,
+        domain: "SKILLS",
+        weekStartDate: "2026-05-04",
+        weekEndDate: "2026-05-10",
+        status: "COMPLETED",
+        releasedAt: "2026-05-11T08:00:00.000Z",
+        releasedBy: "Coach Lee",
+        viewOnly: true,
+        planContent: {
+          plan: {
+            id: "plan-1",
+            athleteId: "athlete-1",
+            entityId: "entity-1",
+            status: "COMPLETED",
+          },
+          version: {
+            id: "version-2",
+            trainingPlanId: "plan-1",
+            status: "COMPLETED",
+            versionNumber: 2,
+          },
+          generationDomain: "SKILLS",
+          constraintComplianceSummary: { status: "COMPLIANT" },
+          days: [
+            {
+              id: "day-1",
+              dayIndex: 1,
+              date: "2026-05-04",
+              sessions: [
+                {
+                  id: "session-1",
+                  title: "Serve practice",
+                  sessionStructure: {
+                    skill: {
+                      items: [
+                        {
+                          label: "Target Serve Drill",
+                          summary: "Hit targets from deuce court",
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await fetchCoachTrainingPlanDomainHistoryDetail(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+      "domain-plan-1",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-management/domains/SKILLS/history/domain-plan-1",
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 60000,
+      },
+    );
+    expect(result).toMatchObject({
+      planId: "plan-1",
+      domainPlanId: "domain-plan-1",
+      versionId: "version-2",
+      versionNumber: 2,
+      domain: "SKILLS",
+      viewOnly: true,
+    });
+    expect(result.planContent.allowedActions).toEqual([]);
+    expect(result.planContent.days[0]?.sessions[0]?.sessionStructureSections[0]?.items[0]).toMatchObject({
+      label: "Target Serve Drill",
+      summary: "Hit targets from deuce court",
+    });
   });
 
   it("parses the wrapped weekly journal payload", async () => {

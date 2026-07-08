@@ -91,6 +91,8 @@ function TrainingPlanAthleteRow({
     athletePlanGenerationDomain: row.currentGenerationDomain,
     currentPlanId: row.currentPlanId,
     currentPlanStatus: row.currentPlanStatus,
+    displayPlanStatus: row.displayPlanStatus,
+    planStatus: row.planStatus,
     fallbackDomain: domain,
     hasPlanningProfile: row.hasPlanningProfile,
     hasHeadCoachConfigured,

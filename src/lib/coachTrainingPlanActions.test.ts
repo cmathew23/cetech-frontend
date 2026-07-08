@@ -80,6 +80,96 @@ describe("resolveTrainingPlanAction", () => {
     expect(action.disabled).toBe(false);
   });
 
+  it("uses displayPlanStatus COMPLETED for the Training Plan list status and view label", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills-101",
+      currentPlanStatus: "ACTIVE",
+      displayPlanStatus: "COMPLETED",
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+    });
+
+    expect(action.buttonLabel).toBe("View Skills Plan");
+    expect(action.buttonLabel).not.toBe("Edit Skills Plan");
+    expect(action.planStatusLabel).toBe("Plan: COMPLETED");
+    expect(action.href).toContain("plan-skills-101");
+    expect(action.disabled).toBe(false);
+  });
+
+  it.each([
+    ["SKILLS", "View Skills Plan"],
+    ["NUTRITION", "View Nutrition Plan"],
+    ["S_AND_C", "View S&C Plan"],
+  ] as const)(
+    "uses View button label for completed %s plans",
+    (domain, buttonLabel) => {
+      const action = resolveTrainingPlanAction({
+        athleteId: "athlete101",
+        assignedFunctions: [domain],
+        athletePlanGenerationDomain: domain,
+        currentPlanId: `plan-${domain.toLowerCase()}`,
+        currentPlanStatus: "ACTIVE",
+        displayPlanStatus: "COMPLETED",
+        fallbackDomain: domain,
+        hasPlanningProfile: true,
+      });
+
+      expect(action.buttonLabel).toBe(buttonLabel);
+      expect(action.planStatusLabel).toBe("Plan: COMPLETED");
+    },
+  );
+
+  it("uses displayPlanStatus ACTIVE ahead of legacy status fields", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["NUTRITION"],
+      athletePlanGenerationDomain: "NUTRITION",
+      currentPlanId: "plan-nutrition-101",
+      currentPlanStatus: "COMPLETED",
+      planStatus: "COMPLETED",
+      displayPlanStatus: "ACTIVE",
+      fallbackDomain: "NUTRITION",
+      hasPlanningProfile: true,
+    });
+
+    expect(action.buttonLabel).toBe("Edit Nutrition Plan");
+    expect(action.planStatusLabel).toBe("Plan: ACTIVE");
+  });
+
+  it("falls back to planStatus when displayPlanStatus is missing", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["S_AND_C"],
+      athletePlanGenerationDomain: "S_AND_C",
+      currentPlanId: "plan-snc-101",
+      currentPlanStatus: "ACTIVE",
+      planStatus: "COMPLETED",
+      fallbackDomain: "S_AND_C",
+      hasPlanningProfile: true,
+    });
+
+    expect(action.buttonLabel).toBe("View S&C Plan");
+    expect(action.planStatusLabel).toBe("Plan: COMPLETED");
+  });
+
+  it("falls back to currentPlanStatus when displayPlanStatus and planStatus are missing", () => {
+    const action = resolveTrainingPlanAction({
+      athleteId: "athlete101",
+      assignedFunctions: ["SKILLS"],
+      athletePlanGenerationDomain: "SKILLS",
+      currentPlanId: "plan-skills-101",
+      currentPlanStatus: "ACTIVE",
+      fallbackDomain: "SKILLS",
+      hasPlanningProfile: true,
+    });
+
+    expect(action.buttonLabel).toBe("Edit Skills Plan");
+    expect(action.planStatusLabel).toBe("Plan: ACTIVE");
+  });
+
   it("builds Workflow 3 edit route against the existing planning-profile page", () => {
     const href = existingCoachAthletePlanningProfileHref("athlete101", "plan-skills-101");
 

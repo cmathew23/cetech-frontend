@@ -522,6 +522,52 @@ export type CoachAthleteDomainDraftRevisionContext = {
   raw: unknown;
 };
 
+/** Identifies the draft slot a coach wants replacement options for. `tags` is UI-defaulted to []. */
+export type CoachAthleteDomainDraftRevisionOptionTarget = {
+  dayKey: string | null;
+  sessionKey: string | null;
+  itemKey: string | null;
+  itemType: string | null;
+  currentId: string | null;
+  label: string | null;
+  tags: string[];
+};
+
+export type CoachAthleteDomainDraftRevisionOptionSource = "DB" | "CATALOG" | "CURRENT_PLAN";
+
+/** A single DB/catalog/current-plan backed replacement option ranked by the backend. */
+export type CoachAthleteDomainDraftRevisionOption = {
+  id: string;
+  rank: number | null;
+  label: string;
+  domain: string | null;
+  optionKind: string;
+  source: CoachAthleteDomainDraftRevisionOptionSource;
+  score: number | null;
+  reason: string | null;
+  goalIds: string[];
+  targetTags: string[];
+  safetyTags: string[];
+  levelTags: string[];
+  metadata: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionOptionsResult = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  target: CoachAthleteDomainDraftRevisionOptionTarget | null;
+  options: CoachAthleteDomainDraftRevisionOption[];
+};
+
+export type FetchCoachAthleteDomainDraftRevisionOptionsPayload = {
+  generationDomain: TrainingPlanGenerationDomain;
+  trainingPlanId: string;
+  trainingPlanVersionId: string;
+  target: CoachAthleteDomainDraftRevisionOptionTarget;
+  coachRequest: string;
+  optionKind?: "REPLACEMENT";
+  limit?: number;
+};
+
 /** When persist-draft times out client-side but the draft exists, map latest draft → persist result shape. */
 export function persistDraftResultFromLatestDomainDraft(
   draft: CoachAthleteLatestDomainDraft,
@@ -1067,6 +1113,95 @@ function parseDomainDraftRevisionContextPayload(
     changeOptions,
     requiredInput: record.requiredInput ?? null,
     raw: adapted,
+  };
+}
+
+/** Hard cap on ranked revision options rendered to a coach. */
+const MAX_DOMAIN_DRAFT_REVISION_OPTIONS = 4;
+
+const DOMAIN_DRAFT_REVISION_OPTION_SOURCES: CoachAthleteDomainDraftRevisionOptionSource[] = [
+  "DB",
+  "CATALOG",
+  "CURRENT_PLAN",
+];
+
+function parseDomainDraftRevisionOptionTarget(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionOptionTarget | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  return {
+    dayKey: readStringKey(records, ["dayKey"]),
+    sessionKey: readStringKey(records, ["sessionKey"]),
+    itemKey: readStringKey(records, ["itemKey"]),
+    itemType: readStringKey(records, ["itemType"]),
+    currentId: readStringKey(records, ["currentId"]),
+    label: readStringKey(records, ["label"]),
+    tags: readStringListKey(records, ["tags"]),
+  };
+}
+
+/**
+ * Parses one backend revision option. Returns null unless `id`, `label`, and `optionKind`
+ * are present and `source` is one of DB / CATALOG / CURRENT_PLAN. Static action codes are
+ * never synthesized here; only DB/catalog/current-plan backed entries survive.
+ */
+function parseDomainDraftRevisionOption(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionOption | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  const id = readStringKey(records, ["id", "optionId"]);
+  const label = readStringKey(records, ["label", "name", "title"]);
+  const optionKind = readStringKey(records, ["optionKind", "kind"]);
+  if (id === null || label === null || optionKind === null) return null;
+  const source = readStringKey(records, ["source"]);
+  const normalizedSource = source ? (source.trim().toUpperCase() as CoachAthleteDomainDraftRevisionOptionSource) : null;
+  if (normalizedSource === null || !DOMAIN_DRAFT_REVISION_OPTION_SOURCES.includes(normalizedSource)) {
+    return null;
+  }
+  return {
+    id,
+    rank: readNumberKey(records, ["rank"]),
+    label,
+    domain: readStringKey(records, ["domain", "generationDomain"]),
+    optionKind,
+    source: normalizedSource,
+    score: readNumberKey(records, ["score"]),
+    reason: readStringKey(records, ["reason", "explanation"]),
+    goalIds: readStringListKey(records, ["goalIds"]),
+    targetTags: readStringListKey(records, ["targetTags"]),
+    safetyTags: readStringListKey(records, ["safetyTags"]),
+    levelTags: readStringListKey(records, ["levelTags"]),
+    metadata: record.metadata ?? null,
+  };
+}
+
+function parseDomainDraftRevisionOptionsPayload(
+  data: unknown,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionOptionsResult {
+  const adapted = adaptBackendSuccess(data);
+  const adaptedRecord = asRecord(adapted) ?? {};
+  const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
+  const records = [record];
+  const parsed = readFirstArray(records, ["options"])
+    .map(parseDomainDraftRevisionOption)
+    .filter(
+      (option): option is CoachAthleteDomainDraftRevisionOption => option !== null,
+    );
+  const hasAllRanks = parsed.length > 0 && parsed.every((option) => option.rank !== null);
+  const ordered = hasAllRanks
+    ? [...parsed].sort((left, right) => (left.rank ?? 0) - (right.rank ?? 0))
+    : parsed;
+  return {
+    generationDomain:
+      readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+      fallbackDomain,
+    target: parseDomainDraftRevisionOptionTarget(record.target),
+    options: ordered.slice(0, MAX_DOMAIN_DRAFT_REVISION_OPTIONS),
   };
 }
 
@@ -2658,6 +2793,60 @@ export async function fetchCoachAthleteDomainDraftRevisionContext(
     },
   );
   return parseDomainDraftRevisionContextPayload(raw, domain);
+}
+
+export async function fetchCoachAthleteDomainDraftRevisionOptions(
+  entityId: string,
+  athleteId: string,
+  payload: FetchCoachAthleteDomainDraftRevisionOptionsPayload,
+): Promise<CoachAthleteDomainDraftRevisionOptionsResult> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(payload.generationDomain);
+  const trainingPlanId = assertPlanId(payload.trainingPlanId);
+  const trainingPlanVersionId = payload.trainingPlanVersionId.trim();
+  if (trainingPlanVersionId === "") {
+    throw {
+      message: "trainingPlanVersionId is required for revision options",
+      status: 400,
+      code: "TRAINING_PLAN_REVISION_OPTIONS_VERSION_ID_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const target: CoachAthleteDomainDraftRevisionOptionTarget = {
+    dayKey: payload.target.dayKey ?? null,
+    sessionKey: payload.target.sessionKey ?? null,
+    itemKey: payload.target.itemKey ?? null,
+    itemType: payload.target.itemType ?? null,
+    currentId: payload.target.currentId ?? null,
+    label: payload.target.label ?? null,
+    // Draft items have no tags source yet; the UI defaults this to [].
+    tags: Array.isArray(payload.target.tags) ? payload.target.tags : [],
+  };
+  const optionKind = payload.optionKind ?? "REPLACEMENT";
+  const limit =
+    typeof payload.limit === "number" && Number.isFinite(payload.limit) && payload.limit > 0
+      ? payload.limit
+      : MAX_DOMAIN_DRAFT_REVISION_OPTIONS;
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainDraftRevisionOptions(
+      ids.entityId,
+      ids.athleteId,
+    ),
+    {
+      method: "POST",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS,
+      body: JSON.stringify({
+        generationDomain: domain,
+        trainingPlanId,
+        trainingPlanVersionId,
+        target,
+        coachRequest: payload.coachRequest,
+        optionKind,
+        limit,
+      }),
+    },
+  );
+  return parseDomainDraftRevisionOptionsPayload(raw, domain);
 }
 
 export async function fetchPersistedTrainingPlanById(

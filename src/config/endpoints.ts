@@ -209,6 +209,11 @@ export const paths = {
       generationDomain: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/domain-drafts/revision-context?generationDomain=${encodeURIComponent(generationDomain)}`,
+    athleteTrainingPlanDomainDraftRevisionOptions: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/training-plan-generation/domain-drafts/revision-options`,
     athleteTrainingPlanDomainHistory: (
       entityId: string,
       athleteId: string,

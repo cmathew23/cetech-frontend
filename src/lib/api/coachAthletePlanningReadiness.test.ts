@@ -19,6 +19,7 @@ import {
   fetchCoachTrainingPlanDomainHistory,
   fetchCoachTrainingPlanDomainHistoryDetail,
   fetchCoachAthleteDomainDraftRevisionContext,
+  fetchCoachAthleteDomainDraftRevisionOptions,
   fetchCoachAthleteUpstreamPlanningContext,
   fetchDomainPlanSummary,
   fetchLatestCoachAthleteDomainDraft,
@@ -1492,5 +1493,196 @@ describe("training plan generation timeouts and helpers", () => {
       itemsPersisted: 12,
       raw: { ok: true },
     });
+  });
+});
+
+describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
+  const basePayload = {
+    generationDomain: "SKILLS" as const,
+    trainingPlanId: "plan-1",
+    trainingPlanVersionId: "version-1",
+    target: {
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemKey: "item-1",
+      itemType: "DRILL",
+      currentId: "drill-1",
+      label: "Target serve drill",
+      tags: [],
+    },
+    coachRequest: "Replace the bunker drill, it is too advanced.",
+    optionKind: "REPLACEMENT" as const,
+    limit: 4,
+  };
+
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("POSTs to the revision-options path with the full request body", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: { generationDomain: "SKILLS", target: {}, options: [] },
+    });
+
+    await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", basePayload);
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/domain-drafts/revision-options",
+      expect.objectContaining({ method: "POST", cache: "no-store" }),
+    );
+
+    const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+    const body = JSON.parse(requestInit.body);
+    expect(body).toMatchObject({
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      coachRequest: "Replace the bunker drill, it is too advanced.",
+      optionKind: "REPLACEMENT",
+      limit: 4,
+    });
+    expect(body.target).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemKey: "item-1",
+      itemType: "DRILL",
+      currentId: "drill-1",
+      label: "Target serve drill",
+      tags: [],
+    });
+    // Contract sends trainingPlanVersionId, never versionId.
+    expect(body).not.toHaveProperty("versionId");
+  });
+
+  it("parses and rank-sorts DB/catalog/current-plan options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        target: { dayKey: "day-1" },
+        options: [
+          {
+            id: "opt-2",
+            rank: 2,
+            label: "Cross-court rally drill",
+            domain: "SKILLS",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            score: 0.8,
+            reason: "Similar load",
+            goalIds: ["goal-1"],
+            targetTags: ["serve"],
+            safetyTags: [],
+            levelTags: ["INTERMEDIATE"],
+            metadata: { catalogItemId: "cat-2" },
+          },
+          {
+            id: "opt-1",
+            rank: 1,
+            label: "Target serve drill",
+            domain: "SKILLS",
+            optionKind: "REPLACEMENT",
+            source: "DB",
+            score: 0.9,
+            reason: "Best fit",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: ["shoulder"],
+            levelTags: [],
+            metadata: null,
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.generationDomain).toBe("SKILLS");
+    expect(result.options.map((option) => option.id)).toEqual(["opt-1", "opt-2"]);
+    expect(result.options[0]).toMatchObject({
+      id: "opt-1",
+      rank: 1,
+      label: "Target serve drill",
+      source: "DB",
+      score: 0.9,
+      reason: "Best fit",
+      safetyTags: ["shoulder"],
+    });
+    expect(result.options[1]).toMatchObject({
+      id: "opt-2",
+      source: "CATALOG",
+      targetTags: ["serve"],
+      levelTags: ["INTERMEDIATE"],
+      metadata: { catalogItemId: "cat-2" },
+    });
+  });
+
+  it("filters options missing id/label/optionKind or with an invalid source", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        options: [
+          { id: "ok", label: "Valid", optionKind: "REPLACEMENT", source: "CURRENT_PLAN" },
+          { rank: 1, label: "No id", optionKind: "REPLACEMENT", source: "DB" },
+          { id: "no-label", optionKind: "REPLACEMENT", source: "DB" },
+          { id: "no-kind", label: "No kind", source: "DB" },
+          { id: "bad-source", label: "Bad source", optionKind: "REPLACEMENT", source: "LLM" },
+          { id: "no-source", label: "No source", optionKind: "REPLACEMENT" },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options.map((option) => option.id)).toEqual(["ok"]);
+    expect(result.options[0]?.source).toBe("CURRENT_PLAN");
+  });
+
+  it("caps parsed options to the top 4", async () => {
+    const options = Array.from({ length: 6 }, (_unused, index) => ({
+      id: `opt-${index + 1}`,
+      label: `Option ${index + 1}`,
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+    }));
+    apiRequestMock.mockResolvedValue({ data: { options } });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options).toHaveLength(4);
+    expect(result.options.map((option) => option.id)).toEqual([
+      "opt-1",
+      "opt-2",
+      "opt-3",
+      "opt-4",
+    ]);
+  });
+
+  it("returns [] when options are empty or missing", async () => {
+    apiRequestMock.mockResolvedValue({ data: { generationDomain: "SKILLS", options: [] } });
+    const empty = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+    expect(empty.options).toEqual([]);
+
+    apiRequestMock.mockResolvedValue({ data: { generationDomain: "SKILLS" } });
+    const missing = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+    expect(missing.options).toEqual([]);
   });
 });

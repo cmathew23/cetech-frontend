@@ -1685,4 +1685,135 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
     );
     expect(missing.options).toEqual([]);
   });
+
+  it("sends a clean SESSION target for ADD_ITEM: itemType set, item fields omitted, no null fields", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: { generationDomain: "SKILLS", target: {}, options: [] },
+    });
+
+    await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        // Even if item-level fields leak in, they must NOT be forwarded to the backend.
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Morning session",
+        tags: [],
+      },
+      coachRequest: "Add a volley drill to the morning session.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+    const body = JSON.parse(requestInit.body);
+    expect(body).toMatchObject({
+      generationDomain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+    // Domain-specific itemType, SESSION keys + label + tags only.
+    expect(body.target).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemType: "SKILL",
+      label: "Morning session",
+      tags: [],
+    });
+    expect(body.target).not.toHaveProperty("itemKey");
+    expect(body.target).not.toHaveProperty("currentId");
+    // No field in the ADD_ITEM target is serialized as null.
+    expect(JSON.stringify(body.target)).not.toContain("null");
+  });
+
+  it("sends the domain-specific ADD_ITEM itemType for NUTRITION and S_AND_C", async () => {
+    for (const [domain, expectedItemType] of [
+      ["NUTRITION", "NUTRITION"],
+      ["S_AND_C", "EXERCISE"],
+    ] as const) {
+      apiRequestMock.mockReset();
+      apiRequestMock.mockResolvedValue({ data: { generationDomain: domain, options: [] } });
+      await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+        generationDomain: domain,
+        trainingPlanId: "plan-1",
+        trainingPlanVersionId: "version-1",
+        target: {
+          dayKey: "day-2",
+          sessionKey: "session-1",
+          label: "Balance and Lower Control",
+          tags: [],
+        },
+        coachRequest: "Add another item.",
+        optionKind: "ADD_ITEM",
+        limit: 4,
+      });
+      const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+      const body = JSON.parse(requestInit.body);
+      expect(body.target).toEqual({
+        dayKey: "day-2",
+        sessionKey: "session-1",
+        itemType: expectedItemType,
+        label: "Balance and Lower Control",
+        tags: [],
+      });
+      expect(JSON.stringify(body.target)).not.toContain("null");
+    }
+  });
+
+  it("parses ADD_ITEM options returned by the backend", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "ex-1",
+            rank: 1,
+            label: "Goblet squat",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            score: 0.9,
+            reason: "Approved lower-body exercise",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            metadata: { catalogItemId: "ex-1" },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Lower body",
+        tags: [],
+      },
+      coachRequest: "Add another squat variation.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options).toHaveLength(1);
+    expect(result.options[0]).toMatchObject({
+      id: "ex-1",
+      label: "Goblet squat",
+      optionKind: "ADD_ITEM",
+      source: "CATALOG",
+    });
+  });
 });

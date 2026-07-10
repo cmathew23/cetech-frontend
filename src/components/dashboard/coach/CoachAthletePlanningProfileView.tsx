@@ -60,6 +60,7 @@ import {
   fetchCoachTrainingPlanDomainHistoryDetail,
   fetchCoachAthleteDomainDraftRevisionContext,
   fetchCoachAthleteDomainDraftRevisionOptions,
+  domainDraftAddItemTargetItemType,
   fetchLatestCoachAthleteDomainDraft,
   fetchPersistedTrainingPlanActiveDetail,
   fetchPersistedTrainingPlanVersions,
@@ -90,6 +91,7 @@ import {
   type CoachAthleteTrainingPlanReadiness,
   type CoachAthleteDomainDraftRevisionContext,
   type CoachAthleteDomainDraftRevisionOption,
+  type CoachAthleteDomainDraftRevisionOptionKind,
   type CoachAthleteDomainDraftRevisionOptionTarget,
   type CoachAthleteDomainDraftRevisionOptionsResult,
   type FetchCoachAthleteDomainDraftRevisionOptionsPayload,
@@ -2640,8 +2642,10 @@ export const FYN_REVISION_CAPABILITIES: Record<
     levels: ["DAY", "SESSION", "ITEM"],
     actionsByLevel: {
       DAY: ["ADD_SESSION"],
-      SESSION: ["UPDATE_SESSION"],
-      ITEM: ["ADD_ITEM", "REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
+      // ADD_ITEM lives at SESSION level so adding an exercise never requires selecting an
+      // existing exercise first when a session target is available.
+      SESSION: ["UPDATE_SESSION", "ADD_ITEM"],
+      ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
     },
   },
 };
@@ -2650,11 +2654,24 @@ export const FYN_REVISION_CAPABILITIES: Record<
 export type FynRevisionAction = {
   key: FynRevisionActionKey;
   label: string;
-  /** REPLACE_* actions fetch backend-approved options before anything is added to the basket. */
+  /** REPLACE_* and ADD_ITEM actions fetch backend-approved options before anything is basketed. */
   requiresApprovedOptions: boolean;
   /** Actions that need the coach to describe the change first (everything except removals). */
   requiresBriefRequest: boolean;
 };
+
+/**
+ * Maps an action to the backend revision-options `optionKind` it should request, or null when the
+ * action is text-only (add-session / update / remove) and never fetches approved options. REPLACE_*
+ * requests REPLACEMENT options; ADD_ITEM requests ADD_ITEM (approved drills / food items / exercises).
+ */
+export function fynRevisionActionOptionKind(
+  key: FynRevisionActionKey,
+): CoachAthleteDomainDraftRevisionOptionKind | null {
+  if (key === "REPLACE_ITEM" || key === "REPLACE_DAY") return "REPLACEMENT";
+  if (key === "ADD_ITEM") return "ADD_ITEM";
+  return null;
+}
 
 function fynRevisionItemNoun(domain: TrainingPlanGenerationDomain): string {
   if (domain === "NUTRITION") return "food item";
@@ -2699,6 +2716,35 @@ export function fynRevisionActionLabel(
   }
 }
 
+/**
+ * Domain- and action-specific example placeholder for the "Tell Fyn what to change" context field.
+ * Chosen after the coach has picked an action so the example matches the exact task; falls back to
+ * the generic placeholder for actions without a tailored example.
+ */
+export function fynRevisionContextPlaceholder(
+  domain: TrainingPlanGenerationDomain,
+  actionKey: FynRevisionActionKey | null,
+): string {
+  if (actionKey === null) return FYN_REVISION_INPUT_PLACEHOLDER;
+  if (domain === "SKILLS") {
+    if (actionKey === "ADD_SESSION") {
+      return "Example: Add Lag Putting Foundation and keep intensity low.";
+    }
+    if (actionKey === "ADD_ITEM") return "Example: Add a pace-control putting drill.";
+    if (actionKey === "UPDATE_SESSION_ITEMS") {
+      return "Example: Add one lag putting drill and remove the advanced drill.";
+    }
+  }
+  if (domain === "NUTRITION" && actionKey === "ADD_ITEM") {
+    return "Example: Add a lighter carb option to breakfast.";
+  }
+  if (domain === "S_AND_C") {
+    if (actionKey === "ADD_ITEM") return "Example: Add a low-load mobility exercise.";
+    if (actionKey === "ADD_SESSION") return "Example: Add a low-load mobility session.";
+  }
+  return FYN_REVISION_INPUT_PLACEHOLDER;
+}
+
 /** Domain- and guard-specific gating on top of the static capability map. */
 function fynRevisionActionAllowed(
   domain: TrainingPlanGenerationDomain,
@@ -2732,7 +2778,7 @@ export function fynRevisionAvailableActions(
     .map((key) => ({
       key,
       label: fynRevisionActionLabel(domain, key),
-      requiresApprovedOptions: key === "REPLACE_ITEM" || key === "REPLACE_DAY",
+      requiresApprovedOptions: fynRevisionActionOptionKind(key) !== null,
       requiresBriefRequest: key !== "REMOVE_ITEM",
     }));
 }
@@ -2813,20 +2859,49 @@ export function buildFynRevisionActionChangeText(
   }
 }
 
-/** Assembles the revision-options request payload with the fixed REPLACEMENT / limit=4 contract. */
+/**
+ * Reshapes any target into the clean SESSION-level target ADD_ITEM requires: dayKey + sessionKey +
+ * label are kept, `itemType` is set to the domain-specific string (SKILL / NUTRITION / EXERCISE),
+ * and item-scoped fields (itemKey / currentId) are omitted entirely rather than sent as null. This
+ * lets an S&C ITEM target map safely to its parent session while SESSION/meal targets pass through.
+ */
+export function fynRevisionAddItemSessionTarget(
+  target: CoachAthleteDomainDraftRevisionOptionTarget,
+  domain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionOptionTarget {
+  return {
+    dayKey: target.dayKey,
+    sessionKey: target.sessionKey,
+    itemType: domainDraftAddItemTargetItemType(domain),
+    label: target.label,
+    tags: Array.isArray(target.tags) ? target.tags : [],
+  };
+}
+
+/**
+ * Assembles the revision-options request payload with the fixed limit=4 contract. `optionKind`
+ * defaults to REPLACEMENT; ADD_ITEM additionally collapses the target to its parent session so the
+ * backend receives the required SESSION-level (dayKey + sessionKey) target.
+ */
 export function buildFynRevisionOptionsPayload(input: {
   domain: TrainingPlanGenerationDomain;
   reviseIds: { trainingPlanId: string; versionId: string };
   target: CoachAthleteDomainDraftRevisionOptionTarget;
   coachRequest: string;
+  optionKind?: CoachAthleteDomainDraftRevisionOptionKind;
 }): FetchCoachAthleteDomainDraftRevisionOptionsPayload {
+  const optionKind = input.optionKind ?? "REPLACEMENT";
+  const target =
+    optionKind === "ADD_ITEM"
+      ? fynRevisionAddItemSessionTarget(input.target, input.domain)
+      : input.target;
   return {
     generationDomain: input.domain,
     trainingPlanId: input.reviseIds.trainingPlanId,
     trainingPlanVersionId: input.reviseIds.versionId,
-    target: input.target,
+    target,
     coachRequest: input.coachRequest.trim(),
-    optionKind: "REPLACEMENT",
+    optionKind,
     limit: 4,
   };
 }
@@ -2847,6 +2922,26 @@ export function buildFynRevisionReplaceChangeText(
   const target = targetLabel.trim();
   if (target === "") return `Replace ${noun}: ${option}.`;
   return `Replace ${noun}: ${target} with ${option}.`;
+}
+
+/**
+ * Basket sentence for a chosen approved ADD_ITEM option. Names the approved addition and the
+ * session/meal it is added to so the revise prompt can resolve what to add and where:
+ *   Skills: "Add drill: <approved drill> to <session>."
+ *   Nutrition: "Add food item: <approved item> to <meal>."
+ *   S&C: "Add exercise: <approved exercise> to <session>."
+ */
+export function buildFynRevisionAddItemChangeText(
+  domain: TrainingPlanGenerationDomain,
+  sessionLabel: string,
+  optionLabel: string,
+): string {
+  const option = optionLabel.trim();
+  if (option === "") return "";
+  const noun = fynRevisionItemNoun(domain);
+  const sessionNoun = domain === "NUTRITION" ? "meal" : "session";
+  const session = sessionLabel.trim() || `this ${sessionNoun}`;
+  return `Add ${noun}: ${option} to ${session}.`;
 }
 
 /** Endpoint-backed replacement options for one domain, plus their load/search status. */
@@ -2880,6 +2975,7 @@ export async function fetchFynRevisionReplacementOptions(input: {
   reviseIds: { trainingPlanId: string; versionId: string } | null;
   coachRequest: string;
   target: CoachAthleteDomainDraftRevisionOptionTarget | null;
+  optionKind?: CoachAthleteDomainDraftRevisionOptionKind;
   fetchOptions?: (
     entityId: string,
     athleteId: string,
@@ -2892,12 +2988,22 @@ export async function fetchFynRevisionReplacementOptions(input: {
   if (input.target === null || input.reviseIds === null) {
     return { status: "MISSING_TARGET", message: FYN_REVISION_MISSING_TARGET_MESSAGE };
   }
+  const optionKind = input.optionKind ?? "REPLACEMENT";
+  // ADD_ITEM must resolve to a SESSION-level target; without day + session keys there is no
+  // meal/session to add to, so require them before hitting the endpoint.
+  if (
+    optionKind === "ADD_ITEM" &&
+    ((input.target.dayKey ?? "").trim() === "" || (input.target.sessionKey ?? "").trim() === "")
+  ) {
+    return { status: "MISSING_TARGET", message: FYN_REVISION_MISSING_TARGET_MESSAGE };
+  }
   const fetchOptions = input.fetchOptions ?? fetchCoachAthleteDomainDraftRevisionOptions;
   const payload = buildFynRevisionOptionsPayload({
     domain: input.domain,
     reviseIds: input.reviseIds,
     target: input.target,
     coachRequest: input.coachRequest,
+    optionKind,
   });
   try {
     const result = await fetchOptions(input.entityId, input.athleteId, payload);
@@ -3056,7 +3162,7 @@ export function FynRevisionOptionChips({
   return (
     <div className="space-y-2">
       <p className="text-sm text-textSecondary">
-        Pick an approved replacement and Fyn will add it to the basket:
+        Pick an approved option and Fyn will add it to the basket:
       </p>
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (
@@ -3165,28 +3271,17 @@ export function FynRevisionContextPanel({
 
       {canAcceptMore ? (
         <div className="space-y-3">
-          <label className="space-y-1 text-sm text-textPrimary">
-            <span className="font-medium">Describe the change</span>
-            <textarea
-              rows={2}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-              value={coachRequest}
-              onChange={(event) => onCoachRequestChange(event.target.value)}
-              placeholder={FYN_REVISION_INPUT_PLACEHOLDER}
-              disabled={loading}
-            />
-          </label>
-
+          {/* 1. Target first: what the coach wants to change. */}
           {targetOptions.length > 0 ? (
             <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Which plan item?</span>
+              <span className="font-medium">What do you want to change?</span>
               <select
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
                 value={selectedTargetKey ?? ""}
                 onChange={(event) => onSelectedTargetChange(event.target.value)}
                 disabled={loading}
               >
-                <option value="">Select a plan item…</option>
+                <option value="">Select what to change…</option>
                 {targetOptions.map((option) => (
                   <option key={option.key} value={option.key}>
                     {option.label}
@@ -3200,25 +3295,69 @@ export function FynRevisionContextPanel({
             </p>
           )}
 
+          {/* 2. Action second: only actions supported for this target/domain. These are intent
+              choices (selection controls), not commands — nothing runs until it is basketed. */}
           {selectedTargetOption !== null && availableActions.length > 0 ? (
             <div className="space-y-2">
-              <span className="text-sm font-medium text-textPrimary">
-                Available revision actions
+              <span
+                id={`fyn-revision-action-label-${domain}`}
+                className="text-sm font-medium text-textPrimary"
+              >
+                What do you want to do?
               </span>
-              <div className="flex flex-wrap gap-2">
-                {availableActions.map((action) => (
-                  <Button
-                    key={action.key}
-                    type="button"
-                    variant={selectedAction?.key === action.key ? "primary" : "secondary"}
-                    onClick={() => onSelectAction(action.key)}
-                    disabled={loading || optionsState.loading}
-                  >
-                    {action.label}
-                  </Button>
-                ))}
+              <p className="text-sm text-textSecondary">
+                Choose one revision action. Nothing is applied until you add it to plan changes.
+              </p>
+              <div
+                role="radiogroup"
+                aria-labelledby={`fyn-revision-action-label-${domain}`}
+                className="space-y-2"
+              >
+                {availableActions.map((action) => {
+                  const checked = selectedAction?.key === action.key;
+                  const disabled = loading || optionsState.loading;
+                  return (
+                    <label
+                      key={action.key}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition",
+                        checked
+                          ? "border-primary bg-primary/10 text-textPrimary"
+                          : "border-slate-300 bg-white text-textPrimary hover:bg-primary/5",
+                        disabled && "cursor-not-allowed opacity-60",
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name={`fyn-revision-action-${domain}`}
+                        className="mt-0.5"
+                        value={action.key}
+                        checked={checked}
+                        data-selected={checked ? "true" : "false"}
+                        onChange={() => onSelectAction(action.key)}
+                        disabled={disabled}
+                      />
+                      <span className="font-medium">{action.label}</span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
+          ) : null}
+
+          {/* 3. Context third: Fyn only asks for detail once an action is chosen. */}
+          {selectedAction !== null ? (
+            <label className="space-y-1 text-sm text-textPrimary">
+              <span className="font-medium">Tell Fyn what to change</span>
+              <textarea
+                rows={2}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                value={coachRequest}
+                onChange={(event) => onCoachRequestChange(event.target.value)}
+                placeholder={fynRevisionContextPlaceholder(domain, selectedAction.key)}
+                disabled={loading}
+              />
+            </label>
           ) : null}
 
           {selectedAction?.key === "UPDATE_SESSION_ITEMS" ? (
@@ -14341,8 +14480,19 @@ export function CoachAthletePlanningProfileView({
     if (fynRevisionOptionStates[domain]?.loading) return;
     const coachRequest = fynRevisionRequests[domain] ?? "";
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
-    const target =
-      targetOptions.find((option) => option.key === targetKey)?.target ?? null;
+    const actionKey = fynRevisionActionKeys[domain] ?? null;
+    const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
+    const selectedTargetOption =
+      targetOptions.find((option) => option.key === targetKey) ?? null;
+    let target = selectedTargetOption?.target ?? null;
+    // For ADD_ITEM, target the parent session/meal and label it with the session name so the
+    // payload carries a SESSION-level target even when an item was selected (S&C).
+    if (optionKind === "ADD_ITEM" && target !== null && selectedTargetOption !== null) {
+      target = {
+        ...target,
+        label: selectedTargetOption.sessionLabel ?? target.label,
+      };
+    }
     setFynRevisionOptionStates((current) => ({
       ...current,
       [domain]: {
@@ -14360,6 +14510,7 @@ export function CoachAthletePlanningProfileView({
       reviseIds,
       coachRequest,
       target,
+      optionKind: optionKind ?? "REPLACEMENT",
     });
     setFynRevisionOptionStates((current) => {
       if (outcome.status === "MISSING_REQUEST") {
@@ -14411,11 +14562,21 @@ export function CoachAthletePlanningProfileView({
     option: CoachAthleteDomainDraftRevisionOption,
   ): void {
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
+    const actionKey = fynRevisionActionKeys[domain] ?? null;
+    const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
     const selectedTarget =
       targetOptions.find((entry) => entry.key === targetKey) ?? null;
-    const targetLabel =
-      selectedTarget?.itemLabel ?? selectedTarget?.target.label ?? selectedTarget?.label ?? "";
-    const changeText = buildFynRevisionReplaceChangeText(domain, targetLabel, option.label);
+    let changeText: string;
+    if (optionKind === "ADD_ITEM") {
+      // ADD_ITEM basket lines name the approved addition and the session/meal it is added to.
+      const sessionLabel =
+        selectedTarget?.sessionLabel ?? selectedTarget?.target.label ?? selectedTarget?.label ?? "";
+      changeText = buildFynRevisionAddItemChangeText(domain, sessionLabel, option.label);
+    } else {
+      const targetLabel =
+        selectedTarget?.itemLabel ?? selectedTarget?.target.label ?? selectedTarget?.label ?? "";
+      changeText = buildFynRevisionReplaceChangeText(domain, targetLabel, option.label);
+    }
     if (changeText === "") return;
     handleFynRevisionSelectionChange(
       domain,

@@ -522,18 +522,40 @@ export type CoachAthleteDomainDraftRevisionContext = {
   raw: unknown;
 };
 
-/** Identifies the draft slot a coach wants replacement options for. `tags` is UI-defaulted to []. */
+/**
+ * Identifies the draft slot a coach wants revision options for. `tags` is UI-defaulted to [].
+ * `itemKey` and `currentId` are optional: ADD_ITEM requests target a whole SESSION/meal and omit
+ * these item-level fields entirely (the backend rejects them when sent as null).
+ */
 export type CoachAthleteDomainDraftRevisionOptionTarget = {
   dayKey: string | null;
   sessionKey: string | null;
-  itemKey: string | null;
+  itemKey?: string | null;
   itemType: string | null;
-  currentId: string | null;
+  currentId?: string | null;
   label: string | null;
   tags: string[];
 };
 
+/**
+ * Domain-specific `itemType` sent on ADD_ITEM SESSION targets so the backend knows what kind of
+ * item is being added: SKILLS → "SKILL", NUTRITION → "NUTRITION", S_AND_C → "EXERCISE".
+ */
+export function domainDraftAddItemTargetItemType(
+  domain: TrainingPlanGenerationDomain,
+): string {
+  if (domain === "NUTRITION") return "NUTRITION";
+  if (domain === "S_AND_C") return "EXERCISE";
+  return "SKILL";
+}
+
 export type CoachAthleteDomainDraftRevisionOptionSource = "DB" | "CATALOG" | "CURRENT_PLAN";
+
+/**
+ * Which kind of revision option the backend should return. REPLACEMENT swaps an existing item;
+ * ADD_ITEM returns approved additions (drills / catalog food items / exercises) for a session.
+ */
+export type CoachAthleteDomainDraftRevisionOptionKind = "REPLACEMENT" | "ADD_ITEM";
 
 /** A single DB/catalog/current-plan backed replacement option ranked by the backend. */
 export type CoachAthleteDomainDraftRevisionOption = {
@@ -564,7 +586,7 @@ export type FetchCoachAthleteDomainDraftRevisionOptionsPayload = {
   trainingPlanVersionId: string;
   target: CoachAthleteDomainDraftRevisionOptionTarget;
   coachRequest: string;
-  optionKind?: "REPLACEMENT";
+  optionKind?: CoachAthleteDomainDraftRevisionOptionKind;
   limit?: number;
 };
 
@@ -1144,8 +1166,9 @@ function parseDomainDraftRevisionOptionTarget(
 
 /**
  * Parses one backend revision option. Returns null unless `id`, `label`, and `optionKind`
- * are present and `source` is one of DB / CATALOG / CURRENT_PLAN. Static action codes are
- * never synthesized here; only DB/catalog/current-plan backed entries survive.
+ * are present and `source` is one of DB / CATALOG / CURRENT_PLAN. `optionKind` is preserved
+ * verbatim so both REPLACEMENT and ADD_ITEM options flow through unchanged. Static action codes
+ * are never synthesized here; only DB/catalog/current-plan backed entries survive.
  */
 function parseDomainDraftRevisionOption(
   value: unknown,
@@ -2811,17 +2834,33 @@ export async function fetchCoachAthleteDomainDraftRevisionOptions(
       code: "TRAINING_PLAN_REVISION_OPTIONS_VERSION_ID_REQUIRED",
     } satisfies NormalizedApiError;
   }
-  const target: CoachAthleteDomainDraftRevisionOptionTarget = {
-    dayKey: payload.target.dayKey ?? null,
-    sessionKey: payload.target.sessionKey ?? null,
-    itemKey: payload.target.itemKey ?? null,
-    itemType: payload.target.itemType ?? null,
-    currentId: payload.target.currentId ?? null,
-    label: payload.target.label ?? null,
-    // Draft items have no tags source yet; the UI defaults this to [].
-    tags: Array.isArray(payload.target.tags) ? payload.target.tags : [],
-  };
   const optionKind = payload.optionKind ?? "REPLACEMENT";
+  const tags = Array.isArray(payload.target.tags) ? payload.target.tags : [];
+  let target: Record<string, unknown>;
+  if (optionKind === "ADD_ITEM") {
+    // SESSION-level target: keep only dayKey/sessionKey/label, force a domain-specific itemType,
+    // and omit item-level fields entirely. Never emit null fields — the backend rejects null
+    // strings for itemKey/itemType/currentId.
+    const addItemTarget: Record<string, unknown> = {
+      itemType: domainDraftAddItemTargetItemType(domain),
+      tags,
+    };
+    if (payload.target.dayKey != null) addItemTarget.dayKey = payload.target.dayKey;
+    if (payload.target.sessionKey != null) addItemTarget.sessionKey = payload.target.sessionKey;
+    if (payload.target.label != null) addItemTarget.label = payload.target.label;
+    target = addItemTarget;
+  } else {
+    target = {
+      dayKey: payload.target.dayKey ?? null,
+      sessionKey: payload.target.sessionKey ?? null,
+      itemKey: payload.target.itemKey ?? null,
+      itemType: payload.target.itemType ?? null,
+      currentId: payload.target.currentId ?? null,
+      label: payload.target.label ?? null,
+      // Draft items have no tags source yet; the UI defaults this to [].
+      tags,
+    };
+  }
   const limit =
     typeof payload.limit === "number" && Number.isFinite(payload.limit) && payload.limit > 0
       ? payload.limit

@@ -184,7 +184,12 @@ import {
   FYN_REVISION_CAPABILITIES,
   buildFynRevisionOptionsPayload,
   buildFynRevisionReplaceChangeText,
+  buildFynRevisionAddItemChangeText,
+  fynRevisionActionOptionKind,
+  fynRevisionAddItemSessionTarget,
+  fynRevisionContextPlaceholder,
   fetchFynRevisionReplacementOptions,
+  FYN_REVISION_INPUT_PLACEHOLDER,
   FYN_REVISION_NO_OPTIONS_MESSAGE,
   FYN_REVISION_MISSING_TARGET_MESSAGE,
   FYN_REVISION_OPTIONS_ERROR_MESSAGE,
@@ -2387,7 +2392,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         fynPanelProps({ context: fynDraftContext, targetOptions: targets }),
       ),
     );
-    expect(html).toContain("Which plan item?");
+    expect(html).toContain("What do you want to change?");
     expect(html).toContain("Bunker drill");
     expect(html).toContain("Cool down");
   });
@@ -2456,7 +2461,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         fynPanelProps({ context, targetOptions: targets }),
       ),
     );
-    expect(html).toContain("Which plan item?");
+    expect(html).toContain("What do you want to change?");
     expect(html).toContain("Bunker drill");
     expect(html).not.toContain("Fyn could not read plan items to target yet.");
   });
@@ -2504,7 +2509,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         fynPanelProps({ context, targetOptions: targets }),
       ),
     );
-    expect(html).toContain("Which plan item?");
+    expect(html).toContain("What do you want to change?");
     expect(html).toContain("Volley drill");
   });
 
@@ -2691,7 +2696,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       ),
     );
     expect(populatedHtml).not.toContain("Fyn could not read plan items to target yet.");
-    expect(populatedHtml).toContain("Which plan item?");
+    expect(populatedHtml).toContain("What do you want to change?");
   });
 
   it("enables Show approved options once a Replace action is chosen and a request is typed", () => {
@@ -2825,7 +2830,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         }),
       ),
     );
-    expect(html).toContain("Available revision actions");
+    expect(html).toContain("What do you want to do?");
     expect(html).toContain("Replace drill");
     expect(html).toContain("Adjust drill");
     expect(html).toContain("Remove drill");
@@ -2913,9 +2918,9 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(actionKeysFor("S_AND_C", emptyDayTarget)).toEqual(["ADD_SESSION"]);
     // A day that already has sessions offers no day-level action, so it is dropped entirely.
     expect(nonEmptyDayTarget).toBeUndefined();
-    expect(actionKeysFor("S_AND_C", sessionTarget)).toEqual(["UPDATE_SESSION"]);
+    // Add exercise is a SESSION-level action so it never requires selecting an existing exercise.
+    expect(actionKeysFor("S_AND_C", sessionTarget)).toEqual(["UPDATE_SESSION", "ADD_ITEM"]);
     expect(actionKeysFor("S_AND_C", itemTarget)).toEqual([
-      "ADD_ITEM",
       "REPLACE_ITEM",
       "UPDATE_ITEM",
       "REMOVE_ITEM",
@@ -3110,6 +3115,278 @@ describe("Training Plan Workspace lifecycle display", () => {
     );
     expect(html).toContain("Fyn only shows revision actions this domain can safely execute.");
     expect(html).toContain("Choose a target, then choose what kind of change you want.");
+  });
+
+  it("orders the composer as target -> action -> context", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+
+    // Before a target is chosen: only the target selector is shown.
+    const targetOnly = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+        }),
+      ),
+    );
+    expect(targetOnly).toContain("What do you want to change?");
+    expect(targetOnly).not.toContain("What do you want to do?");
+    expect(targetOnly).not.toContain("Tell Fyn what to change");
+
+    // After a target is chosen: the action selector appears, still no context field.
+    const withAction = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    expect(withAction).toContain("What do you want to do?");
+    expect(withAction).not.toContain("Tell Fyn what to change");
+    // Target selector precedes the action selector in document order.
+    expect(withAction.indexOf("What do you want to change?")).toBeLessThan(
+      withAction.indexOf("What do you want to do?"),
+    );
+
+    // After an action is chosen: the context field appears, after the action selector.
+    const withContext = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(withContext).toContain("Tell Fyn what to change");
+    expect(withContext.indexOf("What do you want to do?")).toBeLessThan(
+      withContext.indexOf("Tell Fyn what to change"),
+    );
+  });
+
+  it("uses domain- and action-specific context placeholders", () => {
+    expect(fynRevisionContextPlaceholder("SKILLS", "ADD_SESSION")).toBe(
+      "Example: Add Lag Putting Foundation and keep intensity low.",
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", "ADD_ITEM")).toBe(
+      "Example: Add a pace-control putting drill.",
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", "UPDATE_SESSION_ITEMS")).toBe(
+      "Example: Add one lag putting drill and remove the advanced drill.",
+    );
+    expect(fynRevisionContextPlaceholder("NUTRITION", "ADD_ITEM")).toBe(
+      "Example: Add a lighter carb option to breakfast.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_ITEM")).toBe(
+      "Example: Add a low-load mobility exercise.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_SESSION")).toBe(
+      "Example: Add a low-load mobility session.",
+    );
+    // Actions without a tailored example fall back to the generic placeholder.
+    expect(fynRevisionContextPlaceholder("SKILLS", "REPLACE_ITEM")).toBe(
+      FYN_REVISION_INPUT_PLACEHOLDER,
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", null)).toBe(FYN_REVISION_INPUT_PLACEHOLDER);
+  });
+
+  it("renders the action-specific placeholder inside the context field", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(html).toContain("Example: Add a pace-control putting drill.");
+  });
+
+  it("offers ADD_ITEM at the SESSION/meal level for every domain", () => {
+    const skills = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    expect(actionKeysFor("SKILLS", skills.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+
+    const nutrition = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [
+                  { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+                  { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    expect(actionKeysFor("NUTRITION", nutrition.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+
+    const sandc = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [
+                  { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                  { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    // S&C add-exercise is offered on the session, and NOT on an existing exercise item.
+    expect(actionKeysFor("S_AND_C", sandc.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+    expect(actionKeysFor("S_AND_C", sandc.find((o) => o.level === "ITEM"))).not.toContain(
+      "ADD_ITEM",
+    );
+  });
+
+  it("reveals Show approved options for REPLACEMENT/ADD_ITEM and Add to plan changes for text-only actions", () => {
+    const skills = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const dayTarget = skills.find((o) => o.level === "DAY")!;
+    const sessionTarget = skills.find((o) => o.level === "SESSION")!;
+    const itemTarget = skills.find((o) => o.level === "ITEM")!;
+    const renderPanel = (
+      targetKey: string,
+      actionKey: FynRevisionActionKeyForTest,
+    ): string =>
+      renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            context: makeRevisionContext({ generationDomain: "SKILLS" }),
+            targetOptions: skills,
+            selectedTargetKey: targetKey,
+            selectedActionKey: actionKey,
+            coachRequest: "Something specific.",
+          }),
+        ),
+      );
+
+    // Approved-options actions.
+    expect(renderPanel(itemTarget.key, "REPLACE_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(renderPanel(sessionTarget.key, "ADD_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+
+    // Text-only actions never expose the approved-options button.
+    for (const [targetKey, actionKey] of [
+      [dayTarget.key, "ADD_SESSION"],
+      [sessionTarget.key, "UPDATE_SESSION"],
+      [itemTarget.key, "REMOVE_ITEM"],
+    ] as const) {
+      const html = renderPanel(targetKey, actionKey);
+      expect(html).toContain("Add to plan changes");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    }
+  });
+
+  it("renders action choices as radio selection controls with intent-not-command helper copy", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    // Actions are grouped radio controls, one per supported action — not command buttons.
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('type="radio"');
+    expect(html).toContain('value="ADD_ITEM"');
+    expect(html).toContain('value="UPDATE_SESSION"');
+    expect(html).toContain('value="UPDATE_SESSION_ITEMS"');
+    // Helper copy makes clear the choice is intent only.
+    expect(html).toContain(
+      "Choose one revision action. Nothing is applied until you add it to plan changes.",
+    );
+  });
+
+  it("marks the chosen action's radio as selected and leaves the rest unselected", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+
+    // No action chosen yet: nothing is marked selected.
+    const unselected = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    expect(unselected).not.toMatch(/data-selected="true"/);
+
+    // Selecting an action is reflected on exactly that radio control.
+    const selected = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(selected).toMatch(/data-selected="true"[^>]*value="ADD_ITEM"/);
+    expect(selected.match(/data-selected="true"/g)).toHaveLength(1);
   });
 
   it("shows the max-4 drill batch copy only for a Skills SESSION target", () => {
@@ -3396,6 +3673,406 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(fetchOptions).toHaveBeenCalledTimes(1);
     expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
     expect(outcome).toEqual({ status: "OK", options: fynFetchedOptions, message: null });
+  });
+
+  it("maps actions to the revision-options optionKind (ADD_ITEM vs REPLACEMENT vs text-only)", () => {
+    expect(fynRevisionActionOptionKind("REPLACE_ITEM")).toBe("REPLACEMENT");
+    expect(fynRevisionActionOptionKind("REPLACE_DAY")).toBe("REPLACEMENT");
+    expect(fynRevisionActionOptionKind("ADD_ITEM")).toBe("ADD_ITEM");
+    expect(fynRevisionActionOptionKind("ADD_SESSION")).toBeNull();
+    expect(fynRevisionActionOptionKind("REMOVE_ITEM")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_ITEM")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_SESSION")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_SESSION_ITEMS")).toBeNull();
+
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION") ?? null;
+    const dayTarget = targets.find((option) => option.level === "DAY") ?? null;
+    const addItem = fynRevisionAvailableActions("SKILLS", sessionTarget).find(
+      (action) => action.key === "ADD_ITEM",
+    );
+    const addSession = fynRevisionAvailableActions("SKILLS", dayTarget).find(
+      (action) => action.key === "ADD_SESSION",
+    );
+    // ADD_ITEM now goes through the approved-options flow; ADD_SESSION stays text-only.
+    expect(addItem?.requiresApprovedOptions).toBe(true);
+    expect(addSession?.requiresApprovedOptions).toBe(false);
+  });
+
+  it("collapses any target to a clean SESSION target for ADD_ITEM (no null item fields)", () => {
+    const sessionTarget = fynRevisionAddItemSessionTarget(
+      {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: "item-1",
+        itemType: "EXERCISE",
+        currentId: "ex-1",
+        label: "Back squat",
+        tags: ["x"],
+      },
+      "S_AND_C",
+    );
+    // Item-level fields are omitted entirely (not sent as null); itemType is domain-specific.
+    expect(sessionTarget).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemType: "EXERCISE",
+      label: "Back squat",
+      tags: ["x"],
+    });
+    expect(sessionTarget).not.toHaveProperty("itemKey");
+    expect(sessionTarget).not.toHaveProperty("currentId");
+    expect(Object.values(sessionTarget)).not.toContain(null);
+  });
+
+  it("builds an ADD_ITEM options payload with a clean SESSION target", () => {
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: "item-1",
+        itemType: "EXERCISE",
+        currentId: "ex-1",
+        label: "Back squat",
+        tags: [],
+      },
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(payload).toEqual({
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemType: "EXERCISE",
+        label: "Back squat",
+        tags: [],
+      },
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+    expect(payload.target).not.toHaveProperty("itemKey");
+    expect(payload.target).not.toHaveProperty("currentId");
+    expect(JSON.stringify(payload.target)).not.toContain("null");
+  });
+
+  it("sends optionKind ADD_ITEM with a SESSION target for a Skills add-drill", async () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "SKILLS" as const,
+      target: null,
+      options: fynFetchedOptions,
+    }));
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a volley approach drill.",
+      target: sessionTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    expect(outcome).toEqual({ status: "OK", options: fynFetchedOptions, message: null });
+    expect(fetchOptions).toHaveBeenCalledTimes(1);
+    // Skills ADD_ITEM: SESSION target, itemType "SKILL", no item-level fields, no null fields.
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      target: sessionTarget.target,
+      coachRequest: "Add a volley approach drill.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: sessionTarget.target.dayKey,
+      sessionKey: sessionTarget.target.sessionKey,
+      itemType: "SKILL",
+      label: sessionTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("sends optionKind ADD_ITEM with a meal/session target for a Nutrition add-food-item", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const mealTarget = nutritionTargets.find((option) => option.level === "SESSION")!;
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "NUTRITION" as const,
+      target: null,
+      options: [],
+    }));
+
+    await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a fruit to breakfast.",
+      target: mealTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    // Nutrition ADD_ITEM: meal/session target, itemType "NUTRITION", no item-level/null fields.
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      target: mealTarget.target,
+      coachRequest: "Add a fruit to breakfast.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: mealTarget.target.dayKey,
+      sessionKey: mealTarget.target.sessionKey,
+      itemType: "NUTRITION",
+      label: mealTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("maps an S&C item target to its parent session when sending ADD_ITEM", async () => {
+    const sandcTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [
+                  { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                  { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const itemTarget = sandcTargets.find((option) => option.level === "ITEM")!;
+    expect(itemTarget.target.itemKey).not.toBeNull();
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "S_AND_C" as const,
+      target: null,
+      options: [],
+    }));
+
+    await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a hamstring exercise.",
+      target: itemTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    // S&C ADD_ITEM: an item target maps to its parent SESSION with itemType "EXERCISE"; the
+    // item-level fields are omitted (never sent as null, which the backend rejects).
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      target: itemTarget.target,
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: itemTarget.target.dayKey,
+      sessionKey: itemTarget.target.sessionKey,
+      itemType: "EXERCISE",
+      label: itemTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("blocks ADD_ITEM without a session target and never calls the endpoint", async () => {
+    const fetchOptions = vi.fn();
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a drill.",
+      target: {
+        dayKey: "day-1",
+        sessionKey: null,
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Day 1",
+        tags: [],
+      },
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+    expect(outcome).toEqual({
+      status: "MISSING_TARGET",
+      message: FYN_REVISION_MISSING_TARGET_MESSAGE,
+    });
+    expect(fetchOptions).not.toHaveBeenCalled();
+  });
+
+  it("writes ADD_ITEM basket lines naming the approved option and the session/meal", () => {
+    expect(
+      buildFynRevisionAddItemChangeText("SKILLS", "Morning session", "Volley approach drill"),
+    ).toBe("Add drill: Volley approach drill to Morning session.");
+    expect(buildFynRevisionAddItemChangeText("NUTRITION", "Breakfast", "Greek yogurt")).toBe(
+      "Add food item: Greek yogurt to Breakfast.",
+    );
+    expect(buildFynRevisionAddItemChangeText("S_AND_C", "Lower body", "Goblet squat")).toBe(
+      "Add exercise: Goblet squat to Lower body.",
+    );
+    // An empty approved option yields no basket line.
+    expect(buildFynRevisionAddItemChangeText("SKILLS", "Morning session", "   ")).toBe("");
+
+    // The ADD_ITEM line participates in the same 3-change basket used by replacements.
+    const selection = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      buildFynRevisionAddItemChangeText("NUTRITION", "Breakfast", "Greek yogurt"),
+    );
+    expect(selection.changes).toHaveLength(1);
+    expect(selection.changes[0]?.acceptedChange).toBe(
+      "Add food item: Greek yogurt to Breakfast.",
+    );
+  });
+
+  it("shows the approved-options button (not chips) for ADD_ITEM until the coach clicks it", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const onShowOptions = vi.fn();
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a volley approach drill.",
+          onShowOptions,
+        }),
+      ),
+    );
+    expect(html).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    // Rendering never fetches, so no approved-option chips exist yet.
+    expect(html).not.toContain("Pick an approved option and Fyn will add it to the basket:");
+    expect(html).not.toContain("Cross-court rally drill");
+    expect(onShowOptions).not.toHaveBeenCalled();
+  });
+
+  it("renders ADD_ITEM approved options as chips only after the fetch resolves", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a volley approach drill.",
+          optionsState: {
+            loading: false,
+            error: null,
+            message: null,
+            options: fynFetchedOptions,
+            searched: true,
+          },
+        }),
+      ),
+    );
+    expect(html).toContain("Pick an approved option and Fyn will add it to the basket:");
+    expect(html).toContain("Cross-court rally drill");
+  });
+
+  it("keeps ADD_SESSION and REMOVE_ITEM text-only with no approved-options button", () => {
+    const skillsTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const dayTarget = skillsTargets.find((option) => option.level === "DAY")!;
+    const addSessionHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: skillsTargets,
+          selectedTargetKey: dayTarget.key,
+          selectedActionKey: "ADD_SESSION",
+          coachRequest: "Add a recovery session.",
+        }),
+      ),
+    );
+    // ADD_SESSION never fetches approved options; it uses the text-only quick-add button.
+    expect(addSessionHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(addSessionHtml).toContain("Add to plan changes");
+
+    const itemTarget = skillsTargets.find((option) => option.level === "ITEM")!;
+    const removeHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: skillsTargets,
+          selectedTargetKey: itemTarget.key,
+          selectedActionKey: "REMOVE_ITEM",
+        }),
+      ),
+    );
+    expect(removeHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
   });
 
   it("stores the operation-explicit replacement line naming the current target and new option", () => {

@@ -45,6 +45,13 @@ export type TrainingPlanWorkspaceOwnershipFlags = {
   directReleaseAllowed: boolean;
 };
 
+export type TrainingPlanPendingRevisionRequest = {
+  feedback: string | null;
+  requestedAt: string | null;
+  requestedBy: string | null;
+  actorRole: string | null;
+};
+
 export type TrainingPlanWorkspaceDomain = {
   summary: TrainingPlanWorkspaceSummary;
   reviewAccess: string | null;
@@ -52,6 +59,7 @@ export type TrainingPlanWorkspaceDomain = {
   submittedForReview: boolean;
   canOpen: boolean;
   allowedActions: string[];
+  pendingRevisionRequest?: TrainingPlanPendingRevisionRequest | null;
 };
 
 export type TrainingPlanWorkspaceAssignmentReleaseMode =

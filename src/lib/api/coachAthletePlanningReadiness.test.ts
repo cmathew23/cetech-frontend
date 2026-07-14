@@ -910,6 +910,65 @@ describe("parseReadinessPayload", () => {
     });
   });
 
+  it("passes a structured Nutrition revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-3",
+    });
+
+    const revisionPatch = {
+      operation: "REPLACE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: {
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        nutritionCatalogItemId: "nut-9",
+        serving: "1 cup",
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+    } as const;
+
+    await reviseNutritionPlan("entity-1", "athlete-1", {
+      trainingPlanId: "plan-1",
+      versionId: "version-3",
+      coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/nutrition/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "plan-1",
+          versionId: "version-3",
+          coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("omits revisionPatch from the body when the caller does not supply one", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-2",
+    });
+
+    await reviseNutritionPlan("entity-1", "athlete-1", {
+      trainingPlanId: "plan-1",
+      versionId: "version-2",
+      coachFeedback: "Increase protein at breakfast",
+    });
+
+    const body = JSON.parse(apiRequestMock.mock.calls.at(-1)![1].body as string);
+    expect(body).not.toHaveProperty("revisionPatch");
+  });
+
   it("fetches persisted active detail with generationDomain query", async () => {
     apiRequestMock.mockResolvedValue({
       message: "ok",
@@ -1000,6 +1059,61 @@ describe("parseReadinessPayload", () => {
       "/training-plan-management/plan-n/active/detail?generationDomain=NUTRITION",
       expect.objectContaining({ method: "GET", cache: "no-store" }),
     );
+  });
+
+  it("parses fresh Nutrition nutrients from active/detail without falling back to stale values", async () => {
+    apiRequestMock.mockResolvedValue({
+      message: "ok",
+      data: {
+        plan: { id: "plan-n", athleteId: "athlete-1", entityId: "entity-1", status: "AI_GENERATED" },
+        version: {
+          id: "version-19",
+          trainingPlanId: "plan-n",
+          versionNumber: 19,
+          status: "AI_GENERATED",
+        },
+        days: [
+          {
+            id: "day-1",
+            dayIndex: 1,
+            sessions: [
+              {
+                id: "session-1",
+                name: "Snacks",
+                sessionStructure: {
+                  items: {
+                    items: [
+                      {
+                        label: "Banana milkshake",
+                        serving: "2 glass",
+                        calories: 130.61289978027344,
+                        protein: 3.6865992546081543,
+                        carbs: 18.29117202758789,
+                        fat: 4.742460250854492,
+                        fiber: 2,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchPersistedTrainingPlanActiveDetail("plan-n", "NUTRITION");
+    const item = result.days[0]?.sessions[0]?.sessionStructureSections[0]?.items[0];
+
+    expect(item).toMatchObject({
+      label: "Banana milkshake",
+      serving: "2 glass",
+      calories: 130.61289978027344,
+      protein: 3.6865992546081543,
+      carbs: 18.29117202758789,
+      fat: 4.742460250854492,
+      fiber: 2,
+    });
   });
 
   it("paths.trainingPlanManagement.activeDetail includes generationDomain query", () => {
@@ -1618,6 +1732,117 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
       levelTags: ["INTERMEDIATE"],
       metadata: { catalogItemId: "cat-2" },
     });
+    // Skills payloads are unchanged: the Nutrition-only catalog field is never populated for them,
+    // and metadata.catalogItemId is never promoted into nutritionCatalogItemId.
+    expect(result.options[0]?.nutritionCatalogItemId).toBeUndefined();
+    expect(result.options[1]?.nutritionCatalogItemId).toBeUndefined();
+  });
+
+  it("preserves the explicit top-level nutritionCatalogItemId on Nutrition options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "NUTRITION",
+        target: { dayKey: "day-1", sessionKey: "meal-1" },
+        options: [
+          {
+            id: "opt-nut-1",
+            rank: 1,
+            label: "Oatmeal",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            // Authoritative catalog reference is the top-level field, distinct from metadata.
+            nutritionCatalogItemId: "nut-42",
+            metadata: { catalogItemId: "meta-should-not-be-used", serving: "1 cup" },
+          },
+          {
+            id: "opt-nut-2",
+            rank: 2,
+            label: "Toast",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            metadata: null,
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options[0]).toMatchObject({
+      id: "opt-nut-1",
+      nutritionCatalogItemId: "nut-42",
+    });
+    // Options without the field expose it as undefined (never inferred from metadata).
+    expect(result.options[1]?.nutritionCatalogItemId).toBeUndefined();
+  });
+
+  it("parses the backend's complete canonical item on Nutrition options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "NUTRITION",
+        options: [
+          {
+            id: "opt-nut-1",
+            rank: 1,
+            label: "Oatmeal",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            nutritionCatalogItemId: "nut-42",
+            // Complete canonical item: identity, serving, and every nutrition value preserved.
+            item: {
+              nutritionCatalogItemId: "nut-42",
+              itemType: "NUTRITION",
+              label: "Oatmeal",
+              serving: "1 cup",
+              calories: 320,
+              protein: 12,
+              carbs: 54,
+              fat: 6,
+              fiber: 8,
+              timing: "Breakfast",
+              notes: "High fibre",
+            },
+          },
+          {
+            id: "opt-nut-2",
+            rank: 2,
+            label: "Toast",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options[0]?.item).toEqual({
+      nutritionCatalogItemId: "nut-42",
+      itemType: "NUTRITION",
+      label: "Oatmeal",
+      serving: "1 cup",
+      calories: 320,
+      protein: 12,
+      carbs: 54,
+      fat: 6,
+      fiber: 8,
+      timing: "Breakfast",
+      notes: "High fibre",
+    });
+    // Options without an item object expose it as null so submission stays blocked.
+    expect(result.options[1]?.item).toBeNull();
   });
 
   it("filters options missing id/label/optionKind or with an invalid source", async () => {

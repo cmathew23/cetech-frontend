@@ -6,6 +6,7 @@ import {
   type NormalizedApiError,
 } from "@/lib/apiClient";
 import type { GenerationDomain } from "@/lib/coachAuthority";
+import type { TrainingPlanPendingRevisionRequest } from "@/types/trainingPlanWorkspace";
 
 type AnyRecord = Record<string, unknown>;
 const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 480_000;
@@ -428,6 +429,7 @@ export type CoachAthleteGeneratedDraftItem = {
   protein: number | null;
   carbs: number | null;
   fat: number | null;
+  fiber: number | null;
   timing: string | null;
   sets: string | null;
   durationMinutes: number | null;
@@ -571,6 +573,18 @@ export type CoachAthleteDomainDraftRevisionOption = {
   targetTags: string[];
   safetyTags: string[];
   levelTags: string[];
+  /**
+   * Authoritative catalog reference for Nutrition options, taken from the backend's explicit
+   * top-level `nutritionCatalogItemId` field. Never inferred from `metadata`, `label`, or `id`.
+   */
+  nutritionCatalogItemId?: string;
+  /**
+   * Complete canonical food item for a Nutrition option, supplied by the backend. For ADD_ITEM /
+   * REPLACE_ITEM this is submitted verbatim as the revision patch's `item` (identity, serving, and
+   * every nutrition value preserved). Absent when the backend does not supply one, which blocks
+   * Apply Revision. Never rebuilt from `label` or `metadata`.
+   */
+  item?: TrainingPlanRevisionPatchItem | null;
   metadata: unknown;
 };
 
@@ -742,6 +756,7 @@ export type CoachPersistedTrainingPlanActiveDetail = {
   generationDomain: string | null;
   allowedActions: GovernedTrainingPlanWorkflowAction[];
   releaseMode: string | null;
+  pendingRevisionRequest?: TrainingPlanPendingRevisionRequest | null;
   constraintComplianceSummary: TrainingPlanConstraintComplianceSummary | null;
   plan: CoachPersistedTrainingPlan;
   version: CoachPersistedTrainingPlanVersion;
@@ -784,10 +799,62 @@ export type AthleteTodayPlan = {
   raw: unknown;
 };
 
+/**
+ * Structured, executable food item carried inside a Nutrition {@link TrainingPlanRevisionPatch}.
+ * For ADD_ITEM / REPLACE_ITEM this is the backend's complete canonical `option.item`, passed through
+ * verbatim (identity, serving, and every nutrition value preserved). Nothing is rebuilt from `label`
+ * or `metadata`.
+ */
+export type TrainingPlanRevisionPatchItem = {
+  nutritionCatalogItemId?: string | null;
+  itemType?: string | null;
+  label?: string | null;
+  serving?: string | null;
+  calories?: number | null;
+  protein?: number | null;
+  carbs?: number | null;
+  fat?: number | null;
+  fiber?: number | null;
+  timing?: string | null;
+  notes?: string | null;
+};
+
+/**
+ * Deterministic item-level serving adjustment for a Nutrition UPDATE_ITEM patch. The backend
+ * recomputes calories/macros from `targetQuantity` + `servingUnit`; the frontend never calculates
+ * them. `targetQuantity` is always > 0.
+ */
+export type NutritionServingAdjustment = {
+  targetQuantity: number;
+  servingUnit: string;
+};
+
+/**
+ * Deterministic single-operation revision patch. This is the executable source of truth the backend
+ * applies; `coachFeedback` is only a human-readable summary. Item operations carry `dayIndex`,
+ * `sessionIndex`, `itemIndex` (all 1-based per the backend contract). ADD_ITEM / REPLACE_ITEM carry
+ * `item`; Nutrition UPDATE_ITEM carries a `servingAdjustment` (never a replacement `item`). The
+ * shared shape retains `session` for domains that support UPDATE_SESSION; Nutrition does not.
+ */
+export type TrainingPlanRevisionPatch = {
+  operation: string;
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex?: number;
+  item?: TrainingPlanRevisionPatchItem;
+  servingAdjustment?: NutritionServingAdjustment;
+  session?: Record<string, unknown>;
+};
+
 export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
   coachFeedback: string;
+  /**
+   * Optional structured patch. When present (Nutrition deterministic single-patch flow) it is the
+   * executable source of truth. Absent for Skills/S&C, which keep the free-form feedback flow.
+   */
+  revisionPatch?: TrainingPlanRevisionPatch | null;
 };
 
 export type TrainingPlanReviseResult = {
@@ -852,7 +919,22 @@ function readFirstArray(records: AnyRecord[], keys: string[]): unknown[] {
   return [];
 }
 
-function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem | null {
+/**
+ * Priority-ordered alias lists for each Nutrition nutrient. The backend may emit a scaled runtime
+ * value (e.g. `caloriesKcal`, `proteinG`) alongside an older unscaled base field (e.g. `calories`).
+ * The parser normalizes each nutrient to a single canonical value using the FIRST finite numeric
+ * value in this order — scaled/runtime aliases win over base fields so the parsed item is never
+ * stale. The frontend performs no nutrient math; it only selects which key to read.
+ */
+const NUTRITION_NUTRIENT_ALIAS_PRIORITY = {
+  calories: ["caloriesKcal", "calories", "kcal", "energyKcal"],
+  protein: ["proteinG", "proteinGrams", "protein"],
+  carbs: ["carbohydrateG", "carbsG", "carbsGrams", "carbs", "carbohydratesGrams", "carbohydrates"],
+  fat: ["fatG", "fatGrams", "fat"],
+  fiber: ["fiberG", "fiberGrams", "fibreG", "fiber", "dietaryFiberGrams", "dietaryFiber"],
+} as const;
+
+export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem | null {
   const record = asRecord(value);
   if (!record) return null;
   const item: CoachAthleteGeneratedDraftItem = {
@@ -867,10 +949,11 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     serving: readStringKey([record], NUTRITION_SERVING_TEXT_KEYS),
     quantity: readNumberKey([record], NUTRITION_QUANTITY_KEYS),
     unit: readStringKey([record], ["unit"]),
-    calories: readNumberKey([record], ["calories"]),
-    protein: readNumberKey([record], ["protein"]),
-    carbs: readNumberKey([record], ["carbs"]),
-    fat: readNumberKey([record], ["fat"]),
+    calories: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.calories),
+    protein: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.protein),
+    carbs: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.carbs),
+    fat: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.fat),
+    fiber: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.fiber),
     timing: readStringKey([record], ["timing"]),
     sets: readStringLike(record.sets),
     durationMinutes: readNumberKey([record], ["durationMinutes"]),
@@ -894,6 +977,7 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     item.protein !== null ||
     item.carbs !== null ||
     item.fat !== null ||
+    item.fiber !== null ||
     item.timing ||
     item.sets ||
     item.durationMinutes !== null ||
@@ -1165,6 +1249,33 @@ function parseDomainDraftRevisionOptionTarget(
 }
 
 /**
+ * Parses the backend's complete canonical `option.item` for a Nutrition option into a
+ * {@link TrainingPlanRevisionPatchItem}, preserving identity, serving, and every nutrition value.
+ * Returns null when the option carries no item object, so ADD_ITEM / REPLACE_ITEM submission can be
+ * blocked. Nothing is rebuilt from `label` or `metadata`.
+ */
+function parseNutritionRevisionOptionItem(
+  value: unknown,
+): TrainingPlanRevisionPatchItem | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  return {
+    nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]),
+    itemType: readStringKey(records, ["itemType"]),
+    label: readStringKey(records, ["label"]),
+    serving: readStringKey(records, ["serving"]),
+    calories: readNumberKey(records, ["calories"]),
+    protein: readNumberKey(records, ["protein"]),
+    carbs: readNumberKey(records, ["carbs"]),
+    fat: readNumberKey(records, ["fat"]),
+    fiber: readNumberKey(records, ["fiber"]),
+    timing: readStringKey(records, ["timing"]),
+    notes: readStringKey(records, ["notes"]),
+  };
+}
+
+/**
  * Parses one backend revision option. Returns null unless `id`, `label`, and `optionKind`
  * are present and `source` is one of DB / CATALOG / CURRENT_PLAN. `optionKind` is preserved
  * verbatim so both REPLACEMENT and ADD_ITEM options flow through unchanged. Static action codes
@@ -1198,6 +1309,10 @@ function parseDomainDraftRevisionOption(
     targetTags: readStringListKey(records, ["targetTags"]),
     safetyTags: readStringListKey(records, ["safetyTags"]),
     levelTags: readStringListKey(records, ["levelTags"]),
+    // Preserve the backend's explicit catalog reference verbatim (no metadata/label/id inference).
+    nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]) ?? undefined,
+    // Preserve the backend's complete canonical food item verbatim for ADD_ITEM / REPLACE_ITEM.
+    item: parseNutritionRevisionOptionItem(record.item),
     metadata: record.metadata ?? null,
   };
 }
@@ -1609,11 +1724,21 @@ function parsePersistedTrainingPlanActiveDetailPayload(
       details: data,
     } satisfies NormalizedApiError;
   }
+  const pendingRevisionRequestRecord = asRecord(record.pendingRevisionRequest);
   return {
     selectedVersionRule: readStringKey([record], ["selectedVersionRule"]),
     generationDomain: readStringKey([record], ["generationDomain"]),
     allowedActions: parseGovernedTrainingPlanWorkflowActionList(record.allowedActions),
     releaseMode: readStringKey([record], ["releaseMode"]),
+    pendingRevisionRequest:
+      pendingRevisionRequestRecord === null
+        ? null
+        : {
+            feedback: readStringKey([pendingRevisionRequestRecord], ["feedback"]),
+            requestedAt: readStringKey([pendingRevisionRequestRecord], ["requestedAt"]),
+            requestedBy: readStringKey([pendingRevisionRequestRecord], ["requestedBy"]),
+            actorRole: readStringKey([pendingRevisionRequestRecord], ["actorRole"]),
+          },
     constraintComplianceSummary: parseConstraintComplianceSummary(
       record.constraintComplianceSummary,
     ),
@@ -1784,7 +1909,13 @@ function assertRevisePayload(
       code,
     } satisfies NormalizedApiError;
   }
-  return { trainingPlanId, versionId, coachFeedback };
+  const normalized: TrainingPlanRevisePayload = { trainingPlanId, versionId, coachFeedback };
+  // Pass a structured patch through untouched when supplied. The API layer never fabricates or
+  // narrows shared operations; domain-specific callers enforce their own supported contracts.
+  if (payload.revisionPatch !== undefined && payload.revisionPatch !== null) {
+    normalized.revisionPatch = payload.revisionPatch;
+  }
+  return normalized;
 }
 
 export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanReadiness {

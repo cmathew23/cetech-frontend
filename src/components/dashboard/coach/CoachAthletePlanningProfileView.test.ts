@@ -146,6 +146,7 @@ import {
   shouldUseWorkflow1HeadCoachReviewActionPanel,
   isHeadCoachSkillsOwnerWorkflow,
   resolveWorkflowActionContext,
+  RevisionRequestPanel,
   DomainReviewDrawerWorkflowActionButtons,
   resolveDomainReviewDrawerVisibleActionLabels,
   resolveDomainReviewDisplayLabels,
@@ -191,6 +192,44 @@ import {
   fetchFynRevisionReplacementOptions,
   FYN_REVISION_INPUT_PLACEHOLDER,
   FYN_REVISION_NO_OPTIONS_MESSAGE,
+  FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
+  NUTRITION_MEAL_SLOT_MIN_ITEMS,
+  NUTRITION_MEAL_MINIMUMS_GUIDANCE,
+  NUTRITION_REMOVE_ITEM_MINIMUM_WARNING,
+  NUTRITION_SINGLE_PATCH_GUIDANCE,
+  buildNutritionRevisionPatch,
+  buildNutritionRevisionSubmission,
+  buildNutritionRevisionOptionItem,
+  buildNutritionServingAdjustment,
+  parseNutritionServing,
+  adjustNutritionServingQuantity,
+  formatNutritionServingValue,
+  nutritionRevisionPatchOperation,
+  nutritionRevisionCanApply,
+  nextNutritionRevisionVersionId,
+  resolveActiveNutritionReviseIds,
+  nutritionMealSlotKeyFromLabel,
+  nutritionMealSlotMinItems,
+  nutritionRemoveItemMinimumNotice,
+  nutritionRemoveItemMinimumMessage,
+  nutritionOptionCatalogId,
+  nutritionRevisionOptionMissingCatalogReference,
+  NUTRITION_OPTION_MISSING_CATALOG_MESSAGE,
+  NUTRITION_STALE_VERSION_MESSAGE,
+  isNutritionStaleVersionRevisionError,
+  isNutritionRevisionInterruptedError,
+  resolveNutritionRevisionErrorOutcome,
+  NUTRITION_REVISION_APPLYING_MESSAGE,
+  NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE,
+  nutritionRevisionDrawerSubmitPending,
+  nutritionRemoveItemTargetStillPresent,
+  NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE,
+  resolveNutritionReviewDrawerLifecycle,
+  runNutritionReviewDrawerOpenRefresh,
+  resolveNewerDomainReviewDraft,
+  resolveLatestDraftForDomainReview,
+  domainReviewDraftRenderKey,
+  domainReviewActiveDetailRenderKey,
   FYN_REVISION_MISSING_TARGET_MESSAGE,
   FYN_REVISION_OPTIONS_ERROR_MESSAGE,
   FYN_REVISION_SHOW_OPTIONS_LABEL,
@@ -217,11 +256,63 @@ import {
 import type {
   FynRevisionActionKey as FynRevisionActionKeyForTest,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
+import { parseGeneratedDraftItem } from "@/lib/api/coachAthletePlanningReadiness";
 import type {
   CoachAthleteDomainDraftRevisionContext,
   CoachAthleteDomainDraftRevisionOption,
+  CoachAthleteLatestDomainDraft,
+  CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
+
+describe("RevisionRequestPanel", () => {
+  it("renders revision feedback and available request metadata", () => {
+    const html = renderToStaticMarkup(
+      createElement(RevisionRequestPanel, {
+        workflowStatus: "revision_requested",
+        pendingRevisionRequest: {
+          feedback: "Reduce the Tuesday workload and add recovery notes.",
+          requestedBy: "Head Coach",
+          requestedAt: "2026-07-14",
+          actorRole: "HEAD_COACH",
+        },
+      }),
+    );
+
+    expect(html).toContain("Revision Request");
+    expect(html).toContain("Reduce the Tuesday workload and add recovery notes.");
+    expect(html).toContain("Requested by:");
+    expect(html).toContain("Head Coach");
+    expect(html).toContain("Requested at:");
+    expect(html).toContain("14/07/2026");
+  });
+
+  it("does not render without revision-requested status and feedback", () => {
+    const request = {
+      feedback: "Update the plan.",
+      requestedBy: null,
+      requestedAt: null,
+      actorRole: null,
+    };
+
+    expect(
+      renderToStaticMarkup(
+        createElement(RevisionRequestPanel, {
+          workflowStatus: "submitted_for_review",
+          pendingRevisionRequest: request,
+        }),
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        createElement(RevisionRequestPanel, {
+          workflowStatus: "revision_requested",
+          pendingRevisionRequest: { ...request, feedback: null },
+        }),
+      ),
+    ).toBe("");
+  });
+});
 
 describe("buildCoachWorkflowResetScopeKey", () => {
   it("changes when the authenticated coach user changes", () => {
@@ -2839,8 +2930,9 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).not.toContain("Edit several drills in this session");
   });
 
-  it("offers Nutrition meal/item actions only and hides day, add-session, and batch actions", () => {
+  it("requires a Nutrition item target for update/replace/remove while meals offer add only", () => {
     const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible.
     const nutritionSchedule = [
       {
         dayIndex: 1,
@@ -2851,6 +2943,8 @@ describe("Training Plan Workspace lifecycle display", () => {
             items: [
               { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
               { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
             ],
           },
         ],
@@ -2864,7 +2958,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(targets.some((option) => option.level === "DAY")).toBe(false);
     const sessionTarget = targets.find((option) => option.level === "SESSION");
     const itemTarget = targets.find((option) => option.level === "ITEM");
-    expect(actionKeysFor("NUTRITION", sessionTarget)).toEqual(["UPDATE_SESSION", "ADD_ITEM"]);
+    expect(actionKeysFor("NUTRITION", sessionTarget)).toEqual(["ADD_ITEM"]);
     expect(actionKeysFor("NUTRITION", itemTarget)).toEqual([
       "REPLACE_ITEM",
       "UPDATE_ITEM",
@@ -2874,13 +2968,37 @@ describe("Training Plan Workspace lifecycle display", () => {
     const allKeys = targets.flatMap((option) => actionKeysFor("NUTRITION", option));
     expect(allKeys).not.toContain("REPLACE_DAY");
     expect(allKeys).not.toContain("ADD_SESSION");
+    expect(allKeys).not.toContain("UPDATE_SESSION");
     expect(allKeys).not.toContain("UPDATE_SESSION_ITEMS");
-    // Nutrition vocabulary: sessions are meals, items are food items.
-    expect(fynRevisionActionLabel("NUTRITION", "UPDATE_SESSION")).toBe("Adjust meal");
+    expect(new Set(allKeys)).toEqual(
+      new Set(["ADD_ITEM", "REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"]),
+    );
+    // Nutrition vocabulary and operation mappings are item-specific.
     expect(fynRevisionActionLabel("NUTRITION", "ADD_ITEM")).toBe("Add food item");
     expect(fynRevisionActionLabel("NUTRITION", "REMOVE_ITEM")).toBe("Remove food item");
     expect(fynRevisionActionLabel("NUTRITION", "REPLACE_ITEM")).toBe("Replace food item");
-    expect(fynRevisionActionLabel("NUTRITION", "UPDATE_ITEM")).toBe("Adjust food item");
+    expect(fynRevisionActionLabel("NUTRITION", "UPDATE_ITEM")).toBe("Change food item details");
+    const itemActions = fynRevisionAvailableActions("NUTRITION", itemTarget ?? null);
+    expect(
+      itemActions.find((action) => action.label === "Change food item details")?.key,
+    ).toBe("UPDATE_ITEM");
+
+    const mealHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "NUTRITION",
+          context,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+        }),
+      ),
+    );
+    expect(mealHtml).toContain("Add food item");
+    expect(mealHtml).not.toContain("Change meal details");
+    expect(mealHtml).not.toContain("Change food item details");
+    expect(mealHtml).not.toContain("Replace food item");
+    expect(mealHtml).not.toContain("Remove food item");
   });
 
   it("offers S&C add-session only for empty days, plus session and exercise actions", () => {
@@ -3448,6 +3566,2361 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(nutritionHtml).not.toContain("Edit several drills in this session");
   });
 
+  describe("Nutrition meal-minimum guidance", () => {
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const renderForDomain = (
+      domain: "SKILLS" | "NUTRITION" | "S_AND_C",
+      scheduleDays: unknown[],
+      extra: Record<string, unknown> = {},
+    ): string => {
+      const context = makeRevisionContext({ generationDomain: domain });
+      const targets = fynRevisionLeveledTargetOptions(context, { domain, scheduleDays });
+      return renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({ domain, context, targetOptions: targets, ...extra }),
+        ),
+      );
+    };
+
+    it("mirrors the backend-confirmed meal-slot minimums as a frontend constant", () => {
+      expect(NUTRITION_MEAL_SLOT_MIN_ITEMS).toEqual({
+        BREAKFAST: 3,
+        MID_MORNING_SNACK: 2,
+        LUNCH: 4,
+        MID_AFTERNOON_SNACK: 2,
+        DINNER: 4,
+      });
+      // Only the five valid meal slots are represented.
+      expect(Object.keys(NUTRITION_MEAL_SLOT_MIN_ITEMS)).toEqual([
+        "BREAKFAST",
+        "MID_MORNING_SNACK",
+        "LUNCH",
+        "MID_AFTERNOON_SNACK",
+        "DINNER",
+      ]);
+    });
+
+    it("shows the meal-minimum guidance with exact values for Nutrition", () => {
+      const html = renderForDomain("NUTRITION", nutritionSchedule);
+      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).toContain(
+        "Meal minimums: Breakfast requires at least 3 items, mid-morning snack at least 2, " +
+          "lunch at least 4, mid-afternoon snack at least 2, and dinner at least 4. " +
+          "If removing an item would drop a meal below its minimum, replace it instead or add " +
+          "another item to the same meal.",
+      );
+    });
+
+    it("lists only the five valid meal slots and no invalid ones", () => {
+      const html = renderForDomain("NUTRITION", nutritionSchedule);
+      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      const guidance = NUTRITION_MEAL_MINIMUMS_GUIDANCE.toLowerCase();
+      for (const slot of ["breakfast", "mid-morning snack", "lunch", "mid-afternoon snack", "dinner"]) {
+        expect(guidance).toContain(slot);
+      }
+      for (const invalid of ["hydration", "recovery", "pre-training", "post-training", "anytime"]) {
+        expect(guidance).not.toContain(invalid);
+      }
+      // A bare "snack" slot (without the mid-morning/afternoon qualifier) is never introduced.
+      expect(guidance).not.toMatch(/(?<!mid-morning |mid-afternoon )snack\b/);
+    });
+
+    it("shows the Remove-carefully warning only when Remove food item is selected for Nutrition", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+
+      const withRemove = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+          }),
+        ),
+      );
+      expect(withRemove).toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+
+      const withReplace = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(withReplace).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+    });
+
+    it("does not show Nutrition meal-minimum guidance for Skills", () => {
+      const html = renderForDomain("SKILLS", skillsSchedule);
+      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).not.toContain("Meal minimums:");
+    });
+
+    it("does not show Nutrition meal-minimum guidance for S&C", () => {
+      const sandcSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Lower body",
+              items: [
+                { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+              ],
+            },
+          ],
+        },
+      ];
+      const html = renderForDomain("S_AND_C", sandcSchedule);
+      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).not.toContain("Meal minimums:");
+    });
+
+    it("does not show the Remove-carefully warning for Skills Remove", () => {
+      const context = makeRevisionContext({ generationDomain: "SKILLS" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "SKILLS",
+        scheduleDays: skillsSchedule,
+      });
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+          }),
+        ),
+      );
+      expect(html).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+    });
+  });
+
+  describe("Nutrition deterministic single-patch flow", () => {
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildNutritionTargets = () =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      // Authoritative catalog reference lives on the explicit top-level field.
+      nutritionCatalogItemId: "nut-9",
+      // Backend supplies the complete canonical item; ADD_ITEM / REPLACE_ITEM submit it verbatim.
+      item: {
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+      metadata: {
+        serving: "1 cup",
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+    };
+
+    it("maps Nutrition actions to only the four supported backend patch operations", () => {
+      expect(nutritionRevisionPatchOperation("UPDATE_SESSION")).toBeNull();
+      expect(nutritionRevisionPatchOperation("REPLACE_ITEM")).toBe("REPLACE_ITEM");
+      expect(nutritionRevisionPatchOperation("ADD_ITEM")).toBe("ADD_ITEM");
+      expect(nutritionRevisionPatchOperation("REMOVE_ITEM")).toBe("REMOVE_ITEM");
+      expect(nutritionRevisionPatchOperation("UPDATE_ITEM")).toBe("UPDATE_ITEM");
+      expect(nutritionRevisionPatchOperation("ADD_SESSION")).toBeNull();
+      expect(nutritionRevisionPatchOperation("REPLACE_DAY")).toBeNull();
+      expect(nutritionRevisionPatchOperation("UPDATE_SESSION_ITEMS")).toBeNull();
+    });
+
+    it("builds one REPLACE_ITEM patch with 1-based indices and the option's canonical item unchanged", () => {
+      const target = buildNutritionTargets().find(
+        (option) => option.level === "ITEM" && option.itemLabel === "White rice",
+      )!;
+      const patch = buildNutritionRevisionPatch({
+        target,
+        actionKey: "REPLACE_ITEM",
+        option: approvedOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(patch).toEqual({
+        operation: "REPLACE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: approvedOption.item,
+      });
+      // The canonical item is passed through by reference, never rebuilt from label/metadata.
+      expect(patch!.item).toBe(approvedOption.item);
+    });
+
+    it("uses 1-based itemIndex from the item's CURRENT array position (never item.order)", () => {
+      const targets = buildNutritionTargets();
+      const first = targets.find((o) => o.level === "ITEM" && o.itemLabel === "White rice")!;
+      const second = targets.find((o) => o.level === "ITEM" && o.itemLabel === "Juice")!;
+      expect(first.indices).toEqual({ dayIndex: 1, sessionIndex: 1, itemIndex: 1 });
+      expect(second.indices).toEqual({ dayIndex: 1, sessionIndex: 1, itemIndex: 2 });
+      expect(
+        buildNutritionRevisionPatch({ target: second, actionKey: "REMOVE_ITEM" }),
+      ).toEqual({ operation: "REMOVE_ITEM", dayIndex: 1, sessionIndex: 1, itemIndex: 2 });
+    });
+
+    it("builds one ADD_ITEM patch with no itemIndex (backend appends automatically)", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const patch = buildNutritionRevisionPatch({
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+      });
+      expect(patch).not.toHaveProperty("itemIndex");
+      expect(patch).toEqual({
+        operation: "ADD_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        item: approvedOption.item,
+      });
+      // The canonical item is passed through by reference, never rebuilt from label/metadata.
+      expect(patch!.item).toBe(approvedOption.item);
+    });
+
+    it("never builds or submits an UPDATE_SESSION patch for Nutrition", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const patch = buildNutritionRevisionPatch({
+        target: sessionTarget,
+        actionKey: "UPDATE_SESSION",
+        coachRequest: "Shift breakfast earlier.",
+      });
+      expect(patch).toBeNull();
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: sessionTarget,
+          actionKey: "UPDATE_SESSION",
+          coachRequest: "Shift breakfast earlier.",
+        }),
+      ).toBeNull();
+    });
+
+    it("returns the backend's canonical item verbatim (serving and every nutrition value preserved)", () => {
+      const item = buildNutritionRevisionOptionItem(approvedOption);
+      // Passed through by reference — nothing rebuilt from label/metadata.
+      expect(item).toBe(approvedOption.item);
+      expect(item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+      // With no canonical item the option carries no item to submit, so null is returned.
+      expect(
+        buildNutritionRevisionOptionItem({ ...approvedOption, item: undefined }),
+      ).toBeNull();
+    });
+
+    it("blocks submission until the required approved option is selected", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      expect(
+        buildNutritionRevisionPatch({ target: itemTarget, actionKey: "REPLACE_ITEM", option: null }),
+      ).toBeNull();
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: null,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: approvedOption,
+        }),
+      ).toBe(true);
+    });
+
+    it("blocks submission when no target or action is selected", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: null, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: itemTarget, actionKey: null }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({ reviseIds: null, target: itemTarget, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+    });
+
+    it("assembles a full submission with revisionPatch as the executable source of truth", () => {
+      const itemTarget = buildNutritionTargets().find(
+        (o) => o.level === "ITEM" && o.itemLabel === "White rice",
+      )!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: itemTarget,
+        actionKey: "REPLACE_ITEM",
+        option: approvedOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(submission).not.toBeNull();
+      expect(submission!.trainingPlanId).toBe("plan-1");
+      expect(submission!.versionId).toBe("ver-1");
+      // The structured patch is present and executable — the request never relies on feedback alone.
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "REPLACE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { nutritionCatalogItemId: "nut-9", label: "Oatmeal" },
+      });
+      // coachFeedback is only a human summary, not the source of truth.
+      expect(submission!.coachFeedback.trim().length).toBeGreaterThan(0);
+      expect(Object.keys(submission!)).toEqual([
+        "trainingPlanId",
+        "versionId",
+        "coachFeedback",
+        "revisionPatch",
+      ]);
+    });
+
+    it("hides the multi-change basket UI for Nutrition and shows single-patch guidance", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = buildNutritionTargets();
+      const sessionTarget = targets.find((o) => o.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: sessionTarget.key,
+            selectedActionKey: "ADD_ITEM",
+            singlePatchMode: true,
+            // A stale multi-change selection must never surface a basket in single-patch mode.
+            selection: { changes: [{ acceptedChange: "One" }, { acceptedChange: "Two" }] },
+          }),
+        ),
+      );
+      expect(html).toContain(NUTRITION_SINGLE_PATCH_GUIDANCE);
+      expect(html).not.toContain("Revision basket");
+      expect(html).not.toContain("Add to plan changes");
+      expect(html).not.toContain("You can make");
+    });
+
+    it("marks the chosen approved option chip in single-patch mode", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = buildNutritionTargets();
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+            singlePatchMode: true,
+            selectedOptionId: "opt-approved-1",
+            coachRequest: "Lighter option.",
+            optionsState: {
+              loading: false,
+              error: null,
+              message: null,
+              options: [approvedOption],
+              searched: true,
+            },
+          }),
+        ),
+      );
+      expect(html).toContain('data-selected="true"');
+      expect(html).toContain("Oatmeal");
+    });
+  });
+
+  describe("Nutrition item target submits its own current array position (no submit-time re-match)", () => {
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      nutritionCatalogItemId: "nut-9",
+      item: {
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+      metadata: { serving: "1 cup", timing: "Breakfast", notes: "High fibre" },
+    };
+    // Day 3 Breakfast renders 4 items; the stored `order` values are 0,1,2,4 and Idli is visibly the
+    // 4th item. A stale order-based index would send 5; the current array position is 4.
+    const staleOrderSchedule = [
+      {
+        dayIndex: 3,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a", serving: "1 bowl" },
+              { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b", serving: "1 cup" },
+              { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c", serving: "2 pcs" },
+              { order: 4, label: "Idli", nutritionCatalogItemId: "nut-idli", serving: "3 pcs" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+    const findItem = (scheduleDays: readonly unknown[], label: string) =>
+      buildTargets(scheduleDays).find((o) => o.level === "ITEM" && o.itemLabel === label)!;
+
+    it("submits the visible dropdown item's current array position + 1 directly", () => {
+      const banana = findItem(staleOrderSchedule, "Banana"); // 3rd item in the rendered meal
+      expect(banana.indices).toMatchObject({ dayIndex: 3, sessionIndex: 1, itemIndex: 3 });
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: banana,
+        actionKey: "REMOVE_ITEM",
+      });
+      // The submitted patch carries the dropdown target's own indices verbatim.
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "REMOVE_ITEM",
+        dayIndex: 3,
+        sessionIndex: 1,
+        itemIndex: 3,
+      });
+    });
+
+    it("submits the fourth item as itemIndex 4 even though its stored order is 4", () => {
+      const idli = findItem(staleOrderSchedule, "Idli"); // 4th item, stored order 4
+      expect(idli.indices.itemIndex).toBe(4);
+      const remove = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: idli,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(remove!.revisionPatch!.itemIndex).toBe(4);
+      expect(remove!.revisionPatch!.itemIndex).not.toBe(5);
+      // REPLACE_ITEM and UPDATE_ITEM submit the same current position.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: idli,
+          actionKey: "REPLACE_ITEM",
+          option: approvedOption,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(4);
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: idli,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 4,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(4);
+    });
+
+    it("submits the fourth item as itemIndex 4 even when the stored order is 5", () => {
+      // Order values need not be contiguous or aligned to position; position is the only truth.
+      const orderFiveSchedule = [
+        {
+          dayIndex: 3,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c" },
+                { order: 5, label: "Idli", nutritionCatalogItemId: "nut-idli" },
+              ],
+            },
+          ],
+        },
+      ];
+      const idli = findItem(orderFiveSchedule, "Idli");
+      expect(idli.indices.itemIndex).toBe(4);
+      expect(
+        buildNutritionRevisionSubmission({ reviseIds, target: idli, actionKey: "REMOVE_ITEM" })!
+          .revisionPatch!.itemIndex,
+      ).toBe(4);
+    });
+
+    it("submits correctly for an item that has no nutritionCatalogItemId", () => {
+      const noCatalogSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c" },
+                { order: 3, label: "Homemade smoothie", serving: "1 cup" },
+              ],
+            },
+          ],
+        },
+      ];
+      const smoothie = findItem(noCatalogSchedule, "Homemade smoothie");
+      expect(smoothie.target.currentId).toBeNull();
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: smoothie,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 2,
+      });
+      // No catalog id is required to submit — the position alone identifies the item.
+      expect(submission).not.toBeNull();
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 4,
+      });
+    });
+
+    it("does not block submission when label/metadata differ from any other item", () => {
+      // Two items share the label "Banana" but differ elsewhere; the SELECTED dropdown target still
+      // submits its own position with no comparison against other items.
+      const dupLabelSchedule = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Banana", nutritionCatalogItemId: "nut-x", serving: "1 large" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-y", serving: "2 small" },
+              ],
+            },
+          ],
+        },
+      ];
+      const targets = buildTargets(dupLabelSchedule).filter(
+        (o) => o.level === "ITEM" && o.itemLabel === "Banana",
+      );
+      // Each "Banana" target keeps its own distinct position and submits without being blocked.
+      expect(targets.map((o) => o.indices.itemIndex)).toEqual([1, 3]);
+      for (const target of targets) {
+        const submission = buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          // 5 differs from both bananas' servings ("1 large" / "2 small"), so neither is blocked.
+          servingTargetQuantity: 5,
+        });
+        expect(submission).not.toBeNull();
+      }
+    });
+
+    it("never produces a false 'item no longer present' block before API submission", () => {
+      // A visible, selectable dropdown item always yields a non-null submission — the frontend has
+      // no speculative pre-submit matcher that could reject it. The message copy exists only as a
+      // reaction to a real backend rejection, never as a frontend pre-check.
+      const idli = findItem(staleOrderSchedule, "Idli");
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: idli,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(submission).not.toBeNull();
+      expect(NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE).toBe(
+        "This item is no longer in the latest plan. Please select it again.",
+      );
+    });
+
+    it("uses the rebuilt dropdown's new current positions after a revision reorders the meal", () => {
+      // Before: Banana is the 3rd item -> itemIndex 3.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: findItem(staleOrderSchedule, "Banana"),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 3,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(3);
+
+      // After a successful revision the plan reloads and the dropdown is rebuilt: Banana is now the
+      // 1st item (carrying a stale order 5). The rebuilt target submits its NEW position (1).
+      const afterRevision = [
+        {
+          dayIndex: 3,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 5, label: "Banana", nutritionCatalogItemId: "nut-c", serving: "2 pcs" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-d" },
+              ],
+            },
+          ],
+        },
+      ];
+      const rebuiltBanana = findItem(afterRevision, "Banana");
+      expect(rebuiltBanana.indices.itemIndex).toBe(1);
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: rebuiltBanana,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 3,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(1);
+    });
+  });
+
+  describe("Nutrition item-level serving adjustment (UPDATE_ITEM)", () => {
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+    // A one-item breakfast whose single item carries the given serving.
+    const mealWith = (serving: string | null | undefined) => [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [{ order: 0, label: "Rice", nutritionCatalogItemId: "nut-1", serving }],
+          },
+        ],
+      },
+    ];
+    const itemTarget = (serving: string | null | undefined) =>
+      buildTargets(mealWith(serving)).find((o) => o.level === "ITEM")!;
+
+    describe("parseNutritionServing", () => {
+      it("reads quantity/unit and derives an integer step of 1", () => {
+        expect(parseNutritionServing("4 pcs")).toEqual({ quantity: 4, unit: "pcs", step: 1 });
+      });
+
+      it("preserves the decimal step (1.5 -> 0.5, 1.25 -> 0.25)", () => {
+        expect(parseNutritionServing("1.5 cups")).toEqual({
+          quantity: 1.5,
+          unit: "cups",
+          step: 0.5,
+        });
+        expect(parseNutritionServing("1.25 scoops")).toEqual({
+          quantity: 1.25,
+          unit: "scoops",
+          step: 0.25,
+        });
+      });
+
+      it("returns null for missing / unparseable / non-positive servings", () => {
+        expect(parseNutritionServing(null)).toBeNull();
+        expect(parseNutritionServing(undefined)).toBeNull();
+        expect(parseNutritionServing("")).toBeNull();
+        expect(parseNutritionServing("a handful")).toBeNull();
+        expect(parseNutritionServing("0 cups")).toBeNull();
+      });
+    });
+
+    describe("formatNutritionServingValue", () => {
+      it("recombines quantity + unit, tolerating a blank unit", () => {
+        expect(formatNutritionServingValue(5, "pcs")).toBe("5 pcs");
+        expect(formatNutritionServingValue(1.5, "cups")).toBe("1.5 cups");
+        expect(formatNutritionServingValue(2, "")).toBe("2");
+      });
+    });
+
+    describe("adjustNutritionServingQuantity", () => {
+      it("steps an integer serving by 1 up and down", () => {
+        expect(adjustNutritionServingQuantity(4, 1, 1)).toBe(5);
+        expect(adjustNutritionServingQuantity(4, 1, -1)).toBe(3);
+      });
+
+      it("steps a 1.5 serving by 0.5 without floating-point drift", () => {
+        expect(adjustNutritionServingQuantity(1.5, 0.5, 1)).toBe(2);
+        expect(adjustNutritionServingQuantity(1.5, 0.5, -1)).toBe(1);
+      });
+
+      it("never reduces a serving to zero or below", () => {
+        expect(adjustNutritionServingQuantity(1, 1, -1)).toBeNull();
+        expect(adjustNutritionServingQuantity(0.5, 0.5, -1)).toBeNull();
+      });
+    });
+
+    it("submits targetQuantity 5 on + and 3 on − for a 4 pcs serving (no replacement item)", () => {
+      const target = itemTarget("4 pcs");
+      const plus = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 5,
+      });
+      expect(plus!.revisionPatch).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        servingAdjustment: { targetQuantity: 5, servingUnit: "pcs" },
+      });
+      // UPDATE_ITEM never carries a replacement item and never invents macros.
+      expect(plus!.revisionPatch).not.toHaveProperty("item");
+      expect(plus!.coachFeedback).toBe("Change Rice serving from 4 pcs to 5 pcs.");
+
+      const minus = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 3,
+      });
+      expect(minus!.revisionPatch!.servingAdjustment).toEqual({
+        targetQuantity: 3,
+        servingUnit: "pcs",
+      });
+      expect(minus!.revisionPatch).not.toHaveProperty("item");
+      expect(minus!.coachFeedback).toBe("Change Rice serving from 4 pcs to 3 pcs.");
+    });
+
+    it("adjusts a 1.5 cups serving using its 0.5 step", () => {
+      const target = itemTarget("1.5 cups");
+      const parsed = parseNutritionServing(target.serving);
+      expect(parsed!.step).toBe(0.5);
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: adjustNutritionServingQuantity(1.5, parsed!.step, 1)!,
+      });
+      expect(submission!.revisionPatch!.servingAdjustment).toEqual({
+        targetQuantity: 2,
+        servingUnit: "cups",
+      });
+      expect(submission!.coachFeedback).toBe("Change Rice serving from 1.5 cups to 2 cups.");
+    });
+
+    it("cannot reduce a 1-unit serving to zero", () => {
+      const target = itemTarget("1 cup");
+      expect(adjustNutritionServingQuantity(1, 1, -1)).toBeNull();
+      // Submitting 0 (or below) is blocked deterministically.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 0,
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks Apply when the serving is unchanged, unparseable, or missing", () => {
+      const target = itemTarget("4 pcs");
+      // Unchanged quantity -> blocked.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 4,
+        }),
+      ).toBeNull();
+      // No target quantity chosen yet -> blocked (Apply disabled until stepped).
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target, actionKey: "UPDATE_ITEM" }),
+      ).toBe(false);
+      // Unparseable serving -> blocked even with a chosen quantity.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: itemTarget("a handful"),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 2,
+        }),
+      ).toBeNull();
+      expect(buildNutritionServingAdjustment(itemTarget("a handful"), 2)).toBeNull();
+      // Missing serving -> blocked.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: itemTarget(null),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 2,
+        }),
+      ).toBeNull();
+    });
+
+    it("leaves REMOVE_ITEM unchanged (no servingAdjustment)", () => {
+      // A 4-item breakfast so REMOVE_ITEM stays eligible.
+      const fullMeal = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Rice", nutritionCatalogItemId: "nut-1", serving: "1 cup" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-2", serving: "1 cup" },
+                { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3", serving: "2 pcs" },
+                { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4", serving: "1 slice" },
+              ],
+            },
+          ],
+        },
+      ];
+      const targets = buildTargets(fullMeal);
+      const itemLevel = targets.find((o) => o.level === "ITEM")!;
+      // REMOVE_ITEM: bare item op, no servingAdjustment / item.
+      const remove = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: itemLevel,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(remove!.revisionPatch).not.toHaveProperty("servingAdjustment");
+      expect(remove!.revisionPatch).not.toHaveProperty("item");
+    });
+
+    it("renders the serving stepper for UPDATE_ITEM and hides the free-text input", () => {
+      const targets = buildTargets(mealWith("4 pcs"));
+      const itemLevel = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            singlePatchMode: true,
+            targetOptions: targets,
+            selectedTargetKey: itemLevel.key,
+            selectedActionKey: "UPDATE_ITEM",
+            servingStepper: { quantity: 4, unit: "pcs", canDecrement: true },
+          }),
+        ),
+      );
+      expect(html).toContain("fyn-nutrition-serving-stepper");
+      expect(html).toContain("4 pcs");
+      expect(html).toContain("Increase serving");
+      expect(html).toContain("Decrease serving");
+      // The free-text input and option search are removed for this action.
+      expect(html).not.toContain("Tell Fyn what to change");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    });
+
+    it("keeps the free-text input for non-serving Nutrition actions (ADD_ITEM)", () => {
+      const targets = buildTargets(mealWith("4 pcs"));
+      const sessionLevel = targets.find((o) => o.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            singlePatchMode: true,
+            targetOptions: targets,
+            selectedTargetKey: sessionLevel.key,
+            selectedActionKey: "ADD_ITEM",
+          }),
+        ),
+      );
+      expect(html).toContain("Tell Fyn what to change");
+      expect(html).not.toContain("fyn-nutrition-serving-stepper");
+    });
+  });
+
+  describe("Nutrition Plan Review display after revision", () => {
+    const makeBananaMilkshakeDraft = (
+      nutrients: {
+        calories: number;
+        protein: number;
+        carbs: number;
+        fat: number;
+        fiber: number;
+      },
+      version: { versionNumber: number; versionId: string },
+    ): CoachAthleteLatestDomainDraft => {
+      const rawItem = {
+        label: "Banana milkshake",
+        serving: "2 glass",
+        calories: nutrients.calories,
+        caloriesKcal: nutrients.calories,
+        protein: nutrients.protein,
+        proteinG: nutrients.protein,
+        proteinGrams: nutrients.protein,
+        carbs: nutrients.carbs,
+        carbsG: nutrients.carbs,
+        carbsGrams: nutrients.carbs,
+        carbohydrateG: nutrients.carbs,
+        fat: nutrients.fat,
+        fatG: nutrients.fat,
+        fatGrams: nutrients.fat,
+        fiberGrams: nutrients.fiber,
+        fiberG: nutrients.fiber,
+      };
+      const parsed = parseGeneratedDraftItem(rawItem)!;
+      return {
+        trainingPlanId: "plan-1",
+        trainingPlanVersionId: version.versionId,
+        versionNumber: version.versionNumber,
+        status: "AI_GENERATED",
+        source: null,
+        revision: null,
+        durationDays: null,
+        daysCreated: null,
+        sessionsCreated: null,
+        itemsPersisted: null,
+        days: [
+          {
+            dayIndex: 1,
+            date: null,
+            dayFocus: null,
+            notes: null,
+            estimatedDailyCalories: null,
+            targetCalorieMin: null,
+            targetCalorieMax: null,
+            calorieAdequacyStatus: null,
+            estimatedCarbohydrateGrams: null,
+            targetCarbohydrateMinGrams: null,
+            targetCarbohydrateMaxGrams: null,
+            estimatedProteinGrams: null,
+            targetProteinMinGrams: null,
+            targetProteinMaxGrams: null,
+            estimatedFatGrams: null,
+            targetFatMinGrams: null,
+            targetFatMaxGrams: null,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Snacks",
+                objective: null,
+                plannedDurationMinutes: null,
+                intensity: null,
+                items: [parsed],
+              },
+            ],
+          },
+        ],
+        raw: {
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [{ sessionIndex: 1, title: "Snacks", items: [rawItem] }],
+            },
+          ],
+        },
+      };
+    };
+
+    const readDisplayedBananaMilkshake = (draft: CoachAthleteLatestDomainDraft) => {
+      const item = draft.days[0]!.sessions[0]!.items[0]! as unknown as Record<string, unknown>;
+      const rawItem = (draft.raw as { days: Array<{ sessions: Array<{ items: unknown[] }> }> })
+        .days[0]!.sessions[0]!.items[0] as Record<string, unknown>;
+      return {
+        serving: formatNutritionServingDisplay(item, rawItem),
+        calories: readNutritionMetricValue(item, rawItem, "calories"),
+        protein: readNutritionMetricValue(item, rawItem, "protein"),
+        carbs: readNutritionMetricValue(item, rawItem, "carbs"),
+        fat: readNutritionMetricValue(item, rawItem, "fat"),
+        fiber: readNutritionMetricValue(item, rawItem, "fiber"),
+      };
+    };
+
+    const makeBananaMilkshakeActiveDetail = (
+      nutrients: {
+        calories: number;
+        protein: number;
+        carbs: number;
+        fat: number;
+        fiber: number;
+      },
+      version: { versionNumber: number; versionId: string },
+    ): CoachPersistedTrainingPlanActiveDetail => {
+      const rawItem = {
+        label: "Banana milkshake",
+        serving: "2 glass",
+        calories: nutrients.calories,
+        protein: nutrients.protein,
+        carbs: nutrients.carbs,
+        fat: nutrients.fat,
+        fiber: nutrients.fiber,
+      };
+      const parsed = parseGeneratedDraftItem(rawItem)!;
+      return {
+        selectedVersionRule: "ACTIVE_VERSION",
+        generationDomain: "NUTRITION",
+        allowedActions: ["REQUEST_REVISION"],
+        releaseMode: null,
+        constraintComplianceSummary: null,
+        plan: {
+          id: "plan-1",
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          status: "AI_GENERATED",
+        },
+        version: {
+          id: version.versionId,
+          trainingPlanId: "plan-1",
+          versionNumber: version.versionNumber,
+          status: "AI_GENERATED",
+          createdAt: null,
+          submittedAt: null,
+          approvedAt: null,
+          releasedAt: null,
+          startDate: null,
+          endDate: null,
+        },
+        days: [
+          {
+            id: "day-1",
+            date: null,
+            dayIndex: 1,
+            weekNumber: null,
+            isRestDay: null,
+            plannedLoadMinutes: null,
+            notes: null,
+            trainingPlanVersionId: version.versionId,
+            sessions: [
+              {
+                id: "session-1",
+                trainingDayId: "day-1",
+                title: "Snacks",
+                description: null,
+                plannedStartTime: null,
+                plannedEndTime: null,
+                plannedDurationMinutes: null,
+                sessionOrder: null,
+                sessionType: null,
+                assignedCoachId: null,
+                objective: null,
+                intensity: null,
+                sessionStructureSections: [{ key: "items", items: [parsed], raw: { items: [rawItem] } }],
+                sessionStructureRaw: { items: { items: [rawItem] } },
+              },
+            ],
+          },
+        ],
+        raw: {
+          days: [
+            {
+              id: "day-1",
+              sessions: [
+                {
+                  id: "session-1",
+                  sessionStructure: { items: { items: [rawItem] } },
+                },
+              ],
+            },
+          ],
+        },
+      } as CoachPersistedTrainingPlanActiveDetail;
+    };
+
+    const readDisplayedBananaMilkshakeFromActiveDetail = (
+      detail: CoachPersistedTrainingPlanActiveDetail,
+    ) => {
+      const section = detail.days[0]!.sessions[0]!.sessionStructureSections[0]!;
+      const item = section.items[0]! as unknown as Record<string, unknown>;
+      const rawItem = (section.raw as { items: unknown[] }).items[0] as Record<string, unknown>;
+      return {
+        serving: formatNutritionServingDisplay(item, rawItem),
+        calories: readNutritionMetricValue(item, rawItem, "calories"),
+        protein: readNutritionMetricValue(item, rawItem, "protein"),
+        carbs: readNutritionMetricValue(item, rawItem, "carbs"),
+        fat: readNutritionMetricValue(item, rawItem, "fat"),
+        fiber: readNutritionMetricValue(item, rawItem, "fiber"),
+      };
+    };
+
+    it("replaces stale in-memory nutrients when the same version id is refetched", () => {
+      const stale = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const refetched = makeBananaMilkshakeDraft(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const next = resolveNewerDomainReviewDraft(stale, refetched);
+      expect(next).toBe(refetched);
+      expect(readDisplayedBananaMilkshake(next!)).toMatchObject({
+        serving: "2 glass",
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+        fiber: 2,
+      });
+    });
+
+    it("same-version active/detail refetch replaces stale Nutrition nutrients immediately", () => {
+      const stale = makeBananaMilkshakeActiveDetail(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const refetched = makeBananaMilkshakeActiveDetail(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(
+        resolveHeadCoachReviewActiveDetailAfterRefresh({
+          refreshedActiveDetail: refetched,
+          previousActiveDetail: stale,
+          summaryPlanId: "plan-1",
+          preservePreviousDetail: true,
+        }),
+      ).toBe(refetched);
+      expect(readDisplayedBananaMilkshakeFromActiveDetail(refetched)).toMatchObject({
+        serving: "2 glass",
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+        fiber: 2,
+      });
+    });
+
+    it("renders Nutrition active/detail over stale latest-domain-draft immediately and after reopen", () => {
+      const staleDraft = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const freshActiveDetail = makeBananaMilkshakeActiveDetail(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const resolveSource = () =>
+        resolveDomainReviewDrawerContentSource({
+          domain: "NUTRITION",
+          workflowStatus: "revision_requested",
+          directReleaseSkillsOwner: false,
+          activeDetail: freshActiveDetail,
+          latestDraft: staleDraft,
+        });
+
+      expect(resolveSource()).toBe("active_detail");
+      // Reopening the drawer runs the same resolver with the same state shape: active/detail remains
+      // authoritative and the stale draft cannot take the render path back.
+      expect(resolveSource()).toBe("active_detail");
+      expect(readDisplayedBananaMilkshakeFromActiveDetail(freshActiveDetail)).toMatchObject({
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+      });
+    });
+
+    it("keys the active/detail schedule by persisted plan version", () => {
+      const detail = makeBananaMilkshakeActiveDetail(
+        { calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(domainReviewActiveDetailRenderKey(detail)).toBe("plan-1:ver-19:19");
+    });
+
+    it("prefers the fresher per-domain full-plan reload over a stale global latestSkillsDraft slot", () => {
+      const staleGlobal = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const freshPerDomain = makeBananaMilkshakeDraft(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const displayed = resolveLatestDraftForDomainReview("NUTRITION", {
+        isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+        headCoachOwnedSkillsDraft: null,
+        latestDraftDisplayDomain: "NUTRITION",
+        latestSkillsDraft: staleGlobal,
+        perDomainLatestDraft: freshPerDomain,
+      });
+      expect(displayed).toBe(freshPerDomain);
+      expect(readDisplayedBananaMilkshake(displayed!)).toMatchObject({
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+      });
+    });
+
+    it("keys the rendered schedule by plan version so a refetched draft remounts", () => {
+      const draft = makeBananaMilkshakeDraft(
+        { calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(domainReviewDraftRenderKey(draft)).toBe("plan-1:ver-19:19");
+    });
+
+    // The confirmed Banana Milkshake conflict: the revised candidate carries BOTH the stale base
+    // fields (calories/protein/carbs/fat) and the newer scaled runtime aliases (*Kcal / *G). The
+    // parser must normalize each nutrient scaled-first so the stale base fields can never win.
+    const revisedBananaMilkshakeRaw = {
+      label: "Banana milkshake",
+      serving: "2 glass",
+      calories: 65,
+      caloriesKcal: 130,
+      protein: 1.8,
+      proteinG: 3.6,
+      carbs: 9.1,
+      carbohydrateG: 18.2,
+      fat: 2.4,
+      fatG: 4.8,
+      fiberGrams: 2,
+    };
+
+    it("normalizes each nutrient scaled-first in the parsed item so stale base fields never win", () => {
+      const parsed = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)!;
+      expect(parsed.serving).toBe("2 glass");
+      expect(parsed.calories).toBe(130);
+      expect(parsed.protein).toBe(3.6);
+      expect(parsed.carbs).toBe(18.2);
+      expect(parsed.fat).toBe(4.8);
+      expect(parsed.fiber).toBe(2);
+    });
+
+    it("immediately shows the revised serving/calories/macros from the normalized parsed item", () => {
+      const parsed = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)! as unknown as Record<
+        string,
+        unknown
+      >;
+      // The render reads the normalized parsed item first; the raw item's stale base fields (65/1.8/
+      // 9.1/2.4) must not override the scaled values already resolved into the parsed item.
+      expect(formatNutritionServingDisplay(parsed, revisedBananaMilkshakeRaw)).toBe("2 glass");
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "calories")).toBe(130);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "protein")).toBe(3.6);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "carbs")).toBe(18.2);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "fat")).toBe(4.8);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "fiber")).toBe(2);
+      // Daily totals roll up the same normalized values (no frontend recalculation).
+      const totals = summarizeNutritionItems([{ item: parsed, rawItem: revisedBananaMilkshakeRaw }]);
+      expect(totals).toEqual({ calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 });
+    });
+
+    it("falls back to canonical-only items when scaled runtime aliases are absent", () => {
+      // A canonical/base-only item (no *G / caloriesKcal aliases) must still parse and render.
+      const canonicalOnly = parseGeneratedDraftItem({
+        label: "Oatmeal",
+        serving: "1 bowl",
+        calories: 500,
+        protein: 20,
+        carbs: 60,
+        fat: 12,
+        fiber: 8,
+      })!;
+      expect(canonicalOnly.calories).toBe(500);
+      expect(canonicalOnly.protein).toBe(20);
+      expect(canonicalOnly.carbs).toBe(60);
+      expect(canonicalOnly.fat).toBe(12);
+      expect(canonicalOnly.fiber).toBe(8);
+    });
+
+    it("prefers each scaled runtime alias over its base field during normalization", () => {
+      const scaledOnly = parseGeneratedDraftItem({
+        label: "Shake",
+        proteinGrams: 20,
+        carbsGrams: 60,
+        fatGrams: 12,
+        fiberGrams: 8,
+      })!;
+      expect(scaledOnly.protein).toBe(20);
+      expect(scaledOnly.carbs).toBe(60);
+      expect(scaledOnly.fat).toBe(12);
+      expect(scaledOnly.fiber).toBe(8);
+    });
+
+    it("preserves the existing nutrient aliases in the raw display fallback", () => {
+      const legacyItem = {
+        calories: 500,
+        proteinGrams: 20,
+        carbsGrams: 60,
+        fatGrams: 12,
+        fiberGrams: 8,
+      };
+      expect(readNutritionMetricValue(null, legacyItem, "calories")).toBe(500);
+      expect(readNutritionMetricValue(null, legacyItem, "protein")).toBe(20);
+      expect(readNutritionMetricValue(null, legacyItem, "carbs")).toBe(60);
+      expect(readNutritionMetricValue(null, legacyItem, "fat")).toBe(12);
+      expect(readNutritionMetricValue(null, legacyItem, "fiber")).toBe(8);
+    });
+
+    it("does not overwrite displayed nutrients from the sparse revision-context targetMap", () => {
+      // The sparse revision-context targetMap carries only target metadata (id/index/label/serving/
+      // timing) — never nutrients.
+      const sparseContext = makeRevisionContext({
+        generationDomain: "NUTRITION",
+        draft: null,
+        targetMap: {
+          days: [
+            {
+              dayKey: "1",
+              dayLabel: "Day 1",
+              sessions: [
+                {
+                  sessionKey: "1",
+                  sessionLabel: "Snacks",
+                  items: [
+                    { itemKey: "0", label: "Banana milkshake", serving: "2 glass", timing: "Snack" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      // The complete latest plan the drawer renders below the Fyn panel carries full nutrients.
+      const fullPlanDays = [
+        {
+          dayIndex: 1,
+          sessions: [{ sessionIndex: 1, title: "Snacks", items: [revisedBananaMilkshakeRaw] }],
+        },
+      ];
+      const targets = fynRevisionLeveledTargetOptions(sparseContext, {
+        domain: "NUTRITION",
+        scheduleDays: fullPlanDays,
+      });
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      // The dropdown target rebuilds from the sparse context (serving/label only) and never carries
+      // nutrients that could bleed into the displayed plan.
+      expect(itemTarget.serving).toBe("2 glass");
+      expect(itemTarget).not.toHaveProperty("calories");
+      expect(itemTarget).not.toHaveProperty("caloriesKcal");
+      // The displayed nutrients still come from the complete plan item, unaffected by the context.
+      const parsedFromPlan = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)! as unknown as Record<
+        string,
+        unknown
+      >;
+      expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "calories")).toBe(130);
+      expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "protein")).toBe(3.6);
+    });
+
+    it("rebuilds the dropdown from the latest context only after the full plan reload, keeping the drawer open", async () => {
+      const events: string[] = [];
+      // Mirrors the success-path orchestration: the full plan reloads first, THEN the sparse
+      // revision-context reloads to rebuild the dropdown targets. The refresh takes no close signal,
+      // so the drawer stays open across the rebuild.
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("full-plan");
+        },
+        rebuildTargetOptions: async () => {
+          events.push("revision-context");
+        },
+      });
+      expect(events).toEqual(["full-plan", "revision-context"]);
+    });
+  });
+
+  describe("Nutrition option canonical item mapping", () => {
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+          },
+        ],
+      },
+    ];
+    const buildNutritionTargets = () =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const canonicalItem = {
+      nutritionCatalogItemId: "nut-9",
+      itemType: "NUTRITION",
+      label: "Oatmeal",
+      serving: "1 cup",
+      calories: 320,
+      protein: 12,
+      carbs: 54,
+      fat: 6,
+      fiber: 8,
+      timing: "Breakfast",
+      notes: "High fibre",
+    };
+    const baseOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      nutritionCatalogItemId: "nut-9",
+      item: canonicalItem,
+      metadata: { serving: "1 cup", timing: "Breakfast", notes: "High fibre" },
+    };
+
+    it("reads the catalog id only from the authoritative top-level field", () => {
+      expect(nutritionOptionCatalogId(baseOption)).toBe("nut-9");
+      // Never inferred from metadata.catalogItemId / metadata.itemId / label / option.id.
+      expect(
+        nutritionOptionCatalogId({
+          ...baseOption,
+          nutritionCatalogItemId: undefined,
+          metadata: { catalogItemId: "meta-x", itemId: "meta-y" },
+        }),
+      ).toBeNull();
+    });
+
+    it("REPLACE_ITEM sends the option's canonical item unchanged (serving + nutrition preserved)", () => {
+      const target = buildNutritionTargets().find(
+        (o) => o.level === "ITEM" && o.itemLabel === "White rice",
+      )!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "REPLACE_ITEM",
+        option: baseOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(submission!.revisionPatch!.item).toBe(canonicalItem);
+      expect(submission!.revisionPatch!.item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+    });
+
+    it("ADD_ITEM sends the option's canonical item unchanged (serving + nutrition preserved)", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: baseOption,
+      });
+      expect(submission!.revisionPatch!.item).toBe(canonicalItem);
+      expect(submission!.revisionPatch!.item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+    });
+
+    it("blocks Apply Revision when a chosen ADD_ITEM/REPLACE_ITEM option lacks the canonical item", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const optionWithoutItem = { ...baseOption, item: undefined };
+      // No structured patch can be built, so the submission (and Apply) stays blocked.
+      expect(
+        buildNutritionRevisionPatch({
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBeNull();
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: sessionTarget,
+          actionKey: "ADD_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      // The dedicated hint fires only when an option is actually chosen.
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(true);
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: null,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: baseOption,
+        }),
+      ).toBe(false);
+      // Operations that carry no approved option are unaffected.
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REMOVE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      expect(NUTRITION_OPTION_MISSING_CATALOG_MESSAGE).toContain("missing its item details");
+    });
+  });
+
+  describe("Nutrition REMOVE_ITEM meal-minimum eligibility", () => {
+    const buildMeal = (title: string, itemCount: number) => [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title,
+            items: Array.from({ length: itemCount }, (_unused, index) => ({
+              order: index,
+              label: `Food ${index + 1}`,
+              nutritionCatalogItemId: `nut-${index + 1}`,
+            })),
+          },
+        ],
+      },
+    ];
+    const targetsFor = (title: string, itemCount: number) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: buildMeal(title, itemCount),
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+
+    it("maps meal labels to canonical slots and minimums (single source of truth)", () => {
+      expect(nutritionMealSlotKeyFromLabel("Breakfast")).toBe("BREAKFAST");
+      expect(nutritionMealSlotKeyFromLabel("Mid-morning snack")).toBe("MID_MORNING_SNACK");
+      expect(nutritionMealSlotKeyFromLabel("MID_AFTERNOON_SNACK")).toBe("MID_AFTERNOON_SNACK");
+      expect(nutritionMealSlotKeyFromLabel("Second lunch")).toBeNull();
+      expect(nutritionMealSlotMinItems("Lunch")).toBe(4);
+      expect(nutritionMealSlotMinItems("Dinner")).toBe(4);
+      expect(nutritionMealSlotMinItems("Breakfast")).toBe(3);
+      // Unrecognised meals fall back to the "never remove the last item" floor.
+      expect(nutritionMealSlotMinItems("Hydration")).toBe(1);
+    });
+
+    it("enables Remove food item when the meal has more items than its minimum", () => {
+      // Breakfast minimum is 3; 4 items leaves room to remove one.
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", aboveMin)).toContain("REMOVE_ITEM");
+    });
+
+    it("disables Remove food item when the meal is exactly at its minimum", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", atMin)).not.toContain("REMOVE_ITEM");
+    });
+
+    it("keeps Replace food item available at the minimum", () => {
+      // Lunch minimum is 4; at exactly 4 items Remove is blocked but Replace/Update remain.
+      const atMin = targetsFor("Lunch", 4).find((o) => o.level === "ITEM")!;
+      const keys = actionKeysFor("NUTRITION", atMin);
+      expect(keys).toContain("REPLACE_ITEM");
+      expect(keys).toContain("UPDATE_ITEM");
+      expect(keys).not.toContain("REMOVE_ITEM");
+    });
+
+    it("shows the exact minimum message when an item's meal is at the minimum", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = targetsFor("Breakfast", 3);
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(html).toContain(nutritionRemoveItemMinimumMessage(3));
+      expect(html).toContain(
+        "This meal must contain at least 3 items. Replace this item instead of removing it.",
+      );
+      // Replace stays offered; Remove is not offered as an action at the minimum.
+      expect(html).toContain("Replace food item");
+      expect(html).not.toContain("Remove food item");
+    });
+
+    it("does not show the minimum message (and offers Remove) above the minimum", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = targetsFor("Breakfast", 4);
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(html).not.toContain("This meal must contain at least");
+      expect(html).toContain("Remove food item");
+    });
+
+    it("never builds (or allows submitting) a REMOVE_ITEM patch at the minimum", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      expect(buildNutritionRevisionPatch({ target: atMin, actionKey: "REMOVE_ITEM" })).toBeNull();
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: atMin, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+      // Above the minimum a REMOVE_ITEM patch is still produced exactly as before.
+      expect(
+        buildNutritionRevisionPatch({ target: aboveMin, actionKey: "REMOVE_ITEM" }),
+      ).toMatchObject({ operation: "REMOVE_ITEM", dayIndex: 1, sessionIndex: 1, itemIndex: 1 });
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: aboveMin, actionKey: "REMOVE_ITEM" }),
+      ).toBe(true);
+    });
+
+    it("nutritionRemoveItemMinimumNotice fires only for at-minimum Nutrition items", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      const sessionTarget = targetsFor("Breakfast", 3).find((o) => o.level === "SESSION")!;
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", atMin)).toBe(
+        "This meal must contain at least 3 items. Replace this item instead of removing it.",
+      );
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", aboveMin)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", sessionTarget)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("SKILLS", atMin)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", null)).toBeNull();
+    });
+
+    it("leaves S&C REMOVE_ITEM gating unchanged (last-item rule, not meal minimums)", () => {
+      const sandcTargets = (itemCount: number) =>
+        fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "S_AND_C" }), {
+          domain: "S_AND_C",
+          scheduleDays: [
+            {
+              dayIndex: 1,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  title: "Lower body",
+                  items: Array.from({ length: itemCount }, (_unused, index) => ({
+                    order: index,
+                    label: `Exercise ${index + 1}`,
+                    exerciseCatalogItemId: `ex-${index + 1}`,
+                  })),
+                },
+              ],
+            },
+          ],
+        });
+      // Two exercises: Remove allowed (> 1). One exercise: hidden. Meal minimums never apply to S&C.
+      expect(
+        actionKeysFor("S_AND_C", sandcTargets(2).find((o) => o.level === "ITEM")),
+      ).toContain("REMOVE_ITEM");
+      expect(
+        actionKeysFor("S_AND_C", sandcTargets(1).find((o) => o.level === "ITEM")),
+      ).not.toContain("REMOVE_ITEM");
+    });
+  });
+
+  describe("Nutrition sequential revision version handling", () => {
+    // Confirmed backend fixture.
+    const trainingPlanId = "a7273ff0-35a2-4d79-b940-059ef7d8def8";
+    const V1 = "46efdb36-cbbc-463d-a0be-1c4c2a2c6d2d";
+    const V2 = "ce8e318f-c281-4e3d-871f-e6a432e2b506";
+    const V3 = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    // The drawer renders version 2, so the plan/version object it exposes carries V2.
+    const drawerRenderedReviseIds = { trainingPlanId, versionId: V2 };
+
+    it("submits the drawer-displayed V2 id for the first revision (current fixture)", () => {
+      // No pin yet: the request uses the exact version rendered in the drawer (V2), not V1.
+      const effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)!;
+      expect(effective.versionId).toBe("ce8e318f-c281-4e3d-871f-e6a432e2b506");
+      expect(effective.trainingPlanId).toBe(trainingPlanId);
+    });
+
+    it("chains V2 -> V3 using each response's trainingPlanVersionId", () => {
+      const submittedVersions: string[] = [];
+      let activePin: { trainingPlanId: string; versionId: string } | null = null;
+
+      // Revision 1: drawer shows V2, no pin -> submits V2.
+      let effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, activePin)!;
+      submittedVersions.push(effective.versionId);
+      // The V2 revision responds with V3 -> pinned as the authoritative next version.
+      const afterV2 = nextNutritionRevisionVersionId({ versionId: V3 });
+      activePin = afterV2 === null ? null : { trainingPlanId, versionId: afterV2 };
+
+      // Revision 2: submits V3 (pinned), even though the drawer base is still V2.
+      effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, activePin)!;
+      submittedVersions.push(effective.versionId);
+
+      expect(submittedVersions).toEqual([V2, V3]);
+      expect(effective.trainingPlanId).toBe(trainingPlanId);
+    });
+
+    it("never lets a stale workspace V1 override the displayed V2", () => {
+      // The resolver is fed ONLY the drawer-rendered ids (V2) and the pin — never workspace state.
+      // A stale pin belonging to a DIFFERENT plan (e.g. a lingering V1 from another plan) is ignored.
+      const stalePinDifferentPlan = { trainingPlanId: "some-other-plan", versionId: V1 };
+      expect(
+        resolveActiveNutritionReviseIds(drawerRenderedReviseIds, stalePinDifferentPlan)!.versionId,
+      ).toBe(V2);
+      // With no pin at all, the displayed V2 is used (V1 can never surface here).
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)!.versionId).toBe(V2);
+    });
+
+    it("keeps the pinned version across selection reset / revise-another (pin persists)", () => {
+      // After the V2 revision returns V3, the pin is V3 for the same plan. Selection reset does not
+      // touch the pin (it is only cleared when the drawer closes), so subsequent resolves — the ones
+      // that happen after a reset / "Revise another item" — still submit V3.
+      const pinV3 = { trainingPlanId, versionId: V3 };
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, pinV3)!.versionId).toBe(V3);
+      // Idempotent across repeated resolves (models repeated renders after a reset).
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, pinV3)!.versionId).toBe(V3);
+    });
+
+    it("reads the next version from the revise response (versionId), ignoring blanks", () => {
+      expect(nextNutritionRevisionVersionId({ versionId: V2 })).toBe(V2);
+      expect(nextNutritionRevisionVersionId({ versionId: `  ${V2}  ` })).toBe(V2);
+      expect(nextNutritionRevisionVersionId({ versionId: "" })).toBeNull();
+      expect(nextNutritionRevisionVersionId({ versionId: null })).toBeNull();
+      expect(nextNutritionRevisionVersionId(null)).toBeNull();
+      expect(nextNutritionRevisionVersionId(undefined)).toBeNull();
+    });
+
+    it("uses the drawer-rendered ids before the first successful revision (no pin)", () => {
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)).toEqual(
+        drawerRenderedReviseIds,
+      );
+      // A pin missing a version is ignored (falls back to the rendered ids).
+      expect(
+        resolveActiveNutritionReviseIds(drawerRenderedReviseIds, {
+          trainingPlanId,
+          versionId: "   ",
+        }),
+      ).toEqual(drawerRenderedReviseIds);
+      // No rendered base -> nothing to submit.
+      expect(
+        resolveActiveNutritionReviseIds(null, { trainingPlanId, versionId: V2 }),
+      ).toBeNull();
+    });
+  });
+
+  describe("Nutrition deterministic stale-version rejection", () => {
+    const staleError = {
+      message:
+        "This plan has changed since it was opened. Reload the latest plan before applying another revision.",
+      status: 409,
+      code: "TRAINING_PLAN_REVISION_STALE_VERSION",
+      details: { code: "TRAINING_PLAN_REVISION_STALE_VERSION" },
+    };
+
+    it("detects the stale-version rejection by its backend message", () => {
+      expect(isNutritionStaleVersionRevisionError(staleError)).toBe(true);
+      // Match on the stable message even when no code is present.
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: NUTRITION_STALE_VERSION_MESSAGE,
+          status: 409,
+        }),
+      ).toBe(true);
+      // Match defensively on a stale-version code even if the message differs.
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: "Conflict",
+          status: 409,
+          code: "STALE_VERSION",
+        }),
+      ).toBe(true);
+    });
+
+    it("does not treat unrelated errors as stale-version rejections", () => {
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: "Unable to revise plan.",
+          status: 500,
+        }),
+      ).toBe(false);
+      expect(isNutritionStaleVersionRevisionError(new Error("boom"))).toBe(false);
+      expect(isNutritionStaleVersionRevisionError(null)).toBe(false);
+    });
+
+    it("surfaces the backend stale-version message and requires reload + reselection", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome(staleError);
+      expect(outcome.kind).toBe("STALE_VERSION");
+      // The drawer shows the live backend message verbatim.
+      expect(outcome.message).toBe(staleError.message);
+      // Latest Nutrition plan/version is reloaded and the stale selection is cleared.
+      expect(outcome.reloadLatest).toBe(true);
+      expect(outcome.clearSelection).toBe(true);
+      // The previously submitted revisionPatch is never automatically retried.
+      expect(outcome.retryRevisionPatch).toBe(false);
+    });
+
+    it("falls back to the canonical message when the backend omits a body message", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "",
+        status: 409,
+        code: "STALE_VERSION",
+      });
+      expect(outcome.kind).toBe("STALE_VERSION");
+      expect(outcome.message).toBe(NUTRITION_STALE_VERSION_MESSAGE);
+    });
+
+    it("leaves the normal successful revision flow untouched for non-stale errors", () => {
+      // A generic API failure must not reload the plan or clear the coach's selection,
+      // so the existing success/reload behaviour is unaffected by the stale-version handling.
+      const generic = resolveNutritionRevisionErrorOutcome({
+        message: "Server exploded",
+        status: 500,
+        code: "INTERNAL",
+      });
+      expect(generic.kind).toBe("GENERIC");
+      expect(generic.reloadLatest).toBe(false);
+      expect(generic.clearSelection).toBe(false);
+      expect(generic.retryRevisionPatch).toBe(false);
+      expect(generic.message).toBe("Revision failed: Server exploded (INTERNAL)");
+    });
+  });
+
+  describe("Nutrition interrupted revision handling", () => {
+    const nutritionScheduleWithToast = [
+      {
+        dayKey: "1",
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionKey: "1",
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", itemKey: "0" },
+              { order: 1, label: "Juice", itemKey: "1" },
+              { order: 2, label: "Eggs", itemKey: "2" },
+              { order: 3, label: "Toast", itemKey: "3" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const nutritionScheduleWithoutToast = [
+      {
+        dayKey: "1",
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionKey: "1",
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", itemKey: "0" },
+              { order: 1, label: "Juice", itemKey: "1" },
+              { order: 2, label: "Eggs", itemKey: "2" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    function toastRemoveTarget() {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "NUTRITION",
+        scheduleDays: nutritionScheduleWithToast,
+      });
+      return targets.find((option) => option.itemLabel === "Toast")!;
+    }
+
+    it("locks Apply, Cancel, and Close while a Nutrition revision submit is pending", () => {
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: true,
+          reviseLoading: true,
+        }),
+      ).toBe(true);
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: true,
+          reviseLoading: false,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: false,
+          reviseLoading: true,
+        }),
+      ).toBe(false);
+    });
+
+    it("detects timeout and unknown-outcome transport failures as interrupted", () => {
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Request timed out",
+          status: 0,
+        }),
+      ).toBe(true);
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Failed to fetch",
+          status: 0,
+        }),
+      ).toBe(true);
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Server exploded",
+          status: 500,
+        }),
+      ).toBe(false);
+    });
+
+    it("requires reload, selection clear, and no automatic patch retry on timeout", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "Request timed out",
+        status: 0,
+      });
+      expect(outcome.kind).toBe("INTERRUPTED");
+      expect(outcome.reloadLatest).toBe(true);
+      expect(outcome.clearSelection).toBe(true);
+      expect(outcome.retryRevisionPatch).toBe(false);
+      expect(outcome.message).toBe("Request timed out");
+    });
+
+    it("shows Revision was already applied when the REMOVE_ITEM target is absent after reload", () => {
+      const priorTarget = toastRemoveTarget();
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithToast, priorTarget),
+      ).toBe(true);
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithoutToast, priorTarget),
+      ).toBe(false);
+    });
+
+    it("requires a fresh selection when the REMOVE_ITEM target is still present after reload", () => {
+      const priorTarget = toastRemoveTarget();
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "Request timed out",
+        status: 0,
+      });
+      expect(outcome.clearSelection).toBe(true);
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithToast, priorTarget),
+      ).toBe(true);
+    });
+
+    it("uses the applying revision copy for the pending state", () => {
+      expect(NUTRITION_REVISION_APPLYING_MESSAGE).toBe("Applying revision…");
+      expect(NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE).toBe(
+        "Revision was already applied.",
+      );
+    });
+  });
+
+  describe("Nutrition Plan Review drawer reopen lifecycle", () => {
+    it("clears stale transient messages and loads latest plan + dropdown on open", () => {
+      // Reopening after a prior success/error: transient messages are cleared, the latest plan is
+      // reloaded, and the target dropdown is rebuilt from that plan — all on open.
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      expect(lifecycle.clearTransientMessages).toBe(true);
+      expect(lifecycle.loadLatestPlan).toBe(true);
+      expect(lifecycle.rebuildTargetOptions).toBe(true);
+    });
+
+    it("reopen does not depend on the Revise Plan button to refresh plan data", () => {
+      // The dropdown rebuild + latest-plan load are gated on the drawer OPENING, not on clicking
+      // Revise Plan a second time. Both are true purely from open + NUTRITION domain.
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      expect(lifecycle.loadLatestPlan && lifecycle.rebuildTargetOptions).toBe(true);
+    });
+
+    it("clears messages and selection when the drawer closes", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: false,
+        drawerDomain: null,
+      });
+      expect(lifecycle.clearTransientMessages).toBe(true);
+      expect(lifecycle.clearSelection).toBe(true);
+      // Closed drawer must not fire the loaders.
+      expect(lifecycle.loadLatestPlan).toBe(false);
+      expect(lifecycle.rebuildTargetOptions).toBe(false);
+    });
+
+    it("clears Nutrition state when the drawer switches to another domain", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "SKILLS",
+      });
+      expect(lifecycle.clearSelection).toBe(true);
+      expect(lifecycle.loadLatestPlan).toBe(false);
+      expect(lifecycle.rebuildTargetOptions).toBe(false);
+    });
+
+    it("does not clear the coach's selection while the drawer is open on Nutrition", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      // Open must not stomp an in-progress selection (only close / domain-switch clears it).
+      expect(lifecycle.clearSelection).toBe(false);
+    });
+
+    it("rebuilds the target dropdown only after the latest plan load resolves (never concurrent)", async () => {
+      const order: string[] = [];
+      let resolveLatestPlan: (() => void) | null = null;
+      const latestPlanGate = new Promise<void>((resolve) => {
+        resolveLatestPlan = resolve;
+      });
+
+      const loadLatestPlan = vi.fn(async () => {
+        order.push("latest:start");
+        await latestPlanGate;
+        order.push("latest:end");
+      });
+      const rebuildTargetOptions = vi.fn(async () => {
+        order.push("rebuild:start");
+      });
+
+      const running = runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan,
+        rebuildTargetOptions,
+      });
+
+      // While the latest-plan load is still pending, the dropdown rebuild must NOT have started.
+      await Promise.resolve();
+      expect(loadLatestPlan).toHaveBeenCalledTimes(1);
+      expect(rebuildTargetOptions).not.toHaveBeenCalled();
+      expect(order).toEqual(["latest:start"]);
+
+      // Resolve the latest-plan load; only then may the rebuild run.
+      resolveLatestPlan!();
+      await running;
+
+      expect(rebuildTargetOptions).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["latest:start", "latest:end", "rebuild:start"]);
+    });
+
+    it("clears old target options immediately, then shows fresh options only after the sequential refresh", async () => {
+      // Mirrors the drawer-open effect orchestration using the real exported pieces: the lifecycle
+      // descriptor drives the synchronous clear, then the sequential refresh runs.
+      const events: string[] = [];
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+
+      // 1. Old target/options are cleared IMMEDIATELY on open (synchronously, before any load).
+      expect(lifecycle.clearTargetOptions).toBe(true);
+      if (lifecycle.clearTargetOptions) {
+        events.push("clear-target-options");
+      }
+
+      let resolveLatestPlan: (() => void) | null = null;
+      const latestPlanGate = new Promise<void>((resolve) => {
+        resolveLatestPlan = resolve;
+      });
+      const running = runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: lifecycle.loadLatestPlan
+          ? async () => {
+              events.push("latest:start");
+              await latestPlanGate;
+              events.push("latest:end");
+            }
+          : null,
+        rebuildTargetOptions: lifecycle.rebuildTargetOptions
+          ? async () => {
+              events.push("fresh-options");
+            }
+          : null,
+      });
+
+      // While the latest-plan load is still pending: old options already cleared, NO fresh options.
+      await Promise.resolve();
+      expect(events).toEqual(["clear-target-options", "latest:start"]);
+      expect(events).not.toContain("fresh-options");
+
+      // Fresh options appear only after the sequential refresh completes.
+      resolveLatestPlan!();
+      await running;
+      expect(events).toEqual([
+        "clear-target-options",
+        "latest:start",
+        "latest:end",
+        "fresh-options",
+      ]);
+    });
+
+    it("does not clear target options on close (close clears the whole selection instead)", () => {
+      const closed = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: false,
+        drawerDomain: null,
+      });
+      expect(closed.clearTargetOptions).toBe(false);
+      expect(closed.clearSelection).toBe(true);
+    });
+
+    it("skips a loader when its lifecycle flag is off", async () => {
+      const rebuildTargetOptions = vi.fn(async () => {});
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: null,
+        rebuildTargetOptions,
+      });
+      expect(rebuildTargetOptions).toHaveBeenCalledTimes(1);
+
+      const loadLatestPlan = vi.fn(async () => {});
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan,
+        rebuildTargetOptions: null,
+      });
+      expect(loadLatestPlan).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Nutrition revision success refreshes the drawer to the new version", () => {
+    // V1 Breakfast has 3 items; an ADD_ITEM revision creates V2 by appending "Oatmeal".
+    const v1Schedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+            ],
+          },
+        ],
+      },
+    ];
+    const v2Schedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Oatmeal", nutritionCatalogItemId: "nut-9", serving: "1 cup" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+
+    it("ADD_ITEM creates V2 → drawer stays open → dropdown rebuilds from V2 → added item is selectable for UPDATE_ITEM", async () => {
+      const events: string[] = [];
+      // The latest-plan reload swaps the rendered schedule to the newly created V2; the rebuild then
+      // rebuilds the dropdown targets from whatever the reload left rendered.
+      let renderedSchedule: readonly unknown[] = v1Schedule;
+      let rebuiltTargets = buildTargets(renderedSchedule);
+      // The added item is not yet in the (V1) dropdown before the refresh runs.
+      expect(
+        rebuiltTargets.some((o) => o.level === "ITEM" && o.itemLabel === "Oatmeal"),
+      ).toBe(false);
+
+      // Mirrors the real success-path orchestration: reload latest plan, THEN rebuild the dropdown,
+      // using the same sequential refresh the handler now calls. The refresh performs no close/reopen
+      // (there is no close signal to give), so the drawer stays open across the rebuild.
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("latest");
+          renderedSchedule = v2Schedule;
+        },
+        rebuildTargetOptions: async () => {
+          events.push("rebuild");
+          rebuiltTargets = buildTargets(renderedSchedule);
+        },
+      });
+
+      // Strictly ordered: latest plan reload resolves before the dropdown rebuild runs.
+      expect(events).toEqual(["latest", "rebuild"]);
+
+      // The rebuilt dropdown reflects V2 and includes the newly added item at its new position.
+      const added = rebuiltTargets.find(
+        (o) => o.level === "ITEM" && o.itemLabel === "Oatmeal",
+      );
+      expect(added).toBeDefined();
+      expect(added!.indices).toMatchObject({ dayIndex: 1, sessionIndex: 1, itemIndex: 4 });
+
+      // The added item is immediately selectable for a follow-up UPDATE_ITEM against the new version
+      // (serving "1 cup" stepped to 2 cups).
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds: { trainingPlanId: "plan-1", versionId: "ver-2" },
+        target: added!,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 2,
+      });
+      expect(submission).not.toBeNull();
+      expect(submission!.versionId).toBe("ver-2");
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 4,
+        servingAdjustment: { targetQuantity: 2, servingUnit: "cup" },
+      });
+    });
+  });
+
   it("does not render static, invented, or context change-option replacements before options are fetched", () => {
     const targets = fynRevisionTargetOptions(fynDraftContext);
     const html = renderToStaticMarkup(
@@ -3533,6 +6006,93 @@ describe("Training Plan Workspace lifecycle display", () => {
       fetchOptions: async () => ({ generationDomain: "SKILLS" as const, target: null, options: [] }),
     });
     expect(outcome).toEqual({ status: "OK", options: [], message: FYN_REVISION_NO_OPTIONS_MESSAGE });
+  });
+
+  it("shows the add-food empty message for a Nutrition ADD_ITEM with no approved options", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const mealTarget = nutritionTargets.find((option) => option.level === "SESSION")!;
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a fruit to breakfast.",
+      target: mealTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions: async () => ({
+        generationDomain: "NUTRITION" as const,
+        target: null,
+        options: [],
+      }),
+    });
+    expect(outcome).toEqual({
+      status: "OK",
+      options: [],
+      message: FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
+    });
+    expect(FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE).toBe(
+      "No approved add-food options found for this meal.",
+    );
+  });
+
+  it("keeps the replacement empty message for a Nutrition REPLACEMENT with no approved options", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const itemTarget = nutritionTargets.find((option) => option.level === "ITEM")!;
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the white rice.",
+      target: itemTarget.target,
+      optionKind: "REPLACEMENT",
+      fetchOptions: async () => ({
+        generationDomain: "NUTRITION" as const,
+        target: null,
+        options: [],
+      }),
+    });
+    expect(outcome).toEqual({
+      status: "OK",
+      options: [],
+      message: FYN_REVISION_NO_OPTIONS_MESSAGE,
+    });
   });
 
   it("shows the error message when the options request fails", async () => {
@@ -4034,7 +6594,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         }),
       ),
     );
-    expect(html).toContain("Pick an approved option and Fyn will add it to the basket:");
+    expect(html).toContain("Pick an approved option:");
     expect(html).toContain("Cross-court rally drill");
   });
 
@@ -6534,8 +9094,8 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     }
   });
 
-  it("keeps AI generated drafts on latest draft content when submitted detail inputs are present", () => {
-    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+  it("keeps AI generated drafts on latest draft content when non-Nutrition submitted detail inputs are present", () => {
+    for (const domain of ["SKILLS", "S_AND_C"] as const) {
       expect(
         resolveDomainReviewDrawerContentSource({
           domain,
@@ -6561,6 +9121,30 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         }),
       ).toBe("latest_domain_draft");
     }
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "NUTRITION",
+        workflowStatus: "submitted_for_review",
+        directReleaseSkillsOwner: false,
+        activeDetail: {
+          plan: { id: "NUTRITION-submitted-plan", status: "SUBMITTED_FOR_REVIEW" },
+          version: { id: "NUTRITION-submitted-version", status: "SUBMITTED_FOR_REVIEW" },
+          days: [],
+        } as never,
+        latestDraft: {
+          trainingPlanId: "NUTRITION-draft-plan",
+          trainingPlanVersionId: "NUTRITION-draft-version",
+          versionNumber: 1,
+          status: "AI_GENERATED",
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [{ title: "NUTRITION generated session", items: [] }],
+            },
+          ],
+        } as never,
+      }),
+    ).toBe("active_detail");
   });
 
   it("uses submitted detail after submit and released active detail after release", () => {

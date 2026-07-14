@@ -99,6 +99,10 @@ import {
   type CoachTrainingPlanDomainHistoryRow,
   type TrainingPlanGenerationDomain,
   type TrainingPlanReviseResult,
+  type TrainingPlanRevisePayload,
+  type TrainingPlanRevisionPatch,
+  type TrainingPlanRevisionPatchItem,
+  type NutritionServingAdjustment,
   type CoachAthleteTrainingPlanWorkloadAssessment,
   type CoachAthleteUpstreamPlanningContext,
   type TrainingPlanConstraintComplianceSummary,
@@ -132,6 +136,7 @@ import {
 import { runTrainingPlanGenerationJob } from "@/lib/coachTrainingPlanGenerationJobs";
 import {
   formatDateOnly,
+  formatDateTime,
   formatDateRange,
   formatDateWithWeekday,
   formatPlanningProfileDateDisplay,
@@ -178,6 +183,7 @@ import type {
   TrainingPlanWorkspaceAssignmentDomainContext,
   TrainingPlanWorkspaceAssignmentPlanningContext,
   TrainingPlanWorkspaceAssignmentReleaseMode,
+  TrainingPlanPendingRevisionRequest,
 } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -239,6 +245,10 @@ const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
 ];
 const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
   "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
+// Exact backend message for the deterministic Nutrition stale-version rejection.
+// Used only as a fallback for display; the drawer always prefers the live backend message.
+export const NUTRITION_STALE_VERSION_MESSAGE =
+  "This plan has changed since it was opened. Reload the latest plan before applying another revision.";
 const ASSIGNMENT_CONTEXT_MISSING_LEGACY_FALLBACK_WARNING =
   "[TrainingPlanWorkspace] assignmentContext missing; using legacy fallback";
 
@@ -642,6 +652,139 @@ function isAiGenerationValidationError(e: unknown): boolean {
     message.includes('"validationErrors"') ||
     message.includes('"issues"')
   );
+}
+
+/**
+ * Detects the deterministic Nutrition stale-version rejection returned by the
+ * backend when the submitted `versionId` is no longer the latest eligible draft.
+ *
+ * The rejection surfaces through the standard {@link NormalizedApiError} shape
+ * (`{ message, status, code?, details? }`). The backend status/code is not
+ * relied upon here because it is not guaranteed by the frontend contract; we
+ * match on the stable backend message and, defensively, a stale-version code
+ * if one is present. This is a reaction to a real backend rejection only — it
+ * is NOT a frontend pre-check of the version.
+ */
+export function isNutritionStaleVersionRevisionError(e: unknown): boolean {
+  if (!isNormalizedApiError(e)) return false;
+  const message = e.message.trim().toLowerCase();
+  if (message.includes("this plan has changed since it was opened")) {
+    return true;
+  }
+  const code = (e.code ?? "").trim().toUpperCase();
+  return code.includes("STALE_VERSION") || code.includes("STALE_PLAN_VERSION");
+}
+
+/**
+ * True when a Nutrition revision request timed out or otherwise ended without a confirmable HTTP
+ * outcome (transport failure). The backend may still have applied the patch in these cases.
+ */
+export function isNutritionRevisionInterruptedError(e: unknown): boolean {
+  if (isClientRequestTimedOut(e)) return true;
+  return isNormalizedApiError(e) && e.status === 0;
+}
+
+export type NutritionRevisionErrorKind =
+  | "STALE_VERSION"
+  | "INTERRUPTED"
+  | "AI_VALIDATION"
+  | "GENERIC";
+
+/**
+ * Data describing how the Nutrition revision drawer should react to a failed
+ * revision. Extracted as a pure function so the required behaviour is testable
+ * without rendering the full workspace.
+ *
+ * `retryRevisionPatch` is always `false`: a failed revision is never
+ * automatically retried with the previously submitted patch.
+ */
+export type NutritionRevisionErrorOutcome = {
+  kind: NutritionRevisionErrorKind;
+  message: string;
+  reloadLatest: boolean;
+  clearSelection: boolean;
+  retryRevisionPatch: false;
+};
+
+export function resolveNutritionRevisionErrorOutcome(
+  e: unknown,
+): NutritionRevisionErrorOutcome {
+  if (isNutritionStaleVersionRevisionError(e)) {
+    const message =
+      isNormalizedApiError(e) && e.message.trim() !== ""
+        ? e.message.trim()
+        : NUTRITION_STALE_VERSION_MESSAGE;
+    return {
+      kind: "STALE_VERSION",
+      message,
+      reloadLatest: true,
+      clearSelection: true,
+      retryRevisionPatch: false,
+    };
+  }
+
+  if (isNutritionRevisionInterruptedError(e)) {
+    const message = isClientRequestTimedOut(e)
+      ? "Request timed out"
+      : isNormalizedApiError(e) && e.message.trim() !== ""
+        ? e.message.trim()
+        : "Network error";
+    return {
+      kind: "INTERRUPTED",
+      message,
+      reloadLatest: true,
+      clearSelection: true,
+      retryRevisionPatch: false,
+    };
+  }
+
+  if (isAiGenerationValidationError(e)) {
+    return {
+      kind: "AI_VALIDATION",
+      message: AI_GENERATION_VALIDATION_ERROR_MESSAGE,
+      reloadLatest: false,
+      clearSelection: false,
+      retryRevisionPatch: false,
+    };
+  }
+
+  if (isNormalizedApiError(e)) {
+    const message =
+      e.message.trim() !== "" ? e.message.trim() : "Unable to revise plan. Please try again.";
+    const errorCode = e.code?.trim();
+    return {
+      kind: "GENERIC",
+      message: errorCode
+        ? `Revision failed: ${message} (${errorCode})`
+        : `Revision failed: ${message}`,
+      reloadLatest: false,
+      clearSelection: false,
+      retryRevisionPatch: false,
+    };
+  }
+
+  const errorRecord =
+    typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
+  const message =
+    (typeof errorRecord?.message === "string" && errorRecord.message.trim() !== ""
+      ? errorRecord.message.trim()
+      : null) ?? "Unable to revise plan. Please try again.";
+  const errorCode =
+    (typeof errorRecord?.errorCode === "string" && errorRecord.errorCode.trim() !== ""
+      ? errorRecord.errorCode.trim()
+      : null) ??
+    (typeof errorRecord?.code === "string" && errorRecord.code.trim() !== ""
+      ? errorRecord.code.trim()
+      : null);
+  return {
+    kind: "GENERIC",
+    message: errorCode
+      ? `Revision failed: ${message} (${errorCode})`
+      : `Revision failed: ${message}`,
+    reloadLatest: false,
+    clearSelection: false,
+    retryRevisionPatch: false,
+  };
 }
 
 function isPersistDraftRequestTimedOut(e: unknown): boolean {
@@ -1790,6 +1933,9 @@ export function resolveDomainReviewDrawerContentSource(input: {
   activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
   latestDraft: CoachAthleteLatestDomainDraft | null;
 }): DomainReviewDrawerContentSource {
+  if (input.domain === "NUTRITION" && input.activeDetail !== null) {
+    return "active_detail";
+  }
   const hasLatestDraft =
     input.latestDraft !== null &&
     (input.latestDraft.trainingPlanId?.trim() ?? "") !== "" &&
@@ -2291,6 +2437,72 @@ export type FynRevisionFriendlyOption = {
 export const FYN_REVISION_NO_OPTIONS_MESSAGE =
   "No approved replacement options are available for this target yet.";
 
+/** Shown when a Nutrition ADD_ITEM request returns no approved add-food options. */
+export const FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE =
+  "No approved add-food options found for this meal.";
+
+/**
+ * Nutrition meal-slot minimum item counts, mirrored from the backend authority in
+ * `src/modules/aiGenerationOrchestrator/services/outputValidator.service.js`
+ * (`assertNutritionOnlySanity`). This is the single frontend source of truth for meal minimums:
+ * it drives coach-facing guidance copy AND gates Nutrition REMOVE_ITEM eligibility (a meal may not
+ * be taken below its minimum). The backend remains authoritative and still enforces these limits.
+ */
+export const NUTRITION_MEAL_SLOT_MIN_ITEMS = {
+  BREAKFAST: 3,
+  MID_MORNING_SNACK: 2,
+  LUNCH: 4,
+  MID_AFTERNOON_SNACK: 2,
+  DINNER: 4,
+} as const;
+
+export type NutritionMealSlotKey = keyof typeof NUTRITION_MEAL_SLOT_MIN_ITEMS;
+
+/**
+ * Resolves a session/meal label (e.g. "Breakfast", "Mid-morning snack", or an enum-like
+ * "MID_MORNING_SNACK") to a canonical meal-slot key. Returns null when the label is not one of the
+ * five recognised slots.
+ */
+export function nutritionMealSlotKeyFromLabel(
+  label: string | null | undefined,
+): NutritionMealSlotKey | null {
+  if (typeof label !== "string" || label.trim() === "") return null;
+  const token = label
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return token in NUTRITION_MEAL_SLOT_MIN_ITEMS ? (token as NutritionMealSlotKey) : null;
+}
+
+/**
+ * Minimum item count a meal must retain. Recognised meal slots use their canonical minimum; any
+ * unrecognised label falls back to 1 (never remove the last item), so gating stays safe without
+ * inventing meal-specific rules.
+ */
+export function nutritionMealSlotMinItems(label: string | null | undefined): number {
+  const key = nutritionMealSlotKeyFromLabel(label);
+  return key === null ? 1 : NUTRITION_MEAL_SLOT_MIN_ITEMS[key];
+}
+
+/** Deterministic message shown when REMOVE_ITEM is blocked because a meal is at its minimum. */
+export function nutritionRemoveItemMinimumMessage(minimum: number): string {
+  return `This meal must contain at least ${minimum} items. Replace this item instead of removing it.`;
+}
+
+/** Coach-facing guidance explaining Nutrition meal-slot minimums, shown only for the Nutrition domain. */
+export const NUTRITION_MEAL_MINIMUMS_GUIDANCE =
+  `Meal minimums: Breakfast requires at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.BREAKFAST} items, ` +
+  `mid-morning snack at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.MID_MORNING_SNACK}, ` +
+  `lunch at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.LUNCH}, ` +
+  `mid-afternoon snack at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.MID_AFTERNOON_SNACK}, ` +
+  `and dinner at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.DINNER}. ` +
+  `If removing an item would drop a meal below its minimum, replace it instead or add another item to the same meal.`;
+
+/** Contextual warning shown when a coach selects Remove food item for a Nutrition target. */
+export const NUTRITION_REMOVE_ITEM_MINIMUM_WARNING =
+  "Remove carefully: if this meal is already at its minimum item count, replace this food item instead or add another item to the same meal.";
+
 /** Shown when the coach has not matched their request to a concrete draft plan item. */
 export const FYN_REVISION_MISSING_TARGET_MESSAGE =
   "I could not match that to a plan item. Please mention the day and item more clearly.";
@@ -2315,10 +2527,30 @@ export type FynRevisionTargetOption = {
   sessionLabel: string | null;
   /** Human item label; null for day/session-level targets. */
   itemLabel: string | null;
+  /**
+   * The item's canonical `serving` text (e.g. "4 pcs", "1.5 cups") read verbatim from the latest
+   * rendered plan item. Null for day/session-level targets or items with no serving. Used only to
+   * seed the Nutrition item-level serving stepper; never used to compute calories/macros.
+   */
+  serving: string | null;
   /** Sessions in the target's day (used to gate empty/rest-day-only actions). */
   daySessionCount: number;
   /** Items in the target's session (used to block removing the last item). */
   sessionItemCount: number;
+  /**
+   * Backend-ready 1-based positions used to build a Nutrition {@link TrainingPlanRevisionPatch}.
+   * `dayIndex`/`sessionIndex` come from the source graph's already-1-based dayIndex/sessionIndex
+   * (falling back to array position + 1). `itemIndex` is the item's CURRENT position in the rendered
+   * session items array + 1 — NEVER `item.order` (which can drift out of sync after edits). These
+   * positions are submitted DIRECTLY for REMOVE_ITEM/REPLACE_ITEM/UPDATE_ITEM; there is no
+   * submit-time re-match. Rebuilding the dropdown from the latest plan (on open and after each
+   * successful revision) is what keeps them current.
+   */
+  indices: {
+    dayIndex: number | null;
+    sessionIndex: number | null;
+    itemIndex: number | null;
+  };
   target: CoachAthleteDomainDraftRevisionOptionTarget;
 };
 
@@ -2334,6 +2566,18 @@ function fynTargetReadString(record: FynTargetRecord, keys: string[]): string | 
     const value = record[key];
     if (typeof value === "string" && value.trim() !== "") return value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function fynTargetReadNumber(record: FynTargetRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
   }
   return null;
 }
@@ -2411,6 +2655,8 @@ function fynBuildLeveledTargets(
       `Day ${dayArrayIndex + 1}`;
     const sessions = fynTargetReadArray(day, ["sessions"]);
     const daySessionCount = sessions.length;
+    // 1-based day position: prefer the source graph's already-1-based dayIndex, else array pos + 1.
+    const dayNumber = fynTargetReadNumber(day, ["dayIndex", "dayNumber"]) ?? dayArrayIndex + 1;
     if (levels.has("DAY")) {
       push({
         key: `day|${dayKey}`,
@@ -2419,8 +2665,10 @@ function fynBuildLeveledTargets(
         dayLabel,
         sessionLabel: null,
         itemLabel: null,
+        serving: null,
         daySessionCount,
         sessionItemCount: 0,
+        indices: { dayIndex: dayNumber, sessionIndex: null, itemIndex: null },
         target: {
           dayKey,
           sessionKey: null,
@@ -2443,6 +2691,9 @@ function fynBuildLeveledTargets(
         `Session ${sessionKey}`;
       const items = fynTargetSessionItems(session);
       const sessionItemCount = items.length;
+      // 1-based session position: prefer the source graph's 1-based sessionIndex, else array pos + 1.
+      const sessionNumber =
+        fynTargetReadNumber(session, ["sessionIndex", "sessionNumber"]) ?? sessionArrayIndex + 1;
       if (levels.has("SESSION")) {
         push({
           key: `session|${dayKey}|${sessionKey}`,
@@ -2451,8 +2702,10 @@ function fynBuildLeveledTargets(
           dayLabel,
           sessionLabel,
           itemLabel: null,
+          serving: null,
           daySessionCount,
           sessionItemCount,
+          indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: null },
           target: {
             dayKey,
             sessionKey,
@@ -2473,6 +2726,10 @@ function fynBuildLeveledTargets(
           const itemLabel =
             fynTargetReadString(item, ["label", "summary", "name", "title"]) ??
             `Item ${itemArrayIndex + 1}`;
+          // 1-based item position from the item's CURRENT position in the rendered session items
+          // array — NEVER from `item.order`, which can be stale after edits (e.g. items 0,1,2,4).
+          // day/session are already 1-based and are NOT incremented again.
+          const itemNumber = itemArrayIndex + 1;
           push({
             key: `${dayKey}|${sessionKey}|${itemKey}|${itemArrayIndex}`,
             label: `${dayLabel} · ${sessionLabel} · ${itemLabel}`,
@@ -2480,8 +2737,12 @@ function fynBuildLeveledTargets(
             dayLabel,
             sessionLabel,
             itemLabel,
+            // Canonical serving text read verbatim from the latest plan item; seeds the item-level
+            // serving stepper. Never used to compute calories/macros.
+            serving: fynTargetReadString(item, ["serving", "servingSize", "servingText"]),
             daySessionCount,
             sessionItemCount,
+            indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: itemNumber },
             target: {
               dayKey,
               sessionKey,
@@ -2530,6 +2791,10 @@ function fynTargetOptionsFromFlatList(
     const key = `flat|${dayKey ?? ""}|${sessionKey ?? ""}|${itemKey ?? ""}|${index}`;
     if (seen.has(key)) return;
     seen.add(key);
+    // Flat targets expose only string keys; derive 1-based day/session numbers where the keys are
+    // numeric. `itemIndex` is the item's CURRENT position in the flat list — never `item.order`.
+    const flatDayIndex = fynTargetReadNumber(record, ["dayIndex", "dayNumber"]);
+    const flatSessionIndex = fynTargetReadNumber(record, ["sessionIndex", "sessionNumber"]);
     options.push({
       key,
       label,
@@ -2537,8 +2802,14 @@ function fynTargetOptionsFromFlatList(
       dayLabel: dayKey !== null ? `Day ${dayKey}` : "this day",
       sessionLabel: sessionKey !== null ? `Session ${sessionKey}` : null,
       itemLabel: label,
+      serving: fynTargetReadString(record, ["serving", "servingSize", "servingText"]),
       daySessionCount: 1,
       sessionItemCount: list.length,
+      indices: {
+        dayIndex: flatDayIndex,
+        sessionIndex: flatSessionIndex,
+        itemIndex: index + 1,
+      },
       target: {
         dayKey,
         sessionKey,
@@ -2634,7 +2905,7 @@ export const FYN_REVISION_CAPABILITIES: Record<
     levels: ["SESSION", "ITEM"],
     actionsByLevel: {
       DAY: [],
-      SESSION: ["UPDATE_SESSION", "ADD_ITEM"],
+      SESSION: ["ADD_ITEM"],
       ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
     },
   },
@@ -2697,12 +2968,11 @@ export function fynRevisionActionLabel(
     if (domain === "S_AND_C") return "Add S&C session";
     return "Add session";
   }
-  const sessionNoun = domain === "NUTRITION" ? "meal" : "session";
   switch (key) {
     case "REPLACE_DAY":
       return "Change rest day";
     case "UPDATE_SESSION":
-      return `Adjust ${sessionNoun}`;
+      return "Adjust session";
     case "UPDATE_SESSION_ITEMS":
       return "Edit several drills in this session";
     case "ADD_ITEM":
@@ -2712,6 +2982,7 @@ export function fynRevisionActionLabel(
     case "REPLACE_ITEM":
       return `Replace ${noun}`;
     case "UPDATE_ITEM":
+      if (domain === "NUTRITION") return "Change food item details";
       return `Adjust ${noun}`;
   }
 }
@@ -2755,11 +3026,35 @@ function fynRevisionActionAllowed(
   if (key === "ADD_SESSION" && domain === "S_AND_C") {
     return target.daySessionCount === 0;
   }
-  // Never remove the last item/exercise in a meal or S&C session.
-  if (key === "REMOVE_ITEM" && (domain === "NUTRITION" || domain === "S_AND_C")) {
-    return target.sessionItemCount > 1;
+  if (key === "REMOVE_ITEM") {
+    // Nutrition: only offer removal when the meal has MORE items than its required minimum, so a
+    // meal can never be taken to (or below) its minimum. Unrecognised meals fall back to "never
+    // remove the last item".
+    if (domain === "NUTRITION") {
+      return target.sessionItemCount > nutritionMealSlotMinItems(target.sessionLabel);
+    }
+    // S&C is unchanged: never remove the last exercise in a session.
+    if (domain === "S_AND_C") {
+      return target.sessionItemCount > 1;
+    }
   }
   return true;
+}
+
+/**
+ * The deterministic notice to show when a coach targets a Nutrition food item whose meal is already
+ * at (or below) its required minimum: REMOVE_ITEM is not offered, so we explain why and point the
+ * coach at REPLACE_ITEM. Returns null whenever removal is allowed or the domain/level is not a
+ * Nutrition item.
+ */
+export function nutritionRemoveItemMinimumNotice(
+  domain: TrainingPlanGenerationDomain,
+  target: FynRevisionTargetOption | null,
+): string | null {
+  if (domain !== "NUTRITION" || target === null || target.level !== "ITEM") return null;
+  const minimum = nutritionMealSlotMinItems(target.sessionLabel);
+  if (target.sessionItemCount > minimum) return null;
+  return nutritionRemoveItemMinimumMessage(minimum);
 }
 
 /**
@@ -2857,6 +3152,647 @@ export function buildFynRevisionActionChangeText(
       // Replacements go through the approved-options flow, not this quick-add path.
       return "";
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Nutrition deterministic single-patch flow
+ *
+ * For Nutrition, a revision submits ONE structured, executable `revisionPatch` (the source of
+ * truth) alongside a short `coachFeedback` summary (human-readable only). Skills/S&C are untouched
+ * and keep their free-form multi-change flow. Nothing here fabricates catalogue data: item fields
+ * are passed through verbatim from the coach's selected approved option (or, for updates, from the
+ * item already on the plan).
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Nutrition Fyn actions that map to a deterministic backend patch operation. */
+export type NutritionRevisionPatchOperation =
+  | "REPLACE_ITEM"
+  | "ADD_ITEM"
+  | "REMOVE_ITEM"
+  | "UPDATE_ITEM";
+
+/**
+ * Maps a Fyn action key to the backend patch operation it executes, or null for actions that are
+ * not part of the Nutrition single-patch contract (including all session/day operations). Names are
+ * 1:1 with the existing backend operations — none are invented.
+ */
+export function nutritionRevisionPatchOperation(
+  actionKey: FynRevisionActionKey,
+): NutritionRevisionPatchOperation | null {
+  switch (actionKey) {
+    case "REPLACE_ITEM":
+      return "REPLACE_ITEM";
+    case "ADD_ITEM":
+      return "ADD_ITEM";
+    case "REMOVE_ITEM":
+      return "REMOVE_ITEM";
+    case "UPDATE_ITEM":
+      return "UPDATE_ITEM";
+    default:
+      return null;
+  }
+}
+
+/** Operations that must carry a structured `item` built from a coach-selected approved option. */
+export function nutritionRevisionOperationNeedsOption(
+  operation: NutritionRevisionPatchOperation,
+): boolean {
+  return operation === "REPLACE_ITEM" || operation === "ADD_ITEM";
+}
+
+/**
+ * Authoritative catalog reference for a Nutrition approved option. This reads ONLY the backend's
+ * explicit `option.nutritionCatalogItemId` field. The id is never inferred from `metadata`
+ * (`catalogItemId` / `itemId`), the `label`, or `option.id`. Returns the trimmed id, or null when
+ * the option carries no catalog reference.
+ */
+export function nutritionOptionCatalogId(
+  option: CoachAthleteDomainDraftRevisionOption,
+): string | null {
+  const value = option.nutritionCatalogItemId;
+  if (typeof value === "string" && value.trim() !== "") return value.trim();
+  return null;
+}
+
+/**
+ * Returns the structured `item` for an ADD_ITEM / REPLACE_ITEM patch: the backend's complete
+ * canonical `option.item`, passed through verbatim. Identity (`nutritionCatalogItemId`, `label`),
+ * `serving`, every nutrition value (`calories` / `protein` / `carbs` / `fat` / `fiber`), `timing`,
+ * and `notes` are preserved unchanged. Nothing is rebuilt from `label` or `metadata`. Returns null
+ * when the option carries no canonical item, which blocks submission.
+ */
+export function buildNutritionRevisionOptionItem(
+  option: CoachAthleteDomainDraftRevisionOption,
+): TrainingPlanRevisionPatchItem | null {
+  return option.item ?? null;
+}
+
+/**
+ * Deterministically parses a canonical Nutrition `serving` string (e.g. "4 pcs", "1.5 cups") into a
+ * leading numeric quantity, the trailing unit text, and the +/- step for that quantity. The step is
+ * 1 for integer quantities and the value of the fractional part for decimals (e.g. 1.5 -> 0.5).
+ * Returns null when there is no positive leading number (missing / unparseable serving), which the
+ * submit guard uses to block Apply.
+ */
+export function parseNutritionServing(
+  serving: string | null | undefined,
+): { quantity: number; unit: string; step: number } | null {
+  if (typeof serving !== "string") return null;
+  const match = serving.trim().match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+  if (match === null) return null;
+  const quantityText = match[1];
+  const quantity = Number(quantityText);
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  const dotIndex = quantityText.indexOf(".");
+  let step = 1;
+  if (dotIndex !== -1) {
+    const fraction = Number(`0.${quantityText.slice(dotIndex + 1)}`);
+    step = fraction > 0 ? fraction : 1;
+  }
+  return { quantity, unit: match[2].trim(), step };
+}
+
+/** Decimal places implied by a step value (0 for integers, else the digits after the point). */
+function nutritionServingStepDecimals(step: number): number {
+  if (Number.isInteger(step)) return 0;
+  const text = String(step);
+  const dotIndex = text.indexOf(".");
+  return dotIndex === -1 ? 0 : text.length - dotIndex - 1;
+}
+
+/**
+ * Adjusts a serving quantity by one deterministic step in the given direction, rounded to the step's
+ * decimal precision to avoid floating-point drift. Returns null when the result would be <= 0 (a
+ * serving can never be reduced to zero or below).
+ */
+export function adjustNutritionServingQuantity(
+  quantity: number,
+  step: number,
+  direction: 1 | -1,
+): number | null {
+  const decimals = nutritionServingStepDecimals(step);
+  const factor = 10 ** decimals;
+  const next = Math.round((quantity + direction * step) * factor) / factor;
+  if (!Number.isFinite(next) || next <= 0) return null;
+  return next;
+}
+
+/** Formats a quantity + unit back into serving text (e.g. 5 + "pcs" -> "5 pcs"). */
+export function formatNutritionServingValue(quantity: number, unit: string): string {
+  const quantityText = String(quantity);
+  const unitText = unit.trim();
+  return unitText === "" ? quantityText : `${quantityText} ${unitText}`;
+}
+
+export type BuildNutritionRevisionPatchInput = {
+  target: FynRevisionTargetOption;
+  actionKey: FynRevisionActionKey;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+  /**
+   * Coach-chosen target quantity for a Nutrition UPDATE_ITEM serving adjustment (the current stepper
+   * value). Ignored by every other operation. UPDATE_ITEM is blocked when this is absent, unchanged
+   * from the item's parsed serving quantity, or the item's serving is missing/unparseable.
+   */
+  servingTargetQuantity?: number | null;
+};
+
+/**
+ * Builds the deterministic serving adjustment for a Nutrition UPDATE_ITEM patch from the target
+ * item's canonical `serving` and the coach's chosen target quantity. Returns null (blocking Apply)
+ * when the serving is missing/unparseable, the target quantity is absent or <= 0, or the quantity is
+ * unchanged. The backend recomputes calories/macros — the frontend never calculates them.
+ */
+export function buildNutritionServingAdjustment(
+  target: FynRevisionTargetOption,
+  targetQuantity: number | null | undefined,
+): NutritionServingAdjustment | null {
+  const parsed = parseNutritionServing(target.serving);
+  if (parsed === null) return null;
+  if (typeof targetQuantity !== "number" || !Number.isFinite(targetQuantity)) return null;
+  if (targetQuantity <= 0) return null;
+  if (targetQuantity === parsed.quantity) return null;
+  return { targetQuantity, servingUnit: parsed.unit };
+}
+
+/**
+ * Builds exactly one deterministic Nutrition {@link TrainingPlanRevisionPatch}, or null when the
+ * required structured fields are missing (so the submit guard can block). Index rules:
+ *  - `dayIndex` / `sessionIndex` come straight from the target's already-1-based positions.
+ *  - REPLACE_ITEM / UPDATE_ITEM / REMOVE_ITEM carry the target's 1-based `itemIndex`.
+ *  - ADD_ITEM omits `itemIndex` (the backend appends the new item automatically).
+ */
+export function buildNutritionRevisionPatch(
+  input: BuildNutritionRevisionPatchInput,
+): TrainingPlanRevisionPatch | null {
+  const operation = nutritionRevisionPatchOperation(input.actionKey);
+  if (operation === null) return null;
+  // Submit the selected dropdown target's OWN positions directly. Each item target was built from
+  // the latest loaded plan with dayIndex/sessionIndex and itemIndex = current session.items array
+  // position + 1. There is no submit-time re-match: no order/label/catalog lookup, no second plan
+  // walk, no previous-target state — that speculative matching produced false negatives.
+  const { dayIndex, sessionIndex, itemIndex } = input.target.indices;
+  if (dayIndex === null || sessionIndex === null) return null;
+
+  if (operation === "REMOVE_ITEM") {
+    if (itemIndex === null) return null;
+    // Deterministic eligibility guard: never emit a REMOVE_ITEM patch that would take a meal to or
+    // below its minimum. This blocks submission client-side rather than relying on backend failure.
+    if (input.target.sessionItemCount <= nutritionMealSlotMinItems(input.target.sessionLabel)) {
+      return null;
+    }
+    return { operation, dayIndex, sessionIndex, itemIndex };
+  }
+
+  if (operation === "UPDATE_ITEM") {
+    // Nutrition "Change food item details" is a deterministic serving adjustment: submit only the
+    // structured serving change (targetQuantity + servingUnit), never a replacement `item`. The
+    // backend recomputes calories/macros. Blocked when serving is missing/unparseable or unchanged.
+    if (itemIndex === null) return null;
+    const servingAdjustment = buildNutritionServingAdjustment(
+      input.target,
+      input.servingTargetQuantity,
+    );
+    if (servingAdjustment === null) return null;
+    return {
+      operation,
+      dayIndex,
+      sessionIndex,
+      itemIndex,
+      servingAdjustment,
+    };
+  }
+
+  if (operation === "REPLACE_ITEM") {
+    // Submit the backend's complete canonical `option.item` verbatim; a chosen option without an
+    // `item` blocks the patch (and the submit).
+    const item = input.option ? buildNutritionRevisionOptionItem(input.option) : null;
+    if (itemIndex === null || item === null) return null;
+    return {
+      operation,
+      dayIndex,
+      sessionIndex,
+      itemIndex,
+      item,
+    };
+  }
+
+  // ADD_ITEM: SESSION-level target. `itemIndex` is omitted entirely — the backend appends the new
+  // item to the meal automatically. The chosen option must supply a canonical `item`, submitted
+  // verbatim.
+  const item = input.option ? buildNutritionRevisionOptionItem(input.option) : null;
+  if (item === null) return null;
+  return {
+    operation,
+    dayIndex,
+    sessionIndex,
+    item,
+  };
+}
+
+/**
+ * Short, human-readable summary for `coachFeedback`. This is NEVER the executable source of truth —
+ * `revisionPatch` is — but the backend contract keeps `coachFeedback` required, so we always emit a
+ * concise, non-empty sentence describing the single change.
+ */
+export function buildNutritionRevisionSummary(input: BuildNutritionRevisionPatchInput): string {
+  // UPDATE_ITEM serving adjustment: coachFeedback is audit text only, naming the item and the
+  // before/after serving. The structured `servingAdjustment` patch is the executable source of truth.
+  if (input.actionKey === "UPDATE_ITEM") {
+    const parsed = parseNutritionServing(input.target.serving);
+    const servingAdjustment = buildNutritionServingAdjustment(
+      input.target,
+      input.servingTargetQuantity,
+    );
+    if (parsed !== null && servingAdjustment !== null) {
+      const itemName = (input.target.itemLabel ?? input.target.target.label ?? "item").trim() || "item";
+      const oldServing = formatNutritionServingValue(parsed.quantity, parsed.unit);
+      const newServing = formatNutritionServingValue(
+        servingAdjustment.targetQuantity,
+        servingAdjustment.servingUnit,
+      );
+      return `Change ${itemName} serving from ${oldServing} to ${newServing}.`;
+    }
+  }
+  const actionLabel = fynRevisionActionLabel("NUTRITION", input.actionKey);
+  const path = [input.target.dayLabel, input.target.sessionLabel, input.target.itemLabel]
+    .map((part) => (part ?? "").trim())
+    .filter((part) => part !== "")
+    .join(" · ");
+  const optionLabel = (input.option?.label ?? "").trim();
+  const note = (input.coachRequest ?? "").trim();
+  const segments = [`Apply 1 Nutrition change — ${actionLabel}`];
+  if (path !== "") segments.push(`Target: ${path}`);
+  if (optionLabel !== "") segments.push(`Option: ${optionLabel}`);
+  if (note !== "") segments.push(note);
+  return segments.join(". ") + ".";
+}
+
+/**
+ * Assembles the full Nutrition revise request: `{ trainingPlanId, versionId, coachFeedback,
+ * revisionPatch }`. Returns null when a valid single patch cannot be built (missing target/action,
+ * a required approved option, or required indices) so the caller can keep the submit disabled.
+ */
+export function buildNutritionRevisionSubmission(input: {
+  reviseIds: { trainingPlanId: string; versionId: string } | null;
+  target: FynRevisionTargetOption | null;
+  actionKey: FynRevisionActionKey | null;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+  servingTargetQuantity?: number | null;
+}): TrainingPlanRevisePayload | null {
+  if (input.reviseIds === null || input.target === null || input.actionKey === null) return null;
+  const revisionPatch = buildNutritionRevisionPatch({
+    target: input.target,
+    actionKey: input.actionKey,
+    option: input.option ?? null,
+    coachRequest: input.coachRequest,
+    servingTargetQuantity: input.servingTargetQuantity,
+  });
+  if (revisionPatch === null) return null;
+  return {
+    trainingPlanId: input.reviseIds.trainingPlanId,
+    versionId: input.reviseIds.versionId,
+    coachFeedback: buildNutritionRevisionSummary({
+      target: input.target,
+      actionKey: input.actionKey,
+      option: input.option ?? null,
+      coachRequest: input.coachRequest,
+      servingTargetQuantity: input.servingTargetQuantity,
+    }),
+    revisionPatch,
+  };
+}
+
+/** True when the current Nutrition selection can be submitted as one deterministic patch. */
+export function nutritionRevisionCanApply(input: {
+  reviseIds: { trainingPlanId: string; versionId: string } | null;
+  target: FynRevisionTargetOption | null;
+  actionKey: FynRevisionActionKey | null;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+  servingTargetQuantity?: number | null;
+}): boolean {
+  return buildNutritionRevisionSubmission(input) !== null;
+}
+
+/**
+ * The authoritative version id for the NEXT Nutrition revision, read from a successful revise
+ * response (`trainingPlanVersionId`, surfaced on {@link TrainingPlanReviseResult.versionId}).
+ * Returns null when the response carries no usable version so the caller can fall back to base ids.
+ */
+export function nextNutritionRevisionVersionId(
+  result: Pick<TrainingPlanReviseResult, "versionId"> | null | undefined,
+): string | null {
+  const version = result?.versionId?.trim();
+  return version && version !== "" ? version : null;
+}
+
+export type NutritionReviseIds = { trainingPlanId: string; versionId: string };
+
+/**
+ * Resolves the revise ids to SUBMIT for the next Nutrition revision.
+ *
+ * `baseReviseIds` is the EXACT plan/version rendered in the open review drawer (never the stale
+ * workspace / latest-draft memo). `activeReviseIds` is the version pinned from the previous
+ * successful revise response for this drawer session.
+ *
+ * The pinned version wins whenever it belongs to the same plan currently rendered — so a sequence
+ * of revisions chains V1 -> V2 -> V3 and never reuses a previous version or falls back to a stale
+ * base. Before the first successful revision (no pin), or when a DIFFERENT plan is now rendered
+ * (the pin belongs to a different `trainingPlanId`), the rendered base ids are used unchanged.
+ */
+export function resolveActiveNutritionReviseIds(
+  baseReviseIds: NutritionReviseIds | null,
+  activeReviseIds: NutritionReviseIds | null | undefined,
+): NutritionReviseIds | null {
+  if (baseReviseIds === null) return null;
+  const pinnedPlanId = activeReviseIds?.trainingPlanId?.trim() ?? "";
+  const pinnedVersionId = activeReviseIds?.versionId?.trim() ?? "";
+  if (
+    pinnedVersionId !== "" &&
+    pinnedPlanId !== "" &&
+    pinnedPlanId === baseReviseIds.trainingPlanId.trim()
+  ) {
+    return { trainingPlanId: baseReviseIds.trainingPlanId, versionId: pinnedVersionId };
+  }
+  return baseReviseIds;
+}
+
+/** Shown when an ADD_ITEM/REPLACE_ITEM option is chosen but carries no canonical `item`. */
+export const NUTRITION_OPTION_MISSING_CATALOG_MESSAGE =
+  "The selected approved option is missing its item details. Please choose another option.";
+
+/**
+ * True only when the coach HAS chosen an approved option for an ADD_ITEM/REPLACE_ITEM revision but
+ * that option carries no canonical `item`. Used to surface
+ * {@link NUTRITION_OPTION_MISSING_CATALOG_MESSAGE} and keep Apply Revision blocked. When no option
+ * is chosen yet, this is false (the "pick an option" gate handles that case instead).
+ */
+export function nutritionRevisionOptionMissingCatalogReference(input: {
+  actionKey: FynRevisionActionKey | null;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+}): boolean {
+  if (input.actionKey === null) return false;
+  const operation = nutritionRevisionPatchOperation(input.actionKey);
+  if (operation === null || !nutritionRevisionOperationNeedsOption(operation)) return false;
+  const option = input.option ?? null;
+  if (option === null) return false;
+  return (option.item ?? null) === null;
+}
+
+/**
+ * Copy shown ONLY when the BACKEND rejects a submitted structured item patch because the targeted
+ * item is no longer in the latest plan. This is never triggered by a speculative frontend matcher:
+ * the dropdown target's own dayIndex/sessionIndex/itemIndex are submitted directly, and this message
+ * appears solely as a reaction to a real backend rejection.
+ */
+export const NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE =
+  "This item is no longer in the latest plan. Please select it again.";
+
+/** Guidance shown in the Nutrition Fyn block explaining the one-change-at-a-time flow. */
+export const NUTRITION_SINGLE_PATCH_GUIDANCE =
+  "Apply one plan change at a time. You can revise another item immediately afterward.";
+
+/** Success copy shown after a Nutrition revision is applied. */
+export const NUTRITION_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
+
+/** Shown while a Nutrition single-patch revision request is in flight. */
+export const NUTRITION_REVISION_APPLYING_MESSAGE = "Applying revision…";
+
+/**
+ * Shown after an interrupted revision reload when the previously selected REMOVE_ITEM food item is
+ * no longer on the plan (the backend likely applied the patch before the client timed out).
+ */
+export const NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE = "Revision was already applied.";
+
+export type NutritionPendingRevisionSelection = {
+  target: FynRevisionTargetOption | null;
+  actionKey: FynRevisionActionKey | null;
+};
+
+/** The side effects the Nutrition review drawer must perform on an open/close transition. */
+export type NutritionReviewDrawerLifecycleActions = {
+  clearTransientMessages: boolean;
+  clearTargetOptions: boolean;
+  loadLatestPlan: boolean;
+  rebuildTargetOptions: boolean;
+  clearSelection: boolean;
+};
+
+/**
+ * Pure descriptor for the Nutrition review drawer open/close lifecycle (no new state machine — one
+ * function the effect reads from and tests assert on).
+ *
+ * ON OPEN (drawer open AND domain === NUTRITION): clear stale transient messages, IMMEDIATELY clear
+ * the previous revision target/options (so no old option is shown or selectable during the load),
+ * then reload the latest plan/version and rebuild the revision target dropdown from that latest plan
+ * — so the dropdown is current immediately, with no second "Revise Plan" click.
+ *
+ * ON CLOSE / domain switch: clear transient messages (success/error/applying/already-applied) and
+ * the selected target/action/option + temporary revision state.
+ */
+export function resolveNutritionReviewDrawerLifecycle(input: {
+  drawerOpen: boolean;
+  drawerDomain: TrainingPlanGenerationDomain | null;
+}): NutritionReviewDrawerLifecycleActions {
+  if (input.drawerOpen && input.drawerDomain === "NUTRITION") {
+    return {
+      clearTransientMessages: true,
+      clearTargetOptions: true,
+      loadLatestPlan: true,
+      rebuildTargetOptions: true,
+      clearSelection: false,
+    };
+  }
+  return {
+    clearTransientMessages: true,
+    clearTargetOptions: false,
+    loadLatestPlan: false,
+    rebuildTargetOptions: false,
+    clearSelection: true,
+  };
+}
+
+/**
+ * Chooses which complete latest full-plan draft the Nutrition review drawer should display, keyed by
+ * `versionNumber` then `trainingPlanVersionId`. The `incoming` draft is the freshly fetched full-plan
+ * response; it wins on a newer-or-different version and whenever the versions are indeterminate, so a
+ * successful reload atomically replaces the displayed plan and the renderer never keeps an older plan
+ * object. A lagging reload that returns an older version can never overwrite a newer displayed plan.
+ * When the version number/id matches, `incoming` still wins so a same-version full-plan refetch replaces
+ * stale in-memory nutrients/serving without requiring a version bump.
+ * No nutrients are computed here — this only selects which already-parsed plan object is displayed.
+ */
+export function resolveNewerDomainReviewDraft(
+  existing: CoachAthleteLatestDomainDraft | null,
+  incoming: CoachAthleteLatestDomainDraft | null,
+): CoachAthleteLatestDomainDraft | null {
+  if (incoming === null) return existing;
+  if (existing === null) return incoming;
+  const existingVersionId = existing.trainingPlanVersionId?.trim() ?? "";
+  const incomingVersionId = incoming.trainingPlanVersionId?.trim() ?? "";
+  if (
+    existingVersionId !== "" &&
+    incomingVersionId !== "" &&
+    existingVersionId === incomingVersionId
+  ) {
+    return incoming;
+  }
+  const existingVersion =
+    typeof existing.versionNumber === "number" && Number.isFinite(existing.versionNumber)
+      ? existing.versionNumber
+      : null;
+  const incomingVersion =
+    typeof incoming.versionNumber === "number" && Number.isFinite(incoming.versionNumber)
+      ? incoming.versionNumber
+      : null;
+  if (existingVersion !== null && incomingVersion !== null && incomingVersion < existingVersion) {
+    return existing;
+  }
+  return incoming;
+}
+
+/** Stable render key so the Nutrition review schedule remounts when the displayed draft version changes. */
+export function domainReviewDraftRenderKey(
+  draft: CoachAthleteLatestDomainDraft | null | undefined,
+): string {
+  if (draft === null || draft === undefined) return "none";
+  const versionId = draft.trainingPlanVersionId?.trim() ?? "";
+  const versionNumber =
+    typeof draft.versionNumber === "number" && Number.isFinite(draft.versionNumber)
+      ? String(draft.versionNumber)
+      : "";
+  const planId = draft.trainingPlanId?.trim() ?? "";
+  return [planId, versionId, versionNumber].filter((part) => part !== "").join(":") || "draft";
+}
+
+/** Stable render key so active/detail Nutrition schedule remounts when the persisted version changes. */
+export function domainReviewActiveDetailRenderKey(
+  detail: CoachPersistedTrainingPlanActiveDetail | null | undefined,
+): string {
+  if (detail === null || detail === undefined) return "none";
+  const planId = detail.plan.id?.trim() ?? "";
+  const versionId = detail.version.id?.trim() ?? "";
+  const versionNumber =
+    typeof detail.version.versionNumber === "number" && Number.isFinite(detail.version.versionNumber)
+      ? String(detail.version.versionNumber)
+      : "";
+  return [planId, versionId, versionNumber].filter((part) => part !== "").join(":") || "active-detail";
+}
+
+/**
+ * Resolves the complete latest full-plan draft a domain review drawer should render. The per-domain
+ * cache (`state.latestDraft`) is hydrated by every domain-scoped full-plan reload; the global
+ * `latestSkillsDraft` slot may lag, be cleared (Head Coach review + requestedPlanId), or briefly
+ * hold another domain's draft. Never let a stale non-null global draft shadow a fresher per-domain
+ * reload — pick the newer of the two, with the per-domain draft winning ties.
+ */
+export function resolveLatestDraftForDomainReview(
+  domain: TrainingPlanGenerationDomain,
+  input: {
+    isWorkflow2AHeadCoachOwnedSkillsDraft: boolean;
+    headCoachOwnedSkillsDraft: CoachAthleteLatestDomainDraft | null;
+    latestDraftDisplayDomain: TrainingPlanGenerationDomain | null;
+    latestSkillsDraft: CoachAthleteLatestDomainDraft | null;
+    perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
+  },
+): CoachAthleteLatestDomainDraft | null {
+  if (
+    domain === "SKILLS" &&
+    input.isWorkflow2AHeadCoachOwnedSkillsDraft &&
+    input.headCoachOwnedSkillsDraft !== null
+  ) {
+    return input.headCoachOwnedSkillsDraft;
+  }
+  const globalDraft =
+    input.latestDraftDisplayDomain === domain ? input.latestSkillsDraft : null;
+  const perDomainDraft = input.perDomainLatestDraft;
+  if (globalDraft === null) return perDomainDraft;
+  if (perDomainDraft === null) return globalDraft;
+  const perDomainWins =
+    resolveNewerDomainReviewDraft(globalDraft, perDomainDraft) === perDomainDraft;
+  const globalWins =
+    resolveNewerDomainReviewDraft(perDomainDraft, globalDraft) === globalDraft;
+  if (perDomainWins && !globalWins) return perDomainDraft;
+  if (globalWins && !perDomainWins) return globalDraft;
+  // Same plan version (including a same-version-id refetch): the per-domain cache is authoritative
+  // because every domain-scoped full-plan reload writes there, while the global slot may lag.
+  return perDomainDraft;
+}
+
+/**
+ * Runs the Nutrition review-drawer open refresh STRICTLY in order: the latest plan/version load
+ * must fully resolve before the revision target dropdown is rebuilt, because the dropdown is built
+ * from the newly loaded plan. The two loaders must never run concurrently.
+ */
+export async function runNutritionReviewDrawerOpenRefresh(input: {
+  loadLatestPlan: (() => Promise<unknown>) | null;
+  rebuildTargetOptions: (() => Promise<unknown>) | null;
+}): Promise<void> {
+  if (input.loadLatestPlan !== null) {
+    await input.loadLatestPlan();
+  }
+  if (input.rebuildTargetOptions !== null) {
+    await input.rebuildTargetOptions();
+  }
+}
+
+/** True while a Nutrition Apply Revision request is pending — locks Apply, Cancel, and Close. */
+export function nutritionRevisionDrawerSubmitPending(input: {
+  singlePatchMode: boolean;
+  reviseLoading: boolean;
+}): boolean {
+  return input.singlePatchMode && input.reviseLoading;
+}
+
+/**
+ * Returns true when the food item targeted by a prior REMOVE_ITEM selection is still present on the
+ * reloaded schedule (matched by day/session keys and item key or label). When false after an
+ * interrupted request, the removal likely completed server-side.
+ */
+export function nutritionRemoveItemTargetStillPresent(
+  scheduleDays: readonly unknown[] | null | undefined,
+  priorTarget: FynRevisionTargetOption,
+): boolean {
+  const dayKey = priorTarget.target.dayKey?.trim() ?? "";
+  const sessionKey = priorTarget.target.sessionKey?.trim() ?? "";
+  const itemKey = priorTarget.target.itemKey?.trim() ?? "";
+  const itemLabel = (priorTarget.itemLabel ?? priorTarget.target.label ?? "").trim();
+  if (dayKey === "" || sessionKey === "") return false;
+
+  for (const dayValue of scheduleDays ?? []) {
+    const day = fynTargetAsRecord(dayValue);
+    if (day === null) continue;
+    const dayKeyCandidate =
+      fynTargetReadString(day, ["dayKey"]) ??
+      fynTargetReadString(day, ["dayIndex"]) ??
+      fynTargetReadString(day, ["date"]) ??
+      "";
+    if (dayKeyCandidate !== dayKey) continue;
+
+    const sessions = fynTargetReadArray(day, ["sessions"]);
+    for (const sessionValue of sessions) {
+      const session = fynTargetAsRecord(sessionValue);
+      if (session === null) continue;
+      const sessionKeyCandidate =
+        fynTargetReadString(session, ["sessionKey", "sessionIndex"]) ?? "";
+      if (sessionKeyCandidate !== sessionKey) continue;
+
+      const items = fynTargetSessionItems(session);
+      for (const itemValue of items) {
+        const item = fynTargetAsRecord(itemValue);
+        if (item === null) continue;
+        const candidateKey = fynTargetReadString(item, ["itemKey", "order"]) ?? "";
+        const candidateLabel =
+          fynTargetReadString(item, ["label", "summary", "name", "title"]) ?? "";
+        if (itemKey !== "" && candidateKey === itemKey) return true;
+        if (itemLabel !== "" && candidateLabel === itemLabel) return true;
+      }
+      return false;
+    }
+  }
+  return false;
 }
 
 /**
@@ -3010,7 +3946,12 @@ export async function fetchFynRevisionReplacementOptions(input: {
     return {
       status: "OK",
       options: result.options,
-      message: result.options.length === 0 ? FYN_REVISION_NO_OPTIONS_MESSAGE : null,
+      message:
+        result.options.length === 0
+          ? input.domain === "NUTRITION" && optionKind === "ADD_ITEM"
+            ? FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE
+            : FYN_REVISION_NO_OPTIONS_MESSAGE
+          : null,
     };
   } catch {
     return { status: "ERROR", message: FYN_REVISION_OPTIONS_ERROR_MESSAGE };
@@ -3152,31 +4093,42 @@ export function FynRevisionOptionChips({
   options,
   disabled,
   onSelect,
+  selectedId = null,
 }: {
   options: CoachAthleteDomainDraftRevisionOption[];
   disabled?: boolean;
   onSelect: (option: CoachAthleteDomainDraftRevisionOption) => void;
+  /** When set, the matching chip is visually marked as the current single selection. */
+  selectedId?: string | null;
 }) {
   if (options.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <p className="text-sm text-textSecondary">
-        Pick an approved option and Fyn will add it to the basket:
-      </p>
+      <p className="text-sm text-textSecondary">Pick an approved option:</p>
       <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            title={option.reason ?? undefined}
-            className="rounded-full border border-primary/40 bg-white px-3 py-1 text-sm text-textPrimary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => onSelect(option)}
-            disabled={disabled}
-          >
-            {option.label}
-          </button>
-        ))}
+        {options.map((option) => {
+          const chosen = selectedId !== null && option.id === selectedId;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              title={option.reason ?? undefined}
+              aria-pressed={chosen}
+              data-selected={chosen ? "true" : "false"}
+              className={cn(
+                "rounded-full border px-3 py-1 text-sm transition disabled:cursor-not-allowed disabled:opacity-60",
+                chosen
+                  ? "border-primary bg-primary/10 text-textPrimary"
+                  : "border-primary/40 bg-white text-textPrimary hover:bg-primary/10",
+              )}
+              onClick={() => onSelect(option)}
+              disabled={disabled}
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -3199,6 +4151,12 @@ export function FynRevisionContextPanel({
   optionsState,
   onShowOptions,
   onSelectOption,
+  singlePatchMode = false,
+  selectedOptionId = null,
+  servingStepper = null,
+  servingUnavailable = false,
+  onServingIncrement,
+  onServingDecrement,
 }: {
   domain: TrainingPlanGenerationDomain;
   loading: boolean;
@@ -3216,16 +4174,37 @@ export function FynRevisionContextPanel({
   optionsState: FynRevisionOptionsState;
   onShowOptions: () => void;
   onSelectOption: (option: CoachAthleteDomainDraftRevisionOption) => void;
+  /** Nutrition deterministic single-patch flow: hides the multi-change basket + counter. */
+  singlePatchMode?: boolean;
+  /** The id of the one approved option chosen in single-patch mode (marks the chip as selected). */
+  selectedOptionId?: string | null;
+  /**
+   * Nutrition UPDATE_ITEM ("Change food item details") serving stepper model. When present, the
+   * free-text input is replaced by [ − ] {quantity} {unit} [ + ]. Null when the action is not a
+   * serving adjustment.
+   */
+  servingStepper?: { quantity: number; unit: string; canDecrement: boolean } | null;
+  /** True when a serving adjustment is selected but the item's serving is missing/unparseable. */
+  servingUnavailable?: boolean;
+  onServingIncrement?: () => void;
+  onServingDecrement?: () => void;
 }) {
   const acceptedChanges = fynRevisionAcceptedChanges(selection);
   const acceptedCount = acceptedChanges.length;
-  const canAcceptMore = acceptedCount < MAX_FYN_REVISION_CHANGES;
+  // In single-patch mode the composer is always open (one change at a time, no basket cap).
+  const canAcceptMore = singlePatchMode || acceptedCount < MAX_FYN_REVISION_CHANGES;
   const remainingMessage = fynRevisionRemainingMessage(acceptedCount);
   const selectedTargetOption =
     targetOptions.find((option) => option.key === selectedTargetKey) ?? null;
   const availableActions = fynRevisionAvailableActions(domain, selectedTargetOption);
   const selectedAction =
     availableActions.find((action) => action.key === selectedActionKey) ?? null;
+  // Nutrition "Change food item details" replaces the free-text input + option search with a
+  // deterministic serving stepper ([ − ] {quantity} {unit} [ + ]).
+  const nutritionServingAdjustmentAction =
+    domain === "NUTRITION" && selectedAction?.key === "UPDATE_ITEM";
+  // When a Nutrition item's meal is at its minimum, REMOVE_ITEM is not offered; explain why.
+  const nutritionRemoveMinimumNotice = nutritionRemoveItemMinimumNotice(domain, selectedTargetOption);
   const showOptionsDisabled =
     loading ||
     optionsState.loading ||
@@ -3251,6 +4230,22 @@ export function FynRevisionContextPanel({
           <p className="text-sm text-textSecondary">
             Fyn only shows revision actions this domain can safely execute.
           </p>
+          {domain === "NUTRITION" ? (
+            <p
+              className="text-sm text-textSecondary"
+              data-testid="fyn-nutrition-meal-minimums"
+            >
+              {NUTRITION_MEAL_MINIMUMS_GUIDANCE}
+            </p>
+          ) : null}
+          {singlePatchMode ? (
+            <p
+              className="text-sm text-textSecondary"
+              data-testid="fyn-nutrition-single-patch-guidance"
+            >
+              {NUTRITION_SINGLE_PATCH_GUIDANCE}
+            </p>
+          ) : null}
           <p className="text-sm text-textSecondary">
             Choose a target, then choose what kind of change you want.
           </p>
@@ -3345,8 +4340,9 @@ export function FynRevisionContextPanel({
             </div>
           ) : null}
 
-          {/* 3. Context third: Fyn only asks for detail once an action is chosen. */}
-          {selectedAction !== null ? (
+          {/* 3. Context third: Fyn only asks for detail once an action is chosen. Nutrition
+              serving adjustment uses a stepper instead of the free-text input + option search. */}
+          {selectedAction !== null && !nutritionServingAdjustmentAction ? (
             <label className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Tell Fyn what to change</span>
               <textarea
@@ -3360,9 +4356,74 @@ export function FynRevisionContextPanel({
             </label>
           ) : null}
 
+          {nutritionServingAdjustmentAction && servingStepper !== null ? (
+            <div className="space-y-1 text-sm text-textPrimary">
+              <span className="font-medium">Adjust serving</span>
+              <div
+                className="flex items-center gap-3"
+                data-testid="fyn-nutrition-serving-stepper"
+              >
+                <button
+                  type="button"
+                  aria-label="Decrease serving"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-lg text-textPrimary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => onServingDecrement?.()}
+                  disabled={loading || !servingStepper.canDecrement}
+                >
+                  −
+                </button>
+                <span
+                  className="min-w-[6rem] text-center text-sm font-medium text-textPrimary"
+                  data-testid="fyn-nutrition-serving-value"
+                >
+                  {formatNutritionServingValue(servingStepper.quantity, servingStepper.unit)}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Increase serving"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-lg text-textPrimary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => onServingIncrement?.()}
+                  disabled={loading}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {nutritionServingAdjustmentAction && servingUnavailable ? (
+            <p
+              role="status"
+              data-testid="fyn-nutrition-serving-unavailable"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              This item has no adjustable serving. Please choose another change.
+            </p>
+          ) : null}
+
           {selectedAction?.key === "UPDATE_SESSION_ITEMS" ? (
             <p className="text-sm text-textSecondary" role="status">
               {FYN_REVISION_SESSION_ITEMS_HINT}
+            </p>
+          ) : null}
+
+          {nutritionRemoveMinimumNotice ? (
+            <p
+              role="status"
+              data-testid="fyn-nutrition-remove-minimum"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              {nutritionRemoveMinimumNotice}
+            </p>
+          ) : null}
+
+          {domain === "NUTRITION" && selectedAction?.key === "REMOVE_ITEM" ? (
+            <p
+              role="status"
+              data-testid="fyn-nutrition-remove-warning"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              {NUTRITION_REMOVE_ITEM_MINIMUM_WARNING}
             </p>
           ) : null}
 
@@ -3375,7 +4436,7 @@ export function FynRevisionContextPanel({
             >
               {optionsState.loading ? "Loading options..." : FYN_REVISION_SHOW_OPTIONS_LABEL}
             </Button>
-          ) : selectedAction !== null && selectedTargetOption !== null ? (
+          ) : !singlePatchMode && selectedAction !== null && selectedTargetOption !== null ? (
             <Button
               type="button"
               variant="secondary"
@@ -3400,16 +4461,29 @@ export function FynRevisionContextPanel({
               options={optionsState.options}
               disabled={optionsState.loading}
               onSelect={onSelectOption}
+              selectedId={selectedOptionId}
             />
           ) : optionsState.message ? (
             <p className="text-sm text-textSecondary" role="status">
               {optionsState.message}
             </p>
           ) : null}
+
+          {singlePatchMode && selectedOptionId !== null ? (
+            <p
+              className="text-sm text-textPrimary"
+              role="status"
+              data-testid="fyn-nutrition-selected-option"
+            >
+              Selected:{" "}
+              {optionsState.options.find((option) => option.id === selectedOptionId)?.label ??
+                "approved option"}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {acceptedCount > 0 ? (
+      {!singlePatchMode && acceptedCount > 0 ? (
         <div className="space-y-2 rounded-md border border-primary/20 bg-white/80 p-3">
           <h6 className="text-sm font-medium text-textPrimary">Revision basket</h6>
           <ol className="space-y-2 text-sm text-textPrimary">
@@ -3528,6 +4602,44 @@ function headCoachDomainStatusLabel(kind: AssistantDomainWorkflowStatus): string
   if (kind === "submitted_for_review") return "Submitted for Review";
   if (kind === "draft_generated") return "Draft Created";
   return "Not Created";
+}
+
+export function RevisionRequestPanel({
+  workflowStatus,
+  pendingRevisionRequest,
+}: {
+  workflowStatus: AssistantDomainWorkflowStatus;
+  pendingRevisionRequest: TrainingPlanPendingRevisionRequest | null;
+}) {
+  const feedback = pendingRevisionRequest?.feedback?.trim() ?? "";
+  if (workflowStatus !== "revision_requested" || feedback === "") return null;
+
+  const requestedBy = pendingRevisionRequest?.requestedBy?.trim() ?? "";
+  const requestedAt = pendingRevisionRequest?.requestedAt?.trim() ?? "";
+
+  return (
+    <DashboardStatusNotice type="warning" title="Revision Request" compact>
+      <div className="space-y-2">
+        <p className="whitespace-pre-wrap">{feedback}</p>
+        {requestedBy !== "" || requestedAt !== "" ? (
+          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-current/80">
+            {requestedBy !== "" ? (
+              <div>
+                <dt className="inline font-medium">Requested by: </dt>
+                <dd className="inline">{requestedBy}</dd>
+              </div>
+            ) : null}
+            {requestedAt !== "" ? (
+              <div>
+                <dt className="inline font-medium">Requested at: </dt>
+                <dd className="inline">{formatDateTime(requestedAt)}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
+      </div>
+    </DashboardStatusNotice>
+  );
 }
 
 function resolveHeadCoachDomainSummaryVersionId(input: {
@@ -8295,12 +9407,17 @@ const NUTRITION_SERVING_CANDIDATE_FIELDS = [
   "prescribedQuantity",
 ] as const;
 
+// Read the complete latest plan item's nutrients across every alias the backend may emit. The parsed
+// draft item is already normalized (scaled-first) by parseGeneratedDraftItem and is the single source
+// consulted first. This raw fallback (used only when the parsed item lacks a value) mirrors the same
+// scaled-first priority so a scaled runtime alias (*G / caloriesKcal) is never overridden by an older
+// base field. The frontend never computes these — it only reads whichever key is present.
 const NUTRITION_METRIC_ALIASES: Record<NutritionMetricKey, readonly string[]> = {
-  calories: ["calories", "kcal", "energyKcal"],
-  protein: ["proteinGrams", "protein"],
-  carbs: ["carbsGrams", "carbohydratesGrams", "carbohydrates", "carbs"],
-  fat: ["fatGrams", "fat"],
-  fiber: ["fiberGrams", "fiber", "dietaryFiberGrams", "dietaryFiber"],
+  calories: ["caloriesKcal", "calories", "kcal", "energyKcal"],
+  protein: ["proteinG", "proteinGrams", "protein"],
+  carbs: ["carbohydrateG", "carbsG", "carbsGrams", "carbs", "carbohydratesGrams", "carbohydrates"],
+  fat: ["fatG", "fatGrams", "fat"],
+  fiber: ["fiberG", "fiberGrams", "fibreG", "fiber", "dietaryFiberGrams", "dietaryFiber"],
 };
 
 function formatNutritionCaloriesDisplay(value: number | null | undefined): string {
@@ -8953,6 +10070,13 @@ export function CoachAthletePlanningProfileView({
   const [reviseNutritionLoading, setReviseNutritionLoading] = useState(false);
   const [reviseNutritionError, setReviseNutritionError] = useState<string | null>(null);
   const [reviseNutritionSuccess, setReviseNutritionSuccess] = useState<string | null>(null);
+  // Authoritative plan/version for the next Nutrition revision in the open review drawer. Seeded
+  // from the exact version rendered in the drawer and then updated from each successful revise
+  // response (`trainingPlanVersionId`) so sequential revisions chain correctly and never fall back
+  // to a stale workspace/draft version. Cleared only when the review drawer closes or a different
+  // plan opens (the resolver ignores a pin belonging to a different trainingPlanId).
+  const [nutritionActiveReviseIds, setNutritionActiveReviseIds] =
+    useState<NutritionReviseIds | null>(null);
   const [reviseSandCFeedback, setReviseSandCFeedback] = useState("");
   const [reviseSandCLoading, setReviseSandCLoading] = useState(false);
   const [reviseSandCError, setReviseSandCError] = useState<string | null>(null);
@@ -8983,6 +10107,18 @@ export function CoachAthletePlanningProfileView({
   const [fynRevisionOptionStates, setFynRevisionOptionStates] = useState<
     Partial<Record<TrainingPlanGenerationDomain, FynRevisionOptionsState>>
   >({});
+  // Nutrition single-patch flow: the one approved option the coach has chosen for the current
+  // (single) change. Skills/S&C keep basketing changes and never read this map.
+  const [fynRevisionSelectedOptions, setFynRevisionSelectedOptions] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, CoachAthleteDomainDraftRevisionOption | null>>
+  >({});
+  // Coach's current target quantity for a Nutrition UPDATE_ITEM serving adjustment (the stepper
+  // value). Null means "not yet adjusted" — the display falls back to the item's parsed serving
+  // quantity, which keeps Apply disabled until the coach steps the value. Reset whenever the
+  // selection changes so it always re-seeds from the newly selected item.
+  const [nutritionServingDraftQuantity, setNutritionServingDraftQuantity] = useState<
+    number | null
+  >(null);
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
     useState(false);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -11312,6 +12448,58 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.version?.id,
     workspace,
   ]);
+  // The pinned revision version is scoped to an OPEN Nutrition review drawer. Clear it only when the
+  // drawer closes or switches to another domain (a different trainingPlanId is handled by the
+  // resolver ignoring a mismatched pin). This deliberately does NOT clear on selection reset,
+  // "Revise another item", or plan-display refresh.
+  useEffect(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "NUTRITION") {
+      setNutritionActiveReviseIds(null);
+    }
+  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
+  // Nutrition Plan Review drawer open/close lifecycle. Keyed only on open+domain so it runs once per
+  // open (never on selection/message churn). ON OPEN: clear stale transient messages, reload the
+  // latest plan/version (existing loader) and rebuild the revision target dropdown from that latest
+  // plan (existing revision-context loader) so the dropdown reflects the latest plan immediately —
+  // no second "Revise Plan" click needed. ON CLOSE / domain switch: clear success/error/applying/
+  // already-applied messages, the selected target/action/option, and temporary revision state.
+  useEffect(() => {
+    const lifecycle = resolveNutritionReviewDrawerLifecycle({
+      drawerOpen: domainReviewDrawerOpen,
+      drawerDomain: domainReviewDrawerDomain,
+    });
+    if (lifecycle.clearTransientMessages) {
+      setReviseNutritionError(null);
+      setReviseNutritionSuccess(null);
+    }
+    if (lifecycle.clearTargetOptions) {
+      // Clear the previous target/options SYNCHRONOUSLY before the async refresh, so no stale option
+      // is shown or selectable while the latest plan is still loading.
+      resetFynRevisionOptionsFlow("NUTRITION");
+    }
+    if (lifecycle.loadLatestPlan || lifecycle.rebuildTargetOptions) {
+      // Sequential: rebuild the dropdown ONLY after the latest plan has resolved (never concurrent).
+      void runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: lifecycle.loadLatestPlan
+          ? () => loadLatestSkillsDraft("NUTRITION", true)
+          : null,
+        rebuildTargetOptions: lifecycle.rebuildTargetOptions
+          ? () => loadFynRevisionContext("NUTRITION")
+          : null,
+      });
+    }
+    if (lifecycle.clearSelection) {
+      setReviseNutritionFeedback("");
+      resetFynRevisionOptionsFlow("NUTRITION");
+      setFynRevisionSelections((current) => ({
+        ...current,
+        NUTRITION: defaultFynRevisionBatchSelection(),
+      }));
+    }
+    // loadLatestSkillsDraft / loadFynRevisionContext are stable for a given athlete/entity; excluded
+    // so this initializes exactly once per open rather than re-firing on their identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
   const sandCReviseIds = useMemo(() => {
     return resolveDomainRevisePlanIds({
       domain: "S_AND_C",
@@ -12409,6 +13597,9 @@ export function CoachAthletePlanningProfileView({
     if (!domainReviewDrawerOpen) return;
     function handleDrawerKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (domainReviewDrawerDomain === "NUTRITION" && reviseNutritionLoading) {
+          return;
+        }
         handleCloseDomainReviewDrawer();
       }
     }
@@ -12416,7 +13607,12 @@ export function CoachAthletePlanningProfileView({
     return () => {
       document.removeEventListener("keydown", handleDrawerKeyDown);
     };
-  }, [domainReviewDrawerOpen, handleCloseDomainReviewDrawer]);
+  }, [
+    domainReviewDrawerDomain,
+    domainReviewDrawerOpen,
+    handleCloseDomainReviewDrawer,
+    reviseNutritionLoading,
+  ]);
 
   useEffect(() => {
     if (selectedWorkflowTab === "generate") return;
@@ -13754,7 +14950,7 @@ export function CoachAthletePlanningProfileView({
   const loadLatestSkillsDraft = useCallback(async (
     generationDomain: TrainingPlanGenerationDomain,
     retryOnNotFound = false,
-  ) => {
+  ): Promise<CoachAthleteLatestDomainDraft | null> => {
     if (
       entityId === "" ||
       athleteIdTrimmed === "" ||
@@ -13770,7 +14966,7 @@ export function CoachAthletePlanningProfileView({
       setLatestSkillsDraftMissing(false);
       setLatestSkillsDraftError(null);
       setLatestSkillsDraftErrorDomain(null);
-      return;
+      return null;
     }
 
     const requestScope = { athlete: athleteIdTrimmed, entity: entityId };
@@ -13789,7 +14985,7 @@ export function CoachAthletePlanningProfileView({
         latestSkillsDraftRequestGenRef.current !== requestGeneration
         || !workloadTrainerScopeMatches(workflowTrainerScopeRef, requestScope)
       ) {
-        return;
+        return null;
       }
       try {
         const result = await fetchLatestCoachAthleteDomainDraft(
@@ -13801,7 +14997,7 @@ export function CoachAthletePlanningProfileView({
           latestSkillsDraftRequestGenRef.current !== requestGeneration
           || !workloadTrainerScopeMatches(workflowTrainerScopeRef, requestScope)
         ) {
-          return;
+          return null;
         }
         setLatestSkillsDraft(result);
         setLatestDraftDomain(generationDomain);
@@ -13810,16 +15006,29 @@ export function CoachAthletePlanningProfileView({
         setLatestSkillsDraftError(null);
         setLatestSkillsDraftErrorDomain(null);
         setGeneratePlanError(null);
+        if (generationDomain === "NUTRITION") {
+          // Atomically replace the drawer's displayed Nutrition draft with this complete full-plan
+          // response. In Head Coach review mode the global `latestSkillsDraft` is cleared, so the
+          // drawer renders the per-domain `state.latestDraft`; both slots must receive the same
+          // freshly parsed object so a stale global draft can never shadow a successful reload.
+          setHeadCoachDomainPlanStates((prev) => {
+            const current = prev.NUTRITION;
+            const nextDraft = resolveNewerDomainReviewDraft(current.latestDraft, result);
+            if (nextDraft === null) return prev;
+            if (nextDraft === current.latestDraft) return prev;
+            return { ...prev, NUTRITION: { ...current, latestDraft: nextDraft } };
+          });
+        }
         if (shouldRenderAssistantDomainWorkspace) {
           await refreshAssistantGovernedDetailFromLatestDraft(generationDomain, result);
         }
-        return;
+        return result;
       } catch (e) {
         if (
           latestSkillsDraftRequestGenRef.current !== requestGeneration
           || !workloadTrainerScopeMatches(workflowTrainerScopeRef, requestScope)
         ) {
-          return;
+          return null;
         }
         if (isNormalizedApiError(e) && e.status === 404) {
           if (attemptIndex < retryDelaysMs.length - 1) {
@@ -13831,7 +15040,7 @@ export function CoachAthletePlanningProfileView({
           setLatestSkillsDraftMissing(true);
           setLatestSkillsDraftError(null);
           setLatestSkillsDraftErrorDomain(null);
-          return;
+          return null;
         }
         setLatestSkillsDraft(null);
         setLatestDraftDomain(generationDomain);
@@ -13839,9 +15048,10 @@ export function CoachAthletePlanningProfileView({
         setLatestSkillsDraftMissing(false);
         setLatestSkillsDraftError(domainDraftLoadErrorMessage(generationDomain));
         setLatestSkillsDraftErrorDomain(generationDomain);
-        return;
+        return null;
       }
     }
+    return null;
   }, [
     athleteIdTrimmed,
     entityId,
@@ -14415,6 +15625,10 @@ export function CoachAthletePlanningProfileView({
       ...current,
       [domain]: defaultFynRevisionOptionsState(),
     }));
+    // The chosen approved option (Nutrition single-patch) is target-specific; clear it.
+    setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    // The serving stepper re-seeds from the newly selected item's serving.
+    setNutritionServingDraftQuantity(null);
   }
 
   function handleFynRevisionActionChange(
@@ -14427,6 +15641,10 @@ export function CoachAthletePlanningProfileView({
       ...current,
       [domain]: defaultFynRevisionOptionsState(),
     }));
+    // Switching action invalidates any previously chosen approved option (Nutrition single-patch).
+    setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    // The serving stepper only applies to UPDATE_ITEM; reset it when the action changes.
+    setNutritionServingDraftQuantity(null);
   }
 
   /** Adds a non-replacement action (add/remove/update) to the revision basket as a friendly line. */
@@ -14435,6 +15653,8 @@ export function CoachAthletePlanningProfileView({
     action: FynRevisionAction,
     target: FynRevisionTargetOption,
   ): void {
+    // Nutrition uses the deterministic single-patch flow (Apply Revision), never the basket.
+    if (domain === "NUTRITION") return;
     const coachRequest = fynRevisionRequests[domain] ?? "";
     const changeText = buildFynRevisionActionChangeText(domain, action, target, coachRequest);
     if (changeText === "") return;
@@ -14468,6 +15688,8 @@ export function CoachAthletePlanningProfileView({
       ...current,
       [domain]: defaultFynRevisionOptionsState(),
     }));
+    setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    setNutritionServingDraftQuantity(null);
   }
 
   /** Fetches endpoint-backed replacement options for the selected target. Guards against
@@ -14561,6 +15783,12 @@ export function CoachAthletePlanningProfileView({
     targetOptions: FynRevisionTargetOption[],
     option: CoachAthleteDomainDraftRevisionOption,
   ): void {
+    // Nutrition single-patch flow: keep exactly one chosen approved option (no basket). The patch
+    // is assembled from target + action + this option at Apply Revision time.
+    if (domain === "NUTRITION") {
+      setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: option }));
+      return;
+    }
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
     const actionKey = fynRevisionActionKeys[domain] ?? null;
     const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
@@ -14633,7 +15861,12 @@ export function CoachAthletePlanningProfileView({
 
   function openFynGuidedReviseComposer(domain: TrainingPlanGenerationDomain): void {
     setAssistantRevisePanelDomain(domain);
-    void loadFynRevisionContext(domain);
+    // Nutrition loads its latest plan + revision target dropdown when the review drawer OPENS, so
+    // Revise Plan only reveals the controls here — it must not be the trigger that refreshes plan
+    // data. Skills/S&C keep loading their revision context on demand.
+    if (domain !== "NUTRITION") {
+      void loadFynRevisionContext(domain);
+    }
   }
 
   async function handlePersistedGovernedPlanAction(
@@ -15397,16 +16630,17 @@ export function CoachAthletePlanningProfileView({
       directReleaseSkillsOwner: directReleaseDomainOwner,
       rawPlanStatus,
     });
-    // Read alignment: the drawer refresh hydrates the generated draft into the
-    // per-domain state (state.latestDraft). The global latestSkillsDraft is cleared
-    // in Head Coach review mode when a plan is requested, so fall back to the hydrated
-    // per-domain draft instead of shadowing it with a null global.
-    const latestDraftForReview =
-      (isWorkflow2AHeadCoachOwnedSkillsDraft && headCoachOwnedSkillsDraft !== null
-        ? headCoachOwnedSkillsDraft
-        : latestDraftDisplayDomain === domain
-          ? latestSkillsDraft
-          : null) ?? state.latestDraft;
+    // Read alignment: the drawer refresh hydrates the generated draft into the per-domain state
+    // (`state.latestDraft`). The global `latestSkillsDraft` is cleared in Head Coach review mode
+    // when a plan is requested, and may lag or hold another domain's draft — never shadow the
+    // per-domain full-plan reload with a stale global object.
+    const latestDraftForReview = resolveLatestDraftForDomainReview(domain, {
+      isWorkflow2AHeadCoachOwnedSkillsDraft,
+      headCoachOwnedSkillsDraft,
+      latestDraftDisplayDomain,
+      latestSkillsDraft,
+      perDomainLatestDraft: state.latestDraft,
+    });
     const contentSource = resolveDomainReviewDrawerContentSource({
       domain,
       workflowStatus,
@@ -15650,6 +16884,14 @@ export function CoachAthletePlanningProfileView({
             {!state.loading && !state.error && showWorkflow2DraftPendingNotice ? (
               <div className="text-xs text-textMuted">Draft generated; not yet submitted.</div>
             ) : null}
+            <RevisionRequestPanel
+              workflowStatus={workflowStatus}
+              pendingRevisionRequest={
+                workspace?.domains[domain].pendingRevisionRequest !== undefined
+                  ? workspace.domains[domain].pendingRevisionRequest
+                  : (reviewModel.activeDetail?.pendingRevisionRequest ?? null)
+              }
+            />
           </div>
         </td>
         <td className="px-3 py-3">
@@ -16537,12 +17779,96 @@ export function CoachAthletePlanningProfileView({
     const fynRevisionCoachRequest = fynRevisionRequests[reviewDomain] ?? "";
     const fynRevisionSelectedTargetKey = fynRevisionTargetKeys[reviewDomain] ?? null;
     const fynRevisionSelectedActionKey = fynRevisionActionKeys[reviewDomain] ?? null;
+    // Nutrition submits against the EXACT plan/version rendered in this drawer (via actionContext),
+    // overridden by the pinned response version once a revision has succeeded — never the stale
+    // workspace / latest-draft memo.
+    const nutritionDrawerRenderedReviseIds: NutritionReviseIds | null =
+      reviewDomain === "NUTRITION" && actionContext !== null
+        ? { trainingPlanId: actionContext.planId, versionId: actionContext.versionId }
+        : null;
     const drawerReviseIds =
       reviewDomain === "SKILLS"
         ? skillsReviseIds
         : reviewDomain === "NUTRITION"
-          ? nutritionReviseIds
+          ? resolveActiveNutritionReviseIds(
+              nutritionDrawerRenderedReviseIds,
+              nutritionActiveReviseIds,
+            )
           : sandCReviseIds;
+    // Nutrition uses the deterministic single-patch flow: assemble one structured submission from
+    // the single target/action/option/note selection. Skills/S&C keep the multi-change basket.
+    const nutritionSinglePatchMode = reviewDomain === "NUTRITION";
+    const nutritionRevisionSubmitPending = nutritionRevisionDrawerSubmitPending({
+      singlePatchMode: nutritionSinglePatchMode,
+      reviseLoading: drawerReviseLoading,
+    });
+    const nutritionSelectedOption = nutritionSinglePatchMode
+      ? (fynRevisionSelectedOptions.NUTRITION ?? null)
+      : null;
+    const fynRevisionSelectedTargetOption =
+      fynRevisionTargetOptionList.find(
+        (option) => option.key === fynRevisionSelectedTargetKey,
+      ) ?? null;
+    // Nutrition "Change food item details" (UPDATE_ITEM) is a deterministic serving stepper. Parse
+    // the selected item's canonical serving; the displayed quantity is the coach's stepped draft, or
+    // the parsed original before any adjustment (which keeps Apply disabled until it changes).
+    const nutritionServingAdjustmentActive =
+      nutritionSinglePatchMode && fynRevisionSelectedActionKey === "UPDATE_ITEM";
+    const nutritionServingParts = nutritionServingAdjustmentActive
+      ? parseNutritionServing(fynRevisionSelectedTargetOption?.serving ?? null)
+      : null;
+    const nutritionServingDisplayQuantity =
+      nutritionServingParts === null
+        ? null
+        : (nutritionServingDraftQuantity ?? nutritionServingParts.quantity);
+    const nutritionServingStepper =
+      nutritionServingParts !== null && nutritionServingDisplayQuantity !== null
+        ? {
+            quantity: nutritionServingDisplayQuantity,
+            unit: nutritionServingParts.unit,
+            canDecrement:
+              adjustNutritionServingQuantity(
+                nutritionServingDisplayQuantity,
+                nutritionServingParts.step,
+                -1,
+              ) !== null,
+          }
+        : null;
+    // UPDATE_ITEM is selected but the item's serving is missing/unparseable — show a notice and keep
+    // Apply blocked (the submission builder returns null in this case).
+    const nutritionServingUnavailable =
+      nutritionServingAdjustmentActive && nutritionServingParts === null;
+    const handleNutritionServingAdjust = (direction: 1 | -1) => {
+      if (nutritionServingParts === null || nutritionServingDisplayQuantity === null) return;
+      const next = adjustNutritionServingQuantity(
+        nutritionServingDisplayQuantity,
+        nutritionServingParts.step,
+        direction,
+      );
+      if (next !== null) setNutritionServingDraftQuantity(next);
+    };
+    // Submit the selected dropdown target's own dayIndex/sessionIndex/itemIndex directly — those
+    // targets are (re)built from the latest loaded plan on open and after every successful revision.
+    // No speculative pre-submit re-match, so a visible/selectable item is never falsely blocked.
+    const nutritionRevisionSubmission = nutritionSinglePatchMode
+      ? buildNutritionRevisionSubmission({
+          reviseIds: drawerReviseIds,
+          target: fynRevisionSelectedTargetOption,
+          actionKey: fynRevisionSelectedActionKey,
+          option: nutritionSelectedOption,
+          coachRequest: fynRevisionCoachRequest,
+          servingTargetQuantity: nutritionServingDisplayQuantity,
+        })
+      : null;
+    const nutritionCanApply = nutritionRevisionSubmission !== null;
+    // Surface a specific hint (and keep Apply blocked) when a chosen ADD_ITEM/REPLACE_ITEM option
+    // lacks its authoritative catalog reference.
+    const nutritionOptionMissingCatalog =
+      nutritionSinglePatchMode &&
+      nutritionRevisionOptionMissingCatalogReference({
+        actionKey: fynRevisionSelectedActionKey,
+        option: nutritionSelectedOption,
+      });
     const handleDrawerReviseFeedbackChange = (nextValue: string) => {
       if (reviewDomain === "SKILLS") {
         setReviseSkillsFeedback(nextValue);
@@ -16562,7 +17888,10 @@ export function CoachAthletePlanningProfileView({
       if (reviewDomain === "SKILLS") {
         void handleReviseSkillsPlan();
       } else if (reviewDomain === "NUTRITION") {
-        void handleReviseNutritionPlan();
+        void handleReviseNutritionPlan(nutritionRevisionSubmission, {
+          target: fynRevisionSelectedTargetOption,
+          actionKey: fynRevisionSelectedActionKey,
+        });
       } else {
         void handleReviseSandCPlan();
       }
@@ -16619,6 +17948,7 @@ export function CoachAthletePlanningProfileView({
           type="button"
           className={drawerLayoutClasses.backdropClassName}
           aria-label="Close Domain Review Drawer"
+          disabled={nutritionRevisionSubmitPending}
           onClick={handleCloseDomainReviewDrawer}
         />
         <aside className={drawerLayoutClasses.panelClassName}>
@@ -16635,6 +17965,7 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
+                disabled={nutritionRevisionSubmitPending}
                 onClick={handleCloseDomainReviewDrawer}
               >
                 Close
@@ -16699,6 +18030,15 @@ export function CoachAthletePlanningProfileView({
                   </WorkflowNeutralNotice>
                 ) : null}
               </section>
+
+              <RevisionRequestPanel
+                workflowStatus={workflowStatus}
+                pendingRevisionRequest={
+                  activeDetail?.pendingRevisionRequest !== undefined
+                    ? activeDetail.pendingRevisionRequest
+                    : (workspace?.domains[reviewDomain].pendingRevisionRequest ?? null)
+                }
+              />
 
               <section className="space-y-3 border-t border-border/70 pt-5">
                 <div className="space-y-1">
@@ -16834,38 +18174,93 @@ export function CoachAthletePlanningProfileView({
                         option,
                       );
                     }}
+                    singlePatchMode={nutritionSinglePatchMode}
+                    selectedOptionId={nutritionSelectedOption?.id ?? null}
+                    servingStepper={nutritionServingStepper}
+                    servingUnavailable={nutritionServingUnavailable}
+                    onServingIncrement={() => handleNutritionServingAdjust(1)}
+                    onServingDecrement={() => handleNutritionServingAdjust(-1)}
                   />
-                  <div className="flex flex-wrap justify-end gap-3">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={drawerReviseLoading}
-                      onClick={() => {
-                        setAssistantRevisePanelDomain(null);
-                        setFynRevisionSelections((current) => ({
-                          ...current,
-                          [reviewDomain]: defaultFynRevisionBatchSelection(),
-                        }));
-                        resetFynRevisionOptionsFlow(reviewDomain);
-                        handleDrawerReviseFeedbackChange("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="primary"
-                      loading={drawerReviseLoading}
-                      disabled={
-                        drawerReviseLoading ||
-                        drawerReviseIds === null ||
-                        fynRevisionAcceptedCount(fynRevisionSelection) === 0
-                      }
-                      onClick={handleDrawerReviseSubmit}
-                    >
-                      Revise Plan
-                    </Button>
-                  </div>
+                  {nutritionSinglePatchMode &&
+                  drawerReviseSuccess === NUTRITION_REVISION_APPLIED_MESSAGE ? (
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setAssistantRevisePanelDomain(null);
+                          setReviseNutritionSuccess(null);
+                          resetFynRevisionOptionsFlow(reviewDomain);
+                          handleDrawerReviseFeedbackChange("");
+                        }}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        onClick={() => {
+                          // Selection was already cleared on success; just clear the notice so the
+                          // coach can immediately compose the next single change on the new version.
+                          setReviseNutritionSuccess(null);
+                          resetFynRevisionOptionsFlow(reviewDomain);
+                        }}
+                      >
+                        Revise another item
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                    {nutritionRevisionSubmitPending ? (
+                      <DashboardStatusNotice type="loading" compact>
+                        {NUTRITION_REVISION_APPLYING_MESSAGE}
+                      </DashboardStatusNotice>
+                    ) : null}
+                    {nutritionOptionMissingCatalog ? (
+                      <Alert variant="danger" data-testid="fyn-nutrition-missing-catalog">
+                        {NUTRITION_OPTION_MISSING_CATALOG_MESSAGE}
+                      </Alert>
+                    ) : null}
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={nutritionRevisionSubmitPending || drawerReviseLoading}
+                        onClick={() => {
+                          setAssistantRevisePanelDomain(null);
+                          setFynRevisionSelections((current) => ({
+                            ...current,
+                            [reviewDomain]: defaultFynRevisionBatchSelection(),
+                          }));
+                          resetFynRevisionOptionsFlow(reviewDomain);
+                          handleDrawerReviseFeedbackChange("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        loading={drawerReviseLoading}
+                        disabled={
+                          nutritionRevisionSubmitPending ||
+                          drawerReviseLoading ||
+                          drawerReviseIds === null ||
+                          (nutritionSinglePatchMode
+                            ? !nutritionCanApply
+                            : fynRevisionAcceptedCount(fynRevisionSelection) === 0)
+                        }
+                        onClick={handleDrawerReviseSubmit}
+                      >
+                        {nutritionSinglePatchMode && drawerReviseLoading
+                          ? NUTRITION_REVISION_APPLYING_MESSAGE
+                          : nutritionSinglePatchMode
+                            ? "Apply Revision"
+                            : "Revise Plan"}
+                      </Button>
+                    </div>
+                    </div>
+                  )}
                 </section>
               ) : null}
 
@@ -16918,19 +18313,23 @@ export function CoachAthletePlanningProfileView({
               ) : null}
 
               {contentSource === "active_detail" && activeDetail !== null ? (
-                renderDomainPlanDaySchedule(
-                  activeDetail,
-                  reviewDomainLabel,
-                  domainReviewScheduleDescription(workflowStatus),
-                  reviewDomain,
-                )
+                <div key={domainReviewActiveDetailRenderKey(activeDetail)}>
+                  {renderDomainPlanDaySchedule(
+                    activeDetail,
+                    reviewDomainLabel,
+                    domainReviewScheduleDescription(workflowStatus),
+                    reviewDomain,
+                  )}
+                </div>
               ) : contentSource === "latest_domain_draft" && latestDraft !== null ? (
-                renderLatestDomainDraftDaySchedule(
-                  latestDraft,
-                  reviewDomainLabel,
-                  domainReviewScheduleDescription(workflowStatus),
-                  reviewDomain,
-                )
+                <div key={domainReviewDraftRenderKey(latestDraft)}>
+                  {renderLatestDomainDraftDaySchedule(
+                    latestDraft,
+                    reviewDomainLabel,
+                    domainReviewScheduleDescription(workflowStatus),
+                    reviewDomain,
+                  )}
+                </div>
               ) : shouldShowDomainReviewSubmittedPlanEmptyState({
                   contentSource,
                   loading: domainState.loading,
@@ -16950,6 +18349,7 @@ export function CoachAthletePlanningProfileView({
             <Button
               type="button"
               variant="secondary"
+              disabled={nutritionRevisionSubmitPending}
               onClick={handleCloseDomainReviewDrawer}
             >
               Close
@@ -17634,6 +19034,14 @@ export function CoachAthletePlanningProfileView({
               }
             />
           </dl>
+          <RevisionRequestPanel
+            workflowStatus={model.workflowStatus}
+            pendingRevisionRequest={
+              workspace?.domains[domain].pendingRevisionRequest !== undefined
+                ? workspace.domains[domain].pendingRevisionRequest
+                : (model.activeDetail?.pendingRevisionRequest ?? null)
+            }
+          />
           {workspaceError ? <Alert variant="warning">{workspaceError}</Alert> : null}
           {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
           {generatePlanRecoveryMessage ? (
@@ -19436,71 +20844,143 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  async function handleReviseNutritionPlan() {
+  async function handleReviseNutritionPlan(
+    submission?: TrainingPlanRevisePayload | null,
+    pendingSelection?: NutritionPendingRevisionSelection | null,
+  ) {
+    // Anchor on the EXACT plan/version rendered in the open review drawer (never the stale
+    // workspace / latest-draft memo), then let the pinned response version win once set.
+    const nutritionDrawerModel = resolveDomainReviewSurfaceModel("NUTRITION");
+    const nutritionDrawerRenderedReviseIds: NutritionReviseIds | null =
+      nutritionDrawerModel.planId.trim() !== "" && nutritionDrawerModel.versionId.trim() !== ""
+        ? {
+            trainingPlanId: nutritionDrawerModel.planId,
+            versionId: nutritionDrawerModel.versionId,
+          }
+        : null;
+    const activeReviseIds = resolveActiveNutritionReviseIds(
+      nutritionDrawerRenderedReviseIds,
+      nutritionActiveReviseIds,
+    );
     if (
       reviseNutritionLoading ||
       entityId === "" ||
       athleteIdTrimmed === "" ||
-      !nutritionReviseIds
+      !activeReviseIds
     ) {
       return;
     }
 
-    const coachFeedback = reviseNutritionFeedback.trim();
-    if (coachFeedback === "") {
-      setReviseNutritionError("Enter revision feedback first.");
-      setReviseNutritionSuccess(null);
-      return;
+    // Nutrition single-patch flow supplies a structured `revisionPatch` (the executable source of
+    // truth). Legacy free-text surfaces call with no submission and keep the feedback-only path.
+    const isSinglePatch = submission != null && submission.revisionPatch != null;
+    let payload: TrainingPlanRevisePayload;
+    if (isSinglePatch) {
+      payload = submission;
+    } else {
+      const coachFeedback = reviseNutritionFeedback.trim();
+      if (coachFeedback === "") {
+        setReviseNutritionError("Enter revision feedback first.");
+        setReviseNutritionSuccess(null);
+        return;
+      }
+      payload = {
+        trainingPlanId: activeReviseIds.trainingPlanId,
+        versionId: activeReviseIds.versionId,
+        coachFeedback,
+      };
     }
 
-    const trainingPlanIdForReload = nutritionReviseIds.trainingPlanId.trim();
+    const trainingPlanIdForReload = (
+      payload.trainingPlanId || activeReviseIds.trainingPlanId
+    ).trim();
 
     setReviseNutritionLoading(true);
     setReviseNutritionError(null);
     setReviseNutritionSuccess(null);
     try {
-      const reviseResult = await reviseNutritionPlan(entityId, athleteIdTrimmed, {
-        trainingPlanId: nutritionReviseIds.trainingPlanId,
-        versionId: nutritionReviseIds.versionId,
-        coachFeedback,
-      });
+      const reviseResult = await reviseNutritionPlan(entityId, athleteIdTrimmed, payload);
+      // 1) Pin the version returned by this successful revision as the authoritative version for the
+      // NEXT revision. This is the source of truth even if the latest-plan reload below lags or
+      // resolves to stale state.
+      const nextVersionId = nextNutritionRevisionVersionId(reviseResult);
+      if (nextVersionId !== null) {
+        setNutritionActiveReviseIds({
+          trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+          versionId: nextVersionId,
+        });
+      }
+      // 2) Clear the old revision targets/options up front so no stale target/option is shown or
+      // selectable while the latest plan reloads (single-patch dropdown flow only).
+      if (isSinglePatch) {
+        resetFynRevisionOptionsFlow("NUTRITION");
+      }
+      // 3 + 4) Reload the latest Nutrition plan/version for DISPLAY, THEN rebuild the revision target
+      // dropdown from that reloaded plan — strictly sequential (never concurrent), reusing the same
+      // refresh the drawer-open lifecycle uses so no new loader is introduced. The pinned version
+      // above stays authoritative for the next submission.
       await reconcileRevisedDomainPlanDetail("NUTRITION", reviseResult, trainingPlanIdForReload);
-      await loadLatestSkillsDraft("NUTRITION", true);
+      if (isSinglePatch) {
+        await runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: () => loadLatestSkillsDraft("NUTRITION", true),
+          rebuildTargetOptions: () => loadFynRevisionContext("NUTRITION"),
+        });
+      } else {
+        await loadLatestSkillsDraft("NUTRITION", true);
+      }
       setReviseNutritionFeedback("");
-      setReviseNutritionSuccess("Revised nutrition plan version generated.");
+      if (isSinglePatch) {
+        // 5 + 6) Keep the drawer open; clear the previous single-change selection and show success so
+        // the coach can immediately revise another item against the newly rebuilt (new-version)
+        // dropdown, including any items just added.
+        setFynRevisionSelections((current) => ({
+          ...current,
+          NUTRITION: defaultFynRevisionBatchSelection(),
+        }));
+        setReviseNutritionSuccess(NUTRITION_REVISION_APPLIED_MESSAGE);
+      } else {
+        setReviseNutritionSuccess("Revised nutrition plan version generated.");
+      }
       void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
       console.error("Nutrition training plan revision failed", e);
-      if (isAiGenerationValidationError(e)) {
-        setReviseNutritionError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
-      } else if (isNormalizedApiError(e)) {
-        const message =
-          e.message.trim() !== ""
-            ? e.message.trim()
-            : "Unable to revise plan. Please try again.";
-        const errorCode = e.code?.trim();
-        setReviseNutritionError(
-          errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
-        );
-      } else {
-        const errorRecord =
-          typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
-        const message =
-          (typeof errorRecord?.message === "string" && errorRecord.message.trim() !== ""
-            ? errorRecord.message.trim()
-            : null) ?? "Unable to revise plan. Please try again.";
-        const errorCode =
-          (typeof errorRecord?.errorCode === "string" && errorRecord.errorCode.trim() !== ""
-            ? errorRecord.errorCode.trim()
-            : null) ??
-          (typeof errorRecord?.code === "string" && errorRecord.code.trim() !== ""
-            ? errorRecord.code.trim()
-            : null);
-        setReviseNutritionError(
-          errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
-        );
-      }
+      const outcome = resolveNutritionRevisionErrorOutcome(e);
       setReviseNutritionSuccess(null);
+      // Deterministic stale-version / interrupted rejection: reload the latest plan/version,
+      // clear the stale selection, and never automatically retry the old revisionPatch.
+      if (outcome.reloadLatest) {
+        // Drop the stale pin so the next revision derives its version from the reloaded latest plan.
+        setNutritionActiveReviseIds(null);
+        const reloadedDraft = await loadLatestSkillsDraft("NUTRITION", true);
+        void refreshTrainingPlanWorkspace({ background: true });
+        if (outcome.clearSelection && isSinglePatch) {
+          resetFynRevisionOptionsFlow("NUTRITION");
+          setFynRevisionSelections((current) => ({
+            ...current,
+            NUTRITION: defaultFynRevisionBatchSelection(),
+          }));
+          setReviseNutritionFeedback("");
+        }
+        if (
+          outcome.kind === "INTERRUPTED" &&
+          pendingSelection?.actionKey === "REMOVE_ITEM" &&
+          pendingSelection.target !== null &&
+          !nutritionRemoveItemTargetStillPresent(reloadedDraft?.days, pendingSelection.target)
+        ) {
+          setReviseNutritionError(null);
+          setReviseNutritionSuccess(NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE);
+          return;
+        }
+      } else if (outcome.clearSelection && isSinglePatch) {
+        resetFynRevisionOptionsFlow("NUTRITION");
+        setFynRevisionSelections((current) => ({
+          ...current,
+          NUTRITION: defaultFynRevisionBatchSelection(),
+        }));
+        setReviseNutritionFeedback("");
+      }
+      // Show the backend message (or the specific validation/generic copy) in the drawer.
+      setReviseNutritionError(outcome.message);
     } finally {
       setReviseNutritionLoading(false);
     }
@@ -23674,6 +25154,7 @@ export function CoachAthletePlanningProfileView({
             onClose={() => setLevelValidationModalOpen(false)}
             entityId={entityId}
             athleteId={athleteIdTrimmed}
+            athleteDisplayName={athleteIdentity.displayName}
             selfReportedLevelLabel={formatEnumeratedLabel(
               profile.selfReportedLevel,
             )}

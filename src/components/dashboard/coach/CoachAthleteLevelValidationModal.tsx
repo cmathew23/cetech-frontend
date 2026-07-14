@@ -5,9 +5,6 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
-import {
-  fetchCoachAssignedAthletes,
-} from "@/lib/api/coachMe";
 import { postCoachAthleteLevelValidation } from "@/lib/api/coachAthleteLevelValidation";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
@@ -59,6 +56,7 @@ export type CoachAthleteLevelValidationModalProps = {
   onClose: () => void;
   entityId: string;
   athleteId: string;
+  athleteDisplayName: string | null;
   selfReportedLevelLabel: string;
   levelValidationSnapshot: TrainingPlanLevelValidationView | null;
   onAfterSaveConfirmed: () => void | Promise<void>;
@@ -69,48 +67,22 @@ export function CoachAthleteLevelValidationModal({
   onClose,
   entityId,
   athleteId,
+  athleteDisplayName,
   selfReportedLevelLabel,
   levelValidationSnapshot,
   onAfterSaveConfirmed,
 }: CoachAthleteLevelValidationModalProps) {
   const entityIdTrimmed = entityId.trim();
   const athleteIdTrimmed = athleteId.trim();
-
-  const [athleteDisplayName, setAthleteDisplayName] = useState("");
-  const [nameLoading, setNameLoading] = useState(false);
+  const athleteNameTrimmed = athleteDisplayName?.trim() ?? "";
+  const athleteLabel =
+    athleteNameTrimmed !== ""
+      ? formatPersonNameForDisplay(athleteNameTrimmed)
+      : athleteIdTrimmed;
   const [selectedLevel, setSelectedLevel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasConfirmPermission, setHasConfirmPermission] = useState(true);
-
-  useEffect(() => {
-    if (!open || athleteIdTrimmed === "") {
-      return;
-    }
-    let cancelled = false;
-    setNameLoading(true);
-    async function resolveName() {
-      try {
-        const rows = await fetchCoachAssignedAthletes();
-        if (cancelled) return;
-        const row = rows.find(
-          (r) => r.athleteId.trim() === athleteIdTrimmed,
-        );
-        const name = row?.displayName?.trim()
-          ? formatPersonNameForDisplay(row.displayName)
-          : athleteIdTrimmed;
-        setAthleteDisplayName(name);
-      } catch {
-        if (!cancelled) setAthleteDisplayName(athleteIdTrimmed);
-      } finally {
-        if (!cancelled) setNameLoading(false);
-      }
-    }
-    void resolveName();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, athleteIdTrimmed]);
 
   useEffect(() => {
     if (!open) return;
@@ -171,7 +143,7 @@ export function CoachAthleteLevelValidationModal({
               Athlete
             </dt>
             <dd className="min-w-0 text-textPrimary">
-              {nameLoading ? "Loading…" : athleteDisplayName}
+              {athleteLabel}
             </dd>
           </div>
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">

@@ -804,7 +804,7 @@ export type TrainingPlanRevisionPatchItem = {
   /** Skills item operations identify the DB-backed drill; canonical metadata remains backend-owned. */
   skillCode?: string;
   durationMinutes?: number;
-  reps?: number;
+  reps?: string;
   nutritionCatalogItemId?: string | null;
   itemType?: string | null;
   label?: string | null;

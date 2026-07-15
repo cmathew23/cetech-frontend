@@ -2535,7 +2535,7 @@ export type FynRevisionTargetOption = {
   serving: string | null;
   /** Current Skills drill parameters, read from the latest rendered item for change detection. */
   durationMinutes?: number | null;
-  reps?: number | null;
+  reps?: string | null;
   /** Sessions in the target's day (used to gate empty/rest-day-only actions). */
   daySessionCount: number;
   /** Items in the target's session (used to block removing the last item). */
@@ -2748,7 +2748,7 @@ function fynBuildLeveledTargets(
             // serving stepper. Never used to compute calories/macros.
             serving: fynTargetReadString(item, ["serving", "servingSize", "servingText"]),
             durationMinutes: fynTargetReadNumber(item, ["durationMinutes"]),
-            reps: fynTargetReadNumber(item, ["reps"]),
+            reps: fynTargetReadString(item, ["reps"]),
             daySessionCount,
             sessionItemCount,
             indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: itemNumber },
@@ -2813,7 +2813,7 @@ function fynTargetOptionsFromFlatList(
       itemLabel: label,
       serving: fynTargetReadString(record, ["serving", "servingSize", "servingText"]),
       durationMinutes: fynTargetReadNumber(record, ["durationMinutes"]),
-      reps: fynTargetReadNumber(record, ["reps"]),
+      reps: fynTargetReadString(record, ["reps"]),
       daySessionCount: 1,
       sessionItemCount: list.length,
       indices: {
@@ -3183,7 +3183,7 @@ export function buildSkillsRevisionPatch(input: {
   actionKey: FynRevisionActionKey;
   option?: CoachAthleteDomainDraftRevisionOption | null;
   durationMinutes?: number | null;
-  reps?: number | null;
+  reps?: string | null;
 }): TrainingPlanRevisionPatch | null {
   const { dayIndex, sessionIndex } = input.target.indices;
   if (dayIndex === null || sessionIndex === null) return null;
@@ -3225,13 +3225,10 @@ export function buildSkillsRevisionPatch(input: {
       input.durationMinutes !== input.target.durationMinutes
         ? input.durationMinutes
         : undefined;
+    const trimmedReps = input.reps?.trim() ?? "";
     const reps =
-      input.reps !== null &&
-      input.reps !== undefined &&
-      Number.isFinite(input.reps) &&
-      input.reps >= 0 &&
-      input.reps !== input.target.reps
-        ? input.reps
+      trimmedReps !== "" && trimmedReps !== (input.target.reps?.trim() ?? "")
+        ? trimmedReps
         : undefined;
     if (durationMinutes === undefined && reps === undefined) return null;
 
@@ -3285,7 +3282,7 @@ export function buildSkillsRevisionSubmission(input: {
   option?: CoachAthleteDomainDraftRevisionOption | null;
   coachRequest?: string;
   durationMinutes?: number | null;
-  reps?: number | null;
+  reps?: string | null;
 }): TrainingPlanRevisePayload | null {
   if (
     input.reviseIds === null ||
@@ -10314,7 +10311,7 @@ export function CoachAthletePlanningProfileView({
   const [nutritionServingDraftQuantity, setNutritionServingDraftQuantity] = useState<
     number | null
   >(null);
-  // Empty means unchanged. Skills UPDATE_ITEM submits only fields the coach explicitly edits.
+  // Empty or equal-to-current means unchanged; UPDATE_ITEM submits only explicitly changed fields.
   const [skillsDurationMinutesDraft, setSkillsDurationMinutesDraft] = useState("");
   const [skillsRepsDraft, setSkillsRepsDraft] = useState("");
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
@@ -17411,6 +17408,7 @@ export function CoachAthletePlanningProfileView({
     itemOffset: number,
     options: {
       showNutritionCalories?: boolean;
+      showSkillsRepsVerbatim?: boolean;
       rawItem?: Record<string, unknown> | null;
       shouldLogNutritionItem?: boolean;
     } = {},
@@ -17465,7 +17463,11 @@ export function CoachAthletePlanningProfileView({
       hasRenderableValue(item.durationMinutes)
         ? formatMinutesAsHoursMinutes(Number(item.durationMinutes))
         : null,
-      hasRenderableValue(item.reps) ? `${displayValue(item.reps)} reps` : null,
+      hasRenderableValue(item.reps)
+        ? options.showSkillsRepsVerbatim
+          ? displayValue(item.reps)
+          : `${displayValue(item.reps)} reps`
+        : null,
       hasRenderableValue(sets) ? `${displayValue(sets)} sets` : null,
       hasRenderableValue(balls) ? `${displayValue(balls)} balls` : null,
       hasRenderableValue(item.intensity) ? displayValue(item.intensity) : null,
@@ -17493,7 +17495,11 @@ export function CoachAthletePlanningProfileView({
   function renderDomainReviewDrawerSession(
     session: CoachPersistedTrainingPlanActiveDetail["days"][number]["sessions"][number],
     sessionOffset: number,
-    options: { showNutritionCalories?: boolean; dayOffset?: number } = {},
+    options: {
+      showNutritionCalories?: boolean;
+      showSkillsRepsVerbatim?: boolean;
+      dayOffset?: number;
+    } = {},
   ) {
     const sessionNotes = (session as { notes?: DisplayableValue }).notes;
     const sessionItems = session.sessionStructureSections.flatMap((section) => section.items);
@@ -17538,6 +17544,7 @@ export function CoachAthletePlanningProfileView({
                     {section.items.map((item, itemOffset) =>
                       renderDomainReviewDrawerStructureItem(item, itemOffset, {
                         showNutritionCalories: options.showNutritionCalories,
+                        showSkillsRepsVerbatim: options.showSkillsRepsVerbatim,
                         rawItem: readRawPersistedSectionItemAt(section.raw, itemOffset),
                         shouldLogNutritionItem:
                           options.showNutritionCalories === true &&
@@ -17670,6 +17677,7 @@ export function CoachAthletePlanningProfileView({
                       {day.sessions.map((session, sessionOffset) =>
                         renderDomainReviewDrawerSession(session, sessionOffset, {
                           showNutritionCalories,
+                          showSkillsRepsVerbatim: domain === "SKILLS",
                           dayOffset,
                         }),
                       )}
@@ -17883,7 +17891,11 @@ export function CoachAthletePlanningProfileView({
                                   hasRenderableValue(item.durationMinutes)
                                     ? formatMinutesAsHoursMinutes(item.durationMinutes)
                                     : null,
-                                  hasRenderableValue(item.reps) ? `${displayValue(item.reps)} reps` : null,
+                                  hasRenderableValue(item.reps)
+                                    ? domain === "SKILLS"
+                                      ? displayValue(item.reps)
+                                      : `${displayValue(item.reps)} reps`
+                                    : null,
                                   hasRenderableValue(item.sets) ? `${displayValue(item.sets)} sets` : null,
                                   hasRenderableValue(item.intensity) ? displayValue(item.intensity) : null,
                                 ].filter((value): value is string => value !== null && value.trim() !== "");
@@ -18067,7 +18079,7 @@ export function CoachAthletePlanningProfileView({
       ) ?? null;
     const skillsDurationMinutes =
       skillsDurationMinutesDraft.trim() === "" ? null : Number(skillsDurationMinutesDraft);
-    const skillsReps = skillsRepsDraft.trim() === "" ? null : Number(skillsRepsDraft);
+    const skillsReps = skillsRepsDraft.trim() === "" ? null : skillsRepsDraft.trim();
     const skillsRevisionSubmission = skillsSinglePatchMode
       ? buildSkillsRevisionSubmission({
           reviseIds: drawerReviseIds,
@@ -18426,6 +18438,13 @@ export function CoachAthletePlanningProfileView({
                     selectedActionKey={fynRevisionSelectedActionKey}
                     onSelectAction={(key) => {
                       handleFynRevisionActionChange(reviewDomain, key);
+                      if (
+                        reviewDomain === "SKILLS" &&
+                        key === "UPDATE_ITEM" &&
+                        fynRevisionSelectedTargetOption?.level === "ITEM"
+                      ) {
+                        setSkillsRepsDraft(fynRevisionSelectedTargetOption.reps ?? "");
+                      }
                     }}
                     onQuickAction={(action, target) => {
                       handleFynRevisionQuickAction(reviewDomain, action, target);
@@ -18492,15 +18511,9 @@ export function CoachAthletePlanningProfileView({
                         <label className="space-y-1 text-sm text-textPrimary">
                           <span className="font-medium">Reps</span>
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
                             value={skillsRepsDraft}
-                            placeholder={
-                              fynRevisionSelectedTargetOption.reps == null
-                                ? "Not set"
-                                : `Current: ${fynRevisionSelectedTargetOption.reps}`
-                            }
+                            placeholder="Not set"
                             onChange={(event) => setSkillsRepsDraft(event.target.value)}
                             disabled={drawerReviseLoading}
                             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"

@@ -1033,7 +1033,11 @@ describe("parseReadinessPayload", () => {
       dayIndex: 2,
       sessionIndex: 3,
       itemIndex: 1,
-      item: { skillCode: "CURRENT", durationMinutes: 20, reps: 12 },
+      item: {
+        skillCode: "CURRENT",
+        durationMinutes: 20,
+        reps: "18 randomized balls",
+      },
     } as const;
 
     await reviseSkillsPlan("entity-1", "athlete-1", {

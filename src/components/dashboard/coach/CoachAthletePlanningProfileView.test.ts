@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -3723,7 +3724,7 @@ describe("Training Plan Workspace lifecycle display", () => {
                 label: "Current drill",
                 skillCode: "CURRENT",
                 durationMinutes: 15,
-                reps: 8,
+                reps: "3 lengths x 4 balls",
               },
             ],
           },
@@ -3823,14 +3824,16 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
-    it("builds duration-only, reps-only, and combined UPDATE_ITEM patches", () => {
+    it("builds string-reps, duration-only, and combined UPDATE_ITEM patches", () => {
       const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      expect(itemTarget.reps).toBe("3 lengths x 4 balls");
 
       expect(
         buildSkillsRevisionPatch({
           target: itemTarget,
           actionKey: "UPDATE_ITEM",
           durationMinutes: 20,
+          reps: "   ",
         }),
       ).toEqual({
         operation: "UPDATE_ITEM",
@@ -3843,29 +3846,45 @@ describe("Training Plan Workspace lifecycle display", () => {
         buildSkillsRevisionPatch({
           target: itemTarget,
           actionKey: "UPDATE_ITEM",
-          reps: 12,
+          reps: " 10-12 balls ",
         }),
       ).toEqual({
         operation: "UPDATE_ITEM",
         dayIndex: 2,
         sessionIndex: 3,
         itemIndex: 1,
-        item: { skillCode: "CURRENT", reps: 12 },
+        item: { skillCode: "CURRENT", reps: "10-12 balls" },
       });
       expect(
         buildSkillsRevisionPatch({
           target: itemTarget,
           actionKey: "UPDATE_ITEM",
           durationMinutes: 25,
-          reps: 16,
+          reps: "18 randomized balls",
         }),
       ).toEqual({
         operation: "UPDATE_ITEM",
         dayIndex: 2,
         sessionIndex: 3,
         itemIndex: 1,
-        item: { skillCode: "CURRENT", durationMinutes: 25, reps: 16 },
+        item: {
+          skillCode: "CURRENT",
+          durationMinutes: 25,
+          reps: "18 randomized balls",
+        },
       });
+    });
+
+    it("renders Skills reps verbatim without appending a second reps label", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+
+      expect(source).toContain(
+        'options.showSkillsRepsVerbatim\n          ? displayValue(item.reps)',
+      );
+      expect(source).toContain('domain === "SKILLS"\n                                      ? displayValue(item.reps)');
     });
 
     it("assembles the exact UPDATE_ITEM submission without mutable drill metadata", () => {
@@ -3875,7 +3894,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         target: itemTarget,
         actionKey: "UPDATE_ITEM",
         durationMinutes: 20,
-        reps: 12,
+        reps: "18 randomized balls",
         coachRequest: "Use this for the next progression.",
       });
 
@@ -3889,7 +3908,11 @@ describe("Training Plan Workspace lifecycle display", () => {
           dayIndex: 2,
           sessionIndex: 3,
           itemIndex: 1,
-          item: { skillCode: "CURRENT", durationMinutes: 20, reps: 12 },
+          item: {
+            skillCode: "CURRENT",
+            durationMinutes: 20,
+            reps: "18 randomized balls",
+          },
         },
       });
       expect(submission!.revisionPatch!.item).not.toHaveProperty("label");
@@ -3912,7 +3935,7 @@ describe("Training Plan Workspace lifecycle display", () => {
           ...base,
           target: itemTarget,
           durationMinutes: 15,
-          reps: 8,
+          reps: "3 lengths x 4 balls",
         }),
       ).toBeNull();
       expect(
@@ -3929,7 +3952,7 @@ describe("Training Plan Workspace lifecycle display", () => {
             ...itemTarget,
             target: { ...itemTarget.target, currentId: null },
           },
-          reps: 12,
+          reps: "10-12 balls",
         }),
       ).toBeNull();
       expect(
@@ -3939,7 +3962,7 @@ describe("Training Plan Workspace lifecycle display", () => {
             ...itemTarget,
             indices: { ...itemTarget.indices, itemIndex: null },
           },
-          reps: 12,
+          reps: "10-12 balls",
         }),
       ).toBeNull();
     });
@@ -4090,7 +4113,7 @@ describe("Training Plan Workspace lifecycle display", () => {
                     {
                       ...skillsSchedule[0].sessions[0].items[0],
                       durationMinutes: 20,
-                      reps: 12,
+                      reps: "18 randomized balls",
                     },
                   ],
                 },
@@ -4121,7 +4144,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         rebuiltTargets.find(
           (target) => target.level === "ITEM" && target.target.currentId === "CURRENT",
         ),
-      ).toMatchObject({ durationMinutes: 20, reps: 12 });
+      ).toMatchObject({ durationMinutes: 20, reps: "18 randomized balls" });
     });
 
     it("does not reload or replace the current plan when the Skills revision request fails", async () => {

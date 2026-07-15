@@ -2533,6 +2533,9 @@ export type FynRevisionTargetOption = {
    * seed the Nutrition item-level serving stepper; never used to compute calories/macros.
    */
   serving: string | null;
+  /** Current Skills drill parameters, read from the latest rendered item for change detection. */
+  durationMinutes?: number | null;
+  reps?: number | null;
   /** Sessions in the target's day (used to gate empty/rest-day-only actions). */
   daySessionCount: number;
   /** Items in the target's session (used to block removing the last item). */
@@ -2666,6 +2669,8 @@ function fynBuildLeveledTargets(
         sessionLabel: null,
         itemLabel: null,
         serving: null,
+        durationMinutes: null,
+        reps: null,
         daySessionCount,
         sessionItemCount: 0,
         indices: { dayIndex: dayNumber, sessionIndex: null, itemIndex: null },
@@ -2703,6 +2708,8 @@ function fynBuildLeveledTargets(
           sessionLabel,
           itemLabel: null,
           serving: null,
+          durationMinutes: null,
+          reps: null,
           daySessionCount,
           sessionItemCount,
           indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: null },
@@ -2740,6 +2747,8 @@ function fynBuildLeveledTargets(
             // Canonical serving text read verbatim from the latest plan item; seeds the item-level
             // serving stepper. Never used to compute calories/macros.
             serving: fynTargetReadString(item, ["serving", "servingSize", "servingText"]),
+            durationMinutes: fynTargetReadNumber(item, ["durationMinutes"]),
+            reps: fynTargetReadNumber(item, ["reps"]),
             daySessionCount,
             sessionItemCount,
             indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: itemNumber },
@@ -2803,6 +2812,8 @@ function fynTargetOptionsFromFlatList(
       sessionLabel: sessionKey !== null ? `Session ${sessionKey}` : null,
       itemLabel: label,
       serving: fynTargetReadString(record, ["serving", "servingSize", "servingText"]),
+      durationMinutes: fynTargetReadNumber(record, ["durationMinutes"]),
+      reps: fynTargetReadNumber(record, ["reps"]),
       daySessionCount: 1,
       sessionItemCount: list.length,
       indices: {
@@ -2894,12 +2905,12 @@ export const FYN_REVISION_CAPABILITIES: Record<
   FynRevisionDomainCapability
 > = {
   SKILLS: {
-    // Skills deterministic milestones: add to a session or remove an existing drill.
+    // Skills deterministic milestones: add to a session or remove/update an existing drill.
     levels: ["SESSION", "ITEM"],
     actionsByLevel: {
       DAY: [],
       SESSION: ["ADD_ITEM"],
-      ITEM: ["REMOVE_ITEM"],
+      ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
     },
   },
   NUTRITION: {
@@ -2984,6 +2995,7 @@ export function fynRevisionActionLabel(
       return `Replace ${noun}`;
     case "UPDATE_ITEM":
       if (domain === "NUTRITION") return "Change food item details";
+      if (domain === "SKILLS") return "Change drill parameters";
       return `Adjust ${noun}`;
   }
 }
@@ -3156,11 +3168,11 @@ export function buildFynRevisionActionChangeText(
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Skills Add Drill deterministic single-patch flow
+ * Skills deterministic single-patch flow
  * ---------------------------------------------------------------------------------------------- */
 
 export const SKILLS_SINGLE_PATCH_GUIDANCE =
-  "Apply one drill addition at a time. Select an existing Skills session and an approved drill.";
+  "Apply one drill change at a time. Select a Skills session or an existing drill.";
 export const SKILLS_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
@@ -3170,6 +3182,8 @@ export function buildSkillsRevisionPatch(input: {
   target: FynRevisionTargetOption;
   actionKey: FynRevisionActionKey;
   option?: CoachAthleteDomainDraftRevisionOption | null;
+  durationMinutes?: number | null;
+  reps?: number | null;
 }): TrainingPlanRevisionPatch | null {
   const { dayIndex, sessionIndex } = input.target.indices;
   if (dayIndex === null || sessionIndex === null) return null;
@@ -3198,6 +3212,42 @@ export function buildSkillsRevisionPatch(input: {
     };
   }
 
+  if (input.actionKey === "UPDATE_ITEM" && input.target.level === "ITEM") {
+    const itemIndex = input.target.indices.itemIndex;
+    const skillCode = input.target.target.currentId?.trim() ?? "";
+    if (itemIndex === null || skillCode === "") return null;
+
+    const durationMinutes =
+      input.durationMinutes !== null &&
+      input.durationMinutes !== undefined &&
+      Number.isFinite(input.durationMinutes) &&
+      input.durationMinutes >= 0 &&
+      input.durationMinutes !== input.target.durationMinutes
+        ? input.durationMinutes
+        : undefined;
+    const reps =
+      input.reps !== null &&
+      input.reps !== undefined &&
+      Number.isFinite(input.reps) &&
+      input.reps >= 0 &&
+      input.reps !== input.target.reps
+        ? input.reps
+        : undefined;
+    if (durationMinutes === undefined && reps === undefined) return null;
+
+    return {
+      operation: "UPDATE_ITEM",
+      dayIndex,
+      sessionIndex,
+      itemIndex,
+      item: {
+        skillCode,
+        ...(durationMinutes === undefined ? {} : { durationMinutes }),
+        ...(reps === undefined ? {} : { reps }),
+      },
+    };
+  }
+
   return null;
 }
 
@@ -3211,7 +3261,12 @@ export function buildSkillsRevisionSummary(input: {
   const session = (input.target.sessionLabel ?? input.target.target.label ?? "Skills session").trim();
   const note = (input.coachRequest ?? "").trim();
   const summary =
-    input.actionKey === "REMOVE_ITEM"
+    input.actionKey === "UPDATE_ITEM"
+      ? `Change drill parameters for ${
+          (input.target.itemLabel ?? input.target.target.label ?? input.target.target.currentId ?? "")
+            .trim() || "selected drill"
+        } in ${session || "Skills session"}.`
+      : input.actionKey === "REMOVE_ITEM"
       ? `Remove drill ${
           (input.target.itemLabel ?? input.target.target.label ?? input.target.target.currentId ?? "")
             .trim() || "selected drill"
@@ -3229,6 +3284,8 @@ export function buildSkillsRevisionSubmission(input: {
   actionKey: FynRevisionActionKey | null;
   option?: CoachAthleteDomainDraftRevisionOption | null;
   coachRequest?: string;
+  durationMinutes?: number | null;
+  reps?: number | null;
 }): TrainingPlanRevisePayload | null {
   if (
     input.reviseIds === null ||
@@ -3241,6 +3298,8 @@ export function buildSkillsRevisionSubmission(input: {
     target: input.target,
     actionKey: input.actionKey,
     option: input.option,
+    durationMinutes: input.durationMinutes,
+    reps: input.reps,
   });
   if (revisionPatch === null) return null;
   return {
@@ -10255,6 +10314,9 @@ export function CoachAthletePlanningProfileView({
   const [nutritionServingDraftQuantity, setNutritionServingDraftQuantity] = useState<
     number | null
   >(null);
+  // Empty means unchanged. Skills UPDATE_ITEM submits only fields the coach explicitly edits.
+  const [skillsDurationMinutesDraft, setSkillsDurationMinutesDraft] = useState("");
+  const [skillsRepsDraft, setSkillsRepsDraft] = useState("");
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
     useState(false);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -15810,6 +15872,8 @@ export function CoachAthletePlanningProfileView({
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
     // The serving stepper re-seeds from the newly selected item's serving.
     setNutritionServingDraftQuantity(null);
+    setSkillsDurationMinutesDraft("");
+    setSkillsRepsDraft("");
   }
 
   function handleFynRevisionActionChange(
@@ -15826,6 +15890,8 @@ export function CoachAthletePlanningProfileView({
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
     // The serving stepper only applies to UPDATE_ITEM; reset it when the action changes.
     setNutritionServingDraftQuantity(null);
+    setSkillsDurationMinutesDraft("");
+    setSkillsRepsDraft("");
   }
 
   /** Adds a non-replacement action (add/remove/update) to the revision basket as a friendly line. */
@@ -15871,6 +15937,8 @@ export function CoachAthletePlanningProfileView({
     }));
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
     setNutritionServingDraftQuantity(null);
+    setSkillsDurationMinutesDraft("");
+    setSkillsRepsDraft("");
   }
 
   /** Fetches endpoint-backed replacement options for the selected target. Guards against
@@ -17979,7 +18047,7 @@ export function CoachAthletePlanningProfileView({
               nutritionActiveReviseIds,
             )
           : sandCReviseIds;
-    // Skills Add Drill and Nutrition use one structured patch. S&C remains multi-change basket mode.
+    // Skills and Nutrition use one structured patch. S&C remains multi-change basket mode.
     const skillsSinglePatchMode = reviewDomain === "SKILLS";
     const nutritionSinglePatchMode = reviewDomain === "NUTRITION";
     const deterministicSinglePatchMode = skillsSinglePatchMode || nutritionSinglePatchMode;
@@ -17997,6 +18065,9 @@ export function CoachAthletePlanningProfileView({
       fynRevisionTargetOptionList.find(
         (option) => option.key === fynRevisionSelectedTargetKey,
       ) ?? null;
+    const skillsDurationMinutes =
+      skillsDurationMinutesDraft.trim() === "" ? null : Number(skillsDurationMinutesDraft);
+    const skillsReps = skillsRepsDraft.trim() === "" ? null : Number(skillsRepsDraft);
     const skillsRevisionSubmission = skillsSinglePatchMode
       ? buildSkillsRevisionSubmission({
           reviseIds: drawerReviseIds,
@@ -18004,6 +18075,8 @@ export function CoachAthletePlanningProfileView({
           actionKey: fynRevisionSelectedActionKey,
           option: skillsSelectedOption,
           coachRequest: fynRevisionCoachRequest,
+          durationMinutes: skillsDurationMinutes,
+          reps: skillsReps,
         })
       : null;
     // Nutrition "Change food item details" (UPDATE_ITEM) is a deterministic serving stepper. Parse
@@ -18383,6 +18456,59 @@ export function CoachAthletePlanningProfileView({
                     onServingIncrement={() => handleNutritionServingAdjust(1)}
                     onServingDecrement={() => handleNutritionServingAdjust(-1)}
                   />
+                  {skillsSinglePatchMode &&
+                  fynRevisionSelectedActionKey === "UPDATE_ITEM" &&
+                  fynRevisionSelectedTargetOption?.level === "ITEM" ? (
+                    <fieldset
+                      className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                      data-testid="fyn-skills-parameter-editor"
+                    >
+                      <legend className="px-1 text-sm font-semibold text-textPrimary">
+                        Change drill parameters
+                      </legend>
+                      <p className="text-xs text-textSecondary">
+                        Enter at least one new value. Leave a field empty to keep it unchanged.
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1 text-sm text-textPrimary">
+                          <span className="font-medium">Planned Minutes</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={skillsDurationMinutesDraft}
+                            placeholder={
+                              fynRevisionSelectedTargetOption.durationMinutes == null
+                                ? "Not set"
+                                : `Current: ${fynRevisionSelectedTargetOption.durationMinutes}`
+                            }
+                            onChange={(event) =>
+                              setSkillsDurationMinutesDraft(event.target.value)
+                            }
+                            disabled={drawerReviseLoading}
+                            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                          />
+                        </label>
+                        <label className="space-y-1 text-sm text-textPrimary">
+                          <span className="font-medium">Reps</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={skillsRepsDraft}
+                            placeholder={
+                              fynRevisionSelectedTargetOption.reps == null
+                                ? "Not set"
+                                : `Current: ${fynRevisionSelectedTargetOption.reps}`
+                            }
+                            onChange={(event) => setSkillsRepsDraft(event.target.value)}
+                            disabled={drawerReviseLoading}
+                            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                          />
+                        </label>
+                      </div>
+                    </fieldset>
+                  ) : null}
                   {nutritionSinglePatchMode &&
                   drawerReviseSuccess === NUTRITION_REVISION_APPLIED_MESSAGE ? (
                     <div className="flex flex-wrap justify-end gap-3">

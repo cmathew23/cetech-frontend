@@ -801,8 +801,10 @@ export type AthleteTodayPlan = {
 
 /** Structured item carried inside a deterministic {@link TrainingPlanRevisionPatch}. */
 export type TrainingPlanRevisionPatchItem = {
-  /** Skills ADD_ITEM sends only this DB-backed option id; drill metadata remains backend-owned. */
+  /** Skills item operations identify the DB-backed drill; canonical metadata remains backend-owned. */
   skillCode?: string;
+  durationMinutes?: number;
+  reps?: number;
   nutritionCatalogItemId?: string | null;
   itemType?: string | null;
   label?: string | null;
@@ -848,7 +850,7 @@ export type TrainingPlanRevisePayload = {
   versionId: string;
   coachFeedback: string;
   /**
-   * Optional structured patch. When present (Nutrition or Skills Add Drill deterministic
+   * Optional structured patch. When present (Nutrition or Skills deterministic
    * single-patch flow) it is the executable source of truth. S&C keeps free-form basket feedback.
    */
   revisionPatch?: TrainingPlanRevisionPatch | null;

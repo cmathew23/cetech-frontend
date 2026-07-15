@@ -2878,7 +2878,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(FYN_REVISION_CAPABILITIES.S_AND_C.levels).toEqual(["DAY", "SESSION", "ITEM"]);
   });
 
-  it("exposes Add Drill at session level and Remove Drill at item level", () => {
+  it("exposes Add Drill at session level and Remove/Change Parameters at item level", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
@@ -2890,9 +2890,10 @@ describe("Training Plan Workspace lifecycle display", () => {
 
     expect(dayTarget).toBeUndefined();
     expect(actionKeysFor("SKILLS", sessionTarget)).toEqual(["ADD_ITEM"]);
-    expect(actionKeysFor("SKILLS", itemTarget)).toEqual(["REMOVE_ITEM"]);
+    expect(actionKeysFor("SKILLS", itemTarget)).toEqual(["REMOVE_ITEM", "UPDATE_ITEM"]);
     expect(fynRevisionActionLabel("SKILLS", "ADD_ITEM")).toBe("Add drill");
     expect(fynRevisionActionLabel("SKILLS", "REMOVE_ITEM")).toBe("Remove drill");
+    expect(fynRevisionActionLabel("SKILLS", "UPDATE_ITEM")).toBe("Change drill parameters");
   });
 
   it("renders Add Drill for a Skills session and hides item-level actions", () => {
@@ -3716,7 +3717,15 @@ describe("Training Plan Workspace lifecycle display", () => {
           {
             sessionIndex: 3,
             title: "Short game",
-            items: [{ order: 0, label: "Current drill", skillCode: "CURRENT" }],
+            items: [
+              {
+                order: 0,
+                label: "Current drill",
+                skillCode: "CURRENT",
+                durationMinutes: 15,
+                reps: 8,
+              },
+            ],
           },
         ],
       },
@@ -3814,6 +3823,127 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
+    it("builds duration-only, reps-only, and combined UPDATE_ITEM patches", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", durationMinutes: 20 },
+      });
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          reps: 12,
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", reps: 12 },
+      });
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 25,
+          reps: 16,
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", durationMinutes: 25, reps: 16 },
+      });
+    });
+
+    it("assembles the exact UPDATE_ITEM submission without mutable drill metadata", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: itemTarget,
+        actionKey: "UPDATE_ITEM",
+        durationMinutes: 20,
+        reps: 12,
+        coachRequest: "Use this for the next progression.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Change drill parameters for Current drill in Short game. Use this for the next progression.",
+        revisionPatch: {
+          operation: "UPDATE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          itemIndex: 1,
+          item: { skillCode: "CURRENT", durationMinutes: 20, reps: 12 },
+        },
+      });
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("label");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("summary");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("notes");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("itemType");
+    });
+
+    it("keeps Apply blocked for empty/unchanged values and incomplete UPDATE_ITEM targets", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const base = {
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        actionKey: "UPDATE_ITEM" as const,
+      };
+
+      expect(buildSkillsRevisionSubmission({ ...base, target: itemTarget })).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: itemTarget,
+          durationMinutes: 15,
+          reps: 8,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: sessionTarget,
+          durationMinutes: 20,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: {
+            ...itemTarget,
+            target: { ...itemTarget.target, currentId: null },
+          },
+          reps: 12,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          reps: 12,
+        }),
+      ).toBeNull();
+    });
+
     it("blocks REMOVE_ITEM for wrong or incomplete targets", () => {
       const sessionTarget = targets().find((target) => target.level === "SESSION")!;
       const itemTarget = targets().find((target) => target.level === "ITEM")!;
@@ -3880,6 +4010,28 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(html).not.toContain("Add to plan changes");
     });
 
+    it("keeps free chat visible for Change Drill Parameters without approved options", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Change drill parameters");
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      expect(html).not.toContain("Add to plan changes");
+    });
+
     it("shows a selected DB option in single-patch mode, keeps chat, and hides the basket", () => {
       const sessionTarget = targets().find((target) => target.level === "SESSION")!;
       const html = renderToStaticMarkup(
@@ -3929,7 +4081,21 @@ describe("Training Plan Workspace lifecycle display", () => {
         loadLatestPlan: async () => {
           events.push("reload");
           schedule = [
-            ...skillsSchedule,
+            {
+              ...skillsSchedule[0],
+              sessions: [
+                {
+                  ...skillsSchedule[0].sessions[0],
+                  items: [
+                    {
+                      ...skillsSchedule[0].sessions[0].items[0],
+                      durationMinutes: 20,
+                      reps: 12,
+                    },
+                  ],
+                },
+              ],
+            },
             {
               dayIndex: 4,
               sessions: [{ sessionIndex: 1, title: "Putting", items: [] }],
@@ -3951,6 +4117,11 @@ describe("Training Plan Workspace lifecycle display", () => {
           .filter((target) => target.level === "SESSION")
           .map((target) => target.sessionLabel),
       ).toEqual(["Short game", "Putting"]);
+      expect(
+        rebuiltTargets.find(
+          (target) => target.level === "ITEM" && target.target.currentId === "CURRENT",
+        ),
+      ).toMatchObject({ durationMinutes: 20, reps: 12 });
     });
 
     it("does not reload or replace the current plan when the Skills revision request fails", async () => {
@@ -6904,7 +7075,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       ),
     );
     expect(itemHtml).toContain("Remove drill");
-    expect(itemHtml).not.toContain("Adjust drill");
+    expect(itemHtml).toContain("Change drill parameters");
   });
 
   it("stores the operation-explicit replacement line naming the current target and new option", () => {

@@ -2894,11 +2894,12 @@ export const FYN_REVISION_CAPABILITIES: Record<
   FynRevisionDomainCapability
 > = {
   SKILLS: {
-    levels: ["DAY", "SESSION", "ITEM"],
+    // Milestone 1: deterministic Add Drill only, against an existing Skills session.
+    levels: ["SESSION"],
     actionsByLevel: {
-      DAY: ["REPLACE_DAY", "ADD_SESSION"],
-      SESSION: ["UPDATE_SESSION", "ADD_ITEM", "UPDATE_SESSION_ITEMS"],
-      ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
+      DAY: [],
+      SESSION: ["ADD_ITEM"],
+      ITEM: [],
     },
   },
   NUTRITION: {
@@ -3155,11 +3156,111 @@ export function buildFynRevisionActionChangeText(
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Skills Add Drill deterministic single-patch flow
+ * ---------------------------------------------------------------------------------------------- */
+
+export const SKILLS_SINGLE_PATCH_GUIDANCE =
+  "Apply one drill addition at a time. Select an existing Skills session and an approved drill.";
+export const SKILLS_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
+
+export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
+
+/** Builds the Milestone 1 Skills ADD_ITEM patch without constructing drill metadata. */
+export function buildSkillsRevisionPatch(input: {
+  target: FynRevisionTargetOption;
+  actionKey: FynRevisionActionKey;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+}): TrainingPlanRevisionPatch | null {
+  if (input.actionKey !== "ADD_ITEM" || input.target.level !== "SESSION") return null;
+  const { dayIndex, sessionIndex } = input.target.indices;
+  const skillCode = input.option?.id.trim() ?? "";
+  if (dayIndex === null || sessionIndex === null || skillCode === "") return null;
+  return {
+    operation: "ADD_ITEM",
+    dayIndex,
+    sessionIndex,
+    item: { skillCode },
+  };
+}
+
+/** Human-readable audit summary; the structured patch remains the executable source of truth. */
+export function buildSkillsRevisionSummary(input: {
+  target: FynRevisionTargetOption;
+  option: CoachAthleteDomainDraftRevisionOption;
+  coachRequest?: string;
+}): string {
+  const session = (input.target.sessionLabel ?? input.target.target.label ?? "Skills session").trim();
+  const option = input.option.label.trim();
+  const note = (input.coachRequest ?? "").trim();
+  const summary = `Add drill ${option || input.option.id} to ${session || "Skills session"}.`;
+  return note === "" ? summary : `${summary} ${note}`;
+}
+
+/** Assembles exactly one Skills Add Drill revision request. */
+export function buildSkillsRevisionSubmission(input: {
+  reviseIds: SkillsReviseIds | null;
+  target: FynRevisionTargetOption | null;
+  actionKey: FynRevisionActionKey | null;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+}): TrainingPlanRevisePayload | null {
+  if (
+    input.reviseIds === null ||
+    input.target === null ||
+    input.actionKey === null ||
+    input.option == null
+  ) {
+    return null;
+  }
+  const revisionPatch = buildSkillsRevisionPatch({
+    target: input.target,
+    actionKey: input.actionKey,
+    option: input.option,
+  });
+  if (revisionPatch === null) return null;
+  return {
+    trainingPlanId: input.reviseIds.trainingPlanId,
+    versionId: input.reviseIds.versionId,
+    coachFeedback: buildSkillsRevisionSummary({
+      target: input.target,
+      option: input.option,
+      coachRequest: input.coachRequest,
+    }),
+    revisionPatch,
+  };
+}
+
+export function nextSkillsRevisionVersionId(
+  result: Pick<TrainingPlanReviseResult, "versionId"> | null | undefined,
+): string | null {
+  const version = result?.versionId?.trim();
+  return version && version !== "" ? version : null;
+}
+
+/** Keeps sequential Skills revisions pinned to the version returned by the previous revision. */
+export function resolveActiveSkillsReviseIds(
+  baseReviseIds: SkillsReviseIds | null,
+  activeReviseIds: SkillsReviseIds | null | undefined,
+): SkillsReviseIds | null {
+  if (baseReviseIds === null) return null;
+  const pinnedPlanId = activeReviseIds?.trainingPlanId?.trim() ?? "";
+  const pinnedVersionId = activeReviseIds?.versionId?.trim() ?? "";
+  if (
+    pinnedPlanId !== "" &&
+    pinnedVersionId !== "" &&
+    pinnedPlanId === baseReviseIds.trainingPlanId.trim()
+  ) {
+    return { trainingPlanId: baseReviseIds.trainingPlanId, versionId: pinnedVersionId };
+  }
+  return baseReviseIds;
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Nutrition deterministic single-patch flow
  *
  * For Nutrition, a revision submits ONE structured, executable `revisionPatch` (the source of
- * truth) alongside a short `coachFeedback` summary (human-readable only). Skills/S&C are untouched
- * and keep their free-form multi-change flow. Nothing here fabricates catalogue data: item fields
+ * truth) alongside a short `coachFeedback` summary (human-readable only). S&C keeps its free-form
+ * multi-change flow. Nothing here fabricates catalogue data: item fields
  * are passed through verbatim from the coach's selected approved option (or, for updates, from the
  * item already on the plan).
  * ---------------------------------------------------------------------------------------------- */
@@ -4174,7 +4275,7 @@ export function FynRevisionContextPanel({
   optionsState: FynRevisionOptionsState;
   onShowOptions: () => void;
   onSelectOption: (option: CoachAthleteDomainDraftRevisionOption) => void;
-  /** Nutrition deterministic single-patch flow: hides the multi-change basket + counter. */
+  /** Deterministic single-patch flow: hides the multi-change basket + counter. */
   singlePatchMode?: boolean;
   /** The id of the one approved option chosen in single-patch mode (marks the chip as selected). */
   selectedOptionId?: string | null;
@@ -4241,9 +4342,13 @@ export function FynRevisionContextPanel({
           {singlePatchMode ? (
             <p
               className="text-sm text-textSecondary"
-              data-testid="fyn-nutrition-single-patch-guidance"
+              data-testid={
+                domain === "SKILLS"
+                  ? "fyn-skills-single-patch-guidance"
+                  : "fyn-nutrition-single-patch-guidance"
+              }
             >
-              {NUTRITION_SINGLE_PATCH_GUIDANCE}
+              {domain === "SKILLS" ? SKILLS_SINGLE_PATCH_GUIDANCE : NUTRITION_SINGLE_PATCH_GUIDANCE}
             </p>
           ) : null}
           <p className="text-sm text-textSecondary">
@@ -4473,7 +4578,11 @@ export function FynRevisionContextPanel({
             <p
               className="text-sm text-textPrimary"
               role="status"
-              data-testid="fyn-nutrition-selected-option"
+              data-testid={
+                domain === "SKILLS"
+                  ? "fyn-skills-selected-option"
+                  : "fyn-nutrition-selected-option"
+              }
             >
               Selected:{" "}
               {optionsState.options.find((option) => option.id === selectedOptionId)?.label ??
@@ -10066,6 +10175,7 @@ export function CoachAthletePlanningProfileView({
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
   const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
   const [reviseSkillsSuccess, setReviseSkillsSuccess] = useState<string | null>(null);
+  const [skillsActiveReviseIds, setSkillsActiveReviseIds] = useState<SkillsReviseIds | null>(null);
   const [reviseNutritionFeedback, setReviseNutritionFeedback] = useState("");
   const [reviseNutritionLoading, setReviseNutritionLoading] = useState(false);
   const [reviseNutritionError, setReviseNutritionError] = useState<string | null>(null);
@@ -10107,8 +10217,8 @@ export function CoachAthletePlanningProfileView({
   const [fynRevisionOptionStates, setFynRevisionOptionStates] = useState<
     Partial<Record<TrainingPlanGenerationDomain, FynRevisionOptionsState>>
   >({});
-  // Nutrition single-patch flow: the one approved option the coach has chosen for the current
-  // (single) change. Skills/S&C keep basketing changes and never read this map.
+  // Deterministic single-patch flows keep the one approved option chosen for the current change.
+  // S&C remains basket mode and never reads this map.
   const [fynRevisionSelectedOptions, setFynRevisionSelectedOptions] = useState<
     Partial<Record<TrainingPlanGenerationDomain, CoachAthleteDomainDraftRevisionOption | null>>
   >({});
@@ -12448,6 +12558,11 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.version?.id,
     workspace,
   ]);
+  useEffect(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "SKILLS") {
+      setSkillsActiveReviseIds(null);
+    }
+  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
   // The pinned revision version is scoped to an OPEN Nutrition review drawer. Clear it only when the
   // drawer closes or switches to another domain (a different trainingPlanId is handled by the
   // resolver ignoring a mismatched pin). This deliberately does NOT clear on selection reset,
@@ -15504,35 +15619,75 @@ export function CoachAthletePlanningProfileView({
     urlPlanCandidate,
   ]);
 
-  async function handleReviseSkillsPlan() {
-    if (reviseSkillsLoading || entityId === "" || athleteIdTrimmed === "" || !skillsReviseIds) {
+  async function handleReviseSkillsPlan(submission?: TrainingPlanRevisePayload | null) {
+    const submittedReviseIds =
+      submission != null
+        ? { trainingPlanId: submission.trainingPlanId, versionId: submission.versionId }
+        : skillsReviseIds;
+    const activeReviseIds = resolveActiveSkillsReviseIds(submittedReviseIds, skillsActiveReviseIds);
+    if (reviseSkillsLoading || entityId === "" || athleteIdTrimmed === "" || !activeReviseIds) {
       return;
     }
 
-    const coachFeedback = reviseSkillsFeedback.trim();
-    if (coachFeedback === "") {
-      setReviseSkillsError("Enter revision feedback first.");
-      setReviseSkillsSuccess(null);
-      return;
+    const isSinglePatch = submission != null && submission.revisionPatch != null;
+    let payload: TrainingPlanRevisePayload;
+    if (isSinglePatch) {
+      payload = submission;
+    } else {
+      const coachFeedback = reviseSkillsFeedback.trim();
+      if (coachFeedback === "") {
+        setReviseSkillsError("Enter revision feedback first.");
+        setReviseSkillsSuccess(null);
+        return;
+      }
+      payload = {
+        trainingPlanId: activeReviseIds.trainingPlanId,
+        versionId: activeReviseIds.versionId,
+        coachFeedback,
+      };
     }
 
-    const trainingPlanIdForReload = skillsReviseIds.trainingPlanId.trim();
+    const trainingPlanIdForReload = (payload.trainingPlanId || activeReviseIds.trainingPlanId).trim();
 
     setReviseSkillsLoading(true);
     setReviseSkillsError(null);
     setReviseSkillsSuccess(null);
     try {
-      const reviseResult = await reviseCoachAthleteSkillsTrainingPlan(entityId, athleteIdTrimmed, {
-        trainingPlanId: skillsReviseIds.trainingPlanId,
-        versionId: skillsReviseIds.versionId,
-        coachFeedback,
-      });
+      const reviseResult = await reviseCoachAthleteSkillsTrainingPlan(
+        entityId,
+        athleteIdTrimmed,
+        payload,
+      );
+      const nextVersionId = nextSkillsRevisionVersionId(reviseResult);
+      if (nextVersionId !== null) {
+        setSkillsActiveReviseIds({
+          trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+          versionId: nextVersionId,
+        });
+      }
+      if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
       await reconcileRevisedDomainPlanDetail("SKILLS", reviseResult, trainingPlanIdForReload);
-      await loadLatestSkillsDraft("SKILLS", true);
+      if (isSinglePatch) {
+        await runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: () => loadLatestSkillsDraft("SKILLS", true),
+          rebuildTargetOptions: () => loadFynRevisionContext("SKILLS"),
+        });
+      } else {
+        await loadLatestSkillsDraft("SKILLS", true);
+      }
       setReviseSkillsFeedback("");
-      setReviseSkillsSuccess("Revised skills plan version generated.");
+      if (isSinglePatch) {
+        setFynRevisionSelections((current) => ({
+          ...current,
+          SKILLS: defaultFynRevisionBatchSelection(),
+        }));
+        setReviseSkillsSuccess(SKILLS_REVISION_APPLIED_MESSAGE);
+      } else {
+        setReviseSkillsSuccess("Revised skills plan version generated.");
+      }
       void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
+      // Keep the currently rendered Skills plan and selection unchanged when the revision fails.
       console.error("Skills training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
         setReviseSkillsError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
@@ -15625,7 +15780,7 @@ export function CoachAthletePlanningProfileView({
       ...current,
       [domain]: defaultFynRevisionOptionsState(),
     }));
-    // The chosen approved option (Nutrition single-patch) is target-specific; clear it.
+    // The chosen approved option (deterministic single-patch flows) is target-specific; clear it.
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
     // The serving stepper re-seeds from the newly selected item's serving.
     setNutritionServingDraftQuantity(null);
@@ -15641,7 +15796,7 @@ export function CoachAthletePlanningProfileView({
       ...current,
       [domain]: defaultFynRevisionOptionsState(),
     }));
-    // Switching action invalidates any previously chosen approved option (Nutrition single-patch).
+    // Switching action invalidates any previously chosen deterministic option.
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
     // The serving stepper only applies to UPDATE_ITEM; reset it when the action changes.
     setNutritionServingDraftQuantity(null);
@@ -15653,8 +15808,8 @@ export function CoachAthletePlanningProfileView({
     action: FynRevisionAction,
     target: FynRevisionTargetOption,
   ): void {
-    // Nutrition uses the deterministic single-patch flow (Apply Revision), never the basket.
-    if (domain === "NUTRITION") return;
+    // Skills and Nutrition deterministic flows use Apply Revision, never the basket.
+    if (domain === "SKILLS" || domain === "NUTRITION") return;
     const coachRequest = fynRevisionRequests[domain] ?? "";
     const changeText = buildFynRevisionActionChangeText(domain, action, target, coachRequest);
     if (changeText === "") return;
@@ -15783,9 +15938,9 @@ export function CoachAthletePlanningProfileView({
     targetOptions: FynRevisionTargetOption[],
     option: CoachAthleteDomainDraftRevisionOption,
   ): void {
-    // Nutrition single-patch flow: keep exactly one chosen approved option (no basket). The patch
-    // is assembled from target + action + this option at Apply Revision time.
-    if (domain === "NUTRITION") {
+    // Deterministic flows keep exactly one chosen approved option (no basket). The patch is
+    // assembled from target + action + this option at Apply Revision time.
+    if (domain === "SKILLS" || domain === "NUTRITION") {
       setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: option }));
       return;
     }
@@ -17779,29 +17934,36 @@ export function CoachAthletePlanningProfileView({
     const fynRevisionCoachRequest = fynRevisionRequests[reviewDomain] ?? "";
     const fynRevisionSelectedTargetKey = fynRevisionTargetKeys[reviewDomain] ?? null;
     const fynRevisionSelectedActionKey = fynRevisionActionKeys[reviewDomain] ?? null;
-    // Nutrition submits against the EXACT plan/version rendered in this drawer (via actionContext),
-    // overridden by the pinned response version once a revision has succeeded — never the stale
-    // workspace / latest-draft memo.
+    const skillsDrawerRenderedReviseIds: SkillsReviseIds | null =
+      reviewDomain === "SKILLS" && actionContext !== null
+        ? { trainingPlanId: actionContext.planId, versionId: actionContext.versionId }
+        : null;
+    // Deterministic flows submit against the exact plan/version rendered in this drawer, overridden
+    // by the pinned response version once a revision succeeds.
     const nutritionDrawerRenderedReviseIds: NutritionReviseIds | null =
       reviewDomain === "NUTRITION" && actionContext !== null
         ? { trainingPlanId: actionContext.planId, versionId: actionContext.versionId }
         : null;
     const drawerReviseIds =
       reviewDomain === "SKILLS"
-        ? skillsReviseIds
+        ? resolveActiveSkillsReviseIds(skillsDrawerRenderedReviseIds, skillsActiveReviseIds)
         : reviewDomain === "NUTRITION"
           ? resolveActiveNutritionReviseIds(
               nutritionDrawerRenderedReviseIds,
               nutritionActiveReviseIds,
             )
           : sandCReviseIds;
-    // Nutrition uses the deterministic single-patch flow: assemble one structured submission from
-    // the single target/action/option/note selection. Skills/S&C keep the multi-change basket.
+    // Skills Add Drill and Nutrition use one structured patch. S&C remains multi-change basket mode.
+    const skillsSinglePatchMode = reviewDomain === "SKILLS";
     const nutritionSinglePatchMode = reviewDomain === "NUTRITION";
-    const nutritionRevisionSubmitPending = nutritionRevisionDrawerSubmitPending({
-      singlePatchMode: nutritionSinglePatchMode,
+    const deterministicSinglePatchMode = skillsSinglePatchMode || nutritionSinglePatchMode;
+    const deterministicRevisionSubmitPending = nutritionRevisionDrawerSubmitPending({
+      singlePatchMode: deterministicSinglePatchMode,
       reviseLoading: drawerReviseLoading,
     });
+    const skillsSelectedOption = skillsSinglePatchMode
+      ? (fynRevisionSelectedOptions.SKILLS ?? null)
+      : null;
     const nutritionSelectedOption = nutritionSinglePatchMode
       ? (fynRevisionSelectedOptions.NUTRITION ?? null)
       : null;
@@ -17809,6 +17971,15 @@ export function CoachAthletePlanningProfileView({
       fynRevisionTargetOptionList.find(
         (option) => option.key === fynRevisionSelectedTargetKey,
       ) ?? null;
+    const skillsRevisionSubmission = skillsSinglePatchMode
+      ? buildSkillsRevisionSubmission({
+          reviseIds: drawerReviseIds,
+          target: fynRevisionSelectedTargetOption,
+          actionKey: fynRevisionSelectedActionKey,
+          option: skillsSelectedOption,
+          coachRequest: fynRevisionCoachRequest,
+        })
+      : null;
     // Nutrition "Change food item details" (UPDATE_ITEM) is a deterministic serving stepper. Parse
     // the selected item's canonical serving; the displayed quantity is the coach's stepped draft, or
     // the parsed original before any adjustment (which keeps Apply disabled until it changes).
@@ -17861,6 +18032,7 @@ export function CoachAthletePlanningProfileView({
         })
       : null;
     const nutritionCanApply = nutritionRevisionSubmission !== null;
+    const skillsCanApply = skillsRevisionSubmission !== null;
     // Surface a specific hint (and keep Apply blocked) when a chosen ADD_ITEM/REPLACE_ITEM option
     // lacks its authoritative catalog reference.
     const nutritionOptionMissingCatalog =
@@ -17886,7 +18058,7 @@ export function CoachAthletePlanningProfileView({
     };
     const handleDrawerReviseSubmit = () => {
       if (reviewDomain === "SKILLS") {
-        void handleReviseSkillsPlan();
+        void handleReviseSkillsPlan(skillsRevisionSubmission);
       } else if (reviewDomain === "NUTRITION") {
         void handleReviseNutritionPlan(nutritionRevisionSubmission, {
           target: fynRevisionSelectedTargetOption,
@@ -17948,7 +18120,7 @@ export function CoachAthletePlanningProfileView({
           type="button"
           className={drawerLayoutClasses.backdropClassName}
           aria-label="Close Domain Review Drawer"
-          disabled={nutritionRevisionSubmitPending}
+          disabled={deterministicRevisionSubmitPending}
           onClick={handleCloseDomainReviewDrawer}
         />
         <aside className={drawerLayoutClasses.panelClassName}>
@@ -17965,7 +18137,7 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
-                disabled={nutritionRevisionSubmitPending}
+                disabled={deterministicRevisionSubmitPending}
                 onClick={handleCloseDomainReviewDrawer}
               >
                 Close
@@ -18174,8 +18346,12 @@ export function CoachAthletePlanningProfileView({
                         option,
                       );
                     }}
-                    singlePatchMode={nutritionSinglePatchMode}
-                    selectedOptionId={nutritionSelectedOption?.id ?? null}
+                    singlePatchMode={deterministicSinglePatchMode}
+                    selectedOptionId={
+                      skillsSinglePatchMode
+                        ? (skillsSelectedOption?.id ?? null)
+                        : (nutritionSelectedOption?.id ?? null)
+                    }
                     servingStepper={nutritionServingStepper}
                     servingUnavailable={nutritionServingUnavailable}
                     onServingIncrement={() => handleNutritionServingAdjust(1)}
@@ -18211,9 +18387,11 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                    {nutritionRevisionSubmitPending ? (
+                    {deterministicRevisionSubmitPending ? (
                       <DashboardStatusNotice type="loading" compact>
-                        {NUTRITION_REVISION_APPLYING_MESSAGE}
+                        {nutritionSinglePatchMode
+                          ? NUTRITION_REVISION_APPLYING_MESSAGE
+                          : "Applying revision…"}
                       </DashboardStatusNotice>
                     ) : null}
                     {nutritionOptionMissingCatalog ? (
@@ -18225,7 +18403,7 @@ export function CoachAthletePlanningProfileView({
                       <Button
                         type="button"
                         variant="secondary"
-                        disabled={nutritionRevisionSubmitPending || drawerReviseLoading}
+                        disabled={deterministicRevisionSubmitPending || drawerReviseLoading}
                         onClick={() => {
                           setAssistantRevisePanelDomain(null);
                           setFynRevisionSelections((current) => ({
@@ -18243,18 +18421,22 @@ export function CoachAthletePlanningProfileView({
                         variant="primary"
                         loading={drawerReviseLoading}
                         disabled={
-                          nutritionRevisionSubmitPending ||
+                          deterministicRevisionSubmitPending ||
                           drawerReviseLoading ||
                           drawerReviseIds === null ||
-                          (nutritionSinglePatchMode
-                            ? !nutritionCanApply
+                          (deterministicSinglePatchMode
+                            ? skillsSinglePatchMode
+                              ? !skillsCanApply
+                              : !nutritionCanApply
                             : fynRevisionAcceptedCount(fynRevisionSelection) === 0)
                         }
                         onClick={handleDrawerReviseSubmit}
                       >
-                        {nutritionSinglePatchMode && drawerReviseLoading
-                          ? NUTRITION_REVISION_APPLYING_MESSAGE
-                          : nutritionSinglePatchMode
+                        {deterministicSinglePatchMode && drawerReviseLoading
+                          ? nutritionSinglePatchMode
+                            ? NUTRITION_REVISION_APPLYING_MESSAGE
+                            : "Applying revision…"
+                          : deterministicSinglePatchMode
                             ? "Apply Revision"
                             : "Revise Plan"}
                       </Button>
@@ -18349,7 +18531,7 @@ export function CoachAthletePlanningProfileView({
             <Button
               type="button"
               variant="secondary"
-              disabled={nutritionRevisionSubmitPending}
+              disabled={deterministicRevisionSubmitPending}
               onClick={handleCloseDomainReviewDrawer}
             >
               Close

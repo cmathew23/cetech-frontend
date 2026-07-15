@@ -197,6 +197,11 @@ import {
   NUTRITION_MEAL_MINIMUMS_GUIDANCE,
   NUTRITION_REMOVE_ITEM_MINIMUM_WARNING,
   NUTRITION_SINGLE_PATCH_GUIDANCE,
+  SKILLS_SINGLE_PATCH_GUIDANCE,
+  buildSkillsRevisionPatch,
+  buildSkillsRevisionSubmission,
+  nextSkillsRevisionVersionId,
+  resolveActiveSkillsReviseIds,
   buildNutritionRevisionPatch,
   buildNutritionRevisionSubmission,
   buildNutritionRevisionOptionItem,
@@ -2790,7 +2795,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(populatedHtml).toContain("What do you want to change?");
   });
 
-  it("enables Show approved options once a Replace action is chosen and a request is typed", () => {
+  it("enables Show approved options once Add Drill is chosen and a request is typed", () => {
     const context = makeRevisionContext({ draft: null, targetMap: null });
     const scheduleDays = [
       {
@@ -2810,9 +2815,9 @@ describe("Training Plan Workspace lifecycle display", () => {
       domain: "SKILLS",
       scheduleDays,
     });
-    const itemTarget = targets.find((option) => option.level === "ITEM");
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
 
-    // Replace action chosen but no request typed yet -> Show approved options is disabled.
+    // Add Drill chosen but no request typed yet -> Show approved options is disabled.
     const disabledHtml = renderToStaticMarkup(
       createElement(
         FynRevisionContextPanel,
@@ -2820,8 +2825,8 @@ describe("Training Plan Workspace lifecycle display", () => {
           context,
           targetOptions: targets,
           coachRequest: "",
-          selectedTargetKey: itemTarget?.key ?? null,
-          selectedActionKey: "REPLACE_ITEM",
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
         }),
       ),
     );
@@ -2834,9 +2839,9 @@ describe("Training Plan Workspace lifecycle display", () => {
         fynPanelProps({
           context,
           targetOptions: targets,
-          coachRequest: "Replace the bunker drill.",
-          selectedTargetKey: itemTarget?.key ?? null,
-          selectedActionKey: "REPLACE_ITEM",
+          coachRequest: "Add a bunker drill.",
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
         }),
       ),
     );
@@ -2868,12 +2873,12 @@ describe("Training Plan Workspace lifecycle display", () => {
     );
 
   it("exposes a capability map that matches the documented backend contract", () => {
-    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["DAY", "SESSION", "ITEM"]);
+    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["SESSION"]);
     expect(FYN_REVISION_CAPABILITIES.NUTRITION.levels).toEqual(["SESSION", "ITEM"]);
     expect(FYN_REVISION_CAPABILITIES.S_AND_C.levels).toEqual(["DAY", "SESSION", "ITEM"]);
   });
 
-  it("offers Skills DAY, SESSION, and ITEM actions including the max-4 drill batch edit", () => {
+  it("exposes Add Drill only for Skills Milestone 1", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
@@ -2883,49 +2888,34 @@ describe("Training Plan Workspace lifecycle display", () => {
     const sessionTarget = targets.find((option) => option.level === "SESSION");
     const itemTarget = targets.find((option) => option.level === "ITEM");
 
-    expect(actionKeysFor("SKILLS", dayTarget)).toEqual(["REPLACE_DAY", "ADD_SESSION"]);
-    expect(actionKeysFor("SKILLS", sessionTarget)).toEqual([
-      "UPDATE_SESSION",
-      "ADD_ITEM",
-      "UPDATE_SESSION_ITEMS",
-    ]);
-    expect(actionKeysFor("SKILLS", itemTarget)).toEqual([
-      "REPLACE_ITEM",
-      "UPDATE_ITEM",
-      "REMOVE_ITEM",
-    ]);
-    // The Skills-only batch edit is surfaced with a friendly, capped label.
-    expect(fynRevisionActionLabel("SKILLS", "UPDATE_SESSION_ITEMS")).toBe(
-      "Edit several drills in this session",
-    );
-    expect(fynRevisionActionLabel("SKILLS", "ADD_SESSION")).toBe("Add Skills session");
-    expect(fynRevisionActionLabel("SKILLS", "REPLACE_DAY")).toBe("Change rest day");
+    expect(dayTarget).toBeUndefined();
+    expect(actionKeysFor("SKILLS", sessionTarget)).toEqual(["ADD_ITEM"]);
+    expect(itemTarget).toBeUndefined();
     expect(fynRevisionActionLabel("SKILLS", "ADD_ITEM")).toBe("Add drill");
-    expect(fynRevisionActionLabel("SKILLS", "REPLACE_ITEM")).toBe("Replace drill");
   });
 
-  it("renders the Skills action buttons for the selected target and hides other-level actions", () => {
+  it("renders Add Drill for a Skills session and hides Remove and Change Details", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
       scheduleDays: skillsSchedule,
     });
-    const itemTarget = targets.find((option) => option.level === "ITEM");
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
     const html = renderToStaticMarkup(
       createElement(
         FynRevisionContextPanel,
         fynPanelProps({
           context,
           targetOptions: targets,
-          selectedTargetKey: itemTarget?.key ?? null,
+          selectedTargetKey: sessionTarget?.key ?? null,
         }),
       ),
     );
     expect(html).toContain("What do you want to do?");
-    expect(html).toContain("Replace drill");
-    expect(html).toContain("Adjust drill");
-    expect(html).toContain("Remove drill");
-    // Item target must not surface day/session-level actions.
+    expect(html).toContain("Add drill");
+    expect(html).not.toContain("Replace drill");
+    expect(html).not.toContain("Adjust drill");
+    expect(html).not.toContain("Remove drill");
     expect(html).not.toContain("Change rest day");
     expect(html).not.toContain("Edit several drills in this session");
   });
@@ -3402,14 +3392,12 @@ describe("Training Plan Workspace lifecycle display", () => {
     );
   });
 
-  it("reveals Show approved options for REPLACEMENT/ADD_ITEM and Add to plan changes for text-only actions", () => {
+  it("reveals Show approved options for the Skills Add Drill action only", () => {
     const skills = fynRevisionLeveledTargetOptions(
       makeRevisionContext({ generationDomain: "SKILLS" }),
       { domain: "SKILLS", scheduleDays: skillsSchedule },
     );
-    const dayTarget = skills.find((o) => o.level === "DAY")!;
     const sessionTarget = skills.find((o) => o.level === "SESSION")!;
-    const itemTarget = skills.find((o) => o.level === "ITEM")!;
     const renderPanel = (
       targetKey: string,
       actionKey: FynRevisionActionKeyForTest,
@@ -3427,20 +3415,9 @@ describe("Training Plan Workspace lifecycle display", () => {
         ),
       );
 
-    // Approved-options actions.
-    expect(renderPanel(itemTarget.key, "REPLACE_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
     expect(renderPanel(sessionTarget.key, "ADD_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
-
-    // Text-only actions never expose the approved-options button.
-    for (const [targetKey, actionKey] of [
-      [dayTarget.key, "ADD_SESSION"],
-      [sessionTarget.key, "UPDATE_SESSION"],
-      [itemTarget.key, "REMOVE_ITEM"],
-    ] as const) {
-      const html = renderPanel(targetKey, actionKey);
-      expect(html).toContain("Add to plan changes");
-      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
-    }
+    expect(skills.some((target) => target.level === "DAY")).toBe(false);
+    expect(skills.some((target) => target.level === "ITEM")).toBe(false);
   });
 
   it("renders action choices as radio selection controls with intent-not-command helper copy", () => {
@@ -3463,8 +3440,8 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain('type="radio"');
     expect(html).toContain('value="ADD_ITEM"');
-    expect(html).toContain('value="UPDATE_SESSION"');
-    expect(html).toContain('value="UPDATE_SESSION_ITEMS"');
+    expect(html).not.toContain('value="UPDATE_SESSION"');
+    expect(html).not.toContain('value="UPDATE_SESSION_ITEMS"');
     // Helper copy makes clear the choice is intent only.
     expect(html).toContain(
       "Choose one revision action. Nothing is applied until you add it to plan changes.",
@@ -3507,7 +3484,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(selected.match(/data-selected="true"/g)).toHaveLength(1);
   });
 
-  it("shows the max-4 drill batch copy only for a Skills SESSION target", () => {
+  it("does not show the retired max-4 drill batch action for Skills Milestone 1", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
@@ -3521,12 +3498,11 @@ describe("Training Plan Workspace lifecycle display", () => {
           context,
           targetOptions: targets,
           selectedTargetKey: sessionTarget?.key ?? null,
-          selectedActionKey: "UPDATE_SESSION_ITEMS",
         }),
       ),
     );
-    expect(skillsHtml).toContain("Edit several drills in this session");
-    expect(skillsHtml).toContain(
+    expect(skillsHtml).not.toContain("Edit several drills in this session");
+    expect(skillsHtml).not.toContain(
       "Counts as 1 revision change. Describe up to 4 drill edits for this session.",
     );
 
@@ -3708,13 +3684,13 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(html).not.toContain("Meal minimums:");
     });
 
-    it("does not show the Remove-carefully warning for Skills Remove", () => {
+    it("does not expose Skills Remove or its Nutrition warning", () => {
       const context = makeRevisionContext({ generationDomain: "SKILLS" });
       const targets = fynRevisionLeveledTargetOptions(context, {
         domain: "SKILLS",
         scheduleDays: skillsSchedule,
       });
-      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+      const sessionTarget = targets.find((option) => option.level === "SESSION")!;
       const html = renderToStaticMarkup(
         createElement(
           FynRevisionContextPanel,
@@ -3722,12 +3698,217 @@ describe("Training Plan Workspace lifecycle display", () => {
             domain: "SKILLS",
             context,
             targetOptions: targets,
-            selectedTargetKey: itemTarget.key,
-            selectedActionKey: "REMOVE_ITEM",
+            selectedTargetKey: sessionTarget.key,
           }),
         ),
       );
+      expect(html).not.toContain("Remove drill");
       expect(html).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+    });
+  });
+
+  describe("Skills Add Drill deterministic single-patch flow", () => {
+    const skillsSchedule = [
+      {
+        dayIndex: 2,
+        sessions: [
+          {
+            sessionIndex: 3,
+            title: "Short game",
+            items: [{ order: 0, label: "Current drill", skillCode: "CURRENT" }],
+          },
+        ],
+      },
+    ];
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = () =>
+      fynRevisionLeveledTargetOptions(context, {
+        domain: "SKILLS",
+        scheduleDays: skillsSchedule,
+      });
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "PACE_CONTROL_01",
+      rank: 1,
+      label: "Pace control ladder",
+      domain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      source: "DB",
+      score: 0.95,
+      reason: "Matches the session goal",
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      metadata: {
+        untrustedCanonicalName: "Do not submit",
+        reps: 999,
+      },
+    };
+
+    it("builds the exact ADD_ITEM patch using only option.id as skillCode", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const patch = buildSkillsRevisionPatch({
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+      });
+
+      expect(patch).toEqual({
+        operation: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        item: { skillCode: "PACE_CONTROL_01" },
+      });
+      expect(patch).not.toHaveProperty("itemIndex");
+      expect(patch!.item).not.toHaveProperty("label");
+      expect(patch!.item).not.toHaveProperty("metadata");
+      expect(patch!.item).not.toHaveProperty("reps");
+    });
+
+    it("assembles one exact structured revision payload", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+        coachRequest: "Keep the progression simple.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Add drill Pace control ladder to Short game. Keep the progression simple.",
+        revisionPatch: {
+          operation: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          item: { skillCode: "PACE_CONTROL_01" },
+        },
+      });
+    });
+
+    it("shows a selected DB option in single-patch mode, keeps chat, and hides the basket", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: sessionTarget.key,
+            selectedActionKey: "ADD_ITEM",
+            coachRequest: "Add a pace-control drill.",
+            singlePatchMode: true,
+            selectedOptionId: approvedOption.id,
+            optionsState: {
+              loading: false,
+              error: null,
+              message: null,
+              options: [approvedOption],
+              searched: true,
+            },
+          }),
+        ),
+      );
+
+      expect(html).toContain(SKILLS_SINGLE_PATCH_GUIDANCE);
+      expect(html).toContain('data-testid="fyn-skills-selected-option"');
+      expect(html).toContain('data-selected="true"');
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain("Revision basket");
+      expect(html).not.toContain("Add to plan changes");
+    });
+
+    it("pins the returned Skills version and rebuilds targets after the latest plan reload", async () => {
+      expect(nextSkillsRevisionVersionId({ versionId: "skills-v2" })).toBe("skills-v2");
+      expect(
+        resolveActiveSkillsReviseIds(
+          { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          { trainingPlanId: "skills-plan-1", versionId: "skills-v2" },
+        ),
+      ).toEqual({ trainingPlanId: "skills-plan-1", versionId: "skills-v2" });
+
+      const events: string[] = [];
+      let schedule: readonly unknown[] = skillsSchedule;
+      let rebuiltTargets = targets();
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("reload");
+          schedule = [
+            ...skillsSchedule,
+            {
+              dayIndex: 4,
+              sessions: [{ sessionIndex: 1, title: "Putting", items: [] }],
+            },
+          ];
+        },
+        rebuildTargetOptions: async () => {
+          events.push("rebuild");
+          rebuiltTargets = fynRevisionLeveledTargetOptions(context, {
+            domain: "SKILLS",
+            scheduleDays: schedule,
+          });
+        },
+      });
+
+      expect(events).toEqual(["reload", "rebuild"]);
+      expect(rebuiltTargets.map((target) => target.sessionLabel)).toEqual([
+        "Short game",
+        "Putting",
+      ]);
+    });
+
+    it("does not reload or replace the current plan when the Skills revision request fails", async () => {
+      const currentPlan = { versionId: "skills-v1", days: skillsSchedule };
+      let renderedPlan = currentPlan;
+      const reload = vi.fn(async () => {
+        renderedPlan = { versionId: "skills-v2", days: [] };
+      });
+      const rebuild = vi.fn(async () => {});
+      const revise = vi.fn(async () => {
+        throw new Error("Revision rejected");
+      });
+
+      try {
+        await revise();
+        await runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: reload,
+          rebuildTargetOptions: rebuild,
+        });
+      } catch {
+        // The component's Skills catch path reports the error without plan/reload state changes.
+      }
+
+      expect(renderedPlan).toBe(currentPlan);
+      expect(reload).not.toHaveBeenCalled();
+      expect(rebuild).not.toHaveBeenCalled();
+    });
+
+    it("does not change Nutrition capabilities or S&C basket mode", () => {
+      expect(FYN_REVISION_CAPABILITIES.NUTRITION).toEqual({
+        levels: ["SESSION", "ITEM"],
+        actionsByLevel: {
+          DAY: [],
+          SESSION: ["ADD_ITEM"],
+          ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
+        },
+      });
+
+      const sandcHtml = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            selection: { changes: [{ acceptedChange: "Add exercise to Lower body." }] },
+            singlePatchMode: false,
+          }),
+        ),
+      );
+      expect(sandcHtml).toContain("Revision basket");
+      expect(sandcHtml).not.toContain(SKILLS_SINGLE_PATCH_GUIDANCE);
     });
   });
 
@@ -5921,22 +6102,23 @@ describe("Training Plan Workspace lifecycle display", () => {
     });
   });
 
-  it("does not render static, invented, or context change-option replacements before options are fetched", () => {
-    const targets = fynRevisionTargetOptions(fynDraftContext);
+  it("does not render static, invented, or context change options before Add Drill options are fetched", () => {
+    const targets = fynRevisionLeveledTargetOptions(fynDraftContext, { domain: "SKILLS" });
+    const sessionTarget = targets.find((target) => target.level === "SESSION");
     const html = renderToStaticMarkup(
       createElement(
         FynRevisionContextPanel,
         fynPanelProps({
           context: fynDraftContext,
           targetOptions: targets,
-          selectedTargetKey: targets[0]?.key ?? null,
-          selectedActionKey: "REPLACE_ITEM",
-          coachRequest: "Replace the bunker drill.",
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a bunker drill.",
         }),
       ),
     );
 
-    // Endpoint flow active: generic context changeOptions are never shown as replacements.
+    // Endpoint flow active: generic context changeOptions are never shown as drill choices.
     expect(html).not.toContain("Change drill");
     expect(html).not.toContain("CHANGE_DRILL");
     // No static/invented replacement option lists leak through.
@@ -5947,7 +6129,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).not.toContain(FYN_REVISION_NO_OPTIONS_MESSAGE);
     // No fetched/approved options exist before the coach asks for them.
     expect(html).not.toContain("Cross-court rally drill");
-    // The endpoint-driven action is available once a Replace action is chosen.
+    // The endpoint-driven action is available once Add Drill is chosen.
     expect(html).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
   });
 
@@ -6254,12 +6436,9 @@ describe("Training Plan Workspace lifecycle display", () => {
     const addItem = fynRevisionAvailableActions("SKILLS", sessionTarget).find(
       (action) => action.key === "ADD_ITEM",
     );
-    const addSession = fynRevisionAvailableActions("SKILLS", dayTarget).find(
-      (action) => action.key === "ADD_SESSION",
-    );
-    // ADD_ITEM now goes through the approved-options flow; ADD_SESSION stays text-only.
+    // ADD_ITEM goes through the approved-options flow; no other Skills action is exposed.
     expect(addItem?.requiresApprovedOptions).toBe(true);
-    expect(addSession?.requiresApprovedOptions).toBe(false);
+    expect(dayTarget).toBeNull();
   });
 
   it("collapses any target to a clean SESSION target for ADD_ITEM (no null item fields)", () => {
@@ -6598,41 +6777,25 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).toContain("Cross-court rally drill");
   });
 
-  it("keeps ADD_SESSION and REMOVE_ITEM text-only with no approved-options button", () => {
+  it("does not expose ADD_SESSION or REMOVE_ITEM for Skills Milestone 1", () => {
     const skillsTargets = fynRevisionLeveledTargetOptions(
       makeRevisionContext({ generationDomain: "SKILLS" }),
       { domain: "SKILLS", scheduleDays: skillsSchedule },
     );
-    const dayTarget = skillsTargets.find((option) => option.level === "DAY")!;
-    const addSessionHtml = renderToStaticMarkup(
+    const sessionTarget = skillsTargets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
       createElement(
         FynRevisionContextPanel,
         fynPanelProps({
           context: makeRevisionContext({ generationDomain: "SKILLS" }),
           targetOptions: skillsTargets,
-          selectedTargetKey: dayTarget.key,
-          selectedActionKey: "ADD_SESSION",
-          coachRequest: "Add a recovery session.",
+          selectedTargetKey: sessionTarget.key,
         }),
       ),
     );
-    // ADD_SESSION never fetches approved options; it uses the text-only quick-add button.
-    expect(addSessionHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
-    expect(addSessionHtml).toContain("Add to plan changes");
-
-    const itemTarget = skillsTargets.find((option) => option.level === "ITEM")!;
-    const removeHtml = renderToStaticMarkup(
-      createElement(
-        FynRevisionContextPanel,
-        fynPanelProps({
-          context: makeRevisionContext({ generationDomain: "SKILLS" }),
-          targetOptions: skillsTargets,
-          selectedTargetKey: itemTarget.key,
-          selectedActionKey: "REMOVE_ITEM",
-        }),
-      ),
-    );
-    expect(removeHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(html).not.toContain("Add Skills session");
+    expect(html).not.toContain("Remove drill");
+    expect(html).toContain("Add drill");
   });
 
   it("stores the operation-explicit replacement line naming the current target and new option", () => {

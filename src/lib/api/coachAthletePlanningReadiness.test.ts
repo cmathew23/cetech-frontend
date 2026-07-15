@@ -36,6 +36,7 @@ import {
   release,
   requestTrainingPlanRevision,
   requestRevision,
+  reviseSkillsPlan,
   reviseNutritionPlan,
   releaseTrainingPlanVersionToAthlete,
   startCoachAthleteTrainingPlanGenerationJob,
@@ -947,6 +948,40 @@ describe("parseReadinessPayload", () => {
           trainingPlanId: "plan-1",
           versionId: "version-3",
           coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact Skills Add Drill revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+    });
+    const revisionPatch = {
+      operation: "ADD_ITEM",
+      dayIndex: 2,
+      sessionIndex: 3,
+      item: { skillCode: "PACE_CONTROL_01" },
+    } as const;
+
+    await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Add drill Pace control ladder to Short game.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/skills/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "skills-plan-1",
+          versionId: "skills-version-1",
+          coachFeedback: "Add drill Pace control ladder to Short game.",
           revisionPatch,
         }),
       },

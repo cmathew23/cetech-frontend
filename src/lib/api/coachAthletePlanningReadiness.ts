@@ -799,13 +799,10 @@ export type AthleteTodayPlan = {
   raw: unknown;
 };
 
-/**
- * Structured, executable food item carried inside a Nutrition {@link TrainingPlanRevisionPatch}.
- * For ADD_ITEM / REPLACE_ITEM this is the backend's complete canonical `option.item`, passed through
- * verbatim (identity, serving, and every nutrition value preserved). Nothing is rebuilt from `label`
- * or `metadata`.
- */
+/** Structured item carried inside a deterministic {@link TrainingPlanRevisionPatch}. */
 export type TrainingPlanRevisionPatchItem = {
+  /** Skills ADD_ITEM sends only this DB-backed option id; drill metadata remains backend-owned. */
+  skillCode?: string;
   nutritionCatalogItemId?: string | null;
   itemType?: string | null;
   label?: string | null;
@@ -851,8 +848,8 @@ export type TrainingPlanRevisePayload = {
   versionId: string;
   coachFeedback: string;
   /**
-   * Optional structured patch. When present (Nutrition deterministic single-patch flow) it is the
-   * executable source of truth. Absent for Skills/S&C, which keep the free-form feedback flow.
+   * Optional structured patch. When present (Nutrition or Skills Add Drill deterministic
+   * single-patch flow) it is the executable source of truth. S&C keeps free-form basket feedback.
    */
   revisionPatch?: TrainingPlanRevisionPatch | null;
 };

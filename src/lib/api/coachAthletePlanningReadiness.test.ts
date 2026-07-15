@@ -988,6 +988,41 @@ describe("parseReadinessPayload", () => {
     );
   });
 
+  it("passes the exact Skills Remove Drill revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+    });
+    const revisionPatch = {
+      operation: "REMOVE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 3,
+      itemIndex: 1,
+      item: { skillCode: "CURRENT" },
+    } as const;
+
+    await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Remove drill Current drill from Short game.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/skills/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "skills-plan-1",
+          versionId: "skills-version-1",
+          coachFeedback: "Remove drill Current drill from Short game.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
   it("omits revisionPatch from the body when the caller does not supply one", async () => {
     apiRequestMock.mockResolvedValue({
       trainingPlanId: "plan-1",

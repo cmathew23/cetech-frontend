@@ -2894,12 +2894,12 @@ export const FYN_REVISION_CAPABILITIES: Record<
   FynRevisionDomainCapability
 > = {
   SKILLS: {
-    // Milestone 1: deterministic Add Drill only, against an existing Skills session.
-    levels: ["SESSION"],
+    // Skills deterministic milestones: add to a session or remove an existing drill.
+    levels: ["SESSION", "ITEM"],
     actionsByLevel: {
       DAY: [],
       SESSION: ["ADD_ITEM"],
-      ITEM: [],
+      ITEM: ["REMOVE_ITEM"],
     },
   },
   NUTRITION: {
@@ -3165,38 +3165,64 @@ export const SKILLS_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
 
-/** Builds the Milestone 1 Skills ADD_ITEM patch without constructing drill metadata. */
+/** Builds one supported Skills item patch without constructing drill metadata. */
 export function buildSkillsRevisionPatch(input: {
   target: FynRevisionTargetOption;
   actionKey: FynRevisionActionKey;
   option?: CoachAthleteDomainDraftRevisionOption | null;
 }): TrainingPlanRevisionPatch | null {
-  if (input.actionKey !== "ADD_ITEM" || input.target.level !== "SESSION") return null;
   const { dayIndex, sessionIndex } = input.target.indices;
-  const skillCode = input.option?.id.trim() ?? "";
-  if (dayIndex === null || sessionIndex === null || skillCode === "") return null;
-  return {
-    operation: "ADD_ITEM",
-    dayIndex,
-    sessionIndex,
-    item: { skillCode },
-  };
+  if (dayIndex === null || sessionIndex === null) return null;
+
+  if (input.actionKey === "ADD_ITEM" && input.target.level === "SESSION") {
+    const skillCode = input.option?.id.trim() ?? "";
+    if (skillCode === "") return null;
+    return {
+      operation: "ADD_ITEM",
+      dayIndex,
+      sessionIndex,
+      item: { skillCode },
+    };
+  }
+
+  if (input.actionKey === "REMOVE_ITEM" && input.target.level === "ITEM") {
+    const itemIndex = input.target.indices.itemIndex;
+    const skillCode = input.target.target.currentId?.trim() ?? "";
+    if (itemIndex === null || skillCode === "") return null;
+    return {
+      operation: "REMOVE_ITEM",
+      dayIndex,
+      sessionIndex,
+      itemIndex,
+      item: { skillCode },
+    };
+  }
+
+  return null;
 }
 
 /** Human-readable audit summary; the structured patch remains the executable source of truth. */
 export function buildSkillsRevisionSummary(input: {
   target: FynRevisionTargetOption;
-  option: CoachAthleteDomainDraftRevisionOption;
+  actionKey: FynRevisionActionKey;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
   coachRequest?: string;
 }): string {
   const session = (input.target.sessionLabel ?? input.target.target.label ?? "Skills session").trim();
-  const option = input.option.label.trim();
   const note = (input.coachRequest ?? "").trim();
-  const summary = `Add drill ${option || input.option.id} to ${session || "Skills session"}.`;
+  const summary =
+    input.actionKey === "REMOVE_ITEM"
+      ? `Remove drill ${
+          (input.target.itemLabel ?? input.target.target.label ?? input.target.target.currentId ?? "")
+            .trim() || "selected drill"
+        } from ${session || "Skills session"}.`
+      : `Add drill ${
+          input.option?.label.trim() || input.option?.id.trim() || "selected drill"
+        } to ${session || "Skills session"}.`;
   return note === "" ? summary : `${summary} ${note}`;
 }
 
-/** Assembles exactly one Skills Add Drill revision request. */
+/** Assembles exactly one supported Skills revision request. */
 export function buildSkillsRevisionSubmission(input: {
   reviseIds: SkillsReviseIds | null;
   target: FynRevisionTargetOption | null;
@@ -3207,8 +3233,7 @@ export function buildSkillsRevisionSubmission(input: {
   if (
     input.reviseIds === null ||
     input.target === null ||
-    input.actionKey === null ||
-    input.option == null
+    input.actionKey === null
   ) {
     return null;
   }
@@ -3223,7 +3248,8 @@ export function buildSkillsRevisionSubmission(input: {
     versionId: input.reviseIds.versionId,
     coachFeedback: buildSkillsRevisionSummary({
       target: input.target,
-      option: input.option,
+      actionKey: input.actionKey,
+      option: input.option ?? null,
       coachRequest: input.coachRequest,
     }),
     revisionPatch,

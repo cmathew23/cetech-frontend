@@ -2873,12 +2873,12 @@ describe("Training Plan Workspace lifecycle display", () => {
     );
 
   it("exposes a capability map that matches the documented backend contract", () => {
-    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["SESSION"]);
+    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["SESSION", "ITEM"]);
     expect(FYN_REVISION_CAPABILITIES.NUTRITION.levels).toEqual(["SESSION", "ITEM"]);
     expect(FYN_REVISION_CAPABILITIES.S_AND_C.levels).toEqual(["DAY", "SESSION", "ITEM"]);
   });
 
-  it("exposes Add Drill only for Skills Milestone 1", () => {
+  it("exposes Add Drill at session level and Remove Drill at item level", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
@@ -2890,11 +2890,12 @@ describe("Training Plan Workspace lifecycle display", () => {
 
     expect(dayTarget).toBeUndefined();
     expect(actionKeysFor("SKILLS", sessionTarget)).toEqual(["ADD_ITEM"]);
-    expect(itemTarget).toBeUndefined();
+    expect(actionKeysFor("SKILLS", itemTarget)).toEqual(["REMOVE_ITEM"]);
     expect(fynRevisionActionLabel("SKILLS", "ADD_ITEM")).toBe("Add drill");
+    expect(fynRevisionActionLabel("SKILLS", "REMOVE_ITEM")).toBe("Remove drill");
   });
 
-  it("renders Add Drill for a Skills session and hides Remove and Change Details", () => {
+  it("renders Add Drill for a Skills session and hides item-level actions", () => {
     const context = makeRevisionContext({ generationDomain: "SKILLS" });
     const targets = fynRevisionLeveledTargetOptions(context, {
       domain: "SKILLS",
@@ -3417,7 +3418,7 @@ describe("Training Plan Workspace lifecycle display", () => {
 
     expect(renderPanel(sessionTarget.key, "ADD_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
     expect(skills.some((target) => target.level === "DAY")).toBe(false);
-    expect(skills.some((target) => target.level === "ITEM")).toBe(false);
+    expect(skills.some((target) => target.level === "ITEM")).toBe(true);
   });
 
   it("renders action choices as radio selection controls with intent-not-command helper copy", () => {
@@ -3684,13 +3685,13 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(html).not.toContain("Meal minimums:");
     });
 
-    it("does not expose Skills Remove or its Nutrition warning", () => {
+    it("exposes Skills Remove without Nutrition minimum warnings", () => {
       const context = makeRevisionContext({ generationDomain: "SKILLS" });
       const targets = fynRevisionLeveledTargetOptions(context, {
         domain: "SKILLS",
         scheduleDays: skillsSchedule,
       });
-      const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
       const html = renderToStaticMarkup(
         createElement(
           FynRevisionContextPanel,
@@ -3698,16 +3699,16 @@ describe("Training Plan Workspace lifecycle display", () => {
             domain: "SKILLS",
             context,
             targetOptions: targets,
-            selectedTargetKey: sessionTarget.key,
+            selectedTargetKey: itemTarget.key,
           }),
         ),
       );
-      expect(html).not.toContain("Remove drill");
+      expect(html).toContain("Remove drill");
       expect(html).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
     });
   });
 
-  describe("Skills Add Drill deterministic single-patch flow", () => {
+  describe("Skills deterministic single-patch flow", () => {
     const skillsSchedule = [
       {
         dayIndex: 2,
@@ -3789,6 +3790,96 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
+    it("builds the exact REMOVE_ITEM payload from the selected drill", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: itemTarget,
+        actionKey: "REMOVE_ITEM",
+        coachRequest: "Remove it from this session.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Remove drill Current drill from Short game. Remove it from this session.",
+        revisionPatch: {
+          operation: "REMOVE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          itemIndex: 1,
+          item: { skillCode: "CURRENT" },
+        },
+      });
+    });
+
+    it("blocks REMOVE_ITEM for wrong or incomplete targets", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: sessionTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, dayIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            target: { ...itemTarget.target, currentId: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("keeps free chat visible for Remove Drill and does not request approved options", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            coachRequest: "Remove this drill.",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Remove drill");
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      expect(html).not.toContain("Add to plan changes");
+    });
+
     it("shows a selected DB option in single-patch mode, keeps chat, and hides the basket", () => {
       const sessionTarget = targets().find((target) => target.level === "SESSION")!;
       const html = renderToStaticMarkup(
@@ -3855,15 +3946,17 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
 
       expect(events).toEqual(["reload", "rebuild"]);
-      expect(rebuiltTargets.map((target) => target.sessionLabel)).toEqual([
-        "Short game",
-        "Putting",
-      ]);
+      expect(
+        rebuiltTargets
+          .filter((target) => target.level === "SESSION")
+          .map((target) => target.sessionLabel),
+      ).toEqual(["Short game", "Putting"]);
     });
 
     it("does not reload or replace the current plan when the Skills revision request fails", async () => {
       const currentPlan = { versionId: "skills-v1", days: skillsSchedule };
       let renderedPlan = currentPlan;
+      let activeVersionId = "skills-v1";
       const reload = vi.fn(async () => {
         renderedPlan = { versionId: "skills-v2", days: [] };
       });
@@ -3874,6 +3967,7 @@ describe("Training Plan Workspace lifecycle display", () => {
 
       try {
         await revise();
+        activeVersionId = "skills-v2";
         await runNutritionReviewDrawerOpenRefresh({
           loadLatestPlan: reload,
           rebuildTargetOptions: rebuild,
@@ -3883,6 +3977,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       }
 
       expect(renderedPlan).toBe(currentPlan);
+      expect(activeVersionId).toBe("skills-v1");
       expect(reload).not.toHaveBeenCalled();
       expect(rebuild).not.toHaveBeenCalled();
     });
@@ -6777,13 +6872,13 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).toContain("Cross-court rally drill");
   });
 
-  it("does not expose ADD_SESSION or REMOVE_ITEM for Skills Milestone 1", () => {
+  it("does not expose ADD_SESSION and exposes REMOVE_ITEM only on a drill", () => {
     const skillsTargets = fynRevisionLeveledTargetOptions(
       makeRevisionContext({ generationDomain: "SKILLS" }),
       { domain: "SKILLS", scheduleDays: skillsSchedule },
     );
     const sessionTarget = skillsTargets.find((option) => option.level === "SESSION")!;
-    const html = renderToStaticMarkup(
+    const sessionHtml = renderToStaticMarkup(
       createElement(
         FynRevisionContextPanel,
         fynPanelProps({
@@ -6793,9 +6888,23 @@ describe("Training Plan Workspace lifecycle display", () => {
         }),
       ),
     );
-    expect(html).not.toContain("Add Skills session");
-    expect(html).not.toContain("Remove drill");
-    expect(html).toContain("Add drill");
+    expect(sessionHtml).not.toContain("Add Skills session");
+    expect(sessionHtml).not.toContain("Remove drill");
+    expect(sessionHtml).toContain("Add drill");
+
+    const itemTarget = skillsTargets.find((option) => option.level === "ITEM")!;
+    const itemHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: skillsTargets,
+          selectedTargetKey: itemTarget.key,
+        }),
+      ),
+    );
+    expect(itemHtml).toContain("Remove drill");
+    expect(itemHtml).not.toContain("Adjust drill");
   });
 
   it("stores the operation-explicit replacement line naming the current target and new option", () => {

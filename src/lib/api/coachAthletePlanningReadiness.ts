@@ -856,13 +856,29 @@ export type SandCRevisionPatchItem = {
   reps?: number;
 };
 
-export type SandCRevisionPatch = Omit<
+type SandCExistingItemRevisionPatch = Omit<
   TrainingPlanRevisionPatch,
   "operation" | "item" | "servingAdjustment" | "session"
 > & {
-  operation: "ADD_ITEM" | "REMOVE_ITEM" | "UPDATE_ITEM";
+  operation: "REMOVE_ITEM" | "UPDATE_ITEM";
   item: SandCRevisionPatchItem;
 };
+
+type SandCAddItemRevisionPatch = {
+  type: "ADD_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  item: {
+    exerciseCatalogItemId: string;
+    durationMinutes: number;
+    sets: number;
+    reps: number;
+  };
+};
+
+export type SandCRevisionPatch =
+  | SandCAddItemRevisionPatch
+  | SandCExistingItemRevisionPatch;
 
 export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
@@ -872,7 +888,7 @@ export type TrainingPlanRevisePayload = {
    * Optional structured patch. When present (Nutrition, Skills, or S&C deterministic
    * single-patch flow) it is the executable source of truth.
    */
-  revisionPatch?: TrainingPlanRevisionPatch | null;
+  revisionPatch?: TrainingPlanRevisionPatch | SandCRevisionPatch | null;
 };
 
 export type SandCRevisionSubmission = Omit<

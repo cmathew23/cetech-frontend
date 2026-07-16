@@ -3357,6 +3357,45 @@ export function resolveActiveSkillsReviseIds(
 
 export type SandCReviseIds = { trainingPlanId: string; versionId: string };
 
+export type SandCAddItemValues = {
+  durationMinutes: number | null;
+  sets: number | null;
+  reps: number | null;
+};
+
+export const EMPTY_SANDC_ADD_ITEM_VALUES: SandCAddItemValues = {
+  durationMinutes: null,
+  sets: null,
+  reps: null,
+};
+
+export function adjustSandCPositiveInteger(
+  value: number | null,
+  direction: 1 | -1,
+): number | null {
+  if (direction === 1) return value === null ? 1 : value + 1;
+  if (value === null || value <= 1) return value;
+  return value - 1;
+}
+
+function sandCAddItemValuesComplete(values: SandCAddItemValues): values is {
+  durationMinutes: number;
+  sets: number;
+  reps: number;
+} {
+  return (
+    values.durationMinutes !== null &&
+    Number.isInteger(values.durationMinutes) &&
+    values.durationMinutes > 0 &&
+    values.sets !== null &&
+    Number.isInteger(values.sets) &&
+    values.sets > 0 &&
+    values.reps !== null &&
+    Number.isInteger(values.reps) &&
+    values.reps > 0
+  );
+}
+
 function changedSandCNumericValue(
   nextValue: number | null | undefined,
   currentValue: number | null | undefined,
@@ -3384,18 +3423,21 @@ export function buildSandCRevisionPatch(input: {
 
   if (input.actionKey === "ADD_ITEM" && input.target.level === "SESSION") {
     const exerciseCatalogItemId = input.option?.exerciseCatalogItemId?.trim() ?? "";
-    if (exerciseCatalogItemId === "") return null;
+    const values: SandCAddItemValues = {
+      durationMinutes: input.durationMinutes ?? null,
+      sets: input.sets ?? null,
+      reps: input.reps ?? null,
+    };
+    if (exerciseCatalogItemId === "" || !sandCAddItemValuesComplete(values)) return null;
     return {
-      operation: "ADD_ITEM",
+      type: "ADD_ITEM",
       dayIndex,
       sessionIndex,
       item: {
         exerciseCatalogItemId,
-        ...(changedSandCNumericValue(input.durationMinutes, null) === undefined
-          ? {}
-          : { durationMinutes: input.durationMinutes! }),
-        ...(changedSandCNumericValue(input.sets, null) === undefined ? {} : { sets: input.sets! }),
-        ...(changedSandCNumericValue(input.reps, null) === undefined ? {} : { reps: input.reps! }),
+        durationMinutes: values.durationMinutes,
+        sets: values.sets,
+        reps: values.reps,
       },
     };
   }
@@ -4279,6 +4321,47 @@ export type FynRevisionShowOptionsOutcome =
   | { status: "OK"; options: CoachAthleteDomainDraftRevisionOption[]; message: string | null }
   | { status: "ERROR"; message: string };
 
+export type FynRevisionOptionsRequestIdentity = {
+  requestId: number;
+  selectionKey: string;
+};
+
+export function fynRevisionOptionsUsesStaleResponseGuard(
+  domain: TrainingPlanGenerationDomain,
+): boolean {
+  return domain === "S_AND_C";
+}
+
+export function buildFynRevisionOptionsRequestSelectionKey(input: {
+  domain: TrainingPlanGenerationDomain;
+  actionKey: FynRevisionActionKey | null;
+  dayIndex: number | null;
+  sessionIndex: number | null;
+  itemIndex?: number | null;
+  activeVersionId?: string | null;
+}): string {
+  return JSON.stringify([
+    input.domain,
+    input.actionKey,
+    input.dayIndex,
+    input.sessionIndex,
+    input.itemIndex ?? null,
+    input.activeVersionId?.trim() || null,
+  ]);
+}
+
+export function fynRevisionOptionsResponseIsCurrent(
+  request: FynRevisionOptionsRequestIdentity,
+  current: FynRevisionOptionsRequestIdentity | null | undefined,
+): boolean {
+  return (
+    current !== null &&
+    current !== undefined &&
+    current.requestId === request.requestId &&
+    current.selectionKey === request.selectionKey
+  );
+}
+
 /**
  * Validates the coach request + target, then fetches endpoint-backed replacement options.
  * Never invents options and never calls the API when the request text or target is missing.
@@ -4537,6 +4620,8 @@ export function FynRevisionContextPanel({
   servingUnavailable = false,
   onServingIncrement,
   onServingDecrement,
+  sandCAddItemValues = null,
+  onSandCAddItemAdjust,
 }: {
   domain: TrainingPlanGenerationDomain;
   loading: boolean;
@@ -4568,6 +4653,11 @@ export function FynRevisionContextPanel({
   servingUnavailable?: boolean;
   onServingIncrement?: () => void;
   onServingDecrement?: () => void;
+  sandCAddItemValues?: SandCAddItemValues | null;
+  onSandCAddItemAdjust?: (
+    field: keyof SandCAddItemValues,
+    direction: 1 | -1,
+  ) => void;
 }) {
   const acceptedChanges = fynRevisionAcceptedChanges(selection);
   const acceptedCount = acceptedChanges.length;
@@ -4877,6 +4967,64 @@ export function FynRevisionContextPanel({
               {optionsState.options.find((option) => option.id === selectedOptionId)?.label ??
                 "approved option"}
             </p>
+          ) : null}
+
+          {domain === "S_AND_C" &&
+          selectedAction?.key === "ADD_ITEM" &&
+          selectedOptionId !== null &&
+          sandCAddItemValues !== null ? (
+            <fieldset
+              className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+              data-testid="fyn-sandc-add-item-steppers"
+            >
+              <legend className="px-1 text-sm font-semibold text-textPrimary">
+                Exercise parameters
+              </legend>
+              {(
+                [
+                  ["durationMinutes", "Duration minutes"],
+                  ["sets", "Sets"],
+                  ["reps", "Reps"],
+                ] as const
+              ).map(([field, label]) => {
+                const value = sandCAddItemValues[field];
+                return (
+                  <div
+                    key={field}
+                    className="flex items-center justify-between gap-3 text-sm text-textPrimary"
+                    data-testid={`fyn-sandc-${field}-stepper`}
+                  >
+                    <span className="font-medium">{label}</span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        aria-label={`Decrease ${label.toLowerCase()}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-lg text-textPrimary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => onSandCAddItemAdjust?.(field, -1)}
+                        disabled={loading || value === null || value <= 1}
+                      >
+                        −
+                      </button>
+                      <span
+                        className="min-w-12 text-center font-medium"
+                        data-testid={`fyn-sandc-${field}-value`}
+                      >
+                        {value ?? "Unset"}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Increase ${label.toLowerCase()}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-lg text-textPrimary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => onSandCAddItemAdjust?.(field, 1)}
+                        disabled={loading}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </fieldset>
           ) : null}
         </div>
       ) : null}
@@ -10507,6 +10655,10 @@ export function CoachAthletePlanningProfileView({
   const [fynRevisionOptionStates, setFynRevisionOptionStates] = useState<
     Partial<Record<TrainingPlanGenerationDomain, FynRevisionOptionsState>>
   >({});
+  const fynRevisionOptionsRequestIdRef = useRef(0);
+  const fynRevisionOptionsRequestRef = useRef<
+    Partial<Record<TrainingPlanGenerationDomain, FynRevisionOptionsRequestIdentity>>
+  >({});
   // Deterministic single-patch flows keep the one approved option chosen for the current change.
   const [fynRevisionSelectedOptions, setFynRevisionSelectedOptions] = useState<
     Partial<Record<TrainingPlanGenerationDomain, CoachAthleteDomainDraftRevisionOption | null>>
@@ -10521,6 +10673,9 @@ export function CoachAthletePlanningProfileView({
   // Empty or equal-to-current means unchanged; UPDATE_ITEM submits only explicitly changed fields.
   const [skillsDurationMinutesDraft, setSkillsDurationMinutesDraft] = useState("");
   const [skillsRepsDraft, setSkillsRepsDraft] = useState("");
+  const [sandCAddItemValues, setSandCAddItemValues] = useState<SandCAddItemValues>({
+    ...EMPTY_SANDC_ADD_ITEM_VALUES,
+  });
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
     useState(false);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -12931,6 +13086,21 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.plan?.id,
     persistedSkillsPlanDetail?.version?.id,
     workspace,
+  ]);
+  useEffect(() => {
+    delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    setFynRevisionOptionStates((current) => {
+      if (current.S_AND_C === undefined) return current;
+      return { ...current, S_AND_C: defaultFynRevisionOptionsState() };
+    });
+  }, [
+    domainReviewDrawerDomain,
+    domainReviewDrawerOpen,
+    fynRevisionContexts.S_AND_C?.context,
+    sandCActiveReviseIds?.trainingPlanId,
+    sandCActiveReviseIds?.versionId,
+    sandCReviseIds?.trainingPlanId,
+    sandCReviseIds?.versionId,
   ]);
   const showValidateLevel = useMemo(
     () =>
@@ -16067,6 +16237,9 @@ export function CoachAthletePlanningProfileView({
     domain: TrainingPlanGenerationDomain,
     key: string,
   ): void {
+    if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
+      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    }
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: key }));
     // Available actions and any fetched options depend on the selected target, so reset them.
     setFynRevisionActionKeys((current) => {
@@ -16084,12 +16257,18 @@ export function CoachAthletePlanningProfileView({
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
     setSkillsRepsDraft("");
+    if (domain === "S_AND_C") {
+      setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
+    }
   }
 
   function handleFynRevisionActionChange(
     domain: TrainingPlanGenerationDomain,
     key: FynRevisionActionKey,
   ): void {
+    if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
+      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    }
     setFynRevisionActionKeys((current) => ({ ...current, [domain]: key }));
     // Switching action clears stale fetched options from a previous action choice.
     setFynRevisionOptionStates((current) => ({
@@ -16102,6 +16281,9 @@ export function CoachAthletePlanningProfileView({
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
     setSkillsRepsDraft("");
+    if (domain === "S_AND_C") {
+      setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
+    }
   }
 
   /** Adds a non-replacement action (add/remove/update) to the revision basket as a friendly line. */
@@ -16134,6 +16316,9 @@ export function CoachAthletePlanningProfileView({
   }
 
   function resetFynRevisionOptionsFlow(domain: TrainingPlanGenerationDomain): void {
+    if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
+      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    }
     setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
     setFynRevisionActionKeys((current) => {
@@ -16149,6 +16334,9 @@ export function CoachAthletePlanningProfileView({
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
     setSkillsRepsDraft("");
+    if (domain === "S_AND_C") {
+      setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
+    }
   }
 
   /** Fetches endpoint-backed replacement options for the selected target. Guards against
@@ -16165,6 +16353,23 @@ export function CoachAthletePlanningProfileView({
     const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
     const selectedTargetOption =
       targetOptions.find((option) => option.key === targetKey) ?? null;
+    const request: FynRevisionOptionsRequestIdentity | null =
+      fynRevisionOptionsUsesStaleResponseGuard(domain)
+        ? {
+            requestId: ++fynRevisionOptionsRequestIdRef.current,
+            selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+              domain,
+              actionKey,
+              dayIndex: selectedTargetOption?.indices.dayIndex ?? null,
+              sessionIndex: selectedTargetOption?.indices.sessionIndex ?? null,
+              itemIndex: selectedTargetOption?.indices.itemIndex ?? null,
+              activeVersionId: reviseIds?.versionId ?? null,
+            }),
+          }
+        : null;
+    if (request !== null) {
+      fynRevisionOptionsRequestRef.current.S_AND_C = request;
+    }
     let target = selectedTargetOption?.target ?? null;
     // For ADD_ITEM, target the parent session/meal and label it with the session name so the
     // payload carries a SESSION-level target even when an item was selected (S&C).
@@ -16193,6 +16398,18 @@ export function CoachAthletePlanningProfileView({
       target,
       optionKind: optionKind ?? "REPLACEMENT",
     });
+    if (
+      request !== null &&
+      !fynRevisionOptionsResponseIsCurrent(
+        request,
+        fynRevisionOptionsRequestRef.current.S_AND_C,
+      )
+    ) {
+      return;
+    }
+    if (request !== null) {
+      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    }
     setFynRevisionOptionStates((current) => {
       if (outcome.status === "MISSING_REQUEST") {
         return {
@@ -16246,6 +16463,9 @@ export function CoachAthletePlanningProfileView({
     // assembled from target + action + this option at Apply Revision time.
     if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") {
       setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: option }));
+      if (domain === "S_AND_C") {
+        setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
+      }
       return;
     }
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
@@ -18375,6 +18595,9 @@ export function CoachAthletePlanningProfileView({
           actionKey: fynRevisionSelectedActionKey,
           option: sandCSelectedOption,
           coachRequest: fynRevisionCoachRequest,
+          durationMinutes: sandCAddItemValues.durationMinutes,
+          sets: sandCAddItemValues.sets,
+          reps: sandCAddItemValues.reps,
         })
       : null;
     const sandCCanApply = sandCRevisionSubmission !== null;
@@ -18710,6 +18933,13 @@ export function CoachAthletePlanningProfileView({
                     servingUnavailable={nutritionServingUnavailable}
                     onServingIncrement={() => handleNutritionServingAdjust(1)}
                     onServingDecrement={() => handleNutritionServingAdjust(-1)}
+                    sandCAddItemValues={sandCSinglePatchMode ? sandCAddItemValues : null}
+                    onSandCAddItemAdjust={(field, direction) => {
+                      setSandCAddItemValues((current) => ({
+                        ...current,
+                        [field]: adjustSandCPositiveInteger(current[field], direction),
+                      }));
+                    }}
                   />
                   {skillsSinglePatchMode &&
                   fynRevisionSelectedActionKey === "UPDATE_ITEM" &&

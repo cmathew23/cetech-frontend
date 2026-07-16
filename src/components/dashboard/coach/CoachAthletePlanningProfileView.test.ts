@@ -191,6 +191,9 @@ import {
   fynRevisionAddItemSessionTarget,
   fynRevisionContextPlaceholder,
   fetchFynRevisionReplacementOptions,
+  buildFynRevisionOptionsRequestSelectionKey,
+  fynRevisionOptionsResponseIsCurrent,
+  fynRevisionOptionsUsesStaleResponseGuard,
   FYN_REVISION_INPUT_PLACEHOLDER,
   FYN_REVISION_NO_OPTIONS_MESSAGE,
   FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
@@ -205,6 +208,7 @@ import {
   resolveActiveSkillsReviseIds,
   buildSandCRevisionPatch,
   buildSandCRevisionSubmission,
+  adjustSandCPositiveInteger,
   nextSandCRevisionVersionId,
   resolveActiveSandCReviseIds,
   runSandCStructuredRevisionSequence,
@@ -4233,7 +4237,7 @@ describe("Training Plan Workspace lifecycle display", () => {
           reps: 10,
         }),
       ).toEqual({
-        operation: "ADD_ITEM",
+        type: "ADD_ITEM",
         dayIndex: 2,
         sessionIndex: 1,
         item: {
@@ -4312,6 +4316,9 @@ describe("Training Plan Workspace lifecycle display", () => {
         actionKey: "ADD_ITEM",
         option: approvedOption,
         coachRequest: "Keep the load conservative.",
+        durationMinutes: 15,
+        sets: 2,
+        reps: 10,
       });
 
       expect(submission).toEqual({
@@ -4320,12 +4327,247 @@ describe("Training Plan Workspace lifecycle display", () => {
         coachFeedback:
           "Add exercise Goblet squat to Lower body. Keep the load conservative.",
         revisionPatch: {
-          operation: "ADD_ITEM",
+          type: "ADD_ITEM",
           dayIndex: 2,
           sessionIndex: 1,
-          item: { exerciseCatalogItemId: "exercise-approved" },
+          item: {
+            exerciseCatalogItemId: "exercise-approved",
+            durationMinutes: 15,
+            sets: 2,
+            reps: 10,
+          },
         },
       });
+    });
+
+    it("keeps Add Exercise values unset and uses positive-integer stepper semantics", () => {
+      expect(adjustSandCPositiveInteger(null, 1)).toBe(1);
+      expect(adjustSandCPositiveInteger(null, -1)).toBeNull();
+      expect(adjustSandCPositiveInteger(1, -1)).toBe(1);
+      expect(adjustSandCPositiveInteger(2, -1)).toBe(1);
+      expect(adjustSandCPositiveInteger(1, 1)).toBe(2);
+
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: targets().find((target) => target.level === "SESSION")!.key,
+            selectedActionKey: "ADD_ITEM",
+            singlePatchMode: true,
+            selectedOptionId: approvedOption.id,
+            optionsState: {
+              ...defaultFynRevisionOptionsState(),
+              options: [approvedOption],
+            },
+            sandCAddItemValues: {
+              durationMinutes: null,
+              sets: null,
+              reps: null,
+            },
+          }),
+        ),
+      );
+
+      expect(html).toContain('data-testid="fyn-sandc-add-item-steppers"');
+      expect(html.match(/>Unset</g)).toHaveLength(3);
+      expect(html).not.toContain('type="number"');
+      expect(html).not.toContain('type="range"');
+    });
+
+    it("blocks Add Exercise until every absolute value is a positive integer", () => {
+      const target = targets().find((entry) => entry.level === "SESSION")!;
+      const build = (durationMinutes: number | null, sets: number | null, reps: number | null) =>
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target,
+          actionKey: "ADD_ITEM",
+          option: approvedOption,
+          durationMinutes,
+          sets,
+          reps,
+        });
+
+      expect(build(null, null, null)).toBeNull();
+      expect(build(1, 1, null)).toBeNull();
+      expect(build(1.5, 1, 1)).toBeNull();
+      expect(build(0, 1, 1)).toBeNull();
+
+      const submission = build(12, 3, 8)!;
+      expect(submission.revisionPatch).toEqual({
+        type: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        item: {
+          exerciseCatalogItemId: "exercise-approved",
+          durationMinutes: 12,
+          sets: 3,
+          reps: 8,
+        },
+      });
+      expect(submission.revisionPatch).not.toHaveProperty("itemIndex");
+      expect(submission.revisionPatch.item).toEqual({
+        exerciseCatalogItemId: "exercise-approved",
+        durationMinutes: 12,
+        sets: 3,
+        reps: 8,
+      });
+      expect(typeof submission.revisionPatch.item.durationMinutes).toBe("number");
+      expect(typeof submission.revisionPatch.item.sets).toBe("number");
+      expect(typeof submission.revisionPatch.item.reps).toBe("number");
+      expect(submission.revisionPatch.item).not.toHaveProperty("label");
+      expect(submission.revisionPatch.item).not.toHaveProperty("notes");
+      expect(submission.revisionPatch.item).not.toHaveProperty("intensity");
+    });
+
+    it("discards a pending options response after the target changes", async () => {
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      let current = pending;
+      let resolveRequest!: () => void;
+      const request = new Promise<void>((resolve) => {
+        resolveRequest = resolve;
+      }).then(() => fynRevisionOptionsResponseIsCurrent(pending, current));
+
+      current = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 2,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      resolveRequest();
+
+      await expect(request).resolves.toBe(false);
+    });
+
+    it("discards a pending options response after the action changes", async () => {
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      let current = pending;
+      let resolveRequest!: () => void;
+      const request = new Promise<void>((resolve) => {
+        resolveRequest = resolve;
+      }).then(() => fynRevisionOptionsResponseIsCurrent(pending, current));
+
+      current = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "UPDATE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          itemIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      resolveRequest();
+
+      await expect(request).resolves.toBe(false);
+    });
+
+    it("discards an older response and accepts only the current options request", () => {
+      const selectionKey = buildFynRevisionOptionsRequestSelectionKey({
+        domain: "S_AND_C",
+        actionKey: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        activeVersionId: "sandc-v2",
+      });
+      const stale = { requestId: 1, selectionKey };
+      const current = { requestId: 2, selectionKey };
+      let newerRequestLoading = true;
+      if (fynRevisionOptionsResponseIsCurrent(stale, current)) {
+        newerRequestLoading = false;
+      }
+
+      expect(fynRevisionOptionsResponseIsCurrent(stale, current)).toBe(false);
+      expect(fynRevisionOptionsResponseIsCurrent(current, current)).toBe(true);
+      expect(newerRequestLoading).toBe(true);
+    });
+
+    it("scopes stale-response guarding to S&C without changing Skills or Nutrition", () => {
+      expect(fynRevisionOptionsUsesStaleResponseGuard("S_AND_C")).toBe(true);
+      expect(fynRevisionOptionsUsesStaleResponseGuard("SKILLS")).toBe(false);
+      expect(fynRevisionOptionsUsesStaleResponseGuard("NUTRITION")).toBe(false);
+    });
+
+    it("uses the version-dependent effect as the only S&C version invalidation path", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+      const pinStart = source.indexOf("pinReturnedVersion: (reviseResult)");
+      const pinEnd = source.indexOf("reconcilePlan:", pinStart);
+      const pinCallback = source.slice(pinStart, pinEnd);
+
+      expect(pinStart).toBeGreaterThan(-1);
+      expect(pinEnd).toBeGreaterThan(pinStart);
+      expect(pinCallback).not.toContain("fynRevisionOptionsRequestRef");
+      expect(pinCallback).not.toContain("setFynRevisionOptionStates");
+      expect(source).toContain(
+        "sandCActiveReviseIds?.versionId,\n    sandCReviseIds?.trainingPlanId,\n    sandCReviseIds?.versionId,",
+      );
+    });
+
+    it("does not let a discarded stale option enable Apply", () => {
+      const target = targets().find((entry) => entry.level === "SESSION")!;
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      const current = {
+        requestId: 2,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 2,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      const selectedOption = fynRevisionOptionsResponseIsCurrent(pending, current)
+        ? approvedOption
+        : null;
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target,
+          actionKey: "ADD_ITEM",
+          option: selectedOption,
+          durationMinutes: 12,
+          sets: 3,
+          reps: 8,
+        }),
+      ).toBeNull();
     });
 
     it("uses single-patch UI and bypasses the free-text multi-change basket", () => {
@@ -4418,11 +4660,13 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(pin?.versionId).toBe("sandc-v3");
     });
 
-    it("does not reset action or target when post-submit refresh fails", async () => {
+    it("preserves the Add Exercise selection when post-submit refresh fails", async () => {
       const currentPlan = { versionId: "sandc-v1", days: sandCSchedule };
       const renderedPlan = currentPlan;
-      let actionKey: string | null = "REMOVE_ITEM";
-      let targetKey: string | null = "exercise-current";
+      let actionKey: string | null = "ADD_ITEM";
+      let targetKey: string | null = "session|2|1";
+      let selectedExerciseId: string | null = "exercise-approved";
+      let values = { durationMinutes: 12, sets: 3, reps: 8 };
       const submit = vi.fn(async () => ({
         planId: "sandc-plan-1",
         versionId: "sandc-v2",
@@ -4434,6 +4678,8 @@ describe("Training Plan Workspace lifecycle display", () => {
       const reset = vi.fn(() => {
         actionKey = null;
         targetKey = null;
+        selectedExerciseId = null;
+        values = { durationMinutes: 0, sets: 0, reps: 0 };
       });
 
       await expect(
@@ -4448,8 +4694,10 @@ describe("Training Plan Workspace lifecycle display", () => {
       ).rejects.toThrow("Unable to reload S&C revision guidance.");
 
       expect(renderedPlan).toBe(currentPlan);
-      expect(actionKey).toBe("REMOVE_ITEM");
-      expect(targetKey).toBe("exercise-current");
+      expect(actionKey).toBe("ADD_ITEM");
+      expect(targetKey).toBe("session|2|1");
+      expect(selectedExerciseId).toBe("exercise-approved");
+      expect(values).toEqual({ durationMinutes: 12, sets: 3, reps: 8 });
       expect(reset).not.toHaveBeenCalled();
       expect(submit).toHaveBeenCalledTimes(1);
     });
@@ -7211,6 +7459,50 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(expectedPayload.target).not.toHaveProperty("currentId");
     expect(Object.values(expectedPayload.target)).not.toContain(null);
     expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("loads approved exercise options for a selected S&C session", async () => {
+    const target = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [{ sessionIndex: 1, title: "Lower body", items: [] }],
+          },
+        ],
+      },
+    ).find((option) => option.level === "SESSION")!;
+    const approvedExercise = {
+      ...fynFetchedOptions[0]!,
+      id: "display-only-id",
+      domain: "S_AND_C",
+      optionKind: "ADD_ITEM",
+      exerciseCatalogItemId: "exercise-catalog-1",
+    };
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "S_AND_C" as const,
+      target: target.target,
+      options: [approvedExercise],
+    }));
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a hamstring exercise.",
+      target: target.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    expect(outcome.status).toBe("OK");
+    if (outcome.status === "OK") {
+      expect(outcome.options[0]?.exerciseCatalogItemId).toBe("exercise-catalog-1");
+      expect(outcome.options[0]?.id).toBe("display-only-id");
+    }
   });
 
   it("blocks ADD_ITEM without a session target and never calls the endpoint", async () => {

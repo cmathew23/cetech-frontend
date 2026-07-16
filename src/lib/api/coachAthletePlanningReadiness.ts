@@ -578,6 +578,8 @@ export type CoachAthleteDomainDraftRevisionOption = {
    * top-level `nutritionCatalogItemId` field. Never inferred from `metadata`, `label`, or `id`.
    */
   nutritionCatalogItemId?: string;
+  /** Authoritative catalog reference for S&C options. */
+  exerciseCatalogItemId?: string;
   /**
    * Complete canonical food item for a Nutrition option, supplied by the backend. For ADD_ITEM /
    * REPLACE_ITEM this is submitted verbatim as the revision patch's `item` (identity, serving, and
@@ -803,8 +805,10 @@ export type AthleteTodayPlan = {
 export type TrainingPlanRevisionPatchItem = {
   /** Skills item operations identify the DB-backed drill; canonical metadata remains backend-owned. */
   skillCode?: string;
+  exerciseCatalogItemId?: string;
   durationMinutes?: number;
-  reps?: string;
+  sets?: number;
+  reps?: string | number;
   nutritionCatalogItemId?: string | null;
   itemType?: string | null;
   label?: string | null;
@@ -845,15 +849,37 @@ export type TrainingPlanRevisionPatch = {
   session?: Record<string, unknown>;
 };
 
+export type SandCRevisionPatchItem = {
+  exerciseCatalogItemId: string;
+  durationMinutes?: number;
+  sets?: number;
+  reps?: number;
+};
+
+export type SandCRevisionPatch = Omit<
+  TrainingPlanRevisionPatch,
+  "operation" | "item" | "servingAdjustment" | "session"
+> & {
+  operation: "ADD_ITEM" | "REMOVE_ITEM" | "UPDATE_ITEM";
+  item: SandCRevisionPatchItem;
+};
+
 export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
   coachFeedback: string;
   /**
-   * Optional structured patch. When present (Nutrition or Skills deterministic
-   * single-patch flow) it is the executable source of truth. S&C keeps free-form basket feedback.
+   * Optional structured patch. When present (Nutrition, Skills, or S&C deterministic
+   * single-patch flow) it is the executable source of truth.
    */
   revisionPatch?: TrainingPlanRevisionPatch | null;
+};
+
+export type SandCRevisionSubmission = Omit<
+  TrainingPlanRevisePayload,
+  "revisionPatch"
+> & {
+  revisionPatch: SandCRevisionPatch;
 };
 
 export type TrainingPlanReviseResult = {
@@ -1310,6 +1336,7 @@ function parseDomainDraftRevisionOption(
     levelTags: readStringListKey(records, ["levelTags"]),
     // Preserve the backend's explicit catalog reference verbatim (no metadata/label/id inference).
     nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]) ?? undefined,
+    exerciseCatalogItemId: readStringKey(records, ["exerciseCatalogItemId"]) ?? undefined,
     // Preserve the backend's complete canonical food item verbatim for ADD_ITEM / REPLACE_ITEM.
     item: parseNutritionRevisionOptionItem(record.item),
     metadata: record.metadata ?? null,

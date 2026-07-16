@@ -38,6 +38,7 @@ import {
   requestRevision,
   reviseSkillsPlan,
   reviseNutritionPlan,
+  reviseSandcPlan,
   releaseTrainingPlanVersionToAthlete,
   startCoachAthleteTrainingPlanGenerationJob,
   submitReview,
@@ -948,6 +949,46 @@ describe("parseReadinessPayload", () => {
           trainingPlanId: "plan-1",
           versionId: "version-3",
           coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact structured S&C revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+    });
+    const revisionPatch = {
+      operation: "UPDATE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: {
+        exerciseCatalogItemId: "exercise-1",
+        durationMinutes: 25,
+        sets: 4,
+        reps: 6,
+      },
+    } as const;
+
+    await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Change exercise parameters for Back squat in Lower body.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/sandc/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "sandc-plan-1",
+          versionId: "sandc-version-1",
+          coachFeedback: "Change exercise parameters for Back squat in Lower body.",
           revisionPatch,
         }),
       },
@@ -2118,6 +2159,7 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
             targetTags: [],
             safetyTags: [],
             levelTags: [],
+            exerciseCatalogItemId: "exercise-catalog-1",
             metadata: { catalogItemId: "ex-1" },
           },
         ],
@@ -2148,6 +2190,7 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
       label: "Goblet squat",
       optionKind: "ADD_ITEM",
       source: "CATALOG",
+      exerciseCatalogItemId: "exercise-catalog-1",
     });
   });
 });

@@ -102,6 +102,8 @@ import {
   type TrainingPlanRevisePayload,
   type TrainingPlanRevisionPatch,
   type TrainingPlanRevisionPatchItem,
+  type SandCRevisionPatch,
+  type SandCRevisionSubmission,
   type NutritionServingAdjustment,
   type CoachAthleteTrainingPlanWorkloadAssessment,
   type CoachAthleteUpstreamPlanningContext,
@@ -2535,6 +2537,9 @@ export type FynRevisionTargetOption = {
   serving: string | null;
   /** Current Skills drill parameters, read from the latest rendered item for change detection. */
   durationMinutes?: number | null;
+  /** Current S&C exercise parameters, read from the latest rendered item for change detection. */
+  sets?: number | null;
+  numericReps?: number | null;
   reps?: string | null;
   /** Sessions in the target's day (used to gate empty/rest-day-only actions). */
   daySessionCount: number;
@@ -2670,6 +2675,8 @@ function fynBuildLeveledTargets(
         itemLabel: null,
         serving: null,
         durationMinutes: null,
+        sets: null,
+        numericReps: null,
         reps: null,
         daySessionCount,
         sessionItemCount: 0,
@@ -2709,6 +2716,8 @@ function fynBuildLeveledTargets(
           itemLabel: null,
           serving: null,
           durationMinutes: null,
+          sets: null,
+          numericReps: null,
           reps: null,
           daySessionCount,
           sessionItemCount,
@@ -2748,6 +2757,8 @@ function fynBuildLeveledTargets(
             // serving stepper. Never used to compute calories/macros.
             serving: fynTargetReadString(item, ["serving", "servingSize", "servingText"]),
             durationMinutes: fynTargetReadNumber(item, ["durationMinutes"]),
+            sets: fynTargetReadNumber(item, ["sets"]),
+            numericReps: fynTargetReadNumber(item, ["reps"]),
             reps: fynTargetReadString(item, ["reps"]),
             daySessionCount,
             sessionItemCount,
@@ -2813,6 +2824,8 @@ function fynTargetOptionsFromFlatList(
       itemLabel: label,
       serving: fynTargetReadString(record, ["serving", "servingSize", "servingText"]),
       durationMinutes: fynTargetReadNumber(record, ["durationMinutes"]),
+      sets: fynTargetReadNumber(record, ["sets"]),
+      numericReps: fynTargetReadNumber(record, ["reps"]),
       reps: fynTargetReadString(record, ["reps"]),
       daySessionCount: 1,
       sessionItemCount: list.length,
@@ -2922,13 +2935,11 @@ export const FYN_REVISION_CAPABILITIES: Record<
     },
   },
   S_AND_C: {
-    levels: ["DAY", "SESSION", "ITEM"],
+    levels: ["SESSION", "ITEM"],
     actionsByLevel: {
-      DAY: ["ADD_SESSION"],
-      // ADD_ITEM lives at SESSION level so adding an exercise never requires selecting an
-      // existing exercise first when a session target is available.
-      SESSION: ["UPDATE_SESSION", "ADD_ITEM"],
-      ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
+      DAY: [],
+      SESSION: ["ADD_ITEM"],
+      ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
     },
   },
 };
@@ -3174,6 +3185,9 @@ export function buildFynRevisionActionChangeText(
 export const SKILLS_SINGLE_PATCH_GUIDANCE =
   "Apply one drill change at a time. Select a Skills session or an existing drill.";
 export const SKILLS_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
+export const SANDC_SINGLE_PATCH_GUIDANCE =
+  "Apply one exercise change at a time. Select an S&C session or an existing exercise.";
+export const SANDC_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
 
@@ -3338,11 +3352,194 @@ export function resolveActiveSkillsReviseIds(
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * S&C deterministic single-patch flow
+ * ---------------------------------------------------------------------------------------------- */
+
+export type SandCReviseIds = { trainingPlanId: string; versionId: string };
+
+function changedSandCNumericValue(
+  nextValue: number | null | undefined,
+  currentValue: number | null | undefined,
+): number | undefined {
+  return nextValue !== null &&
+    nextValue !== undefined &&
+    Number.isFinite(nextValue) &&
+    nextValue >= 0 &&
+    nextValue !== currentValue
+    ? nextValue
+    : undefined;
+}
+
+/** Builds one supported S&C item patch from authoritative exercise identifiers and numeric fields. */
+export function buildSandCRevisionPatch(input: {
+  target: FynRevisionTargetOption;
+  actionKey: FynRevisionActionKey;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  durationMinutes?: number | null;
+  sets?: number | null;
+  reps?: number | null;
+}): SandCRevisionPatch | null {
+  const { dayIndex, sessionIndex } = input.target.indices;
+  if (dayIndex === null || sessionIndex === null) return null;
+
+  if (input.actionKey === "ADD_ITEM" && input.target.level === "SESSION") {
+    const exerciseCatalogItemId = input.option?.exerciseCatalogItemId?.trim() ?? "";
+    if (exerciseCatalogItemId === "") return null;
+    return {
+      operation: "ADD_ITEM",
+      dayIndex,
+      sessionIndex,
+      item: {
+        exerciseCatalogItemId,
+        ...(changedSandCNumericValue(input.durationMinutes, null) === undefined
+          ? {}
+          : { durationMinutes: input.durationMinutes! }),
+        ...(changedSandCNumericValue(input.sets, null) === undefined ? {} : { sets: input.sets! }),
+        ...(changedSandCNumericValue(input.reps, null) === undefined ? {} : { reps: input.reps! }),
+      },
+    };
+  }
+
+  if (
+    (input.actionKey === "REMOVE_ITEM" || input.actionKey === "UPDATE_ITEM") &&
+    input.target.level === "ITEM"
+  ) {
+    const itemIndex = input.target.indices.itemIndex;
+    const exerciseCatalogItemId = input.target.target.currentId?.trim() ?? "";
+    if (itemIndex === null || exerciseCatalogItemId === "") return null;
+
+    if (input.actionKey === "REMOVE_ITEM") {
+      return {
+        operation: "REMOVE_ITEM",
+        dayIndex,
+        sessionIndex,
+        itemIndex,
+        item: { exerciseCatalogItemId },
+      };
+    }
+
+    const durationMinutes = changedSandCNumericValue(
+      input.durationMinutes,
+      input.target.durationMinutes,
+    );
+    const sets = changedSandCNumericValue(input.sets, input.target.sets);
+    const reps = changedSandCNumericValue(input.reps, input.target.numericReps);
+    if (durationMinutes === undefined && sets === undefined && reps === undefined) return null;
+    return {
+      operation: "UPDATE_ITEM",
+      dayIndex,
+      sessionIndex,
+      itemIndex,
+      item: {
+        exerciseCatalogItemId,
+        ...(durationMinutes === undefined ? {} : { durationMinutes }),
+        ...(sets === undefined ? {} : { sets }),
+        ...(reps === undefined ? {} : { reps }),
+      },
+    };
+  }
+
+  return null;
+}
+
+function buildSandCRevisionSummary(input: {
+  target: FynRevisionTargetOption;
+  actionKey: FynRevisionActionKey;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+}): string {
+  const session = (input.target.sessionLabel ?? input.target.target.label ?? "S&C session").trim();
+  const note = (input.coachRequest ?? "").trim();
+  const exercise =
+    input.actionKey === "ADD_ITEM"
+      ? input.option?.label.trim() || input.option?.exerciseCatalogItemId?.trim()
+      : input.target.itemLabel?.trim() || input.target.target.currentId?.trim();
+  const summary =
+    input.actionKey === "ADD_ITEM"
+      ? `Add exercise ${exercise || "selected exercise"} to ${session || "S&C session"}.`
+      : input.actionKey === "REMOVE_ITEM"
+        ? `Remove exercise ${exercise || "selected exercise"} from ${session || "S&C session"}.`
+        : `Change exercise parameters for ${exercise || "selected exercise"} in ${
+            session || "S&C session"
+          }.`;
+  return note === "" ? summary : `${summary} ${note}`;
+}
+
+/** Assembles exactly one supported S&C revision request. */
+export function buildSandCRevisionSubmission(input: {
+  reviseIds: SandCReviseIds | null;
+  target: FynRevisionTargetOption | null;
+  actionKey: FynRevisionActionKey | null;
+  option?: CoachAthleteDomainDraftRevisionOption | null;
+  coachRequest?: string;
+  durationMinutes?: number | null;
+  sets?: number | null;
+  reps?: number | null;
+}): SandCRevisionSubmission | null {
+  if (input.reviseIds === null || input.target === null || input.actionKey === null) return null;
+  const revisionPatch = buildSandCRevisionPatch({
+    target: input.target,
+    actionKey: input.actionKey,
+    option: input.option,
+    durationMinutes: input.durationMinutes,
+    sets: input.sets,
+    reps: input.reps,
+  });
+  if (revisionPatch === null) return null;
+  return {
+    trainingPlanId: input.reviseIds.trainingPlanId,
+    versionId: input.reviseIds.versionId,
+    coachFeedback: buildSandCRevisionSummary({
+      target: input.target,
+      actionKey: input.actionKey,
+      option: input.option,
+      coachRequest: input.coachRequest,
+    }),
+    revisionPatch,
+  };
+}
+
+export function nextSandCRevisionVersionId(
+  result: Pick<TrainingPlanReviseResult, "versionId"> | null | undefined,
+): string | null {
+  return nextSkillsRevisionVersionId(result);
+}
+
+export function resolveActiveSandCReviseIds(
+  baseReviseIds: SandCReviseIds | null,
+  activeReviseIds: SandCReviseIds | null | undefined,
+): SandCReviseIds | null {
+  return resolveActiveSkillsReviseIds(baseReviseIds, activeReviseIds);
+}
+
+/** Runs one structured S&C revision and resets temporary state only after every refresh succeeds. */
+export async function runSandCStructuredRevisionSequence(input: {
+  submit: () => Promise<TrainingPlanReviseResult>;
+  pinReturnedVersion: (result: TrainingPlanReviseResult) => void;
+  reconcilePlan: (result: TrainingPlanReviseResult) => Promise<unknown>;
+  reloadLatestPlan: () => Promise<boolean>;
+  reloadRevisionContext: () => Promise<boolean>;
+  resetTemporaryState: () => void;
+}): Promise<TrainingPlanReviseResult> {
+  const result = await input.submit();
+  input.pinReturnedVersion(result);
+  await input.reconcilePlan(result);
+  if (!(await input.reloadLatestPlan())) {
+    throw new Error("Unable to reload the revised S&C plan.");
+  }
+  if (!(await input.reloadRevisionContext())) {
+    throw new Error("Unable to reload S&C revision guidance.");
+  }
+  input.resetTemporaryState();
+  return result;
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Nutrition deterministic single-patch flow
  *
  * For Nutrition, a revision submits ONE structured, executable `revisionPatch` (the source of
- * truth) alongside a short `coachFeedback` summary (human-readable only). S&C keeps its free-form
- * multi-change flow. Nothing here fabricates catalogue data: item fields
+ * truth) alongside a short `coachFeedback` summary (human-readable only). Nothing here fabricates
+ * catalogue data: item fields
  * are passed through verbatim from the coach's selected approved option (or, for updates, from the
  * item already on the plan).
  * ---------------------------------------------------------------------------------------------- */
@@ -4427,10 +4624,16 @@ export function FynRevisionContextPanel({
               data-testid={
                 domain === "SKILLS"
                   ? "fyn-skills-single-patch-guidance"
-                  : "fyn-nutrition-single-patch-guidance"
+                  : domain === "NUTRITION"
+                    ? "fyn-nutrition-single-patch-guidance"
+                    : "fyn-sandc-single-patch-guidance"
               }
             >
-              {domain === "SKILLS" ? SKILLS_SINGLE_PATCH_GUIDANCE : NUTRITION_SINGLE_PATCH_GUIDANCE}
+              {domain === "SKILLS"
+                ? SKILLS_SINGLE_PATCH_GUIDANCE
+                : domain === "NUTRITION"
+                  ? NUTRITION_SINGLE_PATCH_GUIDANCE
+                  : SANDC_SINGLE_PATCH_GUIDANCE}
             </p>
           ) : null}
           <p className="text-sm text-textSecondary">
@@ -4488,7 +4691,9 @@ export function FynRevisionContextPanel({
                 What do you want to do?
               </span>
               <p className="text-sm text-textSecondary">
-                Choose one revision action. Nothing is applied until you add it to plan changes.
+                {domain === "S_AND_C" && singlePatchMode
+                  ? "Choose one revision action. Nothing is applied until you select Apply Revision."
+                  : "Choose one revision action. Nothing is applied until you add it to plan changes."}
               </p>
               <div
                 role="radiogroup"
@@ -4663,7 +4868,9 @@ export function FynRevisionContextPanel({
               data-testid={
                 domain === "SKILLS"
                   ? "fyn-skills-selected-option"
-                  : "fyn-nutrition-selected-option"
+                  : domain === "NUTRITION"
+                    ? "fyn-nutrition-selected-option"
+                    : "fyn-sandc-selected-option"
               }
             >
               Selected:{" "}
@@ -10273,6 +10480,7 @@ export function CoachAthletePlanningProfileView({
   const [reviseSandCLoading, setReviseSandCLoading] = useState(false);
   const [reviseSandCError, setReviseSandCError] = useState<string | null>(null);
   const [reviseSandCSuccess, setReviseSandCSuccess] = useState<string | null>(null);
+  const [sandCActiveReviseIds, setSandCActiveReviseIds] = useState<SandCReviseIds | null>(null);
   const [fynRevisionContexts, setFynRevisionContexts] = useState<
     Partial<Record<TrainingPlanGenerationDomain, FynRevisionContextState>>
   >({});
@@ -10300,7 +10508,6 @@ export function CoachAthletePlanningProfileView({
     Partial<Record<TrainingPlanGenerationDomain, FynRevisionOptionsState>>
   >({});
   // Deterministic single-patch flows keep the one approved option chosen for the current change.
-  // S&C remains basket mode and never reads this map.
   const [fynRevisionSelectedOptions, setFynRevisionSelectedOptions] = useState<
     Partial<Record<TrainingPlanGenerationDomain, CoachAthleteDomainDraftRevisionOption | null>>
   >({});
@@ -12655,6 +12862,11 @@ export function CoachAthletePlanningProfileView({
   useEffect(() => {
     if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "NUTRITION") {
       setNutritionActiveReviseIds(null);
+    }
+  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
+  useEffect(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "S_AND_C") {
+      setSandCActiveReviseIds(null);
     }
   }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
   // Nutrition Plan Review drawer open/close lifecycle. Keyed only on open+domain so it runs once per
@@ -15150,6 +15362,7 @@ export function CoachAthletePlanningProfileView({
   const loadLatestSkillsDraft = useCallback(async (
     generationDomain: TrainingPlanGenerationDomain,
     retryOnNotFound = false,
+    preserveCurrentOnFailure = false,
   ): Promise<CoachAthleteLatestDomainDraft | null> => {
     if (
       entityId === "" ||
@@ -15234,7 +15447,7 @@ export function CoachAthletePlanningProfileView({
           if (attemptIndex < retryDelaysMs.length - 1) {
             continue;
           }
-          setLatestSkillsDraft(null);
+          if (!preserveCurrentOnFailure) setLatestSkillsDraft(null);
           setLatestDraftDomain(generationDomain);
           setLatestSkillsDraftRequestState("missing");
           setLatestSkillsDraftMissing(true);
@@ -15242,7 +15455,7 @@ export function CoachAthletePlanningProfileView({
           setLatestSkillsDraftErrorDomain(null);
           return null;
         }
-        setLatestSkillsDraft(null);
+        if (!preserveCurrentOnFailure) setLatestSkillsDraft(null);
         setLatestDraftDomain(generationDomain);
         setLatestSkillsDraftRequestState("error");
         setLatestSkillsDraftMissing(false);
@@ -15897,8 +16110,8 @@ export function CoachAthletePlanningProfileView({
     action: FynRevisionAction,
     target: FynRevisionTargetOption,
   ): void {
-    // Skills and Nutrition deterministic flows use Apply Revision, never the basket.
-    if (domain === "SKILLS" || domain === "NUTRITION") return;
+    // Deterministic flows use Apply Revision, never the basket.
+    if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") return;
     const coachRequest = fynRevisionRequests[domain] ?? "";
     const changeText = buildFynRevisionActionChangeText(domain, action, target, coachRequest);
     if (changeText === "") return;
@@ -16031,7 +16244,7 @@ export function CoachAthletePlanningProfileView({
   ): void {
     // Deterministic flows keep exactly one chosen approved option (no basket). The patch is
     // assembled from target + action + this option at Apply Revision time.
-    if (domain === "SKILLS" || domain === "NUTRITION") {
+    if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") {
       setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: option }));
       return;
     }
@@ -16058,8 +16271,8 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  async function loadFynRevisionContext(domain: TrainingPlanGenerationDomain): Promise<void> {
-    if (entityId === "" || athleteIdTrimmed === "") return;
+  async function loadFynRevisionContext(domain: TrainingPlanGenerationDomain): Promise<boolean> {
+    if (entityId === "" || athleteIdTrimmed === "") return false;
     setFynRevisionContexts((current) => ({
       ...current,
       [domain]: {
@@ -16093,6 +16306,7 @@ export function CoachAthletePlanningProfileView({
           }),
         );
       }
+      return true;
     } catch {
       setFynRevisionContexts((current) => ({
         ...current,
@@ -16102,6 +16316,7 @@ export function CoachAthletePlanningProfileView({
           error: "Fyn guidance could not load.",
         },
       }));
+      return false;
     }
   }
 
@@ -18050,6 +18265,10 @@ export function CoachAthletePlanningProfileView({
       reviewDomain === "NUTRITION" && actionContext !== null
         ? { trainingPlanId: actionContext.planId, versionId: actionContext.versionId }
         : null;
+    const sandCDrawerRenderedReviseIds: SandCReviseIds | null =
+      reviewDomain === "S_AND_C" && actionContext !== null
+        ? { trainingPlanId: actionContext.planId, versionId: actionContext.versionId }
+        : null;
     const drawerReviseIds =
       reviewDomain === "SKILLS"
         ? resolveActiveSkillsReviseIds(skillsDrawerRenderedReviseIds, skillsActiveReviseIds)
@@ -18058,11 +18277,13 @@ export function CoachAthletePlanningProfileView({
               nutritionDrawerRenderedReviseIds,
               nutritionActiveReviseIds,
             )
-          : sandCReviseIds;
-    // Skills and Nutrition use one structured patch. S&C remains multi-change basket mode.
+          : resolveActiveSandCReviseIds(sandCDrawerRenderedReviseIds, sandCActiveReviseIds);
+    // Skills, Nutrition, and S&C each submit one structured patch.
     const skillsSinglePatchMode = reviewDomain === "SKILLS";
     const nutritionSinglePatchMode = reviewDomain === "NUTRITION";
-    const deterministicSinglePatchMode = skillsSinglePatchMode || nutritionSinglePatchMode;
+    const sandCSinglePatchMode = reviewDomain === "S_AND_C";
+    const deterministicSinglePatchMode =
+      skillsSinglePatchMode || nutritionSinglePatchMode || sandCSinglePatchMode;
     const deterministicRevisionSubmitPending = nutritionRevisionDrawerSubmitPending({
       singlePatchMode: deterministicSinglePatchMode,
       reviseLoading: drawerReviseLoading,
@@ -18072,6 +18293,9 @@ export function CoachAthletePlanningProfileView({
       : null;
     const nutritionSelectedOption = nutritionSinglePatchMode
       ? (fynRevisionSelectedOptions.NUTRITION ?? null)
+      : null;
+    const sandCSelectedOption = sandCSinglePatchMode
+      ? (fynRevisionSelectedOptions.S_AND_C ?? null)
       : null;
     const fynRevisionSelectedTargetOption =
       fynRevisionTargetOptionList.find(
@@ -18144,6 +18368,16 @@ export function CoachAthletePlanningProfileView({
       : null;
     const nutritionCanApply = nutritionRevisionSubmission !== null;
     const skillsCanApply = skillsRevisionSubmission !== null;
+    const sandCRevisionSubmission = sandCSinglePatchMode
+      ? buildSandCRevisionSubmission({
+          reviseIds: drawerReviseIds,
+          target: fynRevisionSelectedTargetOption,
+          actionKey: fynRevisionSelectedActionKey,
+          option: sandCSelectedOption,
+          coachRequest: fynRevisionCoachRequest,
+        })
+      : null;
+    const sandCCanApply = sandCRevisionSubmission !== null;
     // Surface a specific hint (and keep Apply blocked) when a chosen ADD_ITEM/REPLACE_ITEM option
     // lacks its authoritative catalog reference.
     const nutritionOptionMissingCatalog =
@@ -18176,7 +18410,7 @@ export function CoachAthletePlanningProfileView({
           actionKey: fynRevisionSelectedActionKey,
         });
       } else {
-        void handleReviseSandCPlan();
+        void handleReviseSandCPlan(sandCRevisionSubmission);
       }
     };
     const planWindowLabel =
@@ -18468,7 +18702,9 @@ export function CoachAthletePlanningProfileView({
                     selectedOptionId={
                       skillsSinglePatchMode
                         ? (skillsSelectedOption?.id ?? null)
-                        : (nutritionSelectedOption?.id ?? null)
+                        : nutritionSinglePatchMode
+                          ? (nutritionSelectedOption?.id ?? null)
+                          : (sandCSelectedOption?.id ?? null)
                     }
                     servingStepper={nutritionServingStepper}
                     servingUnavailable={nutritionServingUnavailable}
@@ -18592,7 +18828,9 @@ export function CoachAthletePlanningProfileView({
                           (deterministicSinglePatchMode
                             ? skillsSinglePatchMode
                               ? !skillsCanApply
-                              : !nutritionCanApply
+                              : nutritionSinglePatchMode
+                                ? !nutritionCanApply
+                                : !sandCCanApply
                             : fynRevisionAcceptedCount(fynRevisionSelection) === 0)
                         }
                         onClick={handleDrawerReviseSubmit}
@@ -21333,40 +21571,99 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  async function handleReviseSandCPlan() {
+  async function handleReviseSandCPlan(submission?: SandCRevisionSubmission | null) {
+    const submittedReviseIds =
+      submission != null
+        ? { trainingPlanId: submission.trainingPlanId, versionId: submission.versionId }
+        : sandCReviseIds;
+    const activeReviseIds = resolveActiveSandCReviseIds(
+      submittedReviseIds,
+      sandCActiveReviseIds,
+    );
     if (
       reviseSandCLoading ||
       entityId === "" ||
       athleteIdTrimmed === "" ||
-      !sandCReviseIds
+      !activeReviseIds
     ) {
       return;
     }
 
-    const coachFeedback = reviseSandCFeedback.trim();
-    if (coachFeedback === "") {
+    const isSinglePatch = submission != null;
+    const coachFeedback = isSinglePatch ? submission.coachFeedback : reviseSandCFeedback.trim();
+    if (coachFeedback.trim() === "") {
       setReviseSandCError("Enter revision feedback first.");
       setReviseSandCSuccess(null);
       return;
     }
 
-    const trainingPlanIdForReload = sandCReviseIds.trainingPlanId.trim();
+    const payload: TrainingPlanRevisePayload = isSinglePatch
+      ? submission
+      : {
+          trainingPlanId: activeReviseIds.trainingPlanId,
+          versionId: activeReviseIds.versionId,
+          coachFeedback,
+        };
+    const trainingPlanIdForReload = activeReviseIds.trainingPlanId.trim();
 
     setReviseSandCLoading(true);
     setReviseSandCError(null);
     setReviseSandCSuccess(null);
     try {
-      const reviseResult = await reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, {
-        trainingPlanId: sandCReviseIds.trainingPlanId,
-        versionId: sandCReviseIds.versionId,
-        coachFeedback,
-      });
-      await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
-      await loadLatestSkillsDraft("S_AND_C", true);
-      setReviseSandCFeedback("");
-      setReviseSandCSuccess("Revised S&C plan version generated.");
+      if (isSinglePatch) {
+        await runSandCStructuredRevisionSequence({
+          submit: () =>
+            reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, payload),
+          pinReturnedVersion: (reviseResult) => {
+            const nextVersionId = nextSandCRevisionVersionId(reviseResult);
+            if (nextVersionId !== null) {
+              setSandCActiveReviseIds({
+                trainingPlanId:
+                  reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+                versionId: nextVersionId,
+              });
+            }
+          },
+          reconcilePlan: (reviseResult) =>
+            reconcileRevisedDomainPlanDetail(
+              "S_AND_C",
+              reviseResult,
+              trainingPlanIdForReload,
+            ),
+          reloadLatestPlan: async () =>
+            (await loadLatestSkillsDraft("S_AND_C", true, true)) !== null,
+          reloadRevisionContext: () => loadFynRevisionContext("S_AND_C"),
+          resetTemporaryState: () => {
+            resetFynRevisionOptionsFlow("S_AND_C");
+            setFynRevisionSelections((current) => ({
+              ...current,
+              S_AND_C: defaultFynRevisionBatchSelection(),
+            }));
+            setReviseSandCFeedback("");
+          },
+        });
+        setReviseSandCSuccess(SANDC_REVISION_APPLIED_MESSAGE);
+      } else {
+        const reviseResult = await reviseCoachAthleteSandCTrainingPlan(
+          entityId,
+          athleteIdTrimmed,
+          payload,
+        );
+        const nextVersionId = nextSandCRevisionVersionId(reviseResult);
+        if (nextVersionId !== null) {
+          setSandCActiveReviseIds({
+            trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+            versionId: nextVersionId,
+          });
+        }
+        await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
+        await loadLatestSkillsDraft("S_AND_C", true);
+        setReviseSandCFeedback("");
+        setReviseSandCSuccess("Revised S&C plan version generated.");
+      }
       void refreshTrainingPlanWorkspace({ background: true });
     } catch (e) {
+      // Keep the rendered plan, pinned version, and current S&C selection unchanged on failure.
       console.error("S&C training plan revision failed", e);
       const errorRecord =
         typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;

@@ -4250,7 +4250,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(
         buildSandCRevisionPatch({ target: itemTarget, actionKey: "REMOVE_ITEM" }),
       ).toEqual({
-        operation: "REMOVE_ITEM",
+        type: "REMOVE_ITEM",
         dayIndex: 2,
         sessionIndex: 1,
         itemIndex: 1,
@@ -4276,6 +4276,221 @@ describe("Training Plan Workspace lifecycle display", () => {
           reps: 6,
         },
       });
+    });
+
+    it("builds the exact one-based REMOVE_ITEM patch from the selected target catalog ID", () => {
+      const secondItemTarget = targets().find((target) => target.itemLabel === "Split squat")!;
+
+      expect(
+        buildSandCRevisionPatch({
+          target: secondItemTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toEqual({
+        type: "REMOVE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-second" },
+      });
+      expect({
+        ...secondItemTarget.indices,
+        sessionItemCount: secondItemTarget.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        sessionItemCount: 2,
+      });
+    });
+
+    it("scopes flat targetMap count and one-based item index to each selected session", () => {
+      const flatContext = makeRevisionContext({
+        generationDomain: "S_AND_C",
+        targetMap: [
+          {
+            dayIndex: 2,
+            sessionIndex: 1,
+            itemKey: "exercise-a",
+            label: "Back squat",
+            exerciseCatalogItemId: "exercise-a",
+          },
+          {
+            dayIndex: 2,
+            sessionIndex: 2,
+            itemKey: "exercise-b",
+            label: "Mobility flow",
+            exerciseCatalogItemId: "exercise-b",
+          },
+          {
+            dayIndex: 2,
+            sessionIndex: 1,
+            itemKey: "exercise-c",
+            label: "Split squat",
+            exerciseCatalogItemId: "exercise-c",
+          },
+        ],
+      });
+      const flatTargets = fynRevisionLeveledTargetOptions(flatContext, {
+        domain: "S_AND_C",
+        scheduleDays: [],
+      });
+      const firstSessionSecondItem = flatTargets.find(
+        (target) => target.itemLabel === "Split squat",
+      )!;
+      const secondSessionOnlyItem = flatTargets.find(
+        (target) => target.itemLabel === "Mobility flow",
+      )!;
+
+      expect({
+        ...firstSessionSecondItem.indices,
+        sessionItemCount: firstSessionSecondItem.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        sessionItemCount: 2,
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: firstSessionSecondItem,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toEqual({
+        type: "REMOVE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-c" },
+      });
+      expect({
+        ...secondSessionOnlyItem.indices,
+        sessionItemCount: secondSessionOnlyItem.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 2,
+        itemIndex: 1,
+        sessionItemCount: 1,
+      });
+      expect(
+        fynRevisionAvailableActions("S_AND_C", secondSessionOnlyItem).map(
+          (action) => action.key,
+        ),
+      ).not.toContain("REMOVE_ITEM");
+      expect(
+        buildSandCRevisionPatch({
+          target: secondSessionOnlyItem,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks REMOVE_ITEM for invalid targets and never derives identity from a label", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: sessionTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: {
+            ...itemTarget,
+            exerciseCatalogItemId: null,
+            target: { ...itemTarget.target, currentId: itemTarget.itemLabel },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("renders Remove Exercise without free text or an options request", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Remove exercise");
+      expect(html).not.toContain("Tell Fyn what to change");
+      expect(html).not.toContain("Show approved options");
+      expect(html).not.toContain("<textarea");
+    });
+
+    it("blocks removal of the final exercise and shows minimum guidance", () => {
+      const soleExerciseSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Lower body",
+              items: [
+                {
+                  label: "Back squat",
+                  exerciseCatalogItemId: "exercise-current",
+                },
+              ],
+            },
+          ],
+        },
+      ];
+      const soleTargets = fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: soleExerciseSchedule,
+      });
+      const soleItemTarget = soleTargets.find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: soleTargets,
+            selectedTargetKey: soleItemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(
+        fynRevisionAvailableActions("S_AND_C", soleItemTarget).map((action) => action.key),
+      ).not.toContain("REMOVE_ITEM");
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: soleItemTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(html).toContain("A session must contain at least one exercise.");
+      expect(html).toContain('data-testid="fyn-sandc-remove-minimum"');
+      expect(html).toContain('disabled="" name="fyn-revision-action-S_AND_C" value="REMOVE_ITEM"');
     });
 
     it("returns null until the required Add/Remove/Update state exists", () => {
@@ -4700,6 +4915,34 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(values).toEqual({ durationMinutes: 12, sets: 3, reps: 8 });
       expect(reset).not.toHaveBeenCalled();
       expect(submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves the Remove Exercise target when post-submit refresh fails", async () => {
+      let targetKey: string | null = "item|2|1|1";
+      const reset = vi.fn(() => {
+        targetKey = null;
+      });
+
+      await expect(
+        runSandCStructuredRevisionSequence({
+          submit: async () => ({
+            planId: "sandc-plan-1",
+            versionId: "sandc-v2",
+            versionNumber: null,
+            generationDomain: "S_AND_C",
+            detail: null,
+            raw: null,
+          }),
+          pinReturnedVersion: () => {},
+          reconcilePlan: async () => {},
+          reloadLatestPlan: async () => false,
+          reloadRevisionContext: async () => true,
+          resetTemporaryState: reset,
+        }),
+      ).rejects.toThrow("Unable to reload the revised S&C plan.");
+
+      expect(targetKey).toBe("item|2|1|1");
+      expect(reset).not.toHaveBeenCalled();
     });
   });
 

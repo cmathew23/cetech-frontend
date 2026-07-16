@@ -1038,6 +1038,41 @@ describe("parseReadinessPayload", () => {
     );
   });
 
+  it("serializes the exact S&C REMOVE_ITEM patch with its one-based item index", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+    });
+    const revisionPatch = {
+      type: "REMOVE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 1,
+      itemIndex: 2,
+      item: { exerciseCatalogItemId: "exercise-catalog-2" },
+    } as const;
+
+    await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Remove exercise Split squat from Lower body.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/sandc/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "sandc-plan-1",
+          versionId: "sandc-version-1",
+          coachFeedback: "Remove exercise Split squat from Lower body.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
   it("passes the exact Skills Add Drill revisionPatch through to the revise endpoint", async () => {
     apiRequestMock.mockResolvedValue({
       trainingPlanId: "skills-plan-1",

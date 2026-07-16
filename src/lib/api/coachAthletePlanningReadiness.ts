@@ -860,8 +860,18 @@ type SandCExistingItemRevisionPatch = Omit<
   TrainingPlanRevisionPatch,
   "operation" | "item" | "servingAdjustment" | "session"
 > & {
-  operation: "REMOVE_ITEM" | "UPDATE_ITEM";
+  operation: "UPDATE_ITEM";
   item: SandCRevisionPatchItem;
+};
+
+type SandCRemoveItemRevisionPatch = {
+  type: "REMOVE_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex: number;
+  item: {
+    exerciseCatalogItemId: string;
+  };
 };
 
 type SandCAddItemRevisionPatch = {
@@ -878,6 +888,7 @@ type SandCAddItemRevisionPatch = {
 
 export type SandCRevisionPatch =
   | SandCAddItemRevisionPatch
+  | SandCRemoveItemRevisionPatch
   | SandCExistingItemRevisionPatch;
 
 export type TrainingPlanRevisePayload = {

@@ -2541,6 +2541,8 @@ export type FynRevisionTargetOption = {
   sets?: number | null;
   numericReps?: number | null;
   reps?: string | null;
+  /** Authoritative S&C catalog identity; never inferred from a label or generic item id. */
+  exerciseCatalogItemId?: string | null;
   /** Sessions in the target's day (used to gate empty/rest-day-only actions). */
   daySessionCount: number;
   /** Items in the target's session (used to block removing the last item). */
@@ -2760,6 +2762,10 @@ function fynBuildLeveledTargets(
             sets: fynTargetReadNumber(item, ["sets"]),
             numericReps: fynTargetReadNumber(item, ["reps"]),
             reps: fynTargetReadString(item, ["reps"]),
+            exerciseCatalogItemId:
+              domain === "S_AND_C"
+                ? fynTargetReadString(item, ["exerciseCatalogItemId"])
+                : null,
             daySessionCount,
             sessionItemCount,
             indices: { dayIndex: dayNumber, sessionIndex: sessionNumber, itemIndex: itemNumber },
@@ -2797,24 +2803,32 @@ function fynTargetOptionsFromFlatList(
 ): FynRevisionTargetOption[] {
   const options: FynRevisionTargetOption[] = [];
   const seen = new Set<string>();
-  list.forEach((value, index) => {
+  const flatItems = list.flatMap((value, sourceIndex) => {
     const record = fynTargetAsRecord(value);
-    if (record === null) return;
-    if (fynTargetSessionItems(record).length > 0) return;
+    if (record === null || fynTargetSessionItems(record).length > 0) return [];
+    return [{
+      record,
+      sourceIndex,
+      dayIndex: fynTargetReadNumber(record, ["dayIndex", "dayNumber"]),
+      sessionIndex: fynTargetReadNumber(record, ["sessionIndex", "sessionNumber"]),
+    }];
+  });
+  flatItems.forEach(({ record, sourceIndex, dayIndex, sessionIndex }) => {
     const dayKey = fynTargetReadString(record, ["dayKey", "dayIndex", "date"]);
     const sessionKey = fynTargetReadString(record, ["sessionKey", "sessionIndex"]);
     const itemKey = fynTargetReadString(record, ["itemKey", "order"]);
     const label =
       fynTargetReadString(record, ["label", "summary", "name", "title"]) ??
-      `Target ${index + 1}`;
+      `Target ${sourceIndex + 1}`;
     if (dayKey === null && sessionKey === null && itemKey === null) return;
-    const key = `flat|${dayKey ?? ""}|${sessionKey ?? ""}|${itemKey ?? ""}|${index}`;
+    const key = `flat|${dayKey ?? ""}|${sessionKey ?? ""}|${itemKey ?? ""}|${sourceIndex}`;
     if (seen.has(key)) return;
     seen.add(key);
-    // Flat targets expose only string keys; derive 1-based day/session numbers where the keys are
-    // numeric. `itemIndex` is the item's CURRENT position in the flat list — never `item.order`.
-    const flatDayIndex = fynTargetReadNumber(record, ["dayIndex", "dayNumber"]);
-    const flatSessionIndex = fynTargetReadNumber(record, ["sessionIndex", "sessionNumber"]);
+    const sessionItems = flatItems.filter(
+      (item) => item.dayIndex === dayIndex && item.sessionIndex === sessionIndex,
+    );
+    const sessionItemIndex =
+      sessionItems.findIndex((item) => item.sourceIndex === sourceIndex) + 1;
     options.push({
       key,
       label,
@@ -2827,12 +2841,16 @@ function fynTargetOptionsFromFlatList(
       sets: fynTargetReadNumber(record, ["sets"]),
       numericReps: fynTargetReadNumber(record, ["reps"]),
       reps: fynTargetReadString(record, ["reps"]),
+      exerciseCatalogItemId:
+        domain === "S_AND_C"
+          ? fynTargetReadString(record, ["exerciseCatalogItemId"])
+          : null,
       daySessionCount: 1,
-      sessionItemCount: list.length,
+      sessionItemCount: sessionItems.length,
       indices: {
-        dayIndex: flatDayIndex,
-        sessionIndex: flatSessionIndex,
-        itemIndex: index + 1,
+        dayIndex,
+        sessionIndex,
+        itemIndex: sessionItemIndex,
       },
       target: {
         dayKey,
@@ -2846,6 +2864,34 @@ function fynTargetOptionsFromFlatList(
     });
   });
   return options;
+}
+
+function sandCRemoveItemSessionMetadata(
+  target: FynRevisionTargetOption | null,
+): {
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex: number;
+  sessionItemCount: number;
+  isSoleExercise: boolean;
+} | null {
+  if (
+    target === null ||
+    target.level !== "ITEM" ||
+    target.indices.dayIndex === null ||
+    target.indices.sessionIndex === null ||
+    target.indices.itemIndex === null ||
+    target.sessionItemCount < 1
+  ) {
+    return null;
+  }
+  return {
+    dayIndex: target.indices.dayIndex,
+    sessionIndex: target.indices.sessionIndex,
+    itemIndex: target.indices.itemIndex,
+    sessionItemCount: target.sessionItemCount,
+    isSoleExercise: target.sessionItemCount === 1,
+  };
 }
 
 /** The array of day/target records inside the free-form revision-context targetMap. */
@@ -3059,7 +3105,8 @@ function fynRevisionActionAllowed(
     }
     // S&C is unchanged: never remove the last exercise in a session.
     if (domain === "S_AND_C") {
-      return target.sessionItemCount > 1;
+      const metadata = sandCRemoveItemSessionMetadata(target);
+      return metadata !== null && !metadata.isSoleExercise;
     }
   }
   return true;
@@ -3188,6 +3235,8 @@ export const SKILLS_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
 export const SANDC_SINGLE_PATCH_GUIDANCE =
   "Apply one exercise change at a time. Select an S&C session or an existing exercise.";
 export const SANDC_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
+export const SANDC_REMOVE_ITEM_MINIMUM_GUIDANCE =
+  "A session must contain at least one exercise.";
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
 
@@ -3446,20 +3495,24 @@ export function buildSandCRevisionPatch(input: {
     (input.actionKey === "REMOVE_ITEM" || input.actionKey === "UPDATE_ITEM") &&
     input.target.level === "ITEM"
   ) {
-    const itemIndex = input.target.indices.itemIndex;
-    const exerciseCatalogItemId = input.target.target.currentId?.trim() ?? "";
-    if (itemIndex === null || exerciseCatalogItemId === "") return null;
-
     if (input.actionKey === "REMOVE_ITEM") {
+      const metadata = sandCRemoveItemSessionMetadata(input.target);
+      const exerciseCatalogItemId = input.target.exerciseCatalogItemId?.trim() ?? "";
+      if (metadata === null || metadata.isSoleExercise || exerciseCatalogItemId === "") {
+        return null;
+      }
       return {
-        operation: "REMOVE_ITEM",
-        dayIndex,
-        sessionIndex,
-        itemIndex,
+        type: "REMOVE_ITEM",
+        dayIndex: metadata.dayIndex,
+        sessionIndex: metadata.sessionIndex,
+        itemIndex: metadata.itemIndex,
         item: { exerciseCatalogItemId },
       };
     }
 
+    const itemIndex = input.target.indices.itemIndex;
+    const exerciseCatalogItemId = input.target.target.currentId?.trim() ?? "";
+    if (itemIndex === null || exerciseCatalogItemId === "") return null;
     const durationMinutes = changedSandCNumericValue(
       input.durationMinutes,
       input.target.durationMinutes,
@@ -4673,8 +4726,16 @@ export function FynRevisionContextPanel({
   // deterministic serving stepper ([ − ] {quantity} {unit} [ + ]).
   const nutritionServingAdjustmentAction =
     domain === "NUTRITION" && selectedAction?.key === "UPDATE_ITEM";
+  const sandCRemoveItemAction =
+    domain === "S_AND_C" && selectedAction?.key === "REMOVE_ITEM";
   // When a Nutrition item's meal is at its minimum, REMOVE_ITEM is not offered; explain why.
   const nutritionRemoveMinimumNotice = nutritionRemoveItemMinimumNotice(domain, selectedTargetOption);
+  const sandCRemoveMetadata =
+    domain === "S_AND_C"
+      ? sandCRemoveItemSessionMetadata(selectedTargetOption)
+      : null;
+  const sandCRemoveMinimumNotice =
+    sandCRemoveMetadata?.isSoleExercise === true;
   const showOptionsDisabled =
     loading ||
     optionsState.loading ||
@@ -4818,13 +4879,27 @@ export function FynRevisionContextPanel({
                     </label>
                   );
                 })}
+                {sandCRemoveMinimumNotice ? (
+                  <label className="flex cursor-not-allowed items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary opacity-60">
+                    <input
+                      type="radio"
+                      name={`fyn-revision-action-${domain}`}
+                      className="mt-0.5"
+                      value="REMOVE_ITEM"
+                      disabled
+                    />
+                    <span className="font-medium">Remove exercise</span>
+                  </label>
+                ) : null}
               </div>
             </div>
           ) : null}
 
           {/* 3. Context third: Fyn only asks for detail once an action is chosen. Nutrition
               serving adjustment uses a stepper instead of the free-text input + option search. */}
-          {selectedAction !== null && !nutritionServingAdjustmentAction ? (
+          {selectedAction !== null &&
+          !nutritionServingAdjustmentAction &&
+          !sandCRemoveItemAction ? (
             <label className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Tell Fyn what to change</span>
               <textarea
@@ -4896,6 +4971,16 @@ export function FynRevisionContextPanel({
               className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
             >
               {nutritionRemoveMinimumNotice}
+            </p>
+          ) : null}
+
+          {sandCRemoveMinimumNotice ? (
+            <p
+              role="status"
+              data-testid="fyn-sandc-remove-minimum"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              {SANDC_REMOVE_ITEM_MINIMUM_GUIDANCE}
             </p>
           ) : null}
 
@@ -16268,6 +16353,9 @@ export function CoachAthletePlanningProfileView({
   ): void {
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
       delete fynRevisionOptionsRequestRef.current.S_AND_C;
+    }
+    if (domain === "S_AND_C" && key === "REMOVE_ITEM") {
+      setFynRevisionRequests((current) => ({ ...current, S_AND_C: "" }));
     }
     setFynRevisionActionKeys((current) => ({ ...current, [domain]: key }));
     // Switching action clears stale fetched options from a previous action choice.

@@ -2592,6 +2592,18 @@ function fynTargetReadNumber(record: FynTargetRecord, keys: string[]): number | 
   return null;
 }
 
+function fynTargetReadPositiveInteger(record: FynTargetRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+    if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) {
+      const parsed = Number(value);
+      if (Number.isSafeInteger(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
 function fynTargetReadArray(record: FynTargetRecord, keys: string[]): unknown[] {
   for (const key of keys) {
     const value = record[key];
@@ -2758,9 +2770,14 @@ function fynBuildLeveledTargets(
             // Canonical serving text read verbatim from the latest plan item; seeds the item-level
             // serving stepper. Never used to compute calories/macros.
             serving: fynTargetReadString(item, ["serving", "servingSize", "servingText"]),
-            durationMinutes: fynTargetReadNumber(item, ["durationMinutes"]),
-            sets: fynTargetReadNumber(item, ["sets"]),
-            numericReps: fynTargetReadNumber(item, ["reps"]),
+            durationMinutes:
+              domain === "S_AND_C"
+                ? fynTargetReadPositiveInteger(item, ["durationMinutes"])
+                : fynTargetReadNumber(item, ["durationMinutes"]),
+            sets:
+              domain === "S_AND_C" ? fynTargetReadPositiveInteger(item, ["sets"]) : null,
+            numericReps:
+              domain === "S_AND_C" ? fynTargetReadPositiveInteger(item, ["reps"]) : null,
             reps: fynTargetReadString(item, ["reps"]),
             exerciseCatalogItemId:
               domain === "S_AND_C"
@@ -2837,9 +2854,14 @@ function fynTargetOptionsFromFlatList(
       sessionLabel: sessionKey !== null ? `Session ${sessionKey}` : null,
       itemLabel: label,
       serving: fynTargetReadString(record, ["serving", "servingSize", "servingText"]),
-      durationMinutes: fynTargetReadNumber(record, ["durationMinutes"]),
-      sets: fynTargetReadNumber(record, ["sets"]),
-      numericReps: fynTargetReadNumber(record, ["reps"]),
+      durationMinutes:
+        domain === "S_AND_C"
+          ? fynTargetReadPositiveInteger(record, ["durationMinutes"])
+          : fynTargetReadNumber(record, ["durationMinutes"]),
+      sets:
+        domain === "S_AND_C" ? fynTargetReadPositiveInteger(record, ["sets"]) : null,
+      numericReps:
+        domain === "S_AND_C" ? fynTargetReadPositiveInteger(record, ["reps"]) : null,
       reps: fynTargetReadString(record, ["reps"]),
       exerciseCatalogItemId:
         domain === "S_AND_C"
@@ -3418,6 +3440,18 @@ export const EMPTY_SANDC_ADD_ITEM_VALUES: SandCAddItemValues = {
   reps: null,
 };
 
+export function sandCParameterValuesForAction(
+  target: FynRevisionTargetOption | null,
+  actionKey: FynRevisionActionKey,
+): SandCAddItemValues {
+  if (actionKey !== "UPDATE_ITEM") return { ...EMPTY_SANDC_ADD_ITEM_VALUES };
+  return {
+    durationMinutes: target?.durationMinutes ?? null,
+    sets: target?.sets ?? null,
+    reps: target?.numericReps ?? null,
+  };
+}
+
 export function adjustSandCPositiveInteger(
   value: number | null,
   direction: 1 | -1,
@@ -3451,8 +3485,8 @@ function changedSandCNumericValue(
 ): number | undefined {
   return nextValue !== null &&
     nextValue !== undefined &&
-    Number.isFinite(nextValue) &&
-    nextValue >= 0 &&
+    Number.isInteger(nextValue) &&
+    nextValue > 0 &&
     nextValue !== currentValue
     ? nextValue
     : undefined;
@@ -3511,7 +3545,7 @@ export function buildSandCRevisionPatch(input: {
     }
 
     const itemIndex = input.target.indices.itemIndex;
-    const exerciseCatalogItemId = input.target.target.currentId?.trim() ?? "";
+    const exerciseCatalogItemId = input.target.exerciseCatalogItemId?.trim() ?? "";
     if (itemIndex === null || exerciseCatalogItemId === "") return null;
     const durationMinutes = changedSandCNumericValue(
       input.durationMinutes,
@@ -3521,7 +3555,7 @@ export function buildSandCRevisionPatch(input: {
     const reps = changedSandCNumericValue(input.reps, input.target.numericReps);
     if (durationMinutes === undefined && sets === undefined && reps === undefined) return null;
     return {
-      operation: "UPDATE_ITEM",
+      type: "UPDATE_ITEM",
       dayIndex,
       sessionIndex,
       itemIndex,
@@ -4728,6 +4762,8 @@ export function FynRevisionContextPanel({
     domain === "NUTRITION" && selectedAction?.key === "UPDATE_ITEM";
   const sandCRemoveItemAction =
     domain === "S_AND_C" && selectedAction?.key === "REMOVE_ITEM";
+  const sandCUpdateItemAction =
+    domain === "S_AND_C" && selectedAction?.key === "UPDATE_ITEM";
   // When a Nutrition item's meal is at its minimum, REMOVE_ITEM is not offered; explain why.
   const nutritionRemoveMinimumNotice = nutritionRemoveItemMinimumNotice(domain, selectedTargetOption);
   const sandCRemoveMetadata =
@@ -4899,7 +4935,8 @@ export function FynRevisionContextPanel({
               serving adjustment uses a stepper instead of the free-text input + option search. */}
           {selectedAction !== null &&
           !nutritionServingAdjustmentAction &&
-          !sandCRemoveItemAction ? (
+          !sandCRemoveItemAction &&
+          !sandCUpdateItemAction ? (
             <label className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Tell Fyn what to change</span>
               <textarea
@@ -5055,12 +5092,16 @@ export function FynRevisionContextPanel({
           ) : null}
 
           {domain === "S_AND_C" &&
-          selectedAction?.key === "ADD_ITEM" &&
-          selectedOptionId !== null &&
+          ((selectedAction?.key === "ADD_ITEM" && selectedOptionId !== null) ||
+            (selectedAction?.key === "UPDATE_ITEM" && selectedTargetOption?.level === "ITEM")) &&
           sandCAddItemValues !== null ? (
             <fieldset
               className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
-              data-testid="fyn-sandc-add-item-steppers"
+              data-testid={
+                selectedAction.key === "UPDATE_ITEM"
+                  ? "fyn-sandc-update-item-steppers"
+                  : "fyn-sandc-add-item-steppers"
+              }
             >
               <legend className="px-1 text-sm font-semibold text-textPrimary">
                 Exercise parameters
@@ -16350,11 +16391,15 @@ export function CoachAthletePlanningProfileView({
   function handleFynRevisionActionChange(
     domain: TrainingPlanGenerationDomain,
     key: FynRevisionActionKey,
+    target: FynRevisionTargetOption | null,
   ): void {
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
       delete fynRevisionOptionsRequestRef.current.S_AND_C;
     }
-    if (domain === "S_AND_C" && key === "REMOVE_ITEM") {
+    if (
+      domain === "S_AND_C" &&
+      (key === "REMOVE_ITEM" || key === "UPDATE_ITEM")
+    ) {
       setFynRevisionRequests((current) => ({ ...current, S_AND_C: "" }));
     }
     setFynRevisionActionKeys((current) => ({ ...current, [domain]: key }));
@@ -16370,7 +16415,7 @@ export function CoachAthletePlanningProfileView({
     setSkillsDurationMinutesDraft("");
     setSkillsRepsDraft("");
     if (domain === "S_AND_C") {
-      setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
+      setSandCAddItemValues(sandCParameterValuesForAction(target, key));
     }
   }
 
@@ -18982,7 +19027,11 @@ export function CoachAthletePlanningProfileView({
                     }}
                     selectedActionKey={fynRevisionSelectedActionKey}
                     onSelectAction={(key) => {
-                      handleFynRevisionActionChange(reviewDomain, key);
+                      handleFynRevisionActionChange(
+                        reviewDomain,
+                        key,
+                        fynRevisionSelectedTargetOption,
+                      );
                       if (
                         reviewDomain === "SKILLS" &&
                         key === "UPDATE_ITEM" &&

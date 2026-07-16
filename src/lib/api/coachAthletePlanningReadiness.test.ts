@@ -961,7 +961,7 @@ describe("parseReadinessPayload", () => {
       trainingPlanVersionId: "sandc-version-2",
     });
     const revisionPatch = {
-      operation: "UPDATE_ITEM",
+      type: "UPDATE_ITEM",
       dayIndex: 2,
       sessionIndex: 1,
       itemIndex: 1,
@@ -1807,6 +1807,85 @@ describe("training plan generation timeouts and helpers", () => {
       primaryGoalId: "goal-serve-1",
       primaryGoalName: "Improve first serve consistency",
     });
+  });
+
+  it("keeps generic draft sets and reps in their prior normalized string form", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-sandc-1",
+        trainingPlanVersionId: "version-sandc-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-1",
+                    durationMinutes: 20,
+                    sets: 3,
+                    reps: 8,
+                  },
+                  {
+                    exerciseCatalogItemId: "exercise-2",
+                    sets: "3 rounds",
+                    reps: "To fatigue",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "S_AND_C",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      exerciseCatalogItemId: "exercise-1",
+      durationMinutes: 20,
+      sets: "3",
+      reps: "8",
+    });
+    expect(result.days[0]?.sessions[0]?.items[1]).toMatchObject({
+      exerciseCatalogItemId: "exercise-2",
+      durationMinutes: null,
+      sets: "3 rounds",
+      reps: "To fatigue",
+    });
+  });
+
+  it("keeps numeric Skills reps in their prior normalized string form", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-1",
+        trainingPlanVersionId: "version-skills-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [{ label: "Serve drill", reps: 12 }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]?.reps).toBe("12");
   });
 
   it("maps latest draft fields to persist-draft result shape", () => {

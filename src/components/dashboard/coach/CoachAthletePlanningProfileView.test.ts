@@ -209,6 +209,7 @@ import {
   buildSandCRevisionPatch,
   buildSandCRevisionSubmission,
   adjustSandCPositiveInteger,
+  sandCParameterValuesForAction,
   nextSandCRevisionVersionId,
   resolveActiveSandCReviseIds,
   runSandCStructuredRevisionSequence,
@@ -4265,7 +4266,7 @@ describe("Training Plan Workspace lifecycle display", () => {
           reps: 6,
         }),
       ).toEqual({
-        operation: "UPDATE_ITEM",
+        type: "UPDATE_ITEM",
         dayIndex: 2,
         sessionIndex: 1,
         itemIndex: 1,
@@ -4276,6 +4277,203 @@ describe("Training Plan Workspace lifecycle display", () => {
           reps: 6,
         },
       });
+    });
+
+    it("initializes UPDATE_ITEM steppers only from positive-integer context values", () => {
+      const numericTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      expect(sandCParameterValuesForAction(numericTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 20,
+        sets: 3,
+        reps: 8,
+      });
+
+      const stringAndDescriptiveTargets = fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    label: "Squat",
+                    exerciseCatalogItemId: "exercise-squat",
+                    durationMinutes: "20",
+                    sets: "3",
+                    reps: "8",
+                  },
+                  {
+                    label: "Carry",
+                    exerciseCatalogItemId: "exercise-carry",
+                    durationMinutes: null,
+                    sets: "3 rounds",
+                    reps: "To fatigue",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      expect(
+        sandCParameterValuesForAction(
+          stringAndDescriptiveTargets.find((target) => target.itemLabel === "Squat") ?? null,
+          "UPDATE_ITEM",
+        ),
+      ).toEqual({
+        durationMinutes: 20,
+        sets: 3,
+        reps: 8,
+      });
+      expect(
+        sandCParameterValuesForAction(
+          stringAndDescriptiveTargets.find((target) => target.itemLabel === "Carry") ?? null,
+          "UPDATE_ITEM",
+        ),
+      ).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+    });
+
+    it("clears Update values for Add and initializes fresh values from Remove to Update", () => {
+      const firstTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const secondTarget = {
+        ...targets().find((target) => target.itemLabel === "Split squat")!,
+        durationMinutes: 12,
+        sets: 2,
+        numericReps: 6,
+      };
+
+      const updateValues = sandCParameterValuesForAction(firstTarget, "UPDATE_ITEM");
+      expect(updateValues).toEqual({ durationMinutes: 20, sets: 3, reps: 8 });
+      expect(sandCParameterValuesForAction(firstTarget, "ADD_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(firstTarget, "REMOVE_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(secondTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 12,
+        sets: 2,
+        reps: 6,
+      });
+    });
+
+    it("emits only changed positive-integer UPDATE_ITEM fields with exact target identity", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const expectedBase = {
+        type: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-current" },
+      } as const;
+
+      for (const [values, changed] of [
+        [{ durationMinutes: 25 }, { durationMinutes: 25 }],
+        [{ sets: 4 }, { sets: 4 }],
+        [{ reps: 9 }, { reps: 9 }],
+        [
+          { durationMinutes: 25, sets: 4, reps: 9 },
+          { durationMinutes: 25, sets: 4, reps: 9 },
+        ],
+      ] as const) {
+        const patch = buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          ...values,
+        });
+        expect(patch).toEqual({
+          ...expectedBase,
+          item: { ...expectedBase.item, ...changed },
+        });
+        expect(patch?.item).not.toHaveProperty("label");
+        expect(patch?.item).not.toHaveProperty("notes");
+        expect(patch?.item).not.toHaveProperty("intensity");
+        expect(patch?.item).not.toHaveProperty("equipment");
+        expect(patch?.item).not.toHaveProperty("metadata");
+        expect(patch?.item).not.toHaveProperty("tempo");
+        expect(patch?.item).not.toHaveProperty("rpe");
+        expect(patch?.item).not.toHaveProperty("workload");
+        expect(patch?.item).not.toHaveProperty("description");
+      }
+
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+          sets: 3,
+          reps: 8,
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          sets: 0,
+          reps: 1.5,
+        }),
+      ).toBeNull();
+
+      const secondTarget = targets().find((target) => target.itemLabel === "Split squat")!;
+      expect(
+        buildSandCRevisionPatch({
+          target: secondTarget,
+          actionKey: "UPDATE_ITEM",
+          sets: 1,
+        }),
+      ).toMatchObject({
+        type: "UPDATE_ITEM",
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-second", sets: 1 },
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: {
+            ...itemTarget,
+            exerciseCatalogItemId: null,
+            target: { ...itemTarget.target, currentId: "label-derived-id" },
+          },
+          actionKey: "UPDATE_ITEM",
+          sets: 4,
+        }),
+      ).toBeNull();
+    });
+
+    it("renders UPDATE_ITEM as steppers without text or an options request", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+            sandCAddItemValues: sandCParameterValuesForAction(itemTarget, "UPDATE_ITEM"),
+          }),
+        ),
+      );
+
+      expect(html).toContain('data-testid="fyn-sandc-update-item-steppers"');
+      expect(html).toContain('data-testid="fyn-sandc-durationMinutes-value">20');
+      expect(html).toContain('data-testid="fyn-sandc-sets-value">3');
+      expect(html).toContain('data-testid="fyn-sandc-reps-value">8');
+      expect(html).not.toContain("<textarea");
+      expect(html).not.toContain('type="text"');
+      expect(html).not.toContain('type="number"');
+      expect(html).not.toContain('type="range"');
+      expect(html).not.toContain("Show approved options");
     });
 
     it("builds the exact one-based REMOVE_ITEM patch from the selected target catalog ID", () => {
@@ -4942,6 +5140,37 @@ describe("Training Plan Workspace lifecycle display", () => {
       ).rejects.toThrow("Unable to reload the revised S&C plan.");
 
       expect(targetKey).toBe("item|2|1|1");
+      expect(reset).not.toHaveBeenCalled();
+    });
+
+    it("preserves the UPDATE_ITEM target and edited values when refresh fails", async () => {
+      let targetKey: string | null = "item|2|1|1";
+      let values = { durationMinutes: 25, sets: 4, reps: 9 };
+      const reset = vi.fn(() => {
+        targetKey = null;
+        values = { durationMinutes: 20, sets: 3, reps: 8 };
+      });
+
+      await expect(
+        runSandCStructuredRevisionSequence({
+          submit: async () => ({
+            planId: "sandc-plan-1",
+            versionId: "sandc-v2",
+            versionNumber: null,
+            generationDomain: "S_AND_C",
+            detail: null,
+            raw: null,
+          }),
+          pinReturnedVersion: () => {},
+          reconcilePlan: async () => {},
+          reloadLatestPlan: async () => true,
+          reloadRevisionContext: async () => false,
+          resetTemporaryState: reset,
+        }),
+      ).rejects.toThrow("Unable to reload S&C revision guidance.");
+
+      expect(targetKey).toBe("item|2|1|1");
+      expect(values).toEqual({ durationMinutes: 25, sets: 4, reps: 9 });
       expect(reset).not.toHaveBeenCalled();
     });
   });

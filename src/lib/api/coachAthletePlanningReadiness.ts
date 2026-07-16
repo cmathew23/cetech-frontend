@@ -856,11 +856,11 @@ export type SandCRevisionPatchItem = {
   reps?: number;
 };
 
-type SandCExistingItemRevisionPatch = Omit<
-  TrainingPlanRevisionPatch,
-  "operation" | "item" | "servingAdjustment" | "session"
-> & {
-  operation: "UPDATE_ITEM";
+type SandCExistingItemRevisionPatch = {
+  type: "UPDATE_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex: number;
   item: SandCRevisionPatchItem;
 };
 

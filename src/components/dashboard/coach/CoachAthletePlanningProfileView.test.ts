@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -146,6 +147,7 @@ import {
   shouldUseWorkflow1HeadCoachReviewActionPanel,
   isHeadCoachSkillsOwnerWorkflow,
   resolveWorkflowActionContext,
+  RevisionRequestPanel,
   DomainReviewDrawerWorkflowActionButtons,
   resolveDomainReviewDrawerVisibleActionLabels,
   resolveDomainReviewDisplayLabels,
@@ -170,6 +172,85 @@ import {
   handleDomainCoachWorkspaceTabSelect,
   isDomainCoachPlanViewerContextExpired,
   shouldRenderReleasedDomainPlanViewerSchedule,
+  FynRevisionContextPanel,
+  buildFynRevisionCoachFeedback,
+  addAcceptedFynRevisionChange,
+  removeFynRevisionChange,
+  defaultFynRevisionBatchSelection,
+  defaultFynRevisionOptionsState,
+  fynRevisionTargetOptions,
+  fynRevisionLeveledTargetOptions,
+  fynRevisionAvailableActions,
+  fynRevisionActionLabel,
+  buildFynRevisionActionChangeText,
+  FYN_REVISION_CAPABILITIES,
+  buildFynRevisionOptionsPayload,
+  buildFynRevisionReplaceChangeText,
+  buildFynRevisionAddItemChangeText,
+  fynRevisionActionOptionKind,
+  fynRevisionAddItemSessionTarget,
+  fynRevisionContextPlaceholder,
+  fetchFynRevisionReplacementOptions,
+  buildFynRevisionOptionsRequestSelectionKey,
+  fynRevisionOptionsResponseIsCurrent,
+  fynRevisionOptionsUsesStaleResponseGuard,
+  FYN_REVISION_INPUT_PLACEHOLDER,
+  FYN_REVISION_NO_OPTIONS_MESSAGE,
+  FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
+  NUTRITION_MEAL_SLOT_MIN_ITEMS,
+  NUTRITION_MEAL_MINIMUMS_GUIDANCE,
+  NUTRITION_REMOVE_ITEM_MINIMUM_WARNING,
+  NUTRITION_SINGLE_PATCH_GUIDANCE,
+  SKILLS_SINGLE_PATCH_GUIDANCE,
+  buildSkillsRevisionPatch,
+  buildSkillsRevisionSubmission,
+  nextSkillsRevisionVersionId,
+  resolveActiveSkillsReviseIds,
+  buildSandCRevisionPatch,
+  buildSandCRevisionSubmission,
+  adjustSandCPositiveInteger,
+  sandCParameterValuesForAction,
+  nextSandCRevisionVersionId,
+  resolveActiveSandCReviseIds,
+  runSandCStructuredRevisionSequence,
+  buildNutritionRevisionPatch,
+  buildNutritionRevisionSubmission,
+  buildNutritionRevisionOptionItem,
+  buildNutritionServingAdjustment,
+  parseNutritionServing,
+  adjustNutritionServingQuantity,
+  formatNutritionServingValue,
+  nutritionRevisionPatchOperation,
+  nutritionRevisionCanApply,
+  nextNutritionRevisionVersionId,
+  resolveActiveNutritionReviseIds,
+  nutritionMealSlotKeyFromLabel,
+  nutritionMealSlotMinItems,
+  nutritionRemoveItemMinimumNotice,
+  nutritionRemoveItemMinimumMessage,
+  nutritionOptionCatalogId,
+  nutritionRevisionOptionMissingCatalogReference,
+  NUTRITION_OPTION_MISSING_CATALOG_MESSAGE,
+  NUTRITION_STALE_VERSION_MESSAGE,
+  isNutritionStaleVersionRevisionError,
+  isNutritionRevisionInterruptedError,
+  resolveNutritionRevisionErrorOutcome,
+  NUTRITION_REVISION_APPLYING_MESSAGE,
+  NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE,
+  nutritionRevisionDrawerSubmitPending,
+  nutritionRemoveItemTargetStillPresent,
+  NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE,
+  resolveNutritionReviewDrawerLifecycle,
+  runNutritionReviewDrawerOpenRefresh,
+  resolveNewerDomainReviewDraft,
+  resolveLatestDraftForDomainReview,
+  domainReviewDraftRenderKey,
+  domainReviewActiveDetailRenderKey,
+  FYN_REVISION_MISSING_TARGET_MESSAGE,
+  FYN_REVISION_OPTIONS_ERROR_MESSAGE,
+  FYN_REVISION_SHOW_OPTIONS_LABEL,
+  FYN_REVISION_PRESERVE_LINE,
+  MAX_FYN_REVISION_CHANGES,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -188,7 +269,66 @@ import {
   shouldUseLockedDownstreamGenerationContext,
   shouldUseWorkflow1SpecialistCreateGate,
 } from "@/lib/coachTrainingPlanActions";
+import type {
+  FynRevisionActionKey as FynRevisionActionKeyForTest,
+} from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
+import { parseGeneratedDraftItem } from "@/lib/api/coachAthletePlanningReadiness";
+import type {
+  CoachAthleteDomainDraftRevisionContext,
+  CoachAthleteDomainDraftRevisionOption,
+  CoachAthleteLatestDomainDraft,
+  CoachPersistedTrainingPlanActiveDetail,
+} from "@/lib/api/coachAthletePlanningReadiness";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
+
+describe("RevisionRequestPanel", () => {
+  it("renders revision feedback and available request metadata", () => {
+    const html = renderToStaticMarkup(
+      createElement(RevisionRequestPanel, {
+        workflowStatus: "revision_requested",
+        pendingRevisionRequest: {
+          feedback: "Reduce the Tuesday workload and add recovery notes.",
+          requestedBy: "Head Coach",
+          requestedAt: "2026-07-14",
+          actorRole: "HEAD_COACH",
+        },
+      }),
+    );
+
+    expect(html).toContain("Revision Request");
+    expect(html).toContain("Reduce the Tuesday workload and add recovery notes.");
+    expect(html).toContain("Requested by:");
+    expect(html).toContain("Head Coach");
+    expect(html).toContain("Requested at:");
+    expect(html).toContain("14/07/2026");
+  });
+
+  it("does not render without revision-requested status and feedback", () => {
+    const request = {
+      feedback: "Update the plan.",
+      requestedBy: null,
+      requestedAt: null,
+      actorRole: null,
+    };
+
+    expect(
+      renderToStaticMarkup(
+        createElement(RevisionRequestPanel, {
+          workflowStatus: "submitted_for_review",
+          pendingRevisionRequest: request,
+        }),
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        createElement(RevisionRequestPanel, {
+          workflowStatus: "revision_requested",
+          pendingRevisionRequest: { ...request, feedback: null },
+        }),
+      ),
+    ).toBe("");
+  });
+});
 
 describe("buildCoachWorkflowResetScopeKey", () => {
   it("changes when the authenticated coach user changes", () => {
@@ -2207,6 +2347,5985 @@ describe("Training Plan Workspace lifecycle display", () => {
         todayDate: "2026-07-08",
       }),
     ).toBe(true);
+  });
+
+  it("keeps the existing Revise Plan button rendered for editable drafts", () => {
+    const html = renderToStaticMarkup(
+      createElement(DomainReviewDrawerWorkflowActionButtons, {
+        drawerWorkflowActions: {
+          canShowViewPlan: false,
+          canShowSubmitForReview: false,
+          canShowReviseAction: true,
+          canShowApproveAction: false,
+          canShowRequestRevisionAction: false,
+          canShowReleaseAction: false,
+          hasAuthorizedWorkflowAction: true,
+        },
+        renderApproveBeforeRevise: false,
+        workflowStatus: "draft_generated",
+        directReleaseSkillsDraftReview: false,
+        governedPlanActionLoading: null,
+        actionContext: null,
+        drawerReviseLoading: false,
+        requestRevisionFeedback: "",
+        onApprove: vi.fn(),
+        onRequestRevisionFeedbackChange: vi.fn(),
+        onRequestChangesSubmit: vi.fn(),
+        onOpenRevise: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Revise Plan");
+  });
+
+  const fynReviseIds = { trainingPlanId: "plan-1", versionId: "version-1" };
+  const fynDraftContext = {
+    generationDomain: "SKILLS" as const,
+    draft: {
+      days: [
+        {
+          dayIndex: 1,
+          date: "2026-07-06",
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Morning session",
+              items: [
+                {
+                  order: 0,
+                  itemType: "DRILL",
+                  exerciseCatalogItemId: "ex-1",
+                  nutritionCatalogItemId: null,
+                  label: "Bunker drill",
+                  summary: null,
+                },
+                {
+                  order: 1,
+                  itemType: "DRILL",
+                  exerciseCatalogItemId: "ex-2",
+                  nutritionCatalogItemId: null,
+                  label: "Cool down",
+                  summary: null,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    ref: null,
+    status: "AI_GENERATED",
+    version: null,
+    targetMap: null,
+    planningBriefSummary: null,
+    lockedPlanningContextSummary: null,
+    // Generic context change options must NOT be shown as replacement options.
+    allowedChangeTypes: ["CHANGE_DRILL"],
+    changeOptions: [{ changeType: "CHANGE_DRILL", label: "Change drill", description: null, raw: {} }],
+    requiredInput: null,
+    raw: {},
+  } as unknown as CoachAthleteDomainDraftRevisionContext;
+  const fynFetchedOptions: CoachAthleteDomainDraftRevisionOption[] = [
+    {
+      id: "opt-1",
+      rank: 1,
+      label: "Cross-court rally drill",
+      domain: "SKILLS",
+      optionKind: "REPLACEMENT",
+      source: "DB",
+      score: 0.9,
+      reason: "Similar load",
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      metadata: null,
+    },
+    {
+      id: "opt-2",
+      rank: 2,
+      label: "Target serve ladder",
+      domain: "SKILLS",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.8,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      metadata: null,
+    },
+  ];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fynPanelProps = (overrides: Record<string, unknown> = {}): any => ({
+    domain: "SKILLS",
+    context: null,
+    loading: false,
+    error: null,
+    selection: defaultFynRevisionBatchSelection(),
+    onSelectionChange: vi.fn(),
+    coachRequest: "",
+    onCoachRequestChange: vi.fn(),
+    targetOptions: [],
+    selectedTargetKey: null,
+    onSelectedTargetChange: vi.fn(),
+    selectedActionKey: null,
+    onSelectAction: vi.fn(),
+    onQuickAction: vi.fn(),
+    optionsState: defaultFynRevisionOptionsState(),
+    onShowOptions: vi.fn(),
+    onSelectOption: vi.fn(),
+    ...overrides,
+  });
+
+  it("builds selectable targets from draft days/sessions/items and renders the target selector", () => {
+    const targets = fynRevisionTargetOptions(fynDraftContext);
+    expect(targets).toHaveLength(2);
+    expect(targets[0]?.target).toEqual({
+      dayKey: "1",
+      sessionKey: "1",
+      itemKey: "0",
+      itemType: "DRILL",
+      currentId: "ex-1",
+      label: "Bunker drill",
+      tags: [],
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({ context: fynDraftContext, targetOptions: targets }),
+      ),
+    );
+    expect(html).toContain("What do you want to change?");
+    expect(html).toContain("Bunker drill");
+    expect(html).toContain("Cool down");
+  });
+
+  const makeRevisionContext = (
+    overrides: Record<string, unknown>,
+  ): CoachAthleteDomainDraftRevisionContext =>
+    ({
+      generationDomain: "SKILLS",
+      draft: null,
+      ref: null,
+      status: "AI_GENERATED",
+      version: null,
+      targetMap: null,
+      planningBriefSummary: null,
+      lockedPlanningContextSummary: null,
+      allowedChangeTypes: [],
+      changeOptions: [],
+      requiredInput: null,
+      raw: {},
+      ...overrides,
+    }) as unknown as CoachAthleteDomainDraftRevisionContext;
+
+  it("builds selectable targets from context.targetMap when the draft graph is absent", () => {
+    const context = makeRevisionContext({
+      draft: null,
+      targetMap: {
+        days: [
+          {
+            dayKey: "1",
+            dayLabel: "Day 1",
+            sessions: [
+              {
+                sessionKey: "1",
+                sessionLabel: "Morning session",
+                items: [
+                  {
+                    itemKey: "0",
+                    itemType: "DRILL",
+                    skillCode: "SK-1",
+                    label: "Bunker drill",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const targets = fynRevisionTargetOptions(context);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.target).toEqual({
+      dayKey: "1",
+      sessionKey: "1",
+      itemKey: "0",
+      itemType: "DRILL",
+      currentId: "SK-1",
+      label: "Bunker drill",
+      tags: [],
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({ context, targetOptions: targets }),
+      ),
+    );
+    expect(html).toContain("What do you want to change?");
+    expect(html).toContain("Bunker drill");
+    expect(html).not.toContain("Fyn could not read plan items to target yet.");
+  });
+
+  it("falls back to the rendered plan schedule days when neither targetMap nor draft has items", () => {
+    const context = makeRevisionContext({ draft: null, targetMap: null });
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Evening session",
+            items: [
+              {
+                order: 0,
+                itemType: "DRILL",
+                exerciseCatalogItemId: "ex-9",
+                label: "Volley drill",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays,
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.target).toEqual({
+      dayKey: "1",
+      sessionKey: "1",
+      itemKey: "0",
+      itemType: "DRILL",
+      currentId: "ex-9",
+      label: "Volley drill",
+      tags: [],
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({ context, targetOptions: targets }),
+      ),
+    );
+    expect(html).toContain("What do you want to change?");
+    expect(html).toContain("Volley drill");
+  });
+
+  it("also reads persisted plan schedules that nest items under sessionStructureSections", () => {
+    const context = makeRevisionContext({ draft: null, targetMap: null });
+    const scheduleDays = [
+      {
+        dayIndex: 2,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Court block",
+            sessionStructureSections: [
+              {
+                items: [
+                  {
+                    order: 0,
+                    itemType: "DRILL",
+                    exerciseCatalogItemId: "ex-42",
+                    label: "Serve ladder",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays,
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.target.label).toBe("Serve ladder");
+    expect(targets[0]?.target.currentId).toBe("ex-42");
+  });
+
+  it("preserves the Skills skill id even when an exercise id is also present", () => {
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            items: [
+              {
+                order: 0,
+                itemType: "DRILL",
+                skillCode: "SK-7",
+                exerciseCatalogItemId: "ex-1",
+                label: "Approach drill",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays,
+    });
+    expect(targets[0]?.target.currentId).toBe("SK-7");
+  });
+
+  it("preserves the Nutrition catalog id for nutrition targets", () => {
+    const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            items: [
+              {
+                order: 0,
+                itemType: "MEAL",
+                nutritionCatalogItemId: "nut-3",
+                label: "White rice",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "NUTRITION",
+      scheduleDays,
+    });
+    expect(targets[0]?.target.currentId).toBe("nut-3");
+  });
+
+  it("preserves the S&C exercise catalog id for strength targets", () => {
+    const context = makeRevisionContext({ generationDomain: "S_AND_C" });
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            items: [
+              {
+                order: 0,
+                itemType: "LIFT",
+                exerciseCatalogItemId: "ex-31",
+                label: "Back squat",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "S_AND_C",
+      scheduleDays,
+    });
+    expect(targets[0]?.target.currentId).toBe("ex-31");
+  });
+
+  it("allows selection from key-only targets that carry no catalog ids", () => {
+    const context = makeRevisionContext({ draft: null, targetMap: null });
+    const scheduleDays = [
+      {
+        dayIndex: 3,
+        sessions: [
+          {
+            sessionIndex: 1,
+            items: [{ order: 0, label: "Mobility flow" }],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays,
+    });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.target.currentId).toBeNull();
+    expect(targets[0]?.target).toMatchObject({
+      dayKey: "3",
+      sessionKey: "1",
+      itemKey: "0",
+      label: "Mobility flow",
+      tags: [],
+    });
+  });
+
+  it("shows 'Fyn could not read plan items…' only when every source is empty", () => {
+    const context = makeRevisionContext({ draft: null, targetMap: null });
+
+    const emptyHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: fynRevisionTargetOptions(context, {
+            domain: "SKILLS",
+            scheduleDays: [],
+          }),
+        }),
+      ),
+    );
+    expect(emptyHtml).toContain("Fyn could not read plan items to target yet.");
+
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          { sessionIndex: 1, items: [{ order: 0, label: "Bunker drill" }] },
+        ],
+      },
+    ];
+    const populatedHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: fynRevisionTargetOptions(context, {
+            domain: "SKILLS",
+            scheduleDays,
+          }),
+        }),
+      ),
+    );
+    expect(populatedHtml).not.toContain("Fyn could not read plan items to target yet.");
+    expect(populatedHtml).toContain("What do you want to change?");
+  });
+
+  it("enables Show approved options once Add Drill is chosen and a request is typed", () => {
+    const context = makeRevisionContext({ draft: null, targetMap: null });
+    const scheduleDays = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            items: [
+              { order: 0, label: "Bunker drill" },
+              { order: 1, label: "Cool down" },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays,
+    });
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+
+    // Add Drill chosen but no request typed yet -> Show approved options is disabled.
+    const disabledHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: targets,
+          coachRequest: "",
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(disabledHtml).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(disabledHtml).toContain("disabled");
+
+    const enabledHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: targets,
+          coachRequest: "Add a bunker drill.",
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(enabledHtml).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(enabledHtml).not.toContain("disabled");
+  });
+
+  const skillsSchedule = [
+    {
+      dayIndex: 1,
+      sessions: [
+        {
+          sessionIndex: 1,
+          title: "Morning session",
+          items: [
+            { order: 0, itemType: "DRILL", label: "Bunker drill" },
+            { order: 1, itemType: "DRILL", label: "Cool down" },
+          ],
+        },
+      ],
+    },
+  ];
+  const actionKeysFor = (
+    domain: "SKILLS" | "NUTRITION" | "S_AND_C",
+    target: ReturnType<typeof fynRevisionLeveledTargetOptions>[number] | undefined,
+  ): FynRevisionActionKeyForTest[] =>
+    fynRevisionAvailableActions(domain, target ?? null).map(
+      (action) => action.key as FynRevisionActionKeyForTest,
+    );
+
+  it("exposes a capability map that matches the documented backend contract", () => {
+    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["SESSION", "ITEM"]);
+    expect(FYN_REVISION_CAPABILITIES.NUTRITION.levels).toEqual(["SESSION", "ITEM"]);
+    expect(FYN_REVISION_CAPABILITIES.S_AND_C).toEqual({
+      levels: ["SESSION", "ITEM"],
+      actionsByLevel: {
+        DAY: [],
+        SESSION: ["ADD_ITEM"],
+        ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
+      },
+    });
+  });
+
+  it("exposes Add Drill at session level and Remove/Change Parameters at item level", () => {
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays: skillsSchedule,
+    });
+    const dayTarget = targets.find((option) => option.level === "DAY");
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const itemTarget = targets.find((option) => option.level === "ITEM");
+
+    expect(dayTarget).toBeUndefined();
+    expect(actionKeysFor("SKILLS", sessionTarget)).toEqual(["ADD_ITEM"]);
+    expect(actionKeysFor("SKILLS", itemTarget)).toEqual(["REMOVE_ITEM", "UPDATE_ITEM"]);
+    expect(fynRevisionActionLabel("SKILLS", "ADD_ITEM")).toBe("Add drill");
+    expect(fynRevisionActionLabel("SKILLS", "REMOVE_ITEM")).toBe("Remove drill");
+    expect(fynRevisionActionLabel("SKILLS", "UPDATE_ITEM")).toBe("Change drill parameters");
+  });
+
+  it("renders Add Drill for a Skills session and hides item-level actions", () => {
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays: skillsSchedule,
+    });
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+        }),
+      ),
+    );
+    expect(html).toContain("What do you want to do?");
+    expect(html).toContain("Add drill");
+    expect(html).not.toContain("Replace drill");
+    expect(html).not.toContain("Adjust drill");
+    expect(html).not.toContain("Remove drill");
+    expect(html).not.toContain("Change rest day");
+    expect(html).not.toContain("Edit several drills in this session");
+  });
+
+  it("requires a Nutrition item target for update/replace/remove while meals offer add only", () => {
+    const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible.
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "NUTRITION",
+      scheduleDays: nutritionSchedule,
+    });
+
+    expect(targets.some((option) => option.level === "DAY")).toBe(false);
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const itemTarget = targets.find((option) => option.level === "ITEM");
+    expect(actionKeysFor("NUTRITION", sessionTarget)).toEqual(["ADD_ITEM"]);
+    expect(actionKeysFor("NUTRITION", itemTarget)).toEqual([
+      "REPLACE_ITEM",
+      "UPDATE_ITEM",
+      "REMOVE_ITEM",
+    ]);
+
+    const allKeys = targets.flatMap((option) => actionKeysFor("NUTRITION", option));
+    expect(allKeys).not.toContain("REPLACE_DAY");
+    expect(allKeys).not.toContain("ADD_SESSION");
+    expect(allKeys).not.toContain("UPDATE_SESSION");
+    expect(allKeys).not.toContain("UPDATE_SESSION_ITEMS");
+    expect(new Set(allKeys)).toEqual(
+      new Set(["ADD_ITEM", "REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"]),
+    );
+    // Nutrition vocabulary and operation mappings are item-specific.
+    expect(fynRevisionActionLabel("NUTRITION", "ADD_ITEM")).toBe("Add food item");
+    expect(fynRevisionActionLabel("NUTRITION", "REMOVE_ITEM")).toBe("Remove food item");
+    expect(fynRevisionActionLabel("NUTRITION", "REPLACE_ITEM")).toBe("Replace food item");
+    expect(fynRevisionActionLabel("NUTRITION", "UPDATE_ITEM")).toBe("Change food item details");
+    const itemActions = fynRevisionAvailableActions("NUTRITION", itemTarget ?? null);
+    expect(
+      itemActions.find((action) => action.label === "Change food item details")?.key,
+    ).toBe("UPDATE_ITEM");
+
+    const mealHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "NUTRITION",
+          context,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+        }),
+      ),
+    );
+    expect(mealHtml).toContain("Add food item");
+    expect(mealHtml).not.toContain("Change meal details");
+    expect(mealHtml).not.toContain("Change food item details");
+    expect(mealHtml).not.toContain("Replace food item");
+    expect(mealHtml).not.toContain("Remove food item");
+  });
+
+  it("offers exactly S&C add/remove/update item actions and no day or unsupported actions", () => {
+    const context = makeRevisionContext({ generationDomain: "S_AND_C" });
+    const sandcSchedule = [
+      { dayIndex: 1, sessions: [] },
+      {
+        dayIndex: 2,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Lower body",
+            items: [
+              { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+              { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+            ],
+          },
+        ],
+      },
+    ];
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "S_AND_C",
+      scheduleDays: sandcSchedule,
+    });
+
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const itemTarget = targets.find((option) => option.level === "ITEM");
+
+    expect(targets.some((option) => option.level === "DAY")).toBe(false);
+    expect(actionKeysFor("S_AND_C", sessionTarget)).toEqual(["ADD_ITEM"]);
+    expect(actionKeysFor("S_AND_C", itemTarget)).toEqual(["REMOVE_ITEM", "UPDATE_ITEM"]);
+
+    const allKeys = targets.flatMap((option) => actionKeysFor("S_AND_C", option));
+    expect(allKeys).not.toContain("REPLACE_DAY");
+    expect(allKeys).not.toContain("ADD_SESSION");
+    expect(allKeys).not.toContain("UPDATE_SESSION");
+    expect(allKeys).not.toContain("UPDATE_SESSION_ITEMS");
+    expect(allKeys).not.toContain("REPLACE_ITEM");
+    expect(new Set(allKeys)).toEqual(new Set(["ADD_ITEM", "REMOVE_ITEM", "UPDATE_ITEM"]));
+    expect(fynRevisionActionLabel("S_AND_C", "ADD_ITEM")).toBe("Add exercise");
+    expect(fynRevisionActionLabel("S_AND_C", "REMOVE_ITEM")).toBe("Remove exercise");
+    expect(fynRevisionActionLabel("S_AND_C", "UPDATE_ITEM")).toBe("Adjust exercise");
+
+    const sessionHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "S_AND_C",
+          context,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+          singlePatchMode: true,
+        }),
+      ),
+    );
+    expect(sessionHtml).toContain("Add exercise");
+    expect(sessionHtml).not.toContain("Add S&amp;C session");
+    expect(sessionHtml).not.toContain("Adjust session");
+    expect(sessionHtml).not.toContain("Replace exercise");
+
+    const itemHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "S_AND_C",
+          context,
+          targetOptions: targets,
+          selectedTargetKey: itemTarget?.key ?? null,
+          singlePatchMode: true,
+        }),
+      ),
+    );
+    expect(itemHtml).toContain("Remove exercise");
+    expect(itemHtml).toContain("Adjust exercise");
+    expect(itemHtml).not.toContain("Replace exercise");
+    expect(itemHtml).not.toContain("Add S&amp;C session");
+  });
+
+  it("hides the remove action when the target session has only one item", () => {
+    const nutritionOneItem = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+          },
+        ],
+      },
+    ];
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      { domain: "NUTRITION", scheduleDays: nutritionOneItem },
+    );
+    const nutritionItem = nutritionTargets.find((option) => option.level === "ITEM");
+    expect(actionKeysFor("NUTRITION", nutritionItem)).not.toContain("REMOVE_ITEM");
+
+    const sandcOneItem = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Lower body",
+            items: [{ order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" }],
+          },
+        ],
+      },
+    ];
+    const sandcTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      { domain: "S_AND_C", scheduleDays: sandcOneItem },
+    );
+    const sandcItem = sandcTargets.find((option) => option.level === "ITEM");
+    expect(actionKeysFor("S_AND_C", sandcItem)).not.toContain("REMOVE_ITEM");
+  });
+
+  it("builds operation-explicit basket lines that carry day/session/item context", () => {
+    // Nutrition remove: names the food item and the meal it comes from.
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [
+                  { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+                  { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const nutritionItem = nutritionTargets.find((option) => option.level === "ITEM");
+    const removeFood = buildFynRevisionActionChangeText(
+      "NUTRITION",
+      {
+        key: "REMOVE_ITEM",
+        label: "Remove food item",
+        requiresApprovedOptions: false,
+        requiresBriefRequest: false,
+      },
+      nutritionItem!,
+      "",
+    );
+    expect(removeFood).toBe("Remove food item: White rice from Breakfast.");
+
+    // Selecting a quick action stores the explicit line in the basket.
+    const selection = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      removeFood,
+    );
+    expect(selection.changes).toHaveLength(1);
+    expect(selection.changes[0]?.acceptedChange).toBe(
+      "Remove food item: White rice from Breakfast.",
+    );
+  });
+
+  it("writes the Skills batch-drill basket line with counts-as-1 wording", () => {
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays: skillsSchedule,
+    });
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const batchEdit = buildFynRevisionActionChangeText(
+      "SKILLS",
+      {
+        key: "UPDATE_SESSION_ITEMS",
+        label: "Edit several drills in this session",
+        requiresApprovedOptions: false,
+        requiresBriefRequest: false,
+      },
+      sessionTarget!,
+      "",
+    );
+    expect(batchEdit).toBe(
+      `Edit several drills in session: ${sessionTarget!.sessionLabel}. Counts as 1 change; up to 4 drill edits.`,
+    );
+    expect(batchEdit).toContain("Counts as 1 change; up to 4 drill edits.");
+
+    const selection = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      batchEdit,
+    );
+    expect(selection.changes).toHaveLength(1);
+    expect(selection.changes[0]?.acceptedChange).toBe(batchEdit);
+  });
+
+  it("renders the simplified helper copy for the capability-driven flow", () => {
+    const html = renderToStaticMarkup(
+      createElement(FynRevisionContextPanel, fynPanelProps({})),
+    );
+    expect(html).toContain("Fyn only shows revision actions this domain can safely execute.");
+    expect(html).toContain("Choose a target, then choose what kind of change you want.");
+  });
+
+  it("orders the composer as target -> action -> context", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+
+    // Before a target is chosen: only the target selector is shown.
+    const targetOnly = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+        }),
+      ),
+    );
+    expect(targetOnly).toContain("What do you want to change?");
+    expect(targetOnly).not.toContain("What do you want to do?");
+    expect(targetOnly).not.toContain("Tell Fyn what to change");
+
+    // After a target is chosen: the action selector appears, still no context field.
+    const withAction = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    expect(withAction).toContain("What do you want to do?");
+    expect(withAction).not.toContain("Tell Fyn what to change");
+    // Target selector precedes the action selector in document order.
+    expect(withAction.indexOf("What do you want to change?")).toBeLessThan(
+      withAction.indexOf("What do you want to do?"),
+    );
+
+    // After an action is chosen: the context field appears, after the action selector.
+    const withContext = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(withContext).toContain("Tell Fyn what to change");
+    expect(withContext.indexOf("What do you want to do?")).toBeLessThan(
+      withContext.indexOf("Tell Fyn what to change"),
+    );
+  });
+
+  it("uses domain- and action-specific context placeholders", () => {
+    expect(fynRevisionContextPlaceholder("SKILLS", "ADD_SESSION")).toBe(
+      "Example: Add Lag Putting Foundation and keep intensity low.",
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", "ADD_ITEM")).toBe(
+      "Example: Add a pace-control putting drill.",
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", "UPDATE_SESSION_ITEMS")).toBe(
+      "Example: Add one lag putting drill and remove the advanced drill.",
+    );
+    expect(fynRevisionContextPlaceholder("NUTRITION", "ADD_ITEM")).toBe(
+      "Example: Add a lighter carb option to breakfast.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_ITEM")).toBe(
+      "Example: Add a low-load mobility exercise.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_SESSION")).toBe(
+      "Example: Add a low-load mobility session.",
+    );
+    // Actions without a tailored example fall back to the generic placeholder.
+    expect(fynRevisionContextPlaceholder("SKILLS", "REPLACE_ITEM")).toBe(
+      FYN_REVISION_INPUT_PLACEHOLDER,
+    );
+    expect(fynRevisionContextPlaceholder("SKILLS", null)).toBe(FYN_REVISION_INPUT_PLACEHOLDER);
+  });
+
+  it("renders the action-specific placeholder inside the context field", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(html).toContain("Example: Add a pace-control putting drill.");
+  });
+
+  it("offers ADD_ITEM at the SESSION/meal level for every domain", () => {
+    const skills = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    expect(actionKeysFor("SKILLS", skills.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+
+    const nutrition = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [
+                  { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+                  { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    expect(actionKeysFor("NUTRITION", nutrition.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+
+    const sandc = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [
+                  { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                  { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    // S&C add-exercise is offered on the session, and NOT on an existing exercise item.
+    expect(actionKeysFor("S_AND_C", sandc.find((o) => o.level === "SESSION"))).toContain(
+      "ADD_ITEM",
+    );
+    expect(actionKeysFor("S_AND_C", sandc.find((o) => o.level === "ITEM"))).not.toContain(
+      "ADD_ITEM",
+    );
+  });
+
+  it("reveals Show approved options for the Skills Add Drill action only", () => {
+    const skills = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = skills.find((o) => o.level === "SESSION")!;
+    const renderPanel = (
+      targetKey: string,
+      actionKey: FynRevisionActionKeyForTest,
+    ): string =>
+      renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            context: makeRevisionContext({ generationDomain: "SKILLS" }),
+            targetOptions: skills,
+            selectedTargetKey: targetKey,
+            selectedActionKey: actionKey,
+            coachRequest: "Something specific.",
+          }),
+        ),
+      );
+
+    expect(renderPanel(sessionTarget.key, "ADD_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    expect(skills.some((target) => target.level === "DAY")).toBe(false);
+    expect(skills.some((target) => target.level === "ITEM")).toBe(true);
+  });
+
+  it("renders action choices as radio selection controls with intent-not-command helper copy", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    // Actions are grouped radio controls, one per supported action — not command buttons.
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('type="radio"');
+    expect(html).toContain('value="ADD_ITEM"');
+    expect(html).not.toContain('value="UPDATE_SESSION"');
+    expect(html).not.toContain('value="UPDATE_SESSION_ITEMS"');
+    // Helper copy makes clear the choice is intent only.
+    expect(html).toContain(
+      "Choose one revision action. Nothing is applied until you add it to plan changes.",
+    );
+  });
+
+  it("marks the chosen action's radio as selected and leaves the rest unselected", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+
+    // No action chosen yet: nothing is marked selected.
+    const unselected = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    expect(unselected).not.toMatch(/data-selected="true"/);
+
+    // Selecting an action is reflected on exactly that radio control.
+    const selected = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+        }),
+      ),
+    );
+    expect(selected).toMatch(/data-selected="true"[^>]*value="ADD_ITEM"/);
+    expect(selected.match(/data-selected="true"/g)).toHaveLength(1);
+  });
+
+  it("does not show the retired max-4 drill batch action for Skills Milestone 1", () => {
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "SKILLS",
+      scheduleDays: skillsSchedule,
+    });
+    const sessionTarget = targets.find((option) => option.level === "SESSION");
+    const skillsHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+        }),
+      ),
+    );
+    expect(skillsHtml).not.toContain("Edit several drills in this session");
+    expect(skillsHtml).not.toContain(
+      "Counts as 1 revision change. Describe up to 4 drill edits for this session.",
+    );
+
+    // Nutrition never offers or shows the batch drill copy.
+    const nutritionContext = makeRevisionContext({ generationDomain: "NUTRITION" });
+    const nutritionTargets = fynRevisionLeveledTargetOptions(nutritionContext, {
+      domain: "NUTRITION",
+      scheduleDays: [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+                { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const nutritionSession = nutritionTargets.find((option) => option.level === "SESSION");
+    const nutritionHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "NUTRITION",
+          context: nutritionContext,
+          targetOptions: nutritionTargets,
+          selectedTargetKey: nutritionSession?.key ?? null,
+        }),
+      ),
+    );
+    expect(nutritionHtml).not.toContain("up to 4 drill edits");
+    expect(nutritionHtml).not.toContain("Edit several drills in this session");
+  });
+
+  describe("Nutrition meal-minimum guidance", () => {
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const renderForDomain = (
+      domain: "SKILLS" | "NUTRITION" | "S_AND_C",
+      scheduleDays: unknown[],
+      extra: Record<string, unknown> = {},
+    ): string => {
+      const context = makeRevisionContext({ generationDomain: domain });
+      const targets = fynRevisionLeveledTargetOptions(context, { domain, scheduleDays });
+      return renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({ domain, context, targetOptions: targets, ...extra }),
+        ),
+      );
+    };
+
+    it("mirrors the backend-confirmed meal-slot minimums as a frontend constant", () => {
+      expect(NUTRITION_MEAL_SLOT_MIN_ITEMS).toEqual({
+        BREAKFAST: 3,
+        MID_MORNING_SNACK: 2,
+        LUNCH: 4,
+        MID_AFTERNOON_SNACK: 2,
+        DINNER: 4,
+      });
+      // Only the five valid meal slots are represented.
+      expect(Object.keys(NUTRITION_MEAL_SLOT_MIN_ITEMS)).toEqual([
+        "BREAKFAST",
+        "MID_MORNING_SNACK",
+        "LUNCH",
+        "MID_AFTERNOON_SNACK",
+        "DINNER",
+      ]);
+    });
+
+    it("shows the meal-minimum guidance with exact values for Nutrition", () => {
+      const html = renderForDomain("NUTRITION", nutritionSchedule);
+      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).toContain(
+        "Meal minimums: Breakfast requires at least 3 items, mid-morning snack at least 2, " +
+          "lunch at least 4, mid-afternoon snack at least 2, and dinner at least 4. " +
+          "If removing an item would drop a meal below its minimum, replace it instead or add " +
+          "another item to the same meal.",
+      );
+    });
+
+    it("lists only the five valid meal slots and no invalid ones", () => {
+      const html = renderForDomain("NUTRITION", nutritionSchedule);
+      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      const guidance = NUTRITION_MEAL_MINIMUMS_GUIDANCE.toLowerCase();
+      for (const slot of ["breakfast", "mid-morning snack", "lunch", "mid-afternoon snack", "dinner"]) {
+        expect(guidance).toContain(slot);
+      }
+      for (const invalid of ["hydration", "recovery", "pre-training", "post-training", "anytime"]) {
+        expect(guidance).not.toContain(invalid);
+      }
+      // A bare "snack" slot (without the mid-morning/afternoon qualifier) is never introduced.
+      expect(guidance).not.toMatch(/(?<!mid-morning |mid-afternoon )snack\b/);
+    });
+
+    it("shows the Remove-carefully warning only when Remove food item is selected for Nutrition", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+
+      const withRemove = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+          }),
+        ),
+      );
+      expect(withRemove).toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+
+      const withReplace = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(withReplace).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+    });
+
+    it("does not show Nutrition meal-minimum guidance for Skills", () => {
+      const html = renderForDomain("SKILLS", skillsSchedule);
+      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).not.toContain("Meal minimums:");
+    });
+
+    it("does not show Nutrition meal-minimum guidance for S&C", () => {
+      const sandcSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Lower body",
+              items: [
+                { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+              ],
+            },
+          ],
+        },
+      ];
+      const html = renderForDomain("S_AND_C", sandcSchedule);
+      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
+      expect(html).not.toContain("Meal minimums:");
+    });
+
+    it("exposes Skills Remove without Nutrition minimum warnings", () => {
+      const context = makeRevisionContext({ generationDomain: "SKILLS" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "SKILLS",
+        scheduleDays: skillsSchedule,
+      });
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+          }),
+        ),
+      );
+      expect(html).toContain("Remove drill");
+      expect(html).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+    });
+  });
+
+  describe("Skills deterministic single-patch flow", () => {
+    const skillsSchedule = [
+      {
+        dayIndex: 2,
+        sessions: [
+          {
+            sessionIndex: 3,
+            title: "Short game",
+            items: [
+              {
+                order: 0,
+                label: "Current drill",
+                skillCode: "CURRENT",
+                durationMinutes: 15,
+                reps: "3 lengths x 4 balls",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const context = makeRevisionContext({ generationDomain: "SKILLS" });
+    const targets = () =>
+      fynRevisionLeveledTargetOptions(context, {
+        domain: "SKILLS",
+        scheduleDays: skillsSchedule,
+      });
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "PACE_CONTROL_01",
+      rank: 1,
+      label: "Pace control ladder",
+      domain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      source: "DB",
+      score: 0.95,
+      reason: "Matches the session goal",
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      metadata: {
+        untrustedCanonicalName: "Do not submit",
+        reps: 999,
+      },
+    };
+
+    it("builds the exact ADD_ITEM patch using only option.id as skillCode", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const patch = buildSkillsRevisionPatch({
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+      });
+
+      expect(patch).toEqual({
+        operation: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        item: { skillCode: "PACE_CONTROL_01" },
+      });
+      expect(patch).not.toHaveProperty("itemIndex");
+      expect(patch!.item).not.toHaveProperty("label");
+      expect(patch!.item).not.toHaveProperty("metadata");
+      expect(patch!.item).not.toHaveProperty("reps");
+    });
+
+    it("assembles one exact structured revision payload", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+        coachRequest: "Keep the progression simple.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Add drill Pace control ladder to Short game. Keep the progression simple.",
+        revisionPatch: {
+          operation: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          item: { skillCode: "PACE_CONTROL_01" },
+        },
+      });
+    });
+
+    it("builds the exact REMOVE_ITEM payload from the selected drill", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: itemTarget,
+        actionKey: "REMOVE_ITEM",
+        coachRequest: "Remove it from this session.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Remove drill Current drill from Short game. Remove it from this session.",
+        revisionPatch: {
+          operation: "REMOVE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          itemIndex: 1,
+          item: { skillCode: "CURRENT" },
+        },
+      });
+    });
+
+    it("builds string-reps, duration-only, and combined UPDATE_ITEM patches", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      expect(itemTarget.reps).toBe("3 lengths x 4 balls");
+
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+          reps: "   ",
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", durationMinutes: 20 },
+      });
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          reps: " 10-12 balls ",
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", reps: "10-12 balls" },
+      });
+      expect(
+        buildSkillsRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 25,
+          reps: "18 randomized balls",
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: {
+          skillCode: "CURRENT",
+          durationMinutes: 25,
+          reps: "18 randomized balls",
+        },
+      });
+    });
+
+    it("renders Skills reps verbatim without appending a second reps label", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+
+      expect(source).toContain(
+        'options.showSkillsRepsVerbatim\n          ? displayValue(item.reps)',
+      );
+      expect(source).toContain('domain === "SKILLS"\n                                      ? displayValue(item.reps)');
+    });
+
+    it("assembles the exact UPDATE_ITEM submission without mutable drill metadata", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const submission = buildSkillsRevisionSubmission({
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        target: itemTarget,
+        actionKey: "UPDATE_ITEM",
+        durationMinutes: 20,
+        reps: "18 randomized balls",
+        coachRequest: "Use this for the next progression.",
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "skills-plan-1",
+        versionId: "skills-v1",
+        coachFeedback:
+          "Change drill parameters for Current drill in Short game. Use this for the next progression.",
+        revisionPatch: {
+          operation: "UPDATE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 3,
+          itemIndex: 1,
+          item: {
+            skillCode: "CURRENT",
+            durationMinutes: 20,
+            reps: "18 randomized balls",
+          },
+        },
+      });
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("label");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("summary");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("notes");
+      expect(submission!.revisionPatch!.item).not.toHaveProperty("itemType");
+    });
+
+    it("keeps Apply blocked for empty/unchanged values and incomplete UPDATE_ITEM targets", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const base = {
+        reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+        actionKey: "UPDATE_ITEM" as const,
+      };
+
+      expect(buildSkillsRevisionSubmission({ ...base, target: itemTarget })).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: itemTarget,
+          durationMinutes: 15,
+          reps: "3 lengths x 4 balls",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: sessionTarget,
+          durationMinutes: 20,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: {
+            ...itemTarget,
+            target: { ...itemTarget.target, currentId: null },
+          },
+          reps: "10-12 balls",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          ...base,
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          reps: "10-12 balls",
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks REMOVE_ITEM for wrong or incomplete targets", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: sessionTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, dayIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            target: { ...itemTarget.target, currentId: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds: { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("keeps free chat visible for Remove Drill and does not request approved options", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            coachRequest: "Remove this drill.",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Remove drill");
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      expect(html).not.toContain("Add to plan changes");
+    });
+
+    it("keeps free chat visible for Change Drill Parameters without approved options", () => {
+      const itemTarget = targets().find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Change drill parameters");
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      expect(html).not.toContain("Add to plan changes");
+    });
+
+    it("shows a selected DB option in single-patch mode, keeps chat, and hides the basket", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: sessionTarget.key,
+            selectedActionKey: "ADD_ITEM",
+            coachRequest: "Add a pace-control drill.",
+            singlePatchMode: true,
+            selectedOptionId: approvedOption.id,
+            optionsState: {
+              loading: false,
+              error: null,
+              message: null,
+              options: [approvedOption],
+              searched: true,
+            },
+          }),
+        ),
+      );
+
+      expect(html).toContain(SKILLS_SINGLE_PATCH_GUIDANCE);
+      expect(html).toContain('data-testid="fyn-skills-selected-option"');
+      expect(html).toContain('data-selected="true"');
+      expect(html).toContain("<textarea");
+      expect(html).not.toContain("Revision basket");
+      expect(html).not.toContain("Add to plan changes");
+    });
+
+    it("pins the returned Skills version and rebuilds targets after the latest plan reload", async () => {
+      expect(nextSkillsRevisionVersionId({ versionId: "skills-v2" })).toBe("skills-v2");
+      expect(
+        resolveActiveSkillsReviseIds(
+          { trainingPlanId: "skills-plan-1", versionId: "skills-v1" },
+          { trainingPlanId: "skills-plan-1", versionId: "skills-v2" },
+        ),
+      ).toEqual({ trainingPlanId: "skills-plan-1", versionId: "skills-v2" });
+
+      const events: string[] = [];
+      let schedule: readonly unknown[] = skillsSchedule;
+      let rebuiltTargets = targets();
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("reload");
+          schedule = [
+            {
+              ...skillsSchedule[0],
+              sessions: [
+                {
+                  ...skillsSchedule[0].sessions[0],
+                  items: [
+                    {
+                      ...skillsSchedule[0].sessions[0].items[0],
+                      durationMinutes: 20,
+                      reps: "18 randomized balls",
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              dayIndex: 4,
+              sessions: [{ sessionIndex: 1, title: "Putting", items: [] }],
+            },
+          ];
+        },
+        rebuildTargetOptions: async () => {
+          events.push("rebuild");
+          rebuiltTargets = fynRevisionLeveledTargetOptions(context, {
+            domain: "SKILLS",
+            scheduleDays: schedule,
+          });
+        },
+      });
+
+      expect(events).toEqual(["reload", "rebuild"]);
+      expect(
+        rebuiltTargets
+          .filter((target) => target.level === "SESSION")
+          .map((target) => target.sessionLabel),
+      ).toEqual(["Short game", "Putting"]);
+      expect(
+        rebuiltTargets.find(
+          (target) => target.level === "ITEM" && target.target.currentId === "CURRENT",
+        ),
+      ).toMatchObject({ durationMinutes: 20, reps: "18 randomized balls" });
+    });
+
+    it("does not reload or replace the current plan when the Skills revision request fails", async () => {
+      const currentPlan = { versionId: "skills-v1", days: skillsSchedule };
+      let renderedPlan = currentPlan;
+      let activeVersionId = "skills-v1";
+      const reload = vi.fn(async () => {
+        renderedPlan = { versionId: "skills-v2", days: [] };
+      });
+      const rebuild = vi.fn(async () => {});
+      const revise = vi.fn(async () => {
+        throw new Error("Revision rejected");
+      });
+
+      try {
+        await revise();
+        activeVersionId = "skills-v2";
+        await runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: reload,
+          rebuildTargetOptions: rebuild,
+        });
+      } catch {
+        // The component's Skills catch path reports the error without plan/reload state changes.
+      }
+
+      expect(renderedPlan).toBe(currentPlan);
+      expect(activeVersionId).toBe("skills-v1");
+      expect(reload).not.toHaveBeenCalled();
+      expect(rebuild).not.toHaveBeenCalled();
+    });
+
+    it("does not change Nutrition capabilities", () => {
+      expect(FYN_REVISION_CAPABILITIES.NUTRITION).toEqual({
+        levels: ["SESSION", "ITEM"],
+        actionsByLevel: {
+          DAY: [],
+          SESSION: ["ADD_ITEM"],
+          ITEM: ["REPLACE_ITEM", "UPDATE_ITEM", "REMOVE_ITEM"],
+        },
+      });
+    });
+  });
+
+  describe("S&C deterministic single-patch flow", () => {
+    const sandCSchedule = [
+      {
+        dayIndex: 2,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Lower body",
+            items: [
+              {
+                order: 0,
+                label: "Back squat",
+                exerciseCatalogItemId: "exercise-current",
+                durationMinutes: 20,
+                sets: 3,
+                reps: 8,
+              },
+              {
+                order: 1,
+                label: "Split squat",
+                exerciseCatalogItemId: "exercise-second",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const context = makeRevisionContext({ generationDomain: "S_AND_C" });
+    const targets = () =>
+      fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: sandCSchedule,
+      });
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "display-option-id",
+      exerciseCatalogItemId: "exercise-approved",
+      rank: 1,
+      label: "Goblet squat",
+      domain: "S_AND_C",
+      optionKind: "ADD_ITEM",
+      source: "DB",
+      score: 0.9,
+      reason: "Matches the session",
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      metadata: { exerciseCatalogItemId: "do-not-infer" },
+    };
+
+    it("builds ADD/REMOVE/UPDATE patches with exerciseCatalogItemId and numeric fields", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+
+      expect(
+        buildSandCRevisionPatch({
+          target: sessionTarget,
+          actionKey: "ADD_ITEM",
+          option: approvedOption,
+          durationMinutes: 15,
+          sets: 2,
+          reps: 10,
+        }),
+      ).toEqual({
+        type: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        item: {
+          exerciseCatalogItemId: "exercise-approved",
+          durationMinutes: 15,
+          sets: 2,
+          reps: 10,
+        },
+      });
+      expect(
+        buildSandCRevisionPatch({ target: itemTarget, actionKey: "REMOVE_ITEM" }),
+      ).toEqual({
+        type: "REMOVE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-current" },
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 25,
+          sets: 4,
+          reps: 6,
+        }),
+      ).toEqual({
+        type: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: {
+          exerciseCatalogItemId: "exercise-current",
+          durationMinutes: 25,
+          sets: 4,
+          reps: 6,
+        },
+      });
+    });
+
+    it("initializes UPDATE_ITEM steppers only from positive-integer context values", () => {
+      const numericTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      expect(sandCParameterValuesForAction(numericTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 20,
+        sets: 3,
+        reps: 8,
+      });
+
+      const stringAndDescriptiveTargets = fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    label: "Squat",
+                    exerciseCatalogItemId: "exercise-squat",
+                    durationMinutes: "20",
+                    sets: "3",
+                    reps: "8",
+                  },
+                  {
+                    label: "Carry",
+                    exerciseCatalogItemId: "exercise-carry",
+                    durationMinutes: null,
+                    sets: "3 rounds",
+                    reps: "To fatigue",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      expect(
+        sandCParameterValuesForAction(
+          stringAndDescriptiveTargets.find((target) => target.itemLabel === "Squat") ?? null,
+          "UPDATE_ITEM",
+        ),
+      ).toEqual({
+        durationMinutes: 20,
+        sets: 3,
+        reps: 8,
+      });
+      expect(
+        sandCParameterValuesForAction(
+          stringAndDescriptiveTargets.find((target) => target.itemLabel === "Carry") ?? null,
+          "UPDATE_ITEM",
+        ),
+      ).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+    });
+
+    it("clears Update values for Add and initializes fresh values from Remove to Update", () => {
+      const firstTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const secondTarget = {
+        ...targets().find((target) => target.itemLabel === "Split squat")!,
+        durationMinutes: 12,
+        sets: 2,
+        numericReps: 6,
+      };
+
+      const updateValues = sandCParameterValuesForAction(firstTarget, "UPDATE_ITEM");
+      expect(updateValues).toEqual({ durationMinutes: 20, sets: 3, reps: 8 });
+      expect(sandCParameterValuesForAction(firstTarget, "ADD_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(firstTarget, "REMOVE_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(secondTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 12,
+        sets: 2,
+        reps: 6,
+      });
+    });
+
+    it("emits only changed positive-integer UPDATE_ITEM fields with exact target identity", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const expectedBase = {
+        type: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-current" },
+      } as const;
+
+      for (const [values, changed] of [
+        [{ durationMinutes: 25 }, { durationMinutes: 25 }],
+        [{ sets: 4 }, { sets: 4 }],
+        [{ reps: 9 }, { reps: 9 }],
+        [
+          { durationMinutes: 25, sets: 4, reps: 9 },
+          { durationMinutes: 25, sets: 4, reps: 9 },
+        ],
+      ] as const) {
+        const patch = buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          ...values,
+        });
+        expect(patch).toEqual({
+          ...expectedBase,
+          item: { ...expectedBase.item, ...changed },
+        });
+        expect(patch?.item).not.toHaveProperty("label");
+        expect(patch?.item).not.toHaveProperty("notes");
+        expect(patch?.item).not.toHaveProperty("intensity");
+        expect(patch?.item).not.toHaveProperty("equipment");
+        expect(patch?.item).not.toHaveProperty("metadata");
+        expect(patch?.item).not.toHaveProperty("tempo");
+        expect(patch?.item).not.toHaveProperty("rpe");
+        expect(patch?.item).not.toHaveProperty("workload");
+        expect(patch?.item).not.toHaveProperty("description");
+      }
+
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+          sets: 3,
+          reps: 8,
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          sets: 0,
+          reps: 1.5,
+        }),
+      ).toBeNull();
+
+      const secondTarget = targets().find((target) => target.itemLabel === "Split squat")!;
+      expect(
+        buildSandCRevisionPatch({
+          target: secondTarget,
+          actionKey: "UPDATE_ITEM",
+          sets: 1,
+        }),
+      ).toMatchObject({
+        type: "UPDATE_ITEM",
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-second", sets: 1 },
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: {
+            ...itemTarget,
+            exerciseCatalogItemId: null,
+            target: { ...itemTarget.target, currentId: "label-derived-id" },
+          },
+          actionKey: "UPDATE_ITEM",
+          sets: 4,
+        }),
+      ).toBeNull();
+    });
+
+    it("renders UPDATE_ITEM as steppers without text or an options request", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+            sandCAddItemValues: sandCParameterValuesForAction(itemTarget, "UPDATE_ITEM"),
+          }),
+        ),
+      );
+
+      expect(html).toContain('data-testid="fyn-sandc-update-item-steppers"');
+      expect(html).toContain('data-testid="fyn-sandc-durationMinutes-value">20');
+      expect(html).toContain('data-testid="fyn-sandc-sets-value">3');
+      expect(html).toContain('data-testid="fyn-sandc-reps-value">8');
+      expect(html).not.toContain("<textarea");
+      expect(html).not.toContain('type="text"');
+      expect(html).not.toContain('type="number"');
+      expect(html).not.toContain('type="range"');
+      expect(html).not.toContain("Show approved options");
+    });
+
+    it("builds the exact one-based REMOVE_ITEM patch from the selected target catalog ID", () => {
+      const secondItemTarget = targets().find((target) => target.itemLabel === "Split squat")!;
+
+      expect(
+        buildSandCRevisionPatch({
+          target: secondItemTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toEqual({
+        type: "REMOVE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-second" },
+      });
+      expect({
+        ...secondItemTarget.indices,
+        sessionItemCount: secondItemTarget.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        sessionItemCount: 2,
+      });
+    });
+
+    it("scopes flat targetMap count and one-based item index to each selected session", () => {
+      const flatContext = makeRevisionContext({
+        generationDomain: "S_AND_C",
+        targetMap: [
+          {
+            dayIndex: 2,
+            sessionIndex: 1,
+            itemKey: "exercise-a",
+            label: "Back squat",
+            exerciseCatalogItemId: "exercise-a",
+          },
+          {
+            dayIndex: 2,
+            sessionIndex: 2,
+            itemKey: "exercise-b",
+            label: "Mobility flow",
+            exerciseCatalogItemId: "exercise-b",
+          },
+          {
+            dayIndex: 2,
+            sessionIndex: 1,
+            itemKey: "exercise-c",
+            label: "Split squat",
+            exerciseCatalogItemId: "exercise-c",
+          },
+        ],
+      });
+      const flatTargets = fynRevisionLeveledTargetOptions(flatContext, {
+        domain: "S_AND_C",
+        scheduleDays: [],
+      });
+      const firstSessionSecondItem = flatTargets.find(
+        (target) => target.itemLabel === "Split squat",
+      )!;
+      const secondSessionOnlyItem = flatTargets.find(
+        (target) => target.itemLabel === "Mobility flow",
+      )!;
+
+      expect({
+        ...firstSessionSecondItem.indices,
+        sessionItemCount: firstSessionSecondItem.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        sessionItemCount: 2,
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: firstSessionSecondItem,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toEqual({
+        type: "REMOVE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 2,
+        item: { exerciseCatalogItemId: "exercise-c" },
+      });
+      expect({
+        ...secondSessionOnlyItem.indices,
+        sessionItemCount: secondSessionOnlyItem.sessionItemCount,
+      }).toEqual({
+        dayIndex: 2,
+        sessionIndex: 2,
+        itemIndex: 1,
+        sessionItemCount: 1,
+      });
+      expect(
+        fynRevisionAvailableActions("S_AND_C", secondSessionOnlyItem).map(
+          (action) => action.key,
+        ),
+      ).not.toContain("REMOVE_ITEM");
+      expect(
+        buildSandCRevisionPatch({
+          target: secondSessionOnlyItem,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks REMOVE_ITEM for invalid targets and never derives identity from a label", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: sessionTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: {
+            ...itemTarget,
+            exerciseCatalogItemId: null,
+            target: { ...itemTarget.target, currentId: itemTarget.itemLabel },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: {
+            ...itemTarget,
+            indices: { ...itemTarget.indices, itemIndex: null },
+          },
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("renders Remove Exercise without free text or an options request", () => {
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain("Remove exercise");
+      expect(html).not.toContain("Tell Fyn what to change");
+      expect(html).not.toContain("Show approved options");
+      expect(html).not.toContain("<textarea");
+    });
+
+    it("blocks removal of the final exercise and shows minimum guidance", () => {
+      const soleExerciseSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Lower body",
+              items: [
+                {
+                  label: "Back squat",
+                  exerciseCatalogItemId: "exercise-current",
+                },
+              ],
+            },
+          ],
+        },
+      ];
+      const soleTargets = fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: soleExerciseSchedule,
+      });
+      const soleItemTarget = soleTargets.find((target) => target.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: soleTargets,
+            selectedTargetKey: soleItemTarget.key,
+            selectedActionKey: "REMOVE_ITEM",
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(
+        fynRevisionAvailableActions("S_AND_C", soleItemTarget).map((action) => action.key),
+      ).not.toContain("REMOVE_ITEM");
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: soleItemTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+      expect(html).toContain("A session must contain at least one exercise.");
+      expect(html).toContain('data-testid="fyn-sandc-remove-minimum"');
+      expect(html).toContain('disabled="" name="fyn-revision-action-S_AND_C" value="REMOVE_ITEM"');
+    });
+
+    it("returns null until the required Add/Remove/Update state exists", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const itemTarget = targets().find((target) => target.itemLabel === "Back squat")!;
+
+      expect(
+        buildSandCRevisionPatch({
+          target: sessionTarget,
+          actionKey: "ADD_ITEM",
+          option: { ...approvedOption, exerciseCatalogItemId: undefined },
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionPatch({ target: itemTarget, actionKey: "UPDATE_ITEM" }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionPatch({
+          target: itemTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+          sets: 3,
+          reps: 8,
+        }),
+      ).toBeNull();
+      expect(
+        buildSandCRevisionPatch({
+          target: sessionTarget,
+          actionKey: "REMOVE_ITEM",
+        }),
+      ).toBeNull();
+    });
+
+    it("assembles one S&C submission with revisionPatch against the supplied rendered version", () => {
+      const submission = buildSandCRevisionSubmission({
+        reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+        target: targets().find((target) => target.level === "SESSION")!,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+        coachRequest: "Keep the load conservative.",
+        durationMinutes: 15,
+        sets: 2,
+        reps: 10,
+      });
+
+      expect(submission).toEqual({
+        trainingPlanId: "sandc-plan-1",
+        versionId: "sandc-v2",
+        coachFeedback:
+          "Add exercise Goblet squat to Lower body. Keep the load conservative.",
+        revisionPatch: {
+          type: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          item: {
+            exerciseCatalogItemId: "exercise-approved",
+            durationMinutes: 15,
+            sets: 2,
+            reps: 10,
+          },
+        },
+      });
+    });
+
+    it("keeps Add Exercise values unset and uses positive-integer stepper semantics", () => {
+      expect(adjustSandCPositiveInteger(null, 1)).toBe(1);
+      expect(adjustSandCPositiveInteger(null, -1)).toBeNull();
+      expect(adjustSandCPositiveInteger(1, -1)).toBe(1);
+      expect(adjustSandCPositiveInteger(2, -1)).toBe(1);
+      expect(adjustSandCPositiveInteger(1, 1)).toBe(2);
+
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: targets().find((target) => target.level === "SESSION")!.key,
+            selectedActionKey: "ADD_ITEM",
+            singlePatchMode: true,
+            selectedOptionId: approvedOption.id,
+            optionsState: {
+              ...defaultFynRevisionOptionsState(),
+              options: [approvedOption],
+            },
+            sandCAddItemValues: {
+              durationMinutes: null,
+              sets: null,
+              reps: null,
+            },
+          }),
+        ),
+      );
+
+      expect(html).toContain('data-testid="fyn-sandc-add-item-steppers"');
+      expect(html.match(/>Unset</g)).toHaveLength(3);
+      expect(html).not.toContain('type="number"');
+      expect(html).not.toContain('type="range"');
+    });
+
+    it("blocks Add Exercise until every absolute value is a positive integer", () => {
+      const target = targets().find((entry) => entry.level === "SESSION")!;
+      const build = (durationMinutes: number | null, sets: number | null, reps: number | null) =>
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target,
+          actionKey: "ADD_ITEM",
+          option: approvedOption,
+          durationMinutes,
+          sets,
+          reps,
+        });
+
+      expect(build(null, null, null)).toBeNull();
+      expect(build(1, 1, null)).toBeNull();
+      expect(build(1.5, 1, 1)).toBeNull();
+      expect(build(0, 1, 1)).toBeNull();
+
+      const submission = build(12, 3, 8)!;
+      expect(submission.revisionPatch).toEqual({
+        type: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        item: {
+          exerciseCatalogItemId: "exercise-approved",
+          durationMinutes: 12,
+          sets: 3,
+          reps: 8,
+        },
+      });
+      expect(submission.revisionPatch).not.toHaveProperty("itemIndex");
+      expect(submission.revisionPatch.item).toEqual({
+        exerciseCatalogItemId: "exercise-approved",
+        durationMinutes: 12,
+        sets: 3,
+        reps: 8,
+      });
+      expect(typeof submission.revisionPatch.item.durationMinutes).toBe("number");
+      expect(typeof submission.revisionPatch.item.sets).toBe("number");
+      expect(typeof submission.revisionPatch.item.reps).toBe("number");
+      expect(submission.revisionPatch.item).not.toHaveProperty("label");
+      expect(submission.revisionPatch.item).not.toHaveProperty("notes");
+      expect(submission.revisionPatch.item).not.toHaveProperty("intensity");
+    });
+
+    it("enables Add Apply and submits the exact 8/2/2 patch from a mapped catalog option id", async () => {
+      const optionId = "10d68fc7-b875-4cf6-8139-86e2cbf57d53";
+      const liveCatalogOption = {
+        ...approvedOption,
+        id: optionId,
+        label: "Trunk Rotation With Cable",
+        exerciseCatalogItemId: optionId,
+      };
+      const submission = buildSandCRevisionSubmission({
+        reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+        target: targets().find((entry) => entry.level === "SESSION")!,
+        actionKey: "ADD_ITEM",
+        option: liveCatalogOption,
+        durationMinutes: 8,
+        sets: 2,
+        reps: 2,
+      });
+
+      // The rendered Apply button uses this same non-null submission as its S&C can-apply gate.
+      expect(submission).not.toBeNull();
+      expect(submission?.revisionPatch).toEqual({
+        type: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        item: {
+          exerciseCatalogItemId: optionId,
+          durationMinutes: 8,
+          sets: 2,
+          reps: 2,
+        },
+      });
+
+      const revise = vi.fn(async (submitted: NonNullable<typeof submission>) => ({
+        planId: "sandc-plan-1",
+        versionId: "sandc-v3",
+        versionNumber: 3,
+        generationDomain: "S_AND_C" as const,
+        detail: null,
+        raw: submitted.revisionPatch,
+      }));
+      await runSandCStructuredRevisionSequence({
+        submit: () => revise(submission!),
+        pinReturnedVersion: vi.fn(),
+        reconcilePlan: vi.fn(async () => undefined),
+        reloadLatestPlan: vi.fn(async () => true),
+        reloadRevisionContext: vi.fn(async () => true),
+        resetTemporaryState: vi.fn(),
+      });
+      expect(revise).toHaveBeenCalledWith(submission);
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: targets().find((entry) => entry.level === "SESSION")!,
+          actionKey: "ADD_ITEM",
+          option: { ...liveCatalogOption, id: "", exerciseCatalogItemId: undefined },
+          durationMinutes: 8,
+          sets: 2,
+          reps: 2,
+        }),
+      ).toBeNull();
+    });
+
+    it("discards a pending options response after the target changes", async () => {
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      let current = pending;
+      let resolveRequest!: () => void;
+      const request = new Promise<void>((resolve) => {
+        resolveRequest = resolve;
+      }).then(() => fynRevisionOptionsResponseIsCurrent(pending, current));
+
+      current = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 2,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      resolveRequest();
+
+      await expect(request).resolves.toBe(false);
+    });
+
+    it("discards a pending options response after the action changes", async () => {
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      let current = pending;
+      let resolveRequest!: () => void;
+      const request = new Promise<void>((resolve) => {
+        resolveRequest = resolve;
+      }).then(() => fynRevisionOptionsResponseIsCurrent(pending, current));
+
+      current = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "UPDATE_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          itemIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      resolveRequest();
+
+      await expect(request).resolves.toBe(false);
+    });
+
+    it("discards an older response and accepts only the current options request", () => {
+      const selectionKey = buildFynRevisionOptionsRequestSelectionKey({
+        domain: "S_AND_C",
+        actionKey: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        activeVersionId: "sandc-v2",
+      });
+      const stale = { requestId: 1, selectionKey };
+      const current = { requestId: 2, selectionKey };
+      let newerRequestLoading = true;
+      if (fynRevisionOptionsResponseIsCurrent(stale, current)) {
+        newerRequestLoading = false;
+      }
+
+      expect(fynRevisionOptionsResponseIsCurrent(stale, current)).toBe(false);
+      expect(fynRevisionOptionsResponseIsCurrent(current, current)).toBe(true);
+      expect(newerRequestLoading).toBe(true);
+    });
+
+    it("scopes stale-response guarding to S&C without changing Skills or Nutrition", () => {
+      expect(fynRevisionOptionsUsesStaleResponseGuard("S_AND_C")).toBe(true);
+      expect(fynRevisionOptionsUsesStaleResponseGuard("SKILLS")).toBe(false);
+      expect(fynRevisionOptionsUsesStaleResponseGuard("NUTRITION")).toBe(false);
+    });
+
+    it("uses the version-dependent effect as the only S&C version invalidation path", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+      const pinStart = source.indexOf("pinReturnedVersion: (reviseResult)");
+      const pinEnd = source.indexOf("reconcilePlan:", pinStart);
+      const pinCallback = source.slice(pinStart, pinEnd);
+
+      expect(pinStart).toBeGreaterThan(-1);
+      expect(pinEnd).toBeGreaterThan(pinStart);
+      expect(pinCallback).not.toContain("fynRevisionOptionsRequestRef");
+      expect(pinCallback).not.toContain("setFynRevisionOptionStates");
+      expect(source).toContain(
+        "sandCActiveReviseIds?.versionId,\n    sandCReviseIds?.trainingPlanId,\n    sandCReviseIds?.versionId,",
+      );
+    });
+
+    it("does not let a discarded stale option enable Apply", () => {
+      const target = targets().find((entry) => entry.level === "SESSION")!;
+      const pending = {
+        requestId: 1,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 1,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      const current = {
+        requestId: 2,
+        selectionKey: buildFynRevisionOptionsRequestSelectionKey({
+          domain: "S_AND_C",
+          actionKey: "ADD_ITEM",
+          dayIndex: 2,
+          sessionIndex: 2,
+          activeVersionId: "sandc-v2",
+        }),
+      };
+      const selectedOption = fynRevisionOptionsResponseIsCurrent(pending, current)
+        ? approvedOption
+        : null;
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target,
+          actionKey: "ADD_ITEM",
+          option: selectedOption,
+          durationMinutes: 12,
+          sets: 3,
+          reps: 8,
+        }),
+      ).toBeNull();
+    });
+
+    it("uses single-patch UI and bypasses the free-text multi-change basket", () => {
+      const sessionTarget = targets().find((target) => target.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: targets(),
+            selectedTargetKey: sessionTarget.key,
+            selectedActionKey: "ADD_ITEM",
+            coachRequest: "Add a safe exercise.",
+            selection: { changes: [{ acceptedChange: "legacy basket change" }] },
+            singlePatchMode: true,
+          }),
+        ),
+      );
+
+      expect(html).toContain('data-testid="fyn-sandc-single-patch-guidance"');
+      expect(html).toContain("Apply one exercise change at a time.");
+      expect(html).not.toContain("Revision basket");
+      expect(html).not.toContain("Add to plan changes");
+      expect(html).not.toContain("add it to plan changes");
+    });
+
+    it("pins each returned version and resets only after plan and context refresh", async () => {
+      const base = { trainingPlanId: "sandc-plan-1", versionId: "sandc-v1" };
+      let pin: typeof base | null = null;
+      const events: string[] = [];
+      const submittedVersions: string[] = [];
+      const runRevision = async (returnedVersionId: string) => {
+        const reviseIds = resolveActiveSandCReviseIds(base, pin);
+        const submission = buildSandCRevisionSubmission({
+          reviseIds,
+          target: targets().find((target) => target.itemLabel === "Back squat")!,
+          actionKey: "REMOVE_ITEM",
+        })!;
+        await runSandCStructuredRevisionSequence({
+          submit: async () => {
+            events.push("submit");
+            submittedVersions.push(submission.versionId);
+            return {
+              planId: base.trainingPlanId,
+              versionId: returnedVersionId,
+              versionNumber: null,
+              generationDomain: "S_AND_C",
+              detail: null,
+              raw: null,
+            };
+          },
+          pinReturnedVersion: (result) => {
+            events.push("pin");
+            pin = {
+              trainingPlanId: base.trainingPlanId,
+              versionId: nextSandCRevisionVersionId(result)!,
+            };
+          },
+          reconcilePlan: async () => {
+            events.push("reconcile-plan");
+          },
+          reloadLatestPlan: async () => {
+            events.push("reload-plan");
+            return true;
+          },
+          reloadRevisionContext: async () => {
+            events.push("reload-context-and-rebuild-targets");
+            return true;
+          },
+          resetTemporaryState: () => {
+            events.push("reset");
+          },
+        });
+      };
+
+      await runRevision("sandc-v2");
+      expect(events).toEqual([
+        "submit",
+        "pin",
+        "reconcile-plan",
+        "reload-plan",
+        "reload-context-and-rebuild-targets",
+        "reset",
+      ]);
+
+      events.length = 0;
+      await runRevision("sandc-v3");
+      expect(submittedVersions).toEqual(["sandc-v1", "sandc-v2"]);
+      expect(pin?.versionId).toBe("sandc-v3");
+    });
+
+    it("preserves the Add Exercise selection when post-submit refresh fails", async () => {
+      const currentPlan = { versionId: "sandc-v1", days: sandCSchedule };
+      const renderedPlan = currentPlan;
+      let actionKey: string | null = "ADD_ITEM";
+      let targetKey: string | null = "session|2|1";
+      let selectedExerciseId: string | null = "exercise-approved";
+      let values = { durationMinutes: 12, sets: 3, reps: 8 };
+      const submit = vi.fn(async () => ({
+        planId: "sandc-plan-1",
+        versionId: "sandc-v2",
+        versionNumber: null,
+        generationDomain: "S_AND_C" as const,
+        detail: null,
+        raw: null,
+      }));
+      const reset = vi.fn(() => {
+        actionKey = null;
+        targetKey = null;
+        selectedExerciseId = null;
+        values = { durationMinutes: 0, sets: 0, reps: 0 };
+      });
+
+      await expect(
+        runSandCStructuredRevisionSequence({
+          submit,
+          pinReturnedVersion: () => {},
+          reconcilePlan: async () => {},
+          reloadLatestPlan: async () => true,
+          reloadRevisionContext: async () => false,
+          resetTemporaryState: reset,
+        }),
+      ).rejects.toThrow("Unable to reload S&C revision guidance.");
+
+      expect(renderedPlan).toBe(currentPlan);
+      expect(actionKey).toBe("ADD_ITEM");
+      expect(targetKey).toBe("session|2|1");
+      expect(selectedExerciseId).toBe("exercise-approved");
+      expect(values).toEqual({ durationMinutes: 12, sets: 3, reps: 8 });
+      expect(reset).not.toHaveBeenCalled();
+      expect(submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves the Remove Exercise target when post-submit refresh fails", async () => {
+      let targetKey: string | null = "item|2|1|1";
+      const reset = vi.fn(() => {
+        targetKey = null;
+      });
+
+      await expect(
+        runSandCStructuredRevisionSequence({
+          submit: async () => ({
+            planId: "sandc-plan-1",
+            versionId: "sandc-v2",
+            versionNumber: null,
+            generationDomain: "S_AND_C",
+            detail: null,
+            raw: null,
+          }),
+          pinReturnedVersion: () => {},
+          reconcilePlan: async () => {},
+          reloadLatestPlan: async () => false,
+          reloadRevisionContext: async () => true,
+          resetTemporaryState: reset,
+        }),
+      ).rejects.toThrow("Unable to reload the revised S&C plan.");
+
+      expect(targetKey).toBe("item|2|1|1");
+      expect(reset).not.toHaveBeenCalled();
+    });
+
+    it("preserves the UPDATE_ITEM target and edited values when refresh fails", async () => {
+      let targetKey: string | null = "item|2|1|1";
+      let values = { durationMinutes: 25, sets: 4, reps: 9 };
+      const reset = vi.fn(() => {
+        targetKey = null;
+        values = { durationMinutes: 20, sets: 3, reps: 8 };
+      });
+
+      await expect(
+        runSandCStructuredRevisionSequence({
+          submit: async () => ({
+            planId: "sandc-plan-1",
+            versionId: "sandc-v2",
+            versionNumber: null,
+            generationDomain: "S_AND_C",
+            detail: null,
+            raw: null,
+          }),
+          pinReturnedVersion: () => {},
+          reconcilePlan: async () => {},
+          reloadLatestPlan: async () => true,
+          reloadRevisionContext: async () => false,
+          resetTemporaryState: reset,
+        }),
+      ).rejects.toThrow("Unable to reload S&C revision guidance.");
+
+      expect(targetKey).toBe("item|2|1|1");
+      expect(values).toEqual({ durationMinutes: 25, sets: 4, reps: 9 });
+      expect(reset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Nutrition deterministic single-patch flow", () => {
+    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildNutritionTargets = () =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      // Authoritative catalog reference lives on the explicit top-level field.
+      nutritionCatalogItemId: "nut-9",
+      // Backend supplies the complete canonical item; ADD_ITEM / REPLACE_ITEM submit it verbatim.
+      item: {
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+      metadata: {
+        serving: "1 cup",
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+    };
+
+    it("maps Nutrition actions to only the four supported backend patch operations", () => {
+      expect(nutritionRevisionPatchOperation("UPDATE_SESSION")).toBeNull();
+      expect(nutritionRevisionPatchOperation("REPLACE_ITEM")).toBe("REPLACE_ITEM");
+      expect(nutritionRevisionPatchOperation("ADD_ITEM")).toBe("ADD_ITEM");
+      expect(nutritionRevisionPatchOperation("REMOVE_ITEM")).toBe("REMOVE_ITEM");
+      expect(nutritionRevisionPatchOperation("UPDATE_ITEM")).toBe("UPDATE_ITEM");
+      expect(nutritionRevisionPatchOperation("ADD_SESSION")).toBeNull();
+      expect(nutritionRevisionPatchOperation("REPLACE_DAY")).toBeNull();
+      expect(nutritionRevisionPatchOperation("UPDATE_SESSION_ITEMS")).toBeNull();
+    });
+
+    it("builds one REPLACE_ITEM patch with 1-based indices and the option's canonical item unchanged", () => {
+      const target = buildNutritionTargets().find(
+        (option) => option.level === "ITEM" && option.itemLabel === "White rice",
+      )!;
+      const patch = buildNutritionRevisionPatch({
+        target,
+        actionKey: "REPLACE_ITEM",
+        option: approvedOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(patch).toEqual({
+        operation: "REPLACE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: approvedOption.item,
+      });
+      // The canonical item is passed through by reference, never rebuilt from label/metadata.
+      expect(patch!.item).toBe(approvedOption.item);
+    });
+
+    it("uses 1-based itemIndex from the item's CURRENT array position (never item.order)", () => {
+      const targets = buildNutritionTargets();
+      const first = targets.find((o) => o.level === "ITEM" && o.itemLabel === "White rice")!;
+      const second = targets.find((o) => o.level === "ITEM" && o.itemLabel === "Juice")!;
+      expect(first.indices).toEqual({ dayIndex: 1, sessionIndex: 1, itemIndex: 1 });
+      expect(second.indices).toEqual({ dayIndex: 1, sessionIndex: 1, itemIndex: 2 });
+      expect(
+        buildNutritionRevisionPatch({ target: second, actionKey: "REMOVE_ITEM" }),
+      ).toEqual({ operation: "REMOVE_ITEM", dayIndex: 1, sessionIndex: 1, itemIndex: 2 });
+    });
+
+    it("builds one ADD_ITEM patch with no itemIndex (backend appends automatically)", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const patch = buildNutritionRevisionPatch({
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: approvedOption,
+      });
+      expect(patch).not.toHaveProperty("itemIndex");
+      expect(patch).toEqual({
+        operation: "ADD_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        item: approvedOption.item,
+      });
+      // The canonical item is passed through by reference, never rebuilt from label/metadata.
+      expect(patch!.item).toBe(approvedOption.item);
+    });
+
+    it("never builds or submits an UPDATE_SESSION patch for Nutrition", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const patch = buildNutritionRevisionPatch({
+        target: sessionTarget,
+        actionKey: "UPDATE_SESSION",
+        coachRequest: "Shift breakfast earlier.",
+      });
+      expect(patch).toBeNull();
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: sessionTarget,
+          actionKey: "UPDATE_SESSION",
+          coachRequest: "Shift breakfast earlier.",
+        }),
+      ).toBeNull();
+    });
+
+    it("returns the backend's canonical item verbatim (serving and every nutrition value preserved)", () => {
+      const item = buildNutritionRevisionOptionItem(approvedOption);
+      // Passed through by reference — nothing rebuilt from label/metadata.
+      expect(item).toBe(approvedOption.item);
+      expect(item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+      // With no canonical item the option carries no item to submit, so null is returned.
+      expect(
+        buildNutritionRevisionOptionItem({ ...approvedOption, item: undefined }),
+      ).toBeNull();
+    });
+
+    it("blocks submission until the required approved option is selected", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      expect(
+        buildNutritionRevisionPatch({ target: itemTarget, actionKey: "REPLACE_ITEM", option: null }),
+      ).toBeNull();
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: null,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: approvedOption,
+        }),
+      ).toBe(true);
+    });
+
+    it("blocks submission when no target or action is selected", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: null, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: itemTarget, actionKey: null }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({ reviseIds: null, target: itemTarget, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+    });
+
+    it("assembles a full submission with revisionPatch as the executable source of truth", () => {
+      const itemTarget = buildNutritionTargets().find(
+        (o) => o.level === "ITEM" && o.itemLabel === "White rice",
+      )!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: itemTarget,
+        actionKey: "REPLACE_ITEM",
+        option: approvedOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(submission).not.toBeNull();
+      expect(submission!.trainingPlanId).toBe("plan-1");
+      expect(submission!.versionId).toBe("ver-1");
+      // The structured patch is present and executable — the request never relies on feedback alone.
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "REPLACE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { nutritionCatalogItemId: "nut-9", label: "Oatmeal" },
+      });
+      // coachFeedback is only a human summary, not the source of truth.
+      expect(submission!.coachFeedback.trim().length).toBeGreaterThan(0);
+      expect(Object.keys(submission!)).toEqual([
+        "trainingPlanId",
+        "versionId",
+        "coachFeedback",
+        "revisionPatch",
+      ]);
+    });
+
+    it("hides the multi-change basket UI for Nutrition and shows single-patch guidance", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = buildNutritionTargets();
+      const sessionTarget = targets.find((o) => o.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: sessionTarget.key,
+            selectedActionKey: "ADD_ITEM",
+            singlePatchMode: true,
+            // A stale multi-change selection must never surface a basket in single-patch mode.
+            selection: { changes: [{ acceptedChange: "One" }, { acceptedChange: "Two" }] },
+          }),
+        ),
+      );
+      expect(html).toContain(NUTRITION_SINGLE_PATCH_GUIDANCE);
+      expect(html).not.toContain("Revision basket");
+      expect(html).not.toContain("Add to plan changes");
+      expect(html).not.toContain("You can make");
+    });
+
+    it("marks the chosen approved option chip in single-patch mode", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = buildNutritionTargets();
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+            singlePatchMode: true,
+            selectedOptionId: "opt-approved-1",
+            coachRequest: "Lighter option.",
+            optionsState: {
+              loading: false,
+              error: null,
+              message: null,
+              options: [approvedOption],
+              searched: true,
+            },
+          }),
+        ),
+      );
+      expect(html).toContain('data-selected="true"');
+      expect(html).toContain("Oatmeal");
+    });
+  });
+
+  describe("Nutrition item target submits its own current array position (no submit-time re-match)", () => {
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const approvedOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      nutritionCatalogItemId: "nut-9",
+      item: {
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+      metadata: { serving: "1 cup", timing: "Breakfast", notes: "High fibre" },
+    };
+    // Day 3 Breakfast renders 4 items; the stored `order` values are 0,1,2,4 and Idli is visibly the
+    // 4th item. A stale order-based index would send 5; the current array position is 4.
+    const staleOrderSchedule = [
+      {
+        dayIndex: 3,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a", serving: "1 bowl" },
+              { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b", serving: "1 cup" },
+              { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c", serving: "2 pcs" },
+              { order: 4, label: "Idli", nutritionCatalogItemId: "nut-idli", serving: "3 pcs" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+    const findItem = (scheduleDays: readonly unknown[], label: string) =>
+      buildTargets(scheduleDays).find((o) => o.level === "ITEM" && o.itemLabel === label)!;
+
+    it("submits the visible dropdown item's current array position + 1 directly", () => {
+      const banana = findItem(staleOrderSchedule, "Banana"); // 3rd item in the rendered meal
+      expect(banana.indices).toMatchObject({ dayIndex: 3, sessionIndex: 1, itemIndex: 3 });
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: banana,
+        actionKey: "REMOVE_ITEM",
+      });
+      // The submitted patch carries the dropdown target's own indices verbatim.
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "REMOVE_ITEM",
+        dayIndex: 3,
+        sessionIndex: 1,
+        itemIndex: 3,
+      });
+    });
+
+    it("submits the fourth item as itemIndex 4 even though its stored order is 4", () => {
+      const idli = findItem(staleOrderSchedule, "Idli"); // 4th item, stored order 4
+      expect(idli.indices.itemIndex).toBe(4);
+      const remove = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: idli,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(remove!.revisionPatch!.itemIndex).toBe(4);
+      expect(remove!.revisionPatch!.itemIndex).not.toBe(5);
+      // REPLACE_ITEM and UPDATE_ITEM submit the same current position.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: idli,
+          actionKey: "REPLACE_ITEM",
+          option: approvedOption,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(4);
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: idli,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 4,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(4);
+    });
+
+    it("submits the fourth item as itemIndex 4 even when the stored order is 5", () => {
+      // Order values need not be contiguous or aligned to position; position is the only truth.
+      const orderFiveSchedule = [
+        {
+          dayIndex: 3,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c" },
+                { order: 5, label: "Idli", nutritionCatalogItemId: "nut-idli" },
+              ],
+            },
+          ],
+        },
+      ];
+      const idli = findItem(orderFiveSchedule, "Idli");
+      expect(idli.indices.itemIndex).toBe(4);
+      expect(
+        buildNutritionRevisionSubmission({ reviseIds, target: idli, actionKey: "REMOVE_ITEM" })!
+          .revisionPatch!.itemIndex,
+      ).toBe(4);
+    });
+
+    it("submits correctly for an item that has no nutritionCatalogItemId", () => {
+      const noCatalogSchedule = [
+        {
+          dayIndex: 2,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Poha", nutritionCatalogItemId: "nut-a" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-c" },
+                { order: 3, label: "Homemade smoothie", serving: "1 cup" },
+              ],
+            },
+          ],
+        },
+      ];
+      const smoothie = findItem(noCatalogSchedule, "Homemade smoothie");
+      expect(smoothie.target.currentId).toBeNull();
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: smoothie,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 2,
+      });
+      // No catalog id is required to submit — the position alone identifies the item.
+      expect(submission).not.toBeNull();
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        itemIndex: 4,
+      });
+    });
+
+    it("does not block submission when label/metadata differ from any other item", () => {
+      // Two items share the label "Banana" but differ elsewhere; the SELECTED dropdown target still
+      // submits its own position with no comparison against other items.
+      const dupLabelSchedule = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Banana", nutritionCatalogItemId: "nut-x", serving: "1 large" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Banana", nutritionCatalogItemId: "nut-y", serving: "2 small" },
+              ],
+            },
+          ],
+        },
+      ];
+      const targets = buildTargets(dupLabelSchedule).filter(
+        (o) => o.level === "ITEM" && o.itemLabel === "Banana",
+      );
+      // Each "Banana" target keeps its own distinct position and submits without being blocked.
+      expect(targets.map((o) => o.indices.itemIndex)).toEqual([1, 3]);
+      for (const target of targets) {
+        const submission = buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          // 5 differs from both bananas' servings ("1 large" / "2 small"), so neither is blocked.
+          servingTargetQuantity: 5,
+        });
+        expect(submission).not.toBeNull();
+      }
+    });
+
+    it("never produces a false 'item no longer present' block before API submission", () => {
+      // A visible, selectable dropdown item always yields a non-null submission — the frontend has
+      // no speculative pre-submit matcher that could reject it. The message copy exists only as a
+      // reaction to a real backend rejection, never as a frontend pre-check.
+      const idli = findItem(staleOrderSchedule, "Idli");
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: idli,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(submission).not.toBeNull();
+      expect(NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE).toBe(
+        "This item is no longer in the latest plan. Please select it again.",
+      );
+    });
+
+    it("uses the rebuilt dropdown's new current positions after a revision reorders the meal", () => {
+      // Before: Banana is the 3rd item -> itemIndex 3.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: findItem(staleOrderSchedule, "Banana"),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 3,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(3);
+
+      // After a successful revision the plan reloads and the dropdown is rebuilt: Banana is now the
+      // 1st item (carrying a stale order 5). The rebuilt target submits its NEW position (1).
+      const afterRevision = [
+        {
+          dayIndex: 3,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 5, label: "Banana", nutritionCatalogItemId: "nut-c", serving: "2 pcs" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-b" },
+                { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-d" },
+              ],
+            },
+          ],
+        },
+      ];
+      const rebuiltBanana = findItem(afterRevision, "Banana");
+      expect(rebuiltBanana.indices.itemIndex).toBe(1);
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: rebuiltBanana,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 3,
+        })!.revisionPatch!.itemIndex,
+      ).toBe(1);
+    });
+  });
+
+  describe("Nutrition item-level serving adjustment (UPDATE_ITEM)", () => {
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+    // A one-item breakfast whose single item carries the given serving.
+    const mealWith = (serving: string | null | undefined) => [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [{ order: 0, label: "Rice", nutritionCatalogItemId: "nut-1", serving }],
+          },
+        ],
+      },
+    ];
+    const itemTarget = (serving: string | null | undefined) =>
+      buildTargets(mealWith(serving)).find((o) => o.level === "ITEM")!;
+
+    describe("parseNutritionServing", () => {
+      it("reads quantity/unit and derives an integer step of 1", () => {
+        expect(parseNutritionServing("4 pcs")).toEqual({ quantity: 4, unit: "pcs", step: 1 });
+      });
+
+      it("preserves the decimal step (1.5 -> 0.5, 1.25 -> 0.25)", () => {
+        expect(parseNutritionServing("1.5 cups")).toEqual({
+          quantity: 1.5,
+          unit: "cups",
+          step: 0.5,
+        });
+        expect(parseNutritionServing("1.25 scoops")).toEqual({
+          quantity: 1.25,
+          unit: "scoops",
+          step: 0.25,
+        });
+      });
+
+      it("returns null for missing / unparseable / non-positive servings", () => {
+        expect(parseNutritionServing(null)).toBeNull();
+        expect(parseNutritionServing(undefined)).toBeNull();
+        expect(parseNutritionServing("")).toBeNull();
+        expect(parseNutritionServing("a handful")).toBeNull();
+        expect(parseNutritionServing("0 cups")).toBeNull();
+      });
+    });
+
+    describe("formatNutritionServingValue", () => {
+      it("recombines quantity + unit, tolerating a blank unit", () => {
+        expect(formatNutritionServingValue(5, "pcs")).toBe("5 pcs");
+        expect(formatNutritionServingValue(1.5, "cups")).toBe("1.5 cups");
+        expect(formatNutritionServingValue(2, "")).toBe("2");
+      });
+    });
+
+    describe("adjustNutritionServingQuantity", () => {
+      it("steps an integer serving by 1 up and down", () => {
+        expect(adjustNutritionServingQuantity(4, 1, 1)).toBe(5);
+        expect(adjustNutritionServingQuantity(4, 1, -1)).toBe(3);
+      });
+
+      it("steps a 1.5 serving by 0.5 without floating-point drift", () => {
+        expect(adjustNutritionServingQuantity(1.5, 0.5, 1)).toBe(2);
+        expect(adjustNutritionServingQuantity(1.5, 0.5, -1)).toBe(1);
+      });
+
+      it("never reduces a serving to zero or below", () => {
+        expect(adjustNutritionServingQuantity(1, 1, -1)).toBeNull();
+        expect(adjustNutritionServingQuantity(0.5, 0.5, -1)).toBeNull();
+      });
+    });
+
+    it("submits targetQuantity 5 on + and 3 on − for a 4 pcs serving (no replacement item)", () => {
+      const target = itemTarget("4 pcs");
+      const plus = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 5,
+      });
+      expect(plus!.revisionPatch).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        servingAdjustment: { targetQuantity: 5, servingUnit: "pcs" },
+      });
+      // UPDATE_ITEM never carries a replacement item and never invents macros.
+      expect(plus!.revisionPatch).not.toHaveProperty("item");
+      expect(plus!.coachFeedback).toBe("Change Rice serving from 4 pcs to 5 pcs.");
+
+      const minus = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 3,
+      });
+      expect(minus!.revisionPatch!.servingAdjustment).toEqual({
+        targetQuantity: 3,
+        servingUnit: "pcs",
+      });
+      expect(minus!.revisionPatch).not.toHaveProperty("item");
+      expect(minus!.coachFeedback).toBe("Change Rice serving from 4 pcs to 3 pcs.");
+    });
+
+    it("adjusts a 1.5 cups serving using its 0.5 step", () => {
+      const target = itemTarget("1.5 cups");
+      const parsed = parseNutritionServing(target.serving);
+      expect(parsed!.step).toBe(0.5);
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: adjustNutritionServingQuantity(1.5, parsed!.step, 1)!,
+      });
+      expect(submission!.revisionPatch!.servingAdjustment).toEqual({
+        targetQuantity: 2,
+        servingUnit: "cups",
+      });
+      expect(submission!.coachFeedback).toBe("Change Rice serving from 1.5 cups to 2 cups.");
+    });
+
+    it("cannot reduce a 1-unit serving to zero", () => {
+      const target = itemTarget("1 cup");
+      expect(adjustNutritionServingQuantity(1, 1, -1)).toBeNull();
+      // Submitting 0 (or below) is blocked deterministically.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 0,
+        }),
+      ).toBeNull();
+    });
+
+    it("blocks Apply when the serving is unchanged, unparseable, or missing", () => {
+      const target = itemTarget("4 pcs");
+      // Unchanged quantity -> blocked.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target,
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 4,
+        }),
+      ).toBeNull();
+      // No target quantity chosen yet -> blocked (Apply disabled until stepped).
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target, actionKey: "UPDATE_ITEM" }),
+      ).toBe(false);
+      // Unparseable serving -> blocked even with a chosen quantity.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: itemTarget("a handful"),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 2,
+        }),
+      ).toBeNull();
+      expect(buildNutritionServingAdjustment(itemTarget("a handful"), 2)).toBeNull();
+      // Missing serving -> blocked.
+      expect(
+        buildNutritionRevisionSubmission({
+          reviseIds,
+          target: itemTarget(null),
+          actionKey: "UPDATE_ITEM",
+          servingTargetQuantity: 2,
+        }),
+      ).toBeNull();
+    });
+
+    it("leaves REMOVE_ITEM unchanged (no servingAdjustment)", () => {
+      // A 4-item breakfast so REMOVE_ITEM stays eligible.
+      const fullMeal = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "Rice", nutritionCatalogItemId: "nut-1", serving: "1 cup" },
+                { order: 1, label: "Milk", nutritionCatalogItemId: "nut-2", serving: "1 cup" },
+                { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3", serving: "2 pcs" },
+                { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4", serving: "1 slice" },
+              ],
+            },
+          ],
+        },
+      ];
+      const targets = buildTargets(fullMeal);
+      const itemLevel = targets.find((o) => o.level === "ITEM")!;
+      // REMOVE_ITEM: bare item op, no servingAdjustment / item.
+      const remove = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: itemLevel,
+        actionKey: "REMOVE_ITEM",
+      });
+      expect(remove!.revisionPatch).not.toHaveProperty("servingAdjustment");
+      expect(remove!.revisionPatch).not.toHaveProperty("item");
+    });
+
+    it("renders the serving stepper for UPDATE_ITEM and hides the free-text input", () => {
+      const targets = buildTargets(mealWith("4 pcs"));
+      const itemLevel = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            singlePatchMode: true,
+            targetOptions: targets,
+            selectedTargetKey: itemLevel.key,
+            selectedActionKey: "UPDATE_ITEM",
+            servingStepper: { quantity: 4, unit: "pcs", canDecrement: true },
+          }),
+        ),
+      );
+      expect(html).toContain("fyn-nutrition-serving-stepper");
+      expect(html).toContain("4 pcs");
+      expect(html).toContain("Increase serving");
+      expect(html).toContain("Decrease serving");
+      // The free-text input and option search are removed for this action.
+      expect(html).not.toContain("Tell Fyn what to change");
+      expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    });
+
+    it("keeps the free-text input for non-serving Nutrition actions (ADD_ITEM)", () => {
+      const targets = buildTargets(mealWith("4 pcs"));
+      const sessionLevel = targets.find((o) => o.level === "SESSION")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            singlePatchMode: true,
+            targetOptions: targets,
+            selectedTargetKey: sessionLevel.key,
+            selectedActionKey: "ADD_ITEM",
+          }),
+        ),
+      );
+      expect(html).toContain("Tell Fyn what to change");
+      expect(html).not.toContain("fyn-nutrition-serving-stepper");
+    });
+  });
+
+  describe("Nutrition Plan Review display after revision", () => {
+    const makeBananaMilkshakeDraft = (
+      nutrients: {
+        calories: number;
+        protein: number;
+        carbs: number;
+        fat: number;
+        fiber: number;
+      },
+      version: { versionNumber: number; versionId: string },
+    ): CoachAthleteLatestDomainDraft => {
+      const rawItem = {
+        label: "Banana milkshake",
+        serving: "2 glass",
+        calories: nutrients.calories,
+        caloriesKcal: nutrients.calories,
+        protein: nutrients.protein,
+        proteinG: nutrients.protein,
+        proteinGrams: nutrients.protein,
+        carbs: nutrients.carbs,
+        carbsG: nutrients.carbs,
+        carbsGrams: nutrients.carbs,
+        carbohydrateG: nutrients.carbs,
+        fat: nutrients.fat,
+        fatG: nutrients.fat,
+        fatGrams: nutrients.fat,
+        fiberGrams: nutrients.fiber,
+        fiberG: nutrients.fiber,
+      };
+      const parsed = parseGeneratedDraftItem(rawItem)!;
+      return {
+        trainingPlanId: "plan-1",
+        trainingPlanVersionId: version.versionId,
+        versionNumber: version.versionNumber,
+        status: "AI_GENERATED",
+        source: null,
+        revision: null,
+        durationDays: null,
+        daysCreated: null,
+        sessionsCreated: null,
+        itemsPersisted: null,
+        days: [
+          {
+            dayIndex: 1,
+            date: null,
+            dayFocus: null,
+            notes: null,
+            estimatedDailyCalories: null,
+            targetCalorieMin: null,
+            targetCalorieMax: null,
+            calorieAdequacyStatus: null,
+            estimatedCarbohydrateGrams: null,
+            targetCarbohydrateMinGrams: null,
+            targetCarbohydrateMaxGrams: null,
+            estimatedProteinGrams: null,
+            targetProteinMinGrams: null,
+            targetProteinMaxGrams: null,
+            estimatedFatGrams: null,
+            targetFatMinGrams: null,
+            targetFatMaxGrams: null,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Snacks",
+                objective: null,
+                plannedDurationMinutes: null,
+                intensity: null,
+                items: [parsed],
+              },
+            ],
+          },
+        ],
+        raw: {
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [{ sessionIndex: 1, title: "Snacks", items: [rawItem] }],
+            },
+          ],
+        },
+      };
+    };
+
+    const readDisplayedBananaMilkshake = (draft: CoachAthleteLatestDomainDraft) => {
+      const item = draft.days[0]!.sessions[0]!.items[0]! as unknown as Record<string, unknown>;
+      const rawItem = (draft.raw as { days: Array<{ sessions: Array<{ items: unknown[] }> }> })
+        .days[0]!.sessions[0]!.items[0] as Record<string, unknown>;
+      return {
+        serving: formatNutritionServingDisplay(item, rawItem),
+        calories: readNutritionMetricValue(item, rawItem, "calories"),
+        protein: readNutritionMetricValue(item, rawItem, "protein"),
+        carbs: readNutritionMetricValue(item, rawItem, "carbs"),
+        fat: readNutritionMetricValue(item, rawItem, "fat"),
+        fiber: readNutritionMetricValue(item, rawItem, "fiber"),
+      };
+    };
+
+    const makeBananaMilkshakeActiveDetail = (
+      nutrients: {
+        calories: number;
+        protein: number;
+        carbs: number;
+        fat: number;
+        fiber: number;
+      },
+      version: { versionNumber: number; versionId: string },
+    ): CoachPersistedTrainingPlanActiveDetail => {
+      const rawItem = {
+        label: "Banana milkshake",
+        serving: "2 glass",
+        calories: nutrients.calories,
+        protein: nutrients.protein,
+        carbs: nutrients.carbs,
+        fat: nutrients.fat,
+        fiber: nutrients.fiber,
+      };
+      const parsed = parseGeneratedDraftItem(rawItem)!;
+      return {
+        selectedVersionRule: "ACTIVE_VERSION",
+        generationDomain: "NUTRITION",
+        allowedActions: ["REQUEST_REVISION"],
+        releaseMode: null,
+        constraintComplianceSummary: null,
+        plan: {
+          id: "plan-1",
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          status: "AI_GENERATED",
+        },
+        version: {
+          id: version.versionId,
+          trainingPlanId: "plan-1",
+          versionNumber: version.versionNumber,
+          status: "AI_GENERATED",
+          createdAt: null,
+          submittedAt: null,
+          approvedAt: null,
+          releasedAt: null,
+          startDate: null,
+          endDate: null,
+        },
+        days: [
+          {
+            id: "day-1",
+            date: null,
+            dayIndex: 1,
+            weekNumber: null,
+            isRestDay: null,
+            plannedLoadMinutes: null,
+            notes: null,
+            trainingPlanVersionId: version.versionId,
+            sessions: [
+              {
+                id: "session-1",
+                trainingDayId: "day-1",
+                title: "Snacks",
+                description: null,
+                plannedStartTime: null,
+                plannedEndTime: null,
+                plannedDurationMinutes: null,
+                sessionOrder: null,
+                sessionType: null,
+                assignedCoachId: null,
+                objective: null,
+                intensity: null,
+                sessionStructureSections: [{ key: "items", items: [parsed], raw: { items: [rawItem] } }],
+                sessionStructureRaw: { items: { items: [rawItem] } },
+              },
+            ],
+          },
+        ],
+        raw: {
+          days: [
+            {
+              id: "day-1",
+              sessions: [
+                {
+                  id: "session-1",
+                  sessionStructure: { items: { items: [rawItem] } },
+                },
+              ],
+            },
+          ],
+        },
+      } as CoachPersistedTrainingPlanActiveDetail;
+    };
+
+    const readDisplayedBananaMilkshakeFromActiveDetail = (
+      detail: CoachPersistedTrainingPlanActiveDetail,
+    ) => {
+      const section = detail.days[0]!.sessions[0]!.sessionStructureSections[0]!;
+      const item = section.items[0]! as unknown as Record<string, unknown>;
+      const rawItem = (section.raw as { items: unknown[] }).items[0] as Record<string, unknown>;
+      return {
+        serving: formatNutritionServingDisplay(item, rawItem),
+        calories: readNutritionMetricValue(item, rawItem, "calories"),
+        protein: readNutritionMetricValue(item, rawItem, "protein"),
+        carbs: readNutritionMetricValue(item, rawItem, "carbs"),
+        fat: readNutritionMetricValue(item, rawItem, "fat"),
+        fiber: readNutritionMetricValue(item, rawItem, "fiber"),
+      };
+    };
+
+    it("replaces stale in-memory nutrients when the same version id is refetched", () => {
+      const stale = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const refetched = makeBananaMilkshakeDraft(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const next = resolveNewerDomainReviewDraft(stale, refetched);
+      expect(next).toBe(refetched);
+      expect(readDisplayedBananaMilkshake(next!)).toMatchObject({
+        serving: "2 glass",
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+        fiber: 2,
+      });
+    });
+
+    it("same-version active/detail refetch replaces stale Nutrition nutrients immediately", () => {
+      const stale = makeBananaMilkshakeActiveDetail(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const refetched = makeBananaMilkshakeActiveDetail(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(
+        resolveHeadCoachReviewActiveDetailAfterRefresh({
+          refreshedActiveDetail: refetched,
+          previousActiveDetail: stale,
+          summaryPlanId: "plan-1",
+          preservePreviousDetail: true,
+        }),
+      ).toBe(refetched);
+      expect(readDisplayedBananaMilkshakeFromActiveDetail(refetched)).toMatchObject({
+        serving: "2 glass",
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+        fiber: 2,
+      });
+    });
+
+    it("renders Nutrition active/detail over stale latest-domain-draft immediately and after reopen", () => {
+      const staleDraft = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const freshActiveDetail = makeBananaMilkshakeActiveDetail(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const resolveSource = () =>
+        resolveDomainReviewDrawerContentSource({
+          domain: "NUTRITION",
+          workflowStatus: "revision_requested",
+          directReleaseSkillsOwner: false,
+          activeDetail: freshActiveDetail,
+          latestDraft: staleDraft,
+        });
+
+      expect(resolveSource()).toBe("active_detail");
+      // Reopening the drawer runs the same resolver with the same state shape: active/detail remains
+      // authoritative and the stale draft cannot take the render path back.
+      expect(resolveSource()).toBe("active_detail");
+      expect(readDisplayedBananaMilkshakeFromActiveDetail(freshActiveDetail)).toMatchObject({
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+      });
+    });
+
+    it("keys the active/detail schedule by persisted plan version", () => {
+      const detail = makeBananaMilkshakeActiveDetail(
+        { calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(domainReviewActiveDetailRenderKey(detail)).toBe("plan-1:ver-19:19");
+    });
+
+    it("prefers the fresher per-domain full-plan reload over a stale global latestSkillsDraft slot", () => {
+      const staleGlobal = makeBananaMilkshakeDraft(
+        { calories: 65, protein: 1.8, carbs: 9.1, fat: 2.4, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const freshPerDomain = makeBananaMilkshakeDraft(
+        {
+          calories: 130.61289978027344,
+          protein: 3.6865992546081543,
+          carbs: 18.29117202758789,
+          fat: 4.742460250854492,
+          fiber: 2,
+        },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      const displayed = resolveLatestDraftForDomainReview("NUTRITION", {
+        isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+        headCoachOwnedSkillsDraft: null,
+        latestDraftDisplayDomain: "NUTRITION",
+        latestSkillsDraft: staleGlobal,
+        perDomainLatestDraft: freshPerDomain,
+      });
+      expect(displayed).toBe(freshPerDomain);
+      expect(readDisplayedBananaMilkshake(displayed!)).toMatchObject({
+        calories: 130.61289978027344,
+        protein: 3.6865992546081543,
+        carbs: 18.29117202758789,
+        fat: 4.742460250854492,
+      });
+    });
+
+    it("keys the rendered schedule by plan version so a refetched draft remounts", () => {
+      const draft = makeBananaMilkshakeDraft(
+        { calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 },
+        { versionNumber: 19, versionId: "ver-19" },
+      );
+      expect(domainReviewDraftRenderKey(draft)).toBe("plan-1:ver-19:19");
+    });
+
+    // The confirmed Banana Milkshake conflict: the revised candidate carries BOTH the stale base
+    // fields (calories/protein/carbs/fat) and the newer scaled runtime aliases (*Kcal / *G). The
+    // parser must normalize each nutrient scaled-first so the stale base fields can never win.
+    const revisedBananaMilkshakeRaw = {
+      label: "Banana milkshake",
+      serving: "2 glass",
+      calories: 65,
+      caloriesKcal: 130,
+      protein: 1.8,
+      proteinG: 3.6,
+      carbs: 9.1,
+      carbohydrateG: 18.2,
+      fat: 2.4,
+      fatG: 4.8,
+      fiberGrams: 2,
+    };
+
+    it("normalizes each nutrient scaled-first in the parsed item so stale base fields never win", () => {
+      const parsed = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)!;
+      expect(parsed.serving).toBe("2 glass");
+      expect(parsed.calories).toBe(130);
+      expect(parsed.protein).toBe(3.6);
+      expect(parsed.carbs).toBe(18.2);
+      expect(parsed.fat).toBe(4.8);
+      expect(parsed.fiber).toBe(2);
+    });
+
+    it("immediately shows the revised serving/calories/macros from the normalized parsed item", () => {
+      const parsed = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)! as unknown as Record<
+        string,
+        unknown
+      >;
+      // The render reads the normalized parsed item first; the raw item's stale base fields (65/1.8/
+      // 9.1/2.4) must not override the scaled values already resolved into the parsed item.
+      expect(formatNutritionServingDisplay(parsed, revisedBananaMilkshakeRaw)).toBe("2 glass");
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "calories")).toBe(130);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "protein")).toBe(3.6);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "carbs")).toBe(18.2);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "fat")).toBe(4.8);
+      expect(readNutritionMetricValue(parsed, revisedBananaMilkshakeRaw, "fiber")).toBe(2);
+      // Daily totals roll up the same normalized values (no frontend recalculation).
+      const totals = summarizeNutritionItems([{ item: parsed, rawItem: revisedBananaMilkshakeRaw }]);
+      expect(totals).toEqual({ calories: 130, protein: 3.6, carbs: 18.2, fat: 4.8, fiber: 2 });
+    });
+
+    it("falls back to canonical-only items when scaled runtime aliases are absent", () => {
+      // A canonical/base-only item (no *G / caloriesKcal aliases) must still parse and render.
+      const canonicalOnly = parseGeneratedDraftItem({
+        label: "Oatmeal",
+        serving: "1 bowl",
+        calories: 500,
+        protein: 20,
+        carbs: 60,
+        fat: 12,
+        fiber: 8,
+      })!;
+      expect(canonicalOnly.calories).toBe(500);
+      expect(canonicalOnly.protein).toBe(20);
+      expect(canonicalOnly.carbs).toBe(60);
+      expect(canonicalOnly.fat).toBe(12);
+      expect(canonicalOnly.fiber).toBe(8);
+    });
+
+    it("prefers each scaled runtime alias over its base field during normalization", () => {
+      const scaledOnly = parseGeneratedDraftItem({
+        label: "Shake",
+        proteinGrams: 20,
+        carbsGrams: 60,
+        fatGrams: 12,
+        fiberGrams: 8,
+      })!;
+      expect(scaledOnly.protein).toBe(20);
+      expect(scaledOnly.carbs).toBe(60);
+      expect(scaledOnly.fat).toBe(12);
+      expect(scaledOnly.fiber).toBe(8);
+    });
+
+    it("preserves the existing nutrient aliases in the raw display fallback", () => {
+      const legacyItem = {
+        calories: 500,
+        proteinGrams: 20,
+        carbsGrams: 60,
+        fatGrams: 12,
+        fiberGrams: 8,
+      };
+      expect(readNutritionMetricValue(null, legacyItem, "calories")).toBe(500);
+      expect(readNutritionMetricValue(null, legacyItem, "protein")).toBe(20);
+      expect(readNutritionMetricValue(null, legacyItem, "carbs")).toBe(60);
+      expect(readNutritionMetricValue(null, legacyItem, "fat")).toBe(12);
+      expect(readNutritionMetricValue(null, legacyItem, "fiber")).toBe(8);
+    });
+
+    it("does not overwrite displayed nutrients from the sparse revision-context targetMap", () => {
+      // The sparse revision-context targetMap carries only target metadata (id/index/label/serving/
+      // timing) — never nutrients.
+      const sparseContext = makeRevisionContext({
+        generationDomain: "NUTRITION",
+        draft: null,
+        targetMap: {
+          days: [
+            {
+              dayKey: "1",
+              dayLabel: "Day 1",
+              sessions: [
+                {
+                  sessionKey: "1",
+                  sessionLabel: "Snacks",
+                  items: [
+                    { itemKey: "0", label: "Banana milkshake", serving: "2 glass", timing: "Snack" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      // The complete latest plan the drawer renders below the Fyn panel carries full nutrients.
+      const fullPlanDays = [
+        {
+          dayIndex: 1,
+          sessions: [{ sessionIndex: 1, title: "Snacks", items: [revisedBananaMilkshakeRaw] }],
+        },
+      ];
+      const targets = fynRevisionLeveledTargetOptions(sparseContext, {
+        domain: "NUTRITION",
+        scheduleDays: fullPlanDays,
+      });
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      // The dropdown target rebuilds from the sparse context (serving/label only) and never carries
+      // nutrients that could bleed into the displayed plan.
+      expect(itemTarget.serving).toBe("2 glass");
+      expect(itemTarget).not.toHaveProperty("calories");
+      expect(itemTarget).not.toHaveProperty("caloriesKcal");
+      // The displayed nutrients still come from the complete plan item, unaffected by the context.
+      const parsedFromPlan = parseGeneratedDraftItem(revisedBananaMilkshakeRaw)! as unknown as Record<
+        string,
+        unknown
+      >;
+      expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "calories")).toBe(130);
+      expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "protein")).toBe(3.6);
+    });
+
+    it("rebuilds the dropdown from the latest context only after the full plan reload, keeping the drawer open", async () => {
+      const events: string[] = [];
+      // Mirrors the success-path orchestration: the full plan reloads first, THEN the sparse
+      // revision-context reloads to rebuild the dropdown targets. The refresh takes no close signal,
+      // so the drawer stays open across the rebuild.
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("full-plan");
+        },
+        rebuildTargetOptions: async () => {
+          events.push("revision-context");
+        },
+      });
+      expect(events).toEqual(["full-plan", "revision-context"]);
+    });
+  });
+
+  describe("Nutrition option canonical item mapping", () => {
+    const nutritionSchedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+          },
+        ],
+      },
+    ];
+    const buildNutritionTargets = () =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: nutritionSchedule,
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+    const canonicalItem = {
+      nutritionCatalogItemId: "nut-9",
+      itemType: "NUTRITION",
+      label: "Oatmeal",
+      serving: "1 cup",
+      calories: 320,
+      protein: 12,
+      carbs: 54,
+      fat: 6,
+      fiber: 8,
+      timing: "Breakfast",
+      notes: "High fibre",
+    };
+    const baseOption: CoachAthleteDomainDraftRevisionOption = {
+      id: "opt-approved-1",
+      rank: 1,
+      label: "Oatmeal",
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+      score: 0.9,
+      reason: null,
+      goalIds: [],
+      targetTags: [],
+      safetyTags: [],
+      levelTags: [],
+      nutritionCatalogItemId: "nut-9",
+      item: canonicalItem,
+      metadata: { serving: "1 cup", timing: "Breakfast", notes: "High fibre" },
+    };
+
+    it("reads the catalog id only from the authoritative top-level field", () => {
+      expect(nutritionOptionCatalogId(baseOption)).toBe("nut-9");
+      // Never inferred from metadata.catalogItemId / metadata.itemId / label / option.id.
+      expect(
+        nutritionOptionCatalogId({
+          ...baseOption,
+          nutritionCatalogItemId: undefined,
+          metadata: { catalogItemId: "meta-x", itemId: "meta-y" },
+        }),
+      ).toBeNull();
+    });
+
+    it("REPLACE_ITEM sends the option's canonical item unchanged (serving + nutrition preserved)", () => {
+      const target = buildNutritionTargets().find(
+        (o) => o.level === "ITEM" && o.itemLabel === "White rice",
+      )!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target,
+        actionKey: "REPLACE_ITEM",
+        option: baseOption,
+        coachRequest: "Prefer a lighter option.",
+      });
+      expect(submission!.revisionPatch!.item).toBe(canonicalItem);
+      expect(submission!.revisionPatch!.item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+    });
+
+    it("ADD_ITEM sends the option's canonical item unchanged (serving + nutrition preserved)", () => {
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds,
+        target: sessionTarget,
+        actionKey: "ADD_ITEM",
+        option: baseOption,
+      });
+      expect(submission!.revisionPatch!.item).toBe(canonicalItem);
+      expect(submission!.revisionPatch!.item).toEqual({
+        nutritionCatalogItemId: "nut-9",
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        serving: "1 cup",
+        calories: 320,
+        protein: 12,
+        carbs: 54,
+        fat: 6,
+        fiber: 8,
+        timing: "Breakfast",
+        notes: "High fibre",
+      });
+    });
+
+    it("blocks Apply Revision when a chosen ADD_ITEM/REPLACE_ITEM option lacks the canonical item", () => {
+      const itemTarget = buildNutritionTargets().find((o) => o.level === "ITEM")!;
+      const sessionTarget = buildNutritionTargets().find((o) => o.level === "SESSION")!;
+      const optionWithoutItem = { ...baseOption, item: undefined };
+      // No structured patch can be built, so the submission (and Apply) stays blocked.
+      expect(
+        buildNutritionRevisionPatch({
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBeNull();
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: itemTarget,
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionCanApply({
+          reviseIds,
+          target: sessionTarget,
+          actionKey: "ADD_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      // The dedicated hint fires only when an option is actually chosen.
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(true);
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: null,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REPLACE_ITEM",
+          option: baseOption,
+        }),
+      ).toBe(false);
+      // Operations that carry no approved option are unaffected.
+      expect(
+        nutritionRevisionOptionMissingCatalogReference({
+          actionKey: "REMOVE_ITEM",
+          option: optionWithoutItem,
+        }),
+      ).toBe(false);
+      expect(NUTRITION_OPTION_MISSING_CATALOG_MESSAGE).toContain("missing its item details");
+    });
+  });
+
+  describe("Nutrition REMOVE_ITEM meal-minimum eligibility", () => {
+    const buildMeal = (title: string, itemCount: number) => [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title,
+            items: Array.from({ length: itemCount }, (_unused, index) => ({
+              order: index,
+              label: `Food ${index + 1}`,
+              nutritionCatalogItemId: `nut-${index + 1}`,
+            })),
+          },
+        ],
+      },
+    ];
+    const targetsFor = (title: string, itemCount: number) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays: buildMeal(title, itemCount),
+      });
+    const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
+
+    it("maps meal labels to canonical slots and minimums (single source of truth)", () => {
+      expect(nutritionMealSlotKeyFromLabel("Breakfast")).toBe("BREAKFAST");
+      expect(nutritionMealSlotKeyFromLabel("Mid-morning snack")).toBe("MID_MORNING_SNACK");
+      expect(nutritionMealSlotKeyFromLabel("MID_AFTERNOON_SNACK")).toBe("MID_AFTERNOON_SNACK");
+      expect(nutritionMealSlotKeyFromLabel("Second lunch")).toBeNull();
+      expect(nutritionMealSlotMinItems("Lunch")).toBe(4);
+      expect(nutritionMealSlotMinItems("Dinner")).toBe(4);
+      expect(nutritionMealSlotMinItems("Breakfast")).toBe(3);
+      // Unrecognised meals fall back to the "never remove the last item" floor.
+      expect(nutritionMealSlotMinItems("Hydration")).toBe(1);
+    });
+
+    it("enables Remove food item when the meal has more items than its minimum", () => {
+      // Breakfast minimum is 3; 4 items leaves room to remove one.
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", aboveMin)).toContain("REMOVE_ITEM");
+    });
+
+    it("disables Remove food item when the meal is exactly at its minimum", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", atMin)).not.toContain("REMOVE_ITEM");
+    });
+
+    it("keeps Replace food item available at the minimum", () => {
+      // Lunch minimum is 4; at exactly 4 items Remove is blocked but Replace/Update remain.
+      const atMin = targetsFor("Lunch", 4).find((o) => o.level === "ITEM")!;
+      const keys = actionKeysFor("NUTRITION", atMin);
+      expect(keys).toContain("REPLACE_ITEM");
+      expect(keys).toContain("UPDATE_ITEM");
+      expect(keys).not.toContain("REMOVE_ITEM");
+    });
+
+    it("shows the exact minimum message when an item's meal is at the minimum", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = targetsFor("Breakfast", 3);
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(html).toContain(nutritionRemoveItemMinimumMessage(3));
+      expect(html).toContain(
+        "This meal must contain at least 3 items. Replace this item instead of removing it.",
+      );
+      // Replace stays offered; Remove is not offered as an action at the minimum.
+      expect(html).toContain("Replace food item");
+      expect(html).not.toContain("Remove food item");
+    });
+
+    it("does not show the minimum message (and offers Remove) above the minimum", () => {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = targetsFor("Breakfast", 4);
+      const itemTarget = targets.find((o) => o.level === "ITEM")!;
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "NUTRITION",
+            context,
+            targetOptions: targets,
+            selectedTargetKey: itemTarget.key,
+            selectedActionKey: "REPLACE_ITEM",
+          }),
+        ),
+      );
+      expect(html).not.toContain("This meal must contain at least");
+      expect(html).toContain("Remove food item");
+    });
+
+    it("never builds (or allows submitting) a REMOVE_ITEM patch at the minimum", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      expect(buildNutritionRevisionPatch({ target: atMin, actionKey: "REMOVE_ITEM" })).toBeNull();
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: atMin, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+      // Above the minimum a REMOVE_ITEM patch is still produced exactly as before.
+      expect(
+        buildNutritionRevisionPatch({ target: aboveMin, actionKey: "REMOVE_ITEM" }),
+      ).toMatchObject({ operation: "REMOVE_ITEM", dayIndex: 1, sessionIndex: 1, itemIndex: 1 });
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target: aboveMin, actionKey: "REMOVE_ITEM" }),
+      ).toBe(true);
+    });
+
+    it("nutritionRemoveItemMinimumNotice fires only for at-minimum Nutrition items", () => {
+      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
+      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
+      const sessionTarget = targetsFor("Breakfast", 3).find((o) => o.level === "SESSION")!;
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", atMin)).toBe(
+        "This meal must contain at least 3 items. Replace this item instead of removing it.",
+      );
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", aboveMin)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", sessionTarget)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("SKILLS", atMin)).toBeNull();
+      expect(nutritionRemoveItemMinimumNotice("NUTRITION", null)).toBeNull();
+    });
+
+    it("leaves S&C REMOVE_ITEM gating unchanged (last-item rule, not meal minimums)", () => {
+      const sandcTargets = (itemCount: number) =>
+        fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "S_AND_C" }), {
+          domain: "S_AND_C",
+          scheduleDays: [
+            {
+              dayIndex: 1,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  title: "Lower body",
+                  items: Array.from({ length: itemCount }, (_unused, index) => ({
+                    order: index,
+                    label: `Exercise ${index + 1}`,
+                    exerciseCatalogItemId: `ex-${index + 1}`,
+                  })),
+                },
+              ],
+            },
+          ],
+        });
+      // Two exercises: Remove allowed (> 1). One exercise: hidden. Meal minimums never apply to S&C.
+      expect(
+        actionKeysFor("S_AND_C", sandcTargets(2).find((o) => o.level === "ITEM")),
+      ).toContain("REMOVE_ITEM");
+      expect(
+        actionKeysFor("S_AND_C", sandcTargets(1).find((o) => o.level === "ITEM")),
+      ).not.toContain("REMOVE_ITEM");
+    });
+  });
+
+  describe("Nutrition sequential revision version handling", () => {
+    // Confirmed backend fixture.
+    const trainingPlanId = "a7273ff0-35a2-4d79-b940-059ef7d8def8";
+    const V1 = "46efdb36-cbbc-463d-a0be-1c4c2a2c6d2d";
+    const V2 = "ce8e318f-c281-4e3d-871f-e6a432e2b506";
+    const V3 = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    // The drawer renders version 2, so the plan/version object it exposes carries V2.
+    const drawerRenderedReviseIds = { trainingPlanId, versionId: V2 };
+
+    it("submits the drawer-displayed V2 id for the first revision (current fixture)", () => {
+      // No pin yet: the request uses the exact version rendered in the drawer (V2), not V1.
+      const effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)!;
+      expect(effective.versionId).toBe("ce8e318f-c281-4e3d-871f-e6a432e2b506");
+      expect(effective.trainingPlanId).toBe(trainingPlanId);
+    });
+
+    it("chains V2 -> V3 using each response's trainingPlanVersionId", () => {
+      const submittedVersions: string[] = [];
+      let activePin: { trainingPlanId: string; versionId: string } | null = null;
+
+      // Revision 1: drawer shows V2, no pin -> submits V2.
+      let effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, activePin)!;
+      submittedVersions.push(effective.versionId);
+      // The V2 revision responds with V3 -> pinned as the authoritative next version.
+      const afterV2 = nextNutritionRevisionVersionId({ versionId: V3 });
+      activePin = afterV2 === null ? null : { trainingPlanId, versionId: afterV2 };
+
+      // Revision 2: submits V3 (pinned), even though the drawer base is still V2.
+      effective = resolveActiveNutritionReviseIds(drawerRenderedReviseIds, activePin)!;
+      submittedVersions.push(effective.versionId);
+
+      expect(submittedVersions).toEqual([V2, V3]);
+      expect(effective.trainingPlanId).toBe(trainingPlanId);
+    });
+
+    it("never lets a stale workspace V1 override the displayed V2", () => {
+      // The resolver is fed ONLY the drawer-rendered ids (V2) and the pin — never workspace state.
+      // A stale pin belonging to a DIFFERENT plan (e.g. a lingering V1 from another plan) is ignored.
+      const stalePinDifferentPlan = { trainingPlanId: "some-other-plan", versionId: V1 };
+      expect(
+        resolveActiveNutritionReviseIds(drawerRenderedReviseIds, stalePinDifferentPlan)!.versionId,
+      ).toBe(V2);
+      // With no pin at all, the displayed V2 is used (V1 can never surface here).
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)!.versionId).toBe(V2);
+    });
+
+    it("keeps the pinned version across selection reset / revise-another (pin persists)", () => {
+      // After the V2 revision returns V3, the pin is V3 for the same plan. Selection reset does not
+      // touch the pin (it is only cleared when the drawer closes), so subsequent resolves — the ones
+      // that happen after a reset / "Revise another item" — still submit V3.
+      const pinV3 = { trainingPlanId, versionId: V3 };
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, pinV3)!.versionId).toBe(V3);
+      // Idempotent across repeated resolves (models repeated renders after a reset).
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, pinV3)!.versionId).toBe(V3);
+    });
+
+    it("reads the next version from the revise response (versionId), ignoring blanks", () => {
+      expect(nextNutritionRevisionVersionId({ versionId: V2 })).toBe(V2);
+      expect(nextNutritionRevisionVersionId({ versionId: `  ${V2}  ` })).toBe(V2);
+      expect(nextNutritionRevisionVersionId({ versionId: "" })).toBeNull();
+      expect(nextNutritionRevisionVersionId({ versionId: null })).toBeNull();
+      expect(nextNutritionRevisionVersionId(null)).toBeNull();
+      expect(nextNutritionRevisionVersionId(undefined)).toBeNull();
+    });
+
+    it("uses the drawer-rendered ids before the first successful revision (no pin)", () => {
+      expect(resolveActiveNutritionReviseIds(drawerRenderedReviseIds, null)).toEqual(
+        drawerRenderedReviseIds,
+      );
+      // A pin missing a version is ignored (falls back to the rendered ids).
+      expect(
+        resolveActiveNutritionReviseIds(drawerRenderedReviseIds, {
+          trainingPlanId,
+          versionId: "   ",
+        }),
+      ).toEqual(drawerRenderedReviseIds);
+      // No rendered base -> nothing to submit.
+      expect(
+        resolveActiveNutritionReviseIds(null, { trainingPlanId, versionId: V2 }),
+      ).toBeNull();
+    });
+  });
+
+  describe("Nutrition deterministic stale-version rejection", () => {
+    const staleError = {
+      message:
+        "This plan has changed since it was opened. Reload the latest plan before applying another revision.",
+      status: 409,
+      code: "TRAINING_PLAN_REVISION_STALE_VERSION",
+      details: { code: "TRAINING_PLAN_REVISION_STALE_VERSION" },
+    };
+
+    it("detects the stale-version rejection by its backend message", () => {
+      expect(isNutritionStaleVersionRevisionError(staleError)).toBe(true);
+      // Match on the stable message even when no code is present.
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: NUTRITION_STALE_VERSION_MESSAGE,
+          status: 409,
+        }),
+      ).toBe(true);
+      // Match defensively on a stale-version code even if the message differs.
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: "Conflict",
+          status: 409,
+          code: "STALE_VERSION",
+        }),
+      ).toBe(true);
+    });
+
+    it("does not treat unrelated errors as stale-version rejections", () => {
+      expect(
+        isNutritionStaleVersionRevisionError({
+          message: "Unable to revise plan.",
+          status: 500,
+        }),
+      ).toBe(false);
+      expect(isNutritionStaleVersionRevisionError(new Error("boom"))).toBe(false);
+      expect(isNutritionStaleVersionRevisionError(null)).toBe(false);
+    });
+
+    it("surfaces the backend stale-version message and requires reload + reselection", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome(staleError);
+      expect(outcome.kind).toBe("STALE_VERSION");
+      // The drawer shows the live backend message verbatim.
+      expect(outcome.message).toBe(staleError.message);
+      // Latest Nutrition plan/version is reloaded and the stale selection is cleared.
+      expect(outcome.reloadLatest).toBe(true);
+      expect(outcome.clearSelection).toBe(true);
+      // The previously submitted revisionPatch is never automatically retried.
+      expect(outcome.retryRevisionPatch).toBe(false);
+    });
+
+    it("falls back to the canonical message when the backend omits a body message", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "",
+        status: 409,
+        code: "STALE_VERSION",
+      });
+      expect(outcome.kind).toBe("STALE_VERSION");
+      expect(outcome.message).toBe(NUTRITION_STALE_VERSION_MESSAGE);
+    });
+
+    it("leaves the normal successful revision flow untouched for non-stale errors", () => {
+      // A generic API failure must not reload the plan or clear the coach's selection,
+      // so the existing success/reload behaviour is unaffected by the stale-version handling.
+      const generic = resolveNutritionRevisionErrorOutcome({
+        message: "Server exploded",
+        status: 500,
+        code: "INTERNAL",
+      });
+      expect(generic.kind).toBe("GENERIC");
+      expect(generic.reloadLatest).toBe(false);
+      expect(generic.clearSelection).toBe(false);
+      expect(generic.retryRevisionPatch).toBe(false);
+      expect(generic.message).toBe("Revision failed: Server exploded (INTERNAL)");
+    });
+  });
+
+  describe("Nutrition interrupted revision handling", () => {
+    const nutritionScheduleWithToast = [
+      {
+        dayKey: "1",
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionKey: "1",
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", itemKey: "0" },
+              { order: 1, label: "Juice", itemKey: "1" },
+              { order: 2, label: "Eggs", itemKey: "2" },
+              { order: 3, label: "Toast", itemKey: "3" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const nutritionScheduleWithoutToast = [
+      {
+        dayKey: "1",
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionKey: "1",
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", itemKey: "0" },
+              { order: 1, label: "Juice", itemKey: "1" },
+              { order: 2, label: "Eggs", itemKey: "2" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    function toastRemoveTarget() {
+      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "NUTRITION",
+        scheduleDays: nutritionScheduleWithToast,
+      });
+      return targets.find((option) => option.itemLabel === "Toast")!;
+    }
+
+    it("locks Apply, Cancel, and Close while a Nutrition revision submit is pending", () => {
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: true,
+          reviseLoading: true,
+        }),
+      ).toBe(true);
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: true,
+          reviseLoading: false,
+        }),
+      ).toBe(false);
+      expect(
+        nutritionRevisionDrawerSubmitPending({
+          singlePatchMode: false,
+          reviseLoading: true,
+        }),
+      ).toBe(false);
+    });
+
+    it("detects timeout and unknown-outcome transport failures as interrupted", () => {
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Request timed out",
+          status: 0,
+        }),
+      ).toBe(true);
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Failed to fetch",
+          status: 0,
+        }),
+      ).toBe(true);
+      expect(
+        isNutritionRevisionInterruptedError({
+          message: "Server exploded",
+          status: 500,
+        }),
+      ).toBe(false);
+    });
+
+    it("requires reload, selection clear, and no automatic patch retry on timeout", () => {
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "Request timed out",
+        status: 0,
+      });
+      expect(outcome.kind).toBe("INTERRUPTED");
+      expect(outcome.reloadLatest).toBe(true);
+      expect(outcome.clearSelection).toBe(true);
+      expect(outcome.retryRevisionPatch).toBe(false);
+      expect(outcome.message).toBe("Request timed out");
+    });
+
+    it("shows Revision was already applied when the REMOVE_ITEM target is absent after reload", () => {
+      const priorTarget = toastRemoveTarget();
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithToast, priorTarget),
+      ).toBe(true);
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithoutToast, priorTarget),
+      ).toBe(false);
+    });
+
+    it("requires a fresh selection when the REMOVE_ITEM target is still present after reload", () => {
+      const priorTarget = toastRemoveTarget();
+      const outcome = resolveNutritionRevisionErrorOutcome({
+        message: "Request timed out",
+        status: 0,
+      });
+      expect(outcome.clearSelection).toBe(true);
+      expect(
+        nutritionRemoveItemTargetStillPresent(nutritionScheduleWithToast, priorTarget),
+      ).toBe(true);
+    });
+
+    it("uses the applying revision copy for the pending state", () => {
+      expect(NUTRITION_REVISION_APPLYING_MESSAGE).toBe("Applying revision…");
+      expect(NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE).toBe(
+        "Revision was already applied.",
+      );
+    });
+  });
+
+  describe("Nutrition Plan Review drawer reopen lifecycle", () => {
+    it("clears stale transient messages and loads latest plan + dropdown on open", () => {
+      // Reopening after a prior success/error: transient messages are cleared, the latest plan is
+      // reloaded, and the target dropdown is rebuilt from that plan — all on open.
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      expect(lifecycle.clearTransientMessages).toBe(true);
+      expect(lifecycle.loadLatestPlan).toBe(true);
+      expect(lifecycle.rebuildTargetOptions).toBe(true);
+    });
+
+    it("reopen does not depend on the Revise Plan button to refresh plan data", () => {
+      // The dropdown rebuild + latest-plan load are gated on the drawer OPENING, not on clicking
+      // Revise Plan a second time. Both are true purely from open + NUTRITION domain.
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      expect(lifecycle.loadLatestPlan && lifecycle.rebuildTargetOptions).toBe(true);
+    });
+
+    it("clears messages and selection when the drawer closes", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: false,
+        drawerDomain: null,
+      });
+      expect(lifecycle.clearTransientMessages).toBe(true);
+      expect(lifecycle.clearSelection).toBe(true);
+      // Closed drawer must not fire the loaders.
+      expect(lifecycle.loadLatestPlan).toBe(false);
+      expect(lifecycle.rebuildTargetOptions).toBe(false);
+    });
+
+    it("clears Nutrition state when the drawer switches to another domain", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "SKILLS",
+      });
+      expect(lifecycle.clearSelection).toBe(true);
+      expect(lifecycle.loadLatestPlan).toBe(false);
+      expect(lifecycle.rebuildTargetOptions).toBe(false);
+    });
+
+    it("does not clear the coach's selection while the drawer is open on Nutrition", () => {
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+      // Open must not stomp an in-progress selection (only close / domain-switch clears it).
+      expect(lifecycle.clearSelection).toBe(false);
+    });
+
+    it("rebuilds the target dropdown only after the latest plan load resolves (never concurrent)", async () => {
+      const order: string[] = [];
+      let resolveLatestPlan: (() => void) | null = null;
+      const latestPlanGate = new Promise<void>((resolve) => {
+        resolveLatestPlan = resolve;
+      });
+
+      const loadLatestPlan = vi.fn(async () => {
+        order.push("latest:start");
+        await latestPlanGate;
+        order.push("latest:end");
+      });
+      const rebuildTargetOptions = vi.fn(async () => {
+        order.push("rebuild:start");
+      });
+
+      const running = runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan,
+        rebuildTargetOptions,
+      });
+
+      // While the latest-plan load is still pending, the dropdown rebuild must NOT have started.
+      await Promise.resolve();
+      expect(loadLatestPlan).toHaveBeenCalledTimes(1);
+      expect(rebuildTargetOptions).not.toHaveBeenCalled();
+      expect(order).toEqual(["latest:start"]);
+
+      // Resolve the latest-plan load; only then may the rebuild run.
+      resolveLatestPlan!();
+      await running;
+
+      expect(rebuildTargetOptions).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["latest:start", "latest:end", "rebuild:start"]);
+    });
+
+    it("clears old target options immediately, then shows fresh options only after the sequential refresh", async () => {
+      // Mirrors the drawer-open effect orchestration using the real exported pieces: the lifecycle
+      // descriptor drives the synchronous clear, then the sequential refresh runs.
+      const events: string[] = [];
+      const lifecycle = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: true,
+        drawerDomain: "NUTRITION",
+      });
+
+      // 1. Old target/options are cleared IMMEDIATELY on open (synchronously, before any load).
+      expect(lifecycle.clearTargetOptions).toBe(true);
+      if (lifecycle.clearTargetOptions) {
+        events.push("clear-target-options");
+      }
+
+      let resolveLatestPlan: (() => void) | null = null;
+      const latestPlanGate = new Promise<void>((resolve) => {
+        resolveLatestPlan = resolve;
+      });
+      const running = runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: lifecycle.loadLatestPlan
+          ? async () => {
+              events.push("latest:start");
+              await latestPlanGate;
+              events.push("latest:end");
+            }
+          : null,
+        rebuildTargetOptions: lifecycle.rebuildTargetOptions
+          ? async () => {
+              events.push("fresh-options");
+            }
+          : null,
+      });
+
+      // While the latest-plan load is still pending: old options already cleared, NO fresh options.
+      await Promise.resolve();
+      expect(events).toEqual(["clear-target-options", "latest:start"]);
+      expect(events).not.toContain("fresh-options");
+
+      // Fresh options appear only after the sequential refresh completes.
+      resolveLatestPlan!();
+      await running;
+      expect(events).toEqual([
+        "clear-target-options",
+        "latest:start",
+        "latest:end",
+        "fresh-options",
+      ]);
+    });
+
+    it("does not clear target options on close (close clears the whole selection instead)", () => {
+      const closed = resolveNutritionReviewDrawerLifecycle({
+        drawerOpen: false,
+        drawerDomain: null,
+      });
+      expect(closed.clearTargetOptions).toBe(false);
+      expect(closed.clearSelection).toBe(true);
+    });
+
+    it("skips a loader when its lifecycle flag is off", async () => {
+      const rebuildTargetOptions = vi.fn(async () => {});
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: null,
+        rebuildTargetOptions,
+      });
+      expect(rebuildTargetOptions).toHaveBeenCalledTimes(1);
+
+      const loadLatestPlan = vi.fn(async () => {});
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan,
+        rebuildTargetOptions: null,
+      });
+      expect(loadLatestPlan).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Nutrition revision success refreshes the drawer to the new version", () => {
+    // V1 Breakfast has 3 items; an ADD_ITEM revision creates V2 by appending "Oatmeal".
+    const v1Schedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+            ],
+          },
+        ],
+      },
+    ];
+    const v2Schedule = [
+      {
+        dayIndex: 1,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Breakfast",
+            items: [
+              { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+              { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
+              { order: 3, label: "Oatmeal", nutritionCatalogItemId: "nut-9", serving: "1 cup" },
+            ],
+          },
+        ],
+      },
+    ];
+    const buildTargets = (scheduleDays: readonly unknown[]) =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "NUTRITION" }), {
+        domain: "NUTRITION",
+        scheduleDays,
+      });
+
+    it("ADD_ITEM creates V2 → drawer stays open → dropdown rebuilds from V2 → added item is selectable for UPDATE_ITEM", async () => {
+      const events: string[] = [];
+      // The latest-plan reload swaps the rendered schedule to the newly created V2; the rebuild then
+      // rebuilds the dropdown targets from whatever the reload left rendered.
+      let renderedSchedule: readonly unknown[] = v1Schedule;
+      let rebuiltTargets = buildTargets(renderedSchedule);
+      // The added item is not yet in the (V1) dropdown before the refresh runs.
+      expect(
+        rebuiltTargets.some((o) => o.level === "ITEM" && o.itemLabel === "Oatmeal"),
+      ).toBe(false);
+
+      // Mirrors the real success-path orchestration: reload latest plan, THEN rebuild the dropdown,
+      // using the same sequential refresh the handler now calls. The refresh performs no close/reopen
+      // (there is no close signal to give), so the drawer stays open across the rebuild.
+      await runNutritionReviewDrawerOpenRefresh({
+        loadLatestPlan: async () => {
+          events.push("latest");
+          renderedSchedule = v2Schedule;
+        },
+        rebuildTargetOptions: async () => {
+          events.push("rebuild");
+          rebuiltTargets = buildTargets(renderedSchedule);
+        },
+      });
+
+      // Strictly ordered: latest plan reload resolves before the dropdown rebuild runs.
+      expect(events).toEqual(["latest", "rebuild"]);
+
+      // The rebuilt dropdown reflects V2 and includes the newly added item at its new position.
+      const added = rebuiltTargets.find(
+        (o) => o.level === "ITEM" && o.itemLabel === "Oatmeal",
+      );
+      expect(added).toBeDefined();
+      expect(added!.indices).toMatchObject({ dayIndex: 1, sessionIndex: 1, itemIndex: 4 });
+
+      // The added item is immediately selectable for a follow-up UPDATE_ITEM against the new version
+      // (serving "1 cup" stepped to 2 cups).
+      const submission = buildNutritionRevisionSubmission({
+        reviseIds: { trainingPlanId: "plan-1", versionId: "ver-2" },
+        target: added!,
+        actionKey: "UPDATE_ITEM",
+        servingTargetQuantity: 2,
+      });
+      expect(submission).not.toBeNull();
+      expect(submission!.versionId).toBe("ver-2");
+      expect(submission!.revisionPatch).toMatchObject({
+        operation: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 4,
+        servingAdjustment: { targetQuantity: 2, servingUnit: "cup" },
+      });
+    });
+  });
+
+  it("does not render static, invented, or context change options before Add Drill options are fetched", () => {
+    const targets = fynRevisionLeveledTargetOptions(fynDraftContext, { domain: "SKILLS" });
+    const sessionTarget = targets.find((target) => target.level === "SESSION");
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget?.key ?? null,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a bunker drill.",
+        }),
+      ),
+    );
+
+    // Endpoint flow active: generic context changeOptions are never shown as drill choices.
+    expect(html).not.toContain("Change drill");
+    expect(html).not.toContain("CHANGE_DRILL");
+    // No static/invented replacement option lists leak through.
+    expect(html).not.toContain("Make this easier");
+    expect(html).not.toContain("Swap this food");
+    expect(html).not.toContain("Reduce the load");
+    // No premature empty message before the coach asks for options.
+    expect(html).not.toContain(FYN_REVISION_NO_OPTIONS_MESSAGE);
+    // No fetched/approved options exist before the coach asks for them.
+    expect(html).not.toContain("Cross-court rally drill");
+    // The endpoint-driven action is available once Add Drill is chosen.
+    expect(html).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+  });
+
+  it("renders fetched DB/CATALOG replacement options as selectable chips", () => {
+    const targets = fynRevisionTargetOptions(fynDraftContext);
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: targets,
+          selectedTargetKey: targets[0]?.key ?? null,
+          coachRequest: "Replace the bunker drill.",
+          optionsState: {
+            loading: false,
+            error: null,
+            message: null,
+            options: fynFetchedOptions,
+            searched: true,
+          },
+        }),
+      ),
+    );
+
+    expect(html).toContain("Cross-court rally drill");
+    expect(html).toContain("Target serve ladder");
+    expect(html).not.toContain(FYN_REVISION_NO_OPTIONS_MESSAGE);
+  });
+
+  it("shows the no-approved-options message when the endpoint returns none", async () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: fynRevisionTargetOptions(fynDraftContext),
+          optionsState: {
+            loading: false,
+            error: null,
+            message: FYN_REVISION_NO_OPTIONS_MESSAGE,
+            options: [],
+            searched: true,
+          },
+        }),
+      ),
+    );
+    expect(html).toContain(FYN_REVISION_NO_OPTIONS_MESSAGE);
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the bunker drill.",
+      target: fynRevisionTargetOptions(fynDraftContext)[0]?.target ?? null,
+      fetchOptions: async () => ({ generationDomain: "SKILLS" as const, target: null, options: [] }),
+    });
+    expect(outcome).toEqual({ status: "OK", options: [], message: FYN_REVISION_NO_OPTIONS_MESSAGE });
+  });
+
+  it("shows the add-food empty message for a Nutrition ADD_ITEM with no approved options", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const mealTarget = nutritionTargets.find((option) => option.level === "SESSION")!;
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a fruit to breakfast.",
+      target: mealTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions: async () => ({
+        generationDomain: "NUTRITION" as const,
+        target: null,
+        options: [],
+      }),
+    });
+    expect(outcome).toEqual({
+      status: "OK",
+      options: [],
+      message: FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
+    });
+    expect(FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE).toBe(
+      "No approved add-food options found for this meal.",
+    );
+  });
+
+  it("keeps the replacement empty message for a Nutrition REPLACEMENT with no approved options", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const itemTarget = nutritionTargets.find((option) => option.level === "ITEM")!;
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the white rice.",
+      target: itemTarget.target,
+      optionKind: "REPLACEMENT",
+      fetchOptions: async () => ({
+        generationDomain: "NUTRITION" as const,
+        target: null,
+        options: [],
+      }),
+    });
+    expect(outcome).toEqual({
+      status: "OK",
+      options: [],
+      message: FYN_REVISION_NO_OPTIONS_MESSAGE,
+    });
+  });
+
+  it("shows the error message when the options request fails", async () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: fynRevisionTargetOptions(fynDraftContext),
+          optionsState: {
+            loading: false,
+            error: FYN_REVISION_OPTIONS_ERROR_MESSAGE,
+            message: null,
+            options: [],
+            searched: true,
+          },
+        }),
+      ),
+    );
+    expect(html).toContain(FYN_REVISION_OPTIONS_ERROR_MESSAGE);
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the bunker drill.",
+      target: fynRevisionTargetOptions(fynDraftContext)[0]?.target ?? null,
+      fetchOptions: async () => {
+        throw new Error("boom");
+      },
+    });
+    expect(outcome).toEqual({ status: "ERROR", message: FYN_REVISION_OPTIONS_ERROR_MESSAGE });
+  });
+
+  it("blocks the request and returns a clarification when no target is matched", async () => {
+    const fetchOptions = vi.fn();
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Please change something.",
+      target: null,
+      fetchOptions,
+    });
+
+    expect(outcome).toEqual({
+      status: "MISSING_TARGET",
+      message: FYN_REVISION_MISSING_TARGET_MESSAGE,
+    });
+    expect(fetchOptions).not.toHaveBeenCalled();
+
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: fynRevisionTargetOptions(fynDraftContext),
+          optionsState: {
+            loading: false,
+            error: null,
+            message: FYN_REVISION_MISSING_TARGET_MESSAGE,
+            options: [],
+            searched: true,
+          },
+        }),
+      ),
+    );
+    expect(html).toContain(FYN_REVISION_MISSING_TARGET_MESSAGE);
+  });
+
+  it("never calls the options endpoint on render or while typing", async () => {
+    const fetchOptions = vi.fn();
+    const onShowOptions = vi.fn();
+    renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: fynDraftContext,
+          targetOptions: fynRevisionTargetOptions(fynDraftContext),
+          selectedTargetKey: fynRevisionTargetOptions(fynDraftContext)[0]?.key ?? null,
+          coachRequest: "Replace the bunker drill.",
+          onShowOptions,
+        }),
+      ),
+    );
+    // Rendering, and typing (which only updates coachRequest), never triggers a fetch.
+    expect(onShowOptions).not.toHaveBeenCalled();
+
+    // Request text alone does not call the endpoint; an empty request short-circuits.
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "",
+      target: null,
+      fetchOptions,
+    });
+    expect(outcome).toEqual({ status: "MISSING_REQUEST" });
+    expect(fetchOptions).not.toHaveBeenCalled();
+  });
+
+  it("calls the options helper once with the correct REPLACEMENT payload", async () => {
+    const target = fynRevisionTargetOptions(fynDraftContext)[0]?.target;
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      target: target!,
+      coachRequest: "Replace the bunker drill.",
+    });
+    expect(expectedPayload).toEqual({
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target,
+      coachRequest: "Replace the bunker drill.",
+      optionKind: "REPLACEMENT",
+      limit: 4,
+    });
+
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "SKILLS" as const,
+      target: target ?? null,
+      options: fynFetchedOptions,
+    }));
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the bunker drill.",
+      target: target ?? null,
+      fetchOptions,
+    });
+
+    expect(fetchOptions).toHaveBeenCalledTimes(1);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+    expect(outcome).toEqual({ status: "OK", options: fynFetchedOptions, message: null });
+  });
+
+  it("maps actions to the revision-options optionKind (ADD_ITEM vs REPLACEMENT vs text-only)", () => {
+    expect(fynRevisionActionOptionKind("REPLACE_ITEM")).toBe("REPLACEMENT");
+    expect(fynRevisionActionOptionKind("REPLACE_DAY")).toBe("REPLACEMENT");
+    expect(fynRevisionActionOptionKind("ADD_ITEM")).toBe("ADD_ITEM");
+    expect(fynRevisionActionOptionKind("ADD_SESSION")).toBeNull();
+    expect(fynRevisionActionOptionKind("REMOVE_ITEM")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_ITEM")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_SESSION")).toBeNull();
+    expect(fynRevisionActionOptionKind("UPDATE_SESSION_ITEMS")).toBeNull();
+
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION") ?? null;
+    const dayTarget = targets.find((option) => option.level === "DAY") ?? null;
+    const addItem = fynRevisionAvailableActions("SKILLS", sessionTarget).find(
+      (action) => action.key === "ADD_ITEM",
+    );
+    // ADD_ITEM goes through the approved-options flow; no other Skills action is exposed.
+    expect(addItem?.requiresApprovedOptions).toBe(true);
+    expect(dayTarget).toBeNull();
+  });
+
+  it("collapses any target to a clean SESSION target for ADD_ITEM (no null item fields)", () => {
+    const sessionTarget = fynRevisionAddItemSessionTarget(
+      {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: "item-1",
+        itemType: "EXERCISE",
+        currentId: "ex-1",
+        label: "Back squat",
+        tags: ["x"],
+      },
+      "S_AND_C",
+    );
+    // Item-level fields are omitted entirely (not sent as null); itemType is domain-specific.
+    expect(sessionTarget).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemType: "EXERCISE",
+      label: "Back squat",
+      tags: ["x"],
+    });
+    expect(sessionTarget).not.toHaveProperty("itemKey");
+    expect(sessionTarget).not.toHaveProperty("currentId");
+    expect(Object.values(sessionTarget)).not.toContain(null);
+  });
+
+  it("builds an ADD_ITEM options payload with a clean SESSION target", () => {
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: "item-1",
+        itemType: "EXERCISE",
+        currentId: "ex-1",
+        label: "Back squat",
+        tags: [],
+      },
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(payload).toEqual({
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemType: "EXERCISE",
+        label: "Back squat",
+        tags: [],
+      },
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+    expect(payload.target).not.toHaveProperty("itemKey");
+    expect(payload.target).not.toHaveProperty("currentId");
+    expect(JSON.stringify(payload.target)).not.toContain("null");
+  });
+
+  it("sends optionKind ADD_ITEM with a SESSION target for a Skills add-drill", async () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "SKILLS" as const,
+      target: null,
+      options: fynFetchedOptions,
+    }));
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a volley approach drill.",
+      target: sessionTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    expect(outcome).toEqual({ status: "OK", options: fynFetchedOptions, message: null });
+    expect(fetchOptions).toHaveBeenCalledTimes(1);
+    // Skills ADD_ITEM: SESSION target, itemType "SKILL", no item-level fields, no null fields.
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      target: sessionTarget.target,
+      coachRequest: "Add a volley approach drill.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: sessionTarget.target.dayKey,
+      sessionKey: sessionTarget.target.sessionKey,
+      itemType: "SKILL",
+      label: sessionTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("sends optionKind ADD_ITEM with a meal/session target for a Nutrition add-food-item", async () => {
+    const nutritionTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "NUTRITION" }),
+      {
+        domain: "NUTRITION",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Breakfast",
+                items: [{ order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" }],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const mealTarget = nutritionTargets.find((option) => option.level === "SESSION")!;
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "NUTRITION" as const,
+      target: null,
+      options: [],
+    }));
+
+    await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a fruit to breakfast.",
+      target: mealTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    // Nutrition ADD_ITEM: meal/session target, itemType "NUTRITION", no item-level/null fields.
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      target: mealTarget.target,
+      coachRequest: "Add a fruit to breakfast.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: mealTarget.target.dayKey,
+      sessionKey: mealTarget.target.sessionKey,
+      itemType: "NUTRITION",
+      label: mealTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("maps an S&C item target to its parent session when sending ADD_ITEM", async () => {
+    const sandcTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [
+                  { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
+                  { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+    const itemTarget = sandcTargets.find((option) => option.level === "ITEM")!;
+    expect(itemTarget.target.itemKey).not.toBeNull();
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "S_AND_C" as const,
+      target: null,
+      options: [],
+    }));
+
+    await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a hamstring exercise.",
+      target: itemTarget.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    // S&C ADD_ITEM: an item target maps to its parent SESSION with itemType "EXERCISE"; the
+    // item-level fields are omitted (never sent as null, which the backend rejects).
+    const expectedPayload = buildFynRevisionOptionsPayload({
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      target: itemTarget.target,
+      coachRequest: "Add a hamstring exercise.",
+      optionKind: "ADD_ITEM",
+    });
+    expect(expectedPayload.target).toEqual({
+      dayKey: itemTarget.target.dayKey,
+      sessionKey: itemTarget.target.sessionKey,
+      itemType: "EXERCISE",
+      label: itemTarget.target.label,
+      tags: [],
+    });
+    expect(expectedPayload.target).not.toHaveProperty("itemKey");
+    expect(expectedPayload.target).not.toHaveProperty("currentId");
+    expect(Object.values(expectedPayload.target)).not.toContain(null);
+    expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  it("loads approved exercise options for a selected S&C session", async () => {
+    const target = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "S_AND_C" }),
+      {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 2,
+            sessions: [{ sessionIndex: 1, title: "Lower body", items: [] }],
+          },
+        ],
+      },
+    ).find((option) => option.level === "SESSION")!;
+    const approvedExercise = {
+      ...fynFetchedOptions[0]!,
+      id: "display-only-id",
+      domain: "S_AND_C",
+      optionKind: "ADD_ITEM",
+      exerciseCatalogItemId: "exercise-catalog-1",
+    };
+    const fetchOptions = vi.fn(async () => ({
+      generationDomain: "S_AND_C" as const,
+      target: target.target,
+      options: [approvedExercise],
+    }));
+
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a hamstring exercise.",
+      target: target.target,
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+
+    expect(outcome.status).toBe("OK");
+    if (outcome.status === "OK") {
+      expect(outcome.options[0]?.exerciseCatalogItemId).toBe("exercise-catalog-1");
+      expect(outcome.options[0]?.id).toBe("display-only-id");
+    }
+  });
+
+  it("blocks ADD_ITEM without a session target and never calls the endpoint", async () => {
+    const fetchOptions = vi.fn();
+    const outcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      coachRequest: "Add a drill.",
+      target: {
+        dayKey: "day-1",
+        sessionKey: null,
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Day 1",
+        tags: [],
+      },
+      optionKind: "ADD_ITEM",
+      fetchOptions,
+    });
+    expect(outcome).toEqual({
+      status: "MISSING_TARGET",
+      message: FYN_REVISION_MISSING_TARGET_MESSAGE,
+    });
+    expect(fetchOptions).not.toHaveBeenCalled();
+  });
+
+  it("writes ADD_ITEM basket lines naming the approved option and the session/meal", () => {
+    expect(
+      buildFynRevisionAddItemChangeText("SKILLS", "Morning session", "Volley approach drill"),
+    ).toBe("Add drill: Volley approach drill to Morning session.");
+    expect(buildFynRevisionAddItemChangeText("NUTRITION", "Breakfast", "Greek yogurt")).toBe(
+      "Add food item: Greek yogurt to Breakfast.",
+    );
+    expect(buildFynRevisionAddItemChangeText("S_AND_C", "Lower body", "Goblet squat")).toBe(
+      "Add exercise: Goblet squat to Lower body.",
+    );
+    // An empty approved option yields no basket line.
+    expect(buildFynRevisionAddItemChangeText("SKILLS", "Morning session", "   ")).toBe("");
+
+    // The ADD_ITEM line participates in the same 3-change basket used by replacements.
+    const selection = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      buildFynRevisionAddItemChangeText("NUTRITION", "Breakfast", "Greek yogurt"),
+    );
+    expect(selection.changes).toHaveLength(1);
+    expect(selection.changes[0]?.acceptedChange).toBe(
+      "Add food item: Greek yogurt to Breakfast.",
+    );
+  });
+
+  it("shows the approved-options button (not chips) for ADD_ITEM until the coach clicks it", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const onShowOptions = vi.fn();
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a volley approach drill.",
+          onShowOptions,
+        }),
+      ),
+    );
+    expect(html).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+    // Rendering never fetches, so no approved-option chips exist yet.
+    expect(html).not.toContain("Pick an approved option and Fyn will add it to the basket:");
+    expect(html).not.toContain("Cross-court rally drill");
+    expect(onShowOptions).not.toHaveBeenCalled();
+  });
+
+  it("renders ADD_ITEM approved options as chips only after the fetch resolves", () => {
+    const targets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: targets,
+          selectedTargetKey: sessionTarget.key,
+          selectedActionKey: "ADD_ITEM",
+          coachRequest: "Add a volley approach drill.",
+          optionsState: {
+            loading: false,
+            error: null,
+            message: null,
+            options: fynFetchedOptions,
+            searched: true,
+          },
+        }),
+      ),
+    );
+    expect(html).toContain("Pick an approved option:");
+    expect(html).toContain("Cross-court rally drill");
+  });
+
+  it("does not expose ADD_SESSION and exposes REMOVE_ITEM only on a drill", () => {
+    const skillsTargets = fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: "SKILLS" }),
+      { domain: "SKILLS", scheduleDays: skillsSchedule },
+    );
+    const sessionTarget = skillsTargets.find((option) => option.level === "SESSION")!;
+    const sessionHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: skillsTargets,
+          selectedTargetKey: sessionTarget.key,
+        }),
+      ),
+    );
+    expect(sessionHtml).not.toContain("Add Skills session");
+    expect(sessionHtml).not.toContain("Remove drill");
+    expect(sessionHtml).toContain("Add drill");
+
+    const itemTarget = skillsTargets.find((option) => option.level === "ITEM")!;
+    const itemHtml = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          context: makeRevisionContext({ generationDomain: "SKILLS" }),
+          targetOptions: skillsTargets,
+          selectedTargetKey: itemTarget.key,
+        }),
+      ),
+    );
+    expect(itemHtml).toContain("Remove drill");
+    expect(itemHtml).toContain("Change drill parameters");
+  });
+
+  it("stores the operation-explicit replacement line naming the current target and new option", () => {
+    const changeText = buildFynRevisionReplaceChangeText(
+      "SKILLS",
+      "Bunker Carry-Distance Control Drill",
+      fynFetchedOptions[0]!.label,
+    );
+    expect(changeText).toBe(
+      "Replace drill: Bunker Carry-Distance Control Drill with Cross-court rally drill.",
+    );
+
+    const selection = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      changeText,
+    );
+    expect(selection.changes).toHaveLength(1);
+    expect(selection.changes[0]?.acceptedChange).toBe(
+      "Replace drill: Bunker Carry-Distance Control Drill with Cross-court rally drill.",
+    );
+
+    // Domain vocabulary carries through, naming both old and new items.
+    expect(buildFynRevisionReplaceChangeText("NUTRITION", "White rice", "Brown rice")).toBe(
+      "Replace food item: White rice with Brown rice.",
+    );
+    expect(buildFynRevisionReplaceChangeText("S_AND_C", "Back squat", "Front squat")).toBe(
+      "Replace exercise: Back squat with Front squat.",
+    );
+  });
+
+  it("caps the basket at three replacement changes", () => {
+    const one = addAcceptedFynRevisionChange(
+      defaultFynRevisionBatchSelection(),
+      buildFynRevisionReplaceChangeText("SKILLS", "Drill A", "Option A"),
+    );
+    const two = addAcceptedFynRevisionChange(
+      one,
+      buildFynRevisionReplaceChangeText("SKILLS", "Drill B", "Option B"),
+    );
+    const three = addAcceptedFynRevisionChange(
+      two,
+      buildFynRevisionReplaceChangeText("SKILLS", "Drill C", "Option C"),
+    );
+    const four = addAcceptedFynRevisionChange(
+      three,
+      buildFynRevisionReplaceChangeText("SKILLS", "Drill D", "Option D"),
+    );
+
+    expect(one.changes).toHaveLength(1);
+    expect(three.changes).toHaveLength(3);
+    expect(four.changes).toHaveLength(3);
+    expect(MAX_FYN_REVISION_CHANGES).toBe(3);
+  });
+
+  it("serializes selected replacements into coachFeedback with Change 1/2/3 labels", () => {
+    let selection = defaultFynRevisionBatchSelection();
+    selection = addAcceptedFynRevisionChange(
+      selection,
+      buildFynRevisionReplaceChangeText("SKILLS", "Bunker drill", "Cross-court rally drill"),
+    );
+    selection = addAcceptedFynRevisionChange(
+      selection,
+      buildFynRevisionReplaceChangeText("SKILLS", "Cool down", "Mobility flow"),
+    );
+    selection = addAcceptedFynRevisionChange(
+      selection,
+      buildFynRevisionReplaceChangeText("SKILLS", "Sprint set", "Tempo run"),
+    );
+
+    const coachFeedback = buildFynRevisionCoachFeedback({ domain: "SKILLS", selection });
+    expect(coachFeedback).toContain("Change 1:");
+    expect(coachFeedback).toContain("Change 2:");
+    expect(coachFeedback).toContain("Change 3:");
+    expect(coachFeedback).toContain(
+      "Replace drill: Bunker drill with Cross-court rally drill.",
+    );
+    expect(coachFeedback).toContain(FYN_REVISION_PRESERVE_LINE);
+
+    // Submit remains the existing revise flow: only these three fields are sent.
+    const submitPayload = {
+      trainingPlanId: "plan-1",
+      versionId: "version-1",
+      coachFeedback,
+    };
+    expect(Object.keys(submitPayload)).toEqual([
+      "trainingPlanId",
+      "versionId",
+      "coachFeedback",
+    ]);
+  });
+
+  it("serializes a single accepted change into the coachFeedback field", () => {
+    const feedback = buildFynRevisionCoachFeedback({
+      domain: "SKILLS",
+      selection: {
+        changes: [{ acceptedChange: "Replace bunker drill with Cross-court rally drill." }],
+      },
+    });
+
+    expect(feedback).toBe(
+      [
+        "Revision request: Apply these 1 Skills change only.",
+        "",
+        "Change 1:",
+        "Replace bunker drill with Cross-court rally drill.",
+        FYN_REVISION_PRESERVE_LINE,
+      ].join("\n"),
+    );
+  });
+
+  it("ignores empty accepted change text", () => {
+    const selection = addAcceptedFynRevisionChange(defaultFynRevisionBatchSelection(), "   ");
+    expect(selection.changes).toHaveLength(0);
+  });
+
+  it("removes an accepted change from the basket", () => {
+    const two = addAcceptedFynRevisionChange(
+      addAcceptedFynRevisionChange(
+        defaultFynRevisionBatchSelection(),
+        "Replace Bunker drill with Cross-court rally drill.",
+      ),
+      "Replace Cool down with Mobility flow.",
+    );
+    const afterRemove = removeFynRevisionChange(two, 0);
+
+    expect(afterRemove.changes).toHaveLength(1);
+    expect(afterRemove.changes[0]?.acceptedChange).toBe(
+      "Replace Cool down with Mobility flow.",
+    );
+  });
+
+  it("uses the Nutrition domain label in serialized feedback", () => {
+    const feedback = buildFynRevisionCoachFeedback({
+      domain: "NUTRITION",
+      selection: {
+        changes: [
+          { acceptedChange: "Replace white rice with brown rice at lunch." },
+          { acceptedChange: "Replace juice with water at breakfast." },
+        ],
+      },
+    });
+
+    expect(feedback).toContain("Revision request: Apply these 2 Nutrition changes only.");
+    expect(feedback).toContain("Change 1:");
+    expect(feedback).toContain("Replace white rice with brown rice at lunch.");
+    expect(feedback).toContain(FYN_REVISION_PRESERVE_LINE);
   });
 
   it("renders Plan History rows with a read-only View action and no workflow actions", () => {
@@ -4522,8 +10641,8 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     }
   });
 
-  it("keeps AI generated drafts on latest draft content when submitted detail inputs are present", () => {
-    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+  it("keeps AI generated drafts on latest draft content when non-Nutrition submitted detail inputs are present", () => {
+    for (const domain of ["SKILLS", "S_AND_C"] as const) {
       expect(
         resolveDomainReviewDrawerContentSource({
           domain,
@@ -4549,6 +10668,30 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         }),
       ).toBe("latest_domain_draft");
     }
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "NUTRITION",
+        workflowStatus: "submitted_for_review",
+        directReleaseSkillsOwner: false,
+        activeDetail: {
+          plan: { id: "NUTRITION-submitted-plan", status: "SUBMITTED_FOR_REVIEW" },
+          version: { id: "NUTRITION-submitted-version", status: "SUBMITTED_FOR_REVIEW" },
+          days: [],
+        } as never,
+        latestDraft: {
+          trainingPlanId: "NUTRITION-draft-plan",
+          trainingPlanVersionId: "NUTRITION-draft-version",
+          versionNumber: 1,
+          status: "AI_GENERATED",
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [{ title: "NUTRITION generated session", items: [] }],
+            },
+          ],
+        } as never,
+      }),
+    ).toBe("active_detail");
   });
 
   it("uses submitted detail after submit and released active detail after release", () => {

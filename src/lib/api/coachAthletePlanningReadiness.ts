@@ -6,6 +6,7 @@ import {
   type NormalizedApiError,
 } from "@/lib/apiClient";
 import type { GenerationDomain } from "@/lib/coachAuthority";
+import type { TrainingPlanPendingRevisionRequest } from "@/types/trainingPlanWorkspace";
 
 type AnyRecord = Record<string, unknown>;
 const TRAINING_PLAN_EXECUTE_TIMEOUT_MS = 480_000;
@@ -428,6 +429,7 @@ export type CoachAthleteGeneratedDraftItem = {
   protein: number | null;
   carbs: number | null;
   fat: number | null;
+  fiber: number | null;
   timing: string | null;
   sets: string | null;
   durationMinutes: number | null;
@@ -488,6 +490,120 @@ export type CoachAthleteLatestDomainDraft = {
   itemsPersisted: number | null;
   days: CoachAthleteGeneratedDraftDay[];
   raw: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionContextRef = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  trainingPlanId: string | null;
+  trainingPlanVersionId: string | null;
+  versionId: string | null;
+  versionNumber: number | null;
+  status: string | null;
+  raw: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionChangeOption = {
+  changeType: string | null;
+  label: string | null;
+  description: string | null;
+  raw: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionContext = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  draft: CoachAthleteLatestDomainDraft | null;
+  ref: CoachAthleteDomainDraftRevisionContextRef | null;
+  status: string | null;
+  version: unknown;
+  targetMap: unknown;
+  planningBriefSummary: unknown;
+  lockedPlanningContextSummary: unknown;
+  allowedChangeTypes: string[];
+  changeOptions: CoachAthleteDomainDraftRevisionChangeOption[];
+  requiredInput: unknown;
+  raw: unknown;
+};
+
+/**
+ * Identifies the draft slot a coach wants revision options for. `tags` is UI-defaulted to [].
+ * `itemKey` and `currentId` are optional: ADD_ITEM requests target a whole SESSION/meal and omit
+ * these item-level fields entirely (the backend rejects them when sent as null).
+ */
+export type CoachAthleteDomainDraftRevisionOptionTarget = {
+  dayKey: string | null;
+  sessionKey: string | null;
+  itemKey?: string | null;
+  itemType: string | null;
+  currentId?: string | null;
+  label: string | null;
+  tags: string[];
+};
+
+/**
+ * Domain-specific `itemType` sent on ADD_ITEM SESSION targets so the backend knows what kind of
+ * item is being added: SKILLS → "SKILL", NUTRITION → "NUTRITION", S_AND_C → "EXERCISE".
+ */
+export function domainDraftAddItemTargetItemType(
+  domain: TrainingPlanGenerationDomain,
+): string {
+  if (domain === "NUTRITION") return "NUTRITION";
+  if (domain === "S_AND_C") return "EXERCISE";
+  return "SKILL";
+}
+
+export type CoachAthleteDomainDraftRevisionOptionSource = "DB" | "CATALOG" | "CURRENT_PLAN";
+
+/**
+ * Which kind of revision option the backend should return. REPLACEMENT swaps an existing item;
+ * ADD_ITEM returns approved additions (drills / catalog food items / exercises) for a session.
+ */
+export type CoachAthleteDomainDraftRevisionOptionKind = "REPLACEMENT" | "ADD_ITEM";
+
+/** A single DB/catalog/current-plan backed replacement option ranked by the backend. */
+export type CoachAthleteDomainDraftRevisionOption = {
+  id: string;
+  rank: number | null;
+  label: string;
+  domain: string | null;
+  optionKind: string;
+  source: CoachAthleteDomainDraftRevisionOptionSource;
+  score: number | null;
+  reason: string | null;
+  goalIds: string[];
+  targetTags: string[];
+  safetyTags: string[];
+  levelTags: string[];
+  /**
+   * Authoritative catalog reference for Nutrition options, taken from the backend's explicit
+   * top-level `nutritionCatalogItemId` field. Never inferred from `metadata`, `label`, or `id`.
+   */
+  nutritionCatalogItemId?: string;
+  /** Authoritative catalog reference for S&C options. */
+  exerciseCatalogItemId?: string;
+  /**
+   * Complete canonical food item for a Nutrition option, supplied by the backend. For ADD_ITEM /
+   * REPLACE_ITEM this is submitted verbatim as the revision patch's `item` (identity, serving, and
+   * every nutrition value preserved). Absent when the backend does not supply one, which blocks
+   * Apply Revision. Never rebuilt from `label` or `metadata`.
+   */
+  item?: TrainingPlanRevisionPatchItem | null;
+  metadata: unknown;
+};
+
+export type CoachAthleteDomainDraftRevisionOptionsResult = {
+  generationDomain: TrainingPlanGenerationDomain | null;
+  target: CoachAthleteDomainDraftRevisionOptionTarget | null;
+  options: CoachAthleteDomainDraftRevisionOption[];
+};
+
+export type FetchCoachAthleteDomainDraftRevisionOptionsPayload = {
+  generationDomain: TrainingPlanGenerationDomain;
+  trainingPlanId: string;
+  trainingPlanVersionId: string;
+  target: CoachAthleteDomainDraftRevisionOptionTarget;
+  coachRequest: string;
+  optionKind?: CoachAthleteDomainDraftRevisionOptionKind;
+  limit?: number;
 };
 
 /** When persist-draft times out client-side but the draft exists, map latest draft → persist result shape. */
@@ -642,6 +758,7 @@ export type CoachPersistedTrainingPlanActiveDetail = {
   generationDomain: string | null;
   allowedActions: GovernedTrainingPlanWorkflowAction[];
   releaseMode: string | null;
+  pendingRevisionRequest?: TrainingPlanPendingRevisionRequest | null;
   constraintComplianceSummary: TrainingPlanConstraintComplianceSummary | null;
   plan: CoachPersistedTrainingPlan;
   version: CoachPersistedTrainingPlanVersion;
@@ -684,10 +801,112 @@ export type AthleteTodayPlan = {
   raw: unknown;
 };
 
+/** Structured item carried inside a deterministic {@link TrainingPlanRevisionPatch}. */
+export type TrainingPlanRevisionPatchItem = {
+  /** Skills item operations identify the DB-backed drill; canonical metadata remains backend-owned. */
+  skillCode?: string;
+  exerciseCatalogItemId?: string;
+  durationMinutes?: number;
+  sets?: number;
+  reps?: string | number;
+  nutritionCatalogItemId?: string | null;
+  itemType?: string | null;
+  label?: string | null;
+  serving?: string | null;
+  calories?: number | null;
+  protein?: number | null;
+  carbs?: number | null;
+  fat?: number | null;
+  fiber?: number | null;
+  timing?: string | null;
+  notes?: string | null;
+};
+
+/**
+ * Deterministic item-level serving adjustment for a Nutrition UPDATE_ITEM patch. The backend
+ * recomputes calories/macros from `targetQuantity` + `servingUnit`; the frontend never calculates
+ * them. `targetQuantity` is always > 0.
+ */
+export type NutritionServingAdjustment = {
+  targetQuantity: number;
+  servingUnit: string;
+};
+
+/**
+ * Deterministic single-operation revision patch. This is the executable source of truth the backend
+ * applies; `coachFeedback` is only a human-readable summary. Item operations carry `dayIndex`,
+ * `sessionIndex`, `itemIndex` (all 1-based per the backend contract). ADD_ITEM / REPLACE_ITEM carry
+ * `item`; Nutrition UPDATE_ITEM carries a `servingAdjustment` (never a replacement `item`). The
+ * shared shape retains `session` for domains that support UPDATE_SESSION; Nutrition does not.
+ */
+export type TrainingPlanRevisionPatch = {
+  operation: string;
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex?: number;
+  item?: TrainingPlanRevisionPatchItem;
+  servingAdjustment?: NutritionServingAdjustment;
+  session?: Record<string, unknown>;
+};
+
+export type SandCRevisionPatchItem = {
+  exerciseCatalogItemId: string;
+  durationMinutes?: number;
+  sets?: number;
+  reps?: number;
+};
+
+type SandCExistingItemRevisionPatch = {
+  type: "UPDATE_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex: number;
+  item: SandCRevisionPatchItem;
+};
+
+type SandCRemoveItemRevisionPatch = {
+  type: "REMOVE_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  itemIndex: number;
+  item: {
+    exerciseCatalogItemId: string;
+  };
+};
+
+type SandCAddItemRevisionPatch = {
+  type: "ADD_ITEM";
+  dayIndex: number;
+  sessionIndex: number;
+  item: {
+    exerciseCatalogItemId: string;
+    durationMinutes: number;
+    sets: number;
+    reps: number;
+  };
+};
+
+export type SandCRevisionPatch =
+  | SandCAddItemRevisionPatch
+  | SandCRemoveItemRevisionPatch
+  | SandCExistingItemRevisionPatch;
+
 export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
   coachFeedback: string;
+  /**
+   * Optional structured patch. When present (Nutrition, Skills, or S&C deterministic
+   * single-patch flow) it is the executable source of truth.
+   */
+  revisionPatch?: TrainingPlanRevisionPatch | SandCRevisionPatch | null;
+};
+
+export type SandCRevisionSubmission = Omit<
+  TrainingPlanRevisePayload,
+  "revisionPatch"
+> & {
+  revisionPatch: SandCRevisionPatch;
 };
 
 export type TrainingPlanReviseResult = {
@@ -752,7 +971,22 @@ function readFirstArray(records: AnyRecord[], keys: string[]): unknown[] {
   return [];
 }
 
-function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem | null {
+/**
+ * Priority-ordered alias lists for each Nutrition nutrient. The backend may emit a scaled runtime
+ * value (e.g. `caloriesKcal`, `proteinG`) alongside an older unscaled base field (e.g. `calories`).
+ * The parser normalizes each nutrient to a single canonical value using the FIRST finite numeric
+ * value in this order — scaled/runtime aliases win over base fields so the parsed item is never
+ * stale. The frontend performs no nutrient math; it only selects which key to read.
+ */
+const NUTRITION_NUTRIENT_ALIAS_PRIORITY = {
+  calories: ["caloriesKcal", "calories", "kcal", "energyKcal"],
+  protein: ["proteinG", "proteinGrams", "protein"],
+  carbs: ["carbohydrateG", "carbsG", "carbsGrams", "carbs", "carbohydratesGrams", "carbohydrates"],
+  fat: ["fatG", "fatGrams", "fat"],
+  fiber: ["fiberG", "fiberGrams", "fibreG", "fiber", "dietaryFiberGrams", "dietaryFiber"],
+} as const;
+
+export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem | null {
   const record = asRecord(value);
   if (!record) return null;
   const item: CoachAthleteGeneratedDraftItem = {
@@ -767,10 +1001,11 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     serving: readStringKey([record], NUTRITION_SERVING_TEXT_KEYS),
     quantity: readNumberKey([record], NUTRITION_QUANTITY_KEYS),
     unit: readStringKey([record], ["unit"]),
-    calories: readNumberKey([record], ["calories"]),
-    protein: readNumberKey([record], ["protein"]),
-    carbs: readNumberKey([record], ["carbs"]),
-    fat: readNumberKey([record], ["fat"]),
+    calories: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.calories),
+    protein: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.protein),
+    carbs: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.carbs),
+    fat: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.fat),
+    fiber: readNumberKey([record], NUTRITION_NUTRIENT_ALIAS_PRIORITY.fiber),
     timing: readStringKey([record], ["timing"]),
     sets: readStringLike(record.sets),
     durationMinutes: readNumberKey([record], ["durationMinutes"]),
@@ -794,6 +1029,7 @@ function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDraftItem
     item.protein !== null ||
     item.carbs !== null ||
     item.fat !== null ||
+    item.fiber !== null ||
     item.timing ||
     item.sets ||
     item.durationMinutes !== null ||
@@ -935,6 +1171,236 @@ function parseLatestDomainDraftPayload(data: unknown): CoachAthleteLatestDomainD
     itemsPersisted: readNumberKey(records, ["itemsPersisted"]),
     days,
     raw: data,
+  };
+}
+
+function parseDomainDraftRevisionContextRef(
+  value: unknown,
+  fallbackDraft: CoachAthleteLatestDomainDraft | null,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionContextRef | null {
+  const record = asRecord(value);
+  if (!record && fallbackDraft === null) return null;
+  const records = record ? [record] : [];
+  const generationDomain =
+    readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+    fallbackDomain;
+  const trainingPlanVersionId =
+    readStringKey(records, ["trainingPlanVersionId", "versionId"]) ??
+    fallbackDraft?.trainingPlanVersionId ??
+    null;
+  return {
+    generationDomain,
+    trainingPlanId:
+      readStringKey(records, ["trainingPlanId", "planId"]) ??
+      fallbackDraft?.trainingPlanId ??
+      null,
+    trainingPlanVersionId,
+    versionId: readStringKey(records, ["versionId"]) ?? trainingPlanVersionId,
+    versionNumber: readNumberKey(records, ["versionNumber"]) ?? fallbackDraft?.versionNumber ?? null,
+    status: readStringKey(records, ["status"]) ?? fallbackDraft?.status ?? null,
+    raw: value ?? fallbackDraft?.raw ?? null,
+  };
+}
+
+function parseDomainDraftRevisionChangeOption(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionChangeOption | null {
+  const record = asRecord(value);
+  if (!record) {
+    const label = readScalarText(value);
+    return label === null
+      ? null
+      : {
+          changeType: label,
+          label,
+          description: null,
+          raw: value,
+        };
+  }
+  const label = readStringKey([record], ["label", "name", "title", "changeType", "type"]);
+  const changeType = readStringKey([record], ["changeType", "type", "value", "key"]) ?? label;
+  return changeType || label || readStringKey([record], ["description", "summary"])
+    ? {
+        changeType,
+        label,
+        description: readStringKey([record], ["description", "summary"]),
+        raw: value,
+      }
+    : null;
+}
+
+function parseDomainDraftRevisionContextPayload(
+  data: unknown,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionContext {
+  const adapted = adaptBackendSuccess(data);
+  const adaptedRecord = asRecord(adapted) ?? {};
+  const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
+  const records = [record];
+  const draftRecord = asRecord(record.draft);
+  const draft =
+    draftRecord !== null || readStringKey(records, ["trainingPlanId", "trainingPlanVersionId"])
+      ? parseLatestDomainDraftPayload(draftRecord ?? record)
+      : null;
+  const ref = parseDomainDraftRevisionContextRef(record.ref, draft, fallbackDomain);
+  const allowedChangeTypes = readStringListKey(records, [
+    "allowedChangeTypes",
+    "changeTypes",
+    "allowedChanges",
+  ]);
+  const changeOptions = readFirstArray(records, ["changeOptions", "allowedChangeOptions", "options"])
+    .map(parseDomainDraftRevisionChangeOption)
+    .filter(
+      (option): option is CoachAthleteDomainDraftRevisionChangeOption => option !== null,
+    );
+
+  return {
+    generationDomain:
+      readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+      ref?.generationDomain ??
+      fallbackDomain,
+    draft,
+    ref,
+    status: readStringKey(records, ["status"]) ?? ref?.status ?? draft?.status ?? null,
+    version: record.version ?? draftRecord?.version ?? null,
+    targetMap: record.targetMap ?? null,
+    planningBriefSummary: record.planningBriefSummary ?? null,
+    lockedPlanningContextSummary: record.lockedPlanningContextSummary ?? null,
+    allowedChangeTypes,
+    changeOptions,
+    requiredInput: record.requiredInput ?? null,
+    raw: adapted,
+  };
+}
+
+/** Hard cap on ranked revision options rendered to a coach. */
+const MAX_DOMAIN_DRAFT_REVISION_OPTIONS = 4;
+
+const DOMAIN_DRAFT_REVISION_OPTION_SOURCES: CoachAthleteDomainDraftRevisionOptionSource[] = [
+  "DB",
+  "CATALOG",
+  "CURRENT_PLAN",
+];
+
+function parseDomainDraftRevisionOptionTarget(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionOptionTarget | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  return {
+    dayKey: readStringKey(records, ["dayKey"]),
+    sessionKey: readStringKey(records, ["sessionKey"]),
+    itemKey: readStringKey(records, ["itemKey"]),
+    itemType: readStringKey(records, ["itemType"]),
+    currentId: readStringKey(records, ["currentId"]),
+    label: readStringKey(records, ["label"]),
+    tags: readStringListKey(records, ["tags"]),
+  };
+}
+
+/**
+ * Parses the backend's complete canonical `option.item` for a Nutrition option into a
+ * {@link TrainingPlanRevisionPatchItem}, preserving identity, serving, and every nutrition value.
+ * Returns null when the option carries no item object, so ADD_ITEM / REPLACE_ITEM submission can be
+ * blocked. Nothing is rebuilt from `label` or `metadata`.
+ */
+function parseNutritionRevisionOptionItem(
+  value: unknown,
+): TrainingPlanRevisionPatchItem | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  return {
+    nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]),
+    itemType: readStringKey(records, ["itemType"]),
+    label: readStringKey(records, ["label"]),
+    serving: readStringKey(records, ["serving"]),
+    calories: readNumberKey(records, ["calories"]),
+    protein: readNumberKey(records, ["protein"]),
+    carbs: readNumberKey(records, ["carbs"]),
+    fat: readNumberKey(records, ["fat"]),
+    fiber: readNumberKey(records, ["fiber"]),
+    timing: readStringKey(records, ["timing"]),
+    notes: readStringKey(records, ["notes"]),
+  };
+}
+
+/**
+ * Parses one backend revision option. Returns null unless `id`, `label`, and `optionKind`
+ * are present and `source` is one of DB / CATALOG / CURRENT_PLAN. `optionKind` is preserved
+ * verbatim so both REPLACEMENT and ADD_ITEM options flow through unchanged. Static action codes
+ * are never synthesized here; only DB/catalog/current-plan backed entries survive.
+ */
+function parseDomainDraftRevisionOption(
+  value: unknown,
+): CoachAthleteDomainDraftRevisionOption | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const records = [record];
+  const id = readStringKey(records, ["id", "optionId"]);
+  const label = readStringKey(records, ["label", "name", "title"]);
+  const optionKind = readStringKey(records, ["optionKind", "kind"]);
+  if (id === null || label === null || optionKind === null) return null;
+  const source = readStringKey(records, ["source"]);
+  const normalizedSource = source ? (source.trim().toUpperCase() as CoachAthleteDomainDraftRevisionOptionSource) : null;
+  if (normalizedSource === null || !DOMAIN_DRAFT_REVISION_OPTION_SOURCES.includes(normalizedSource)) {
+    return null;
+  }
+  const domain = readStringKey(records, ["domain", "generationDomain"]);
+  const explicitExerciseCatalogItemId = readStringKey(records, ["exerciseCatalogItemId"]);
+  const exerciseCatalogItemId =
+    explicitExerciseCatalogItemId ??
+    (domain === "S_AND_C" && optionKind === "ADD_ITEM" && normalizedSource === "CATALOG"
+      ? id
+      : undefined);
+  return {
+    id,
+    rank: readNumberKey(records, ["rank"]),
+    label,
+    domain,
+    optionKind,
+    source: normalizedSource,
+    score: readNumberKey(records, ["score"]),
+    reason: readStringKey(records, ["reason", "explanation"]),
+    goalIds: readStringListKey(records, ["goalIds"]),
+    targetTags: readStringListKey(records, ["targetTags"]),
+    safetyTags: readStringListKey(records, ["safetyTags"]),
+    levelTags: readStringListKey(records, ["levelTags"]),
+    // Preserve the backend's explicit catalog reference verbatim (no metadata/label/id inference).
+    nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]) ?? undefined,
+    // S&C catalog ADD_ITEM options use their top-level option id as the authoritative exercise id.
+    exerciseCatalogItemId,
+    // Preserve the backend's complete canonical food item verbatim for ADD_ITEM / REPLACE_ITEM.
+    item: parseNutritionRevisionOptionItem(record.item),
+    metadata: record.metadata ?? null,
+  };
+}
+
+function parseDomainDraftRevisionOptionsPayload(
+  data: unknown,
+  fallbackDomain: TrainingPlanGenerationDomain,
+): CoachAthleteDomainDraftRevisionOptionsResult {
+  const adapted = adaptBackendSuccess(data);
+  const adaptedRecord = asRecord(adapted) ?? {};
+  const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
+  const records = [record];
+  const parsed = readFirstArray(records, ["options"])
+    .map(parseDomainDraftRevisionOption)
+    .filter(
+      (option): option is CoachAthleteDomainDraftRevisionOption => option !== null,
+    );
+  const hasAllRanks = parsed.length > 0 && parsed.every((option) => option.rank !== null);
+  const ordered = hasAllRanks
+    ? [...parsed].sort((left, right) => (left.rank ?? 0) - (right.rank ?? 0))
+    : parsed;
+  return {
+    generationDomain:
+      readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain", "domain"])) ??
+      fallbackDomain,
+    target: parseDomainDraftRevisionOptionTarget(record.target),
+    options: ordered.slice(0, MAX_DOMAIN_DRAFT_REVISION_OPTIONS),
   };
 }
 
@@ -1319,11 +1785,21 @@ function parsePersistedTrainingPlanActiveDetailPayload(
       details: data,
     } satisfies NormalizedApiError;
   }
+  const pendingRevisionRequestRecord = asRecord(record.pendingRevisionRequest);
   return {
     selectedVersionRule: readStringKey([record], ["selectedVersionRule"]),
     generationDomain: readStringKey([record], ["generationDomain"]),
     allowedActions: parseGovernedTrainingPlanWorkflowActionList(record.allowedActions),
     releaseMode: readStringKey([record], ["releaseMode"]),
+    pendingRevisionRequest:
+      pendingRevisionRequestRecord === null
+        ? null
+        : {
+            feedback: readStringKey([pendingRevisionRequestRecord], ["feedback"]),
+            requestedAt: readStringKey([pendingRevisionRequestRecord], ["requestedAt"]),
+            requestedBy: readStringKey([pendingRevisionRequestRecord], ["requestedBy"]),
+            actorRole: readStringKey([pendingRevisionRequestRecord], ["actorRole"]),
+          },
     constraintComplianceSummary: parseConstraintComplianceSummary(
       record.constraintComplianceSummary,
     ),
@@ -1494,7 +1970,13 @@ function assertRevisePayload(
       code,
     } satisfies NormalizedApiError;
   }
-  return { trainingPlanId, versionId, coachFeedback };
+  const normalized: TrainingPlanRevisePayload = { trainingPlanId, versionId, coachFeedback };
+  // Pass a structured patch through untouched when supplied. The API layer never fabricates or
+  // narrows shared operations; domain-specific callers enforce their own supported contracts.
+  if (payload.revisionPatch !== undefined && payload.revisionPatch !== null) {
+    normalized.revisionPatch = payload.revisionPatch;
+  }
+  return normalized;
 }
 
 export function parseReadinessPayload(data: unknown): CoachAthleteTrainingPlanReadiness {
@@ -2504,6 +2986,98 @@ export async function fetchLatestCoachAthleteDomainDraft(
   options?: { timeoutMs?: number },
 ): Promise<CoachAthleteLatestDomainDraft> {
   return fetchLatestDomainDraft(entityId, athleteId, generationDomain, options);
+}
+
+export async function fetchCoachAthleteDomainDraftRevisionContext(
+  entityId: string,
+  athleteId: string,
+  generationDomain: TrainingPlanGenerationDomain,
+): Promise<CoachAthleteDomainDraftRevisionContext> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(generationDomain);
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainDraftRevisionContext(
+      ids.entityId,
+      ids.athleteId,
+      domain,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS,
+    },
+  );
+  return parseDomainDraftRevisionContextPayload(raw, domain);
+}
+
+export async function fetchCoachAthleteDomainDraftRevisionOptions(
+  entityId: string,
+  athleteId: string,
+  payload: FetchCoachAthleteDomainDraftRevisionOptionsPayload,
+): Promise<CoachAthleteDomainDraftRevisionOptionsResult> {
+  const ids = assertIds(entityId, athleteId);
+  const domain = assertGenerationDomain(payload.generationDomain);
+  const trainingPlanId = assertPlanId(payload.trainingPlanId);
+  const trainingPlanVersionId = payload.trainingPlanVersionId.trim();
+  if (trainingPlanVersionId === "") {
+    throw {
+      message: "trainingPlanVersionId is required for revision options",
+      status: 400,
+      code: "TRAINING_PLAN_REVISION_OPTIONS_VERSION_ID_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  const optionKind = payload.optionKind ?? "REPLACEMENT";
+  const tags = Array.isArray(payload.target.tags) ? payload.target.tags : [];
+  let target: Record<string, unknown>;
+  if (optionKind === "ADD_ITEM") {
+    // SESSION-level target: keep only dayKey/sessionKey/label, force a domain-specific itemType,
+    // and omit item-level fields entirely. Never emit null fields — the backend rejects null
+    // strings for itemKey/itemType/currentId.
+    const addItemTarget: Record<string, unknown> = {
+      itemType: domainDraftAddItemTargetItemType(domain),
+      tags,
+    };
+    if (payload.target.dayKey != null) addItemTarget.dayKey = payload.target.dayKey;
+    if (payload.target.sessionKey != null) addItemTarget.sessionKey = payload.target.sessionKey;
+    if (payload.target.label != null) addItemTarget.label = payload.target.label;
+    target = addItemTarget;
+  } else {
+    target = {
+      dayKey: payload.target.dayKey ?? null,
+      sessionKey: payload.target.sessionKey ?? null,
+      itemKey: payload.target.itemKey ?? null,
+      itemType: payload.target.itemType ?? null,
+      currentId: payload.target.currentId ?? null,
+      label: payload.target.label ?? null,
+      // Draft items have no tags source yet; the UI defaults this to [].
+      tags,
+    };
+  }
+  const limit =
+    typeof payload.limit === "number" && Number.isFinite(payload.limit) && payload.limit > 0
+      ? payload.limit
+      : MAX_DOMAIN_DRAFT_REVISION_OPTIONS;
+  const raw = await apiRequest(
+    paths.entities.athleteTrainingPlanDomainDraftRevisionOptions(
+      ids.entityId,
+      ids.athleteId,
+    ),
+    {
+      method: "POST",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_LATEST_DOMAIN_DRAFT_TIMEOUT_MS,
+      body: JSON.stringify({
+        generationDomain: domain,
+        trainingPlanId,
+        trainingPlanVersionId,
+        target,
+        coachRequest: payload.coachRequest,
+        optionKind,
+        limit,
+      }),
+    },
+  );
+  return parseDomainDraftRevisionOptionsPayload(raw, domain);
 }
 
 export async function fetchPersistedTrainingPlanById(

@@ -18,6 +18,8 @@ import {
   fetchCoachAthleteTrainingPlanCompleteness,
   fetchCoachTrainingPlanDomainHistory,
   fetchCoachTrainingPlanDomainHistoryDetail,
+  fetchCoachAthleteDomainDraftRevisionContext,
+  fetchCoachAthleteDomainDraftRevisionOptions,
   fetchCoachAthleteUpstreamPlanningContext,
   fetchDomainPlanSummary,
   fetchLatestCoachAthleteDomainDraft,
@@ -34,7 +36,9 @@ import {
   release,
   requestTrainingPlanRevision,
   requestRevision,
+  reviseSkillsPlan,
   reviseNutritionPlan,
+  reviseSandcPlan,
   releaseTrainingPlanVersionToAthlete,
   startCoachAthleteTrainingPlanGenerationJob,
   submitReview,
@@ -908,6 +912,291 @@ describe("parseReadinessPayload", () => {
     });
   });
 
+  it("passes a structured Nutrition revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-3",
+    });
+
+    const revisionPatch = {
+      operation: "REPLACE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: {
+        itemType: "NUTRITION",
+        label: "Oatmeal",
+        nutritionCatalogItemId: "nut-9",
+        serving: "1 cup",
+        timing: "Breakfast",
+        notes: "High fibre",
+      },
+    } as const;
+
+    await reviseNutritionPlan("entity-1", "athlete-1", {
+      trainingPlanId: "plan-1",
+      versionId: "version-3",
+      coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/nutrition/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "plan-1",
+          versionId: "version-3",
+          coachFeedback: "Apply 1 Nutrition change — Change food item details.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact structured S&C revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+    });
+    const revisionPatch = {
+      type: "UPDATE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: {
+        exerciseCatalogItemId: "exercise-1",
+        durationMinutes: 25,
+        sets: 4,
+        reps: 6,
+      },
+    } as const;
+
+    await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Change exercise parameters for Back squat in Lower body.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/sandc/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "sandc-plan-1",
+          versionId: "sandc-version-1",
+          coachFeedback: "Change exercise parameters for Back squat in Lower body.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("serializes the exact S&C ADD_ITEM patch with absolute numeric values", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+    });
+    const revisionPatch = {
+      type: "ADD_ITEM",
+      dayIndex: 2,
+      sessionIndex: 1,
+      item: {
+        exerciseCatalogItemId: "exercise-catalog-1",
+        durationMinutes: 15,
+        sets: 3,
+        reps: 8,
+      },
+    } as const;
+
+    await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Add exercise Goblet squat to Lower body.",
+      revisionPatch,
+    });
+
+    const request = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+    const body = JSON.parse(request.body) as Record<string, unknown>;
+    expect(body.revisionPatch).toEqual(revisionPatch);
+    expect(body.revisionPatch).not.toHaveProperty("itemIndex");
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/sandc/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "sandc-plan-1",
+          versionId: "sandc-version-1",
+          coachFeedback: "Add exercise Goblet squat to Lower body.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("serializes the exact S&C REMOVE_ITEM patch with its one-based item index", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+    });
+    const revisionPatch = {
+      type: "REMOVE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 1,
+      itemIndex: 2,
+      item: { exerciseCatalogItemId: "exercise-catalog-2" },
+    } as const;
+
+    await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Remove exercise Split squat from Lower body.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/sandc/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "sandc-plan-1",
+          versionId: "sandc-version-1",
+          coachFeedback: "Remove exercise Split squat from Lower body.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact Skills Add Drill revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+    });
+    const revisionPatch = {
+      operation: "ADD_ITEM",
+      dayIndex: 2,
+      sessionIndex: 3,
+      item: { skillCode: "PACE_CONTROL_01" },
+    } as const;
+
+    await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Add drill Pace control ladder to Short game.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/skills/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "skills-plan-1",
+          versionId: "skills-version-1",
+          coachFeedback: "Add drill Pace control ladder to Short game.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact Skills Remove Drill revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+    });
+    const revisionPatch = {
+      operation: "REMOVE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 3,
+      itemIndex: 1,
+      item: { skillCode: "CURRENT" },
+    } as const;
+
+    await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Remove drill Current drill from Short game.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/skills/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "skills-plan-1",
+          versionId: "skills-version-1",
+          coachFeedback: "Remove drill Current drill from Short game.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("passes the exact Skills Change Drill Parameters revisionPatch through to the revise endpoint", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+    });
+    const revisionPatch = {
+      operation: "UPDATE_ITEM",
+      dayIndex: 2,
+      sessionIndex: 3,
+      itemIndex: 1,
+      item: {
+        skillCode: "CURRENT",
+        durationMinutes: 20,
+        reps: "18 randomized balls",
+      },
+    } as const;
+
+    await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Change drill parameters for Current drill in Short game.",
+      revisionPatch,
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/skills/revise",
+      {
+        method: "POST",
+        timeoutMs: 480_000,
+        body: JSON.stringify({
+          trainingPlanId: "skills-plan-1",
+          versionId: "skills-version-1",
+          coachFeedback: "Change drill parameters for Current drill in Short game.",
+          revisionPatch,
+        }),
+      },
+    );
+  });
+
+  it("omits revisionPatch from the body when the caller does not supply one", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-2",
+    });
+
+    await reviseNutritionPlan("entity-1", "athlete-1", {
+      trainingPlanId: "plan-1",
+      versionId: "version-2",
+      coachFeedback: "Increase protein at breakfast",
+    });
+
+    const body = JSON.parse(apiRequestMock.mock.calls.at(-1)![1].body as string);
+    expect(body).not.toHaveProperty("revisionPatch");
+  });
+
   it("fetches persisted active detail with generationDomain query", async () => {
     apiRequestMock.mockResolvedValue({
       message: "ok",
@@ -998,6 +1287,61 @@ describe("parseReadinessPayload", () => {
       "/training-plan-management/plan-n/active/detail?generationDomain=NUTRITION",
       expect.objectContaining({ method: "GET", cache: "no-store" }),
     );
+  });
+
+  it("parses fresh Nutrition nutrients from active/detail without falling back to stale values", async () => {
+    apiRequestMock.mockResolvedValue({
+      message: "ok",
+      data: {
+        plan: { id: "plan-n", athleteId: "athlete-1", entityId: "entity-1", status: "AI_GENERATED" },
+        version: {
+          id: "version-19",
+          trainingPlanId: "plan-n",
+          versionNumber: 19,
+          status: "AI_GENERATED",
+        },
+        days: [
+          {
+            id: "day-1",
+            dayIndex: 1,
+            sessions: [
+              {
+                id: "session-1",
+                name: "Snacks",
+                sessionStructure: {
+                  items: {
+                    items: [
+                      {
+                        label: "Banana milkshake",
+                        serving: "2 glass",
+                        calories: 130.61289978027344,
+                        protein: 3.6865992546081543,
+                        carbs: 18.29117202758789,
+                        fat: 4.742460250854492,
+                        fiber: 2,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchPersistedTrainingPlanActiveDetail("plan-n", "NUTRITION");
+    const item = result.days[0]?.sessions[0]?.sessionStructureSections[0]?.items[0];
+
+    expect(item).toMatchObject({
+      label: "Banana milkshake",
+      serving: "2 glass",
+      calories: 130.61289978027344,
+      protein: 3.6865992546081543,
+      carbs: 18.29117202758789,
+      fat: 4.742460250854492,
+      fiber: 2,
+    });
   });
 
   it("paths.trainingPlanManagement.activeDetail includes generationDomain query", () => {
@@ -1269,6 +1613,73 @@ describe("training plan generation timeouts and helpers", () => {
     );
   });
 
+  it("fetches domain draft revision context with generationDomain query", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        draft: {
+          trainingPlanId: "plan-1",
+          trainingPlanVersionId: "version-1",
+          versionNumber: 2,
+          status: "AI_GENERATED",
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  title: "Serve practice",
+                  items: [{ label: "Target serve drill" }],
+                },
+              ],
+            },
+          ],
+        },
+        ref: {
+          trainingPlanId: "plan-1",
+          versionId: "version-1",
+          status: "AI_GENERATED",
+        },
+        targetMap: {
+          days: [{ label: "Day 1 - Serve practice" }],
+        },
+        planningBriefSummary: {
+          goals: ["Improve first serve"],
+          workload: "Moderate",
+        },
+        lockedPlanningContextSummary: {
+          safetyNotes: ["Protect shoulder"],
+        },
+        allowedChangeTypes: ["CHANGE_DRILL"],
+        changeOptions: [{ changeType: "CHANGE_DRILL", label: "Change drill" }],
+        requiredInput: ["changeType", "reason"],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionContext(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/domain-drafts/revision-context?generationDomain=SKILLS",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 60_000,
+      }),
+    );
+    expect(result.generationDomain).toBe("SKILLS");
+    expect(result.draft?.trainingPlanId).toBe("plan-1");
+    expect(result.ref?.versionId).toBe("version-1");
+    expect(result.allowedChangeTypes).toEqual(["CHANGE_DRILL"]);
+    expect(result.changeOptions[0]?.label).toBe("Change drill");
+    expect(result.targetMap).toEqual({
+      days: [{ label: "Day 1 - Serve practice" }],
+    });
+  });
+
   it("parses nutrition composition fields on latest domain draft items", async () => {
     apiRequestMock.mockResolvedValue({
       data: {
@@ -1398,6 +1809,85 @@ describe("training plan generation timeouts and helpers", () => {
     });
   });
 
+  it("keeps generic draft sets and reps in their prior normalized string form", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-sandc-1",
+        trainingPlanVersionId: "version-sandc-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-1",
+                    durationMinutes: 20,
+                    sets: 3,
+                    reps: 8,
+                  },
+                  {
+                    exerciseCatalogItemId: "exercise-2",
+                    sets: "3 rounds",
+                    reps: "To fatigue",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "S_AND_C",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      exerciseCatalogItemId: "exercise-1",
+      durationMinutes: 20,
+      sets: "3",
+      reps: "8",
+    });
+    expect(result.days[0]?.sessions[0]?.items[1]).toMatchObject({
+      exerciseCatalogItemId: "exercise-2",
+      durationMinutes: null,
+      sets: "3 rounds",
+      reps: "To fatigue",
+    });
+  });
+
+  it("keeps numeric Skills reps in their prior normalized string form", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-1",
+        trainingPlanVersionId: "version-skills-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [{ label: "Serve drill", reps: 12 }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]?.reps).toBe("12");
+  });
+
   it("maps latest draft fields to persist-draft result shape", () => {
     expect(
       persistDraftResultFromLatestDomainDraft({
@@ -1424,5 +1914,566 @@ describe("training plan generation timeouts and helpers", () => {
       itemsPersisted: 12,
       raw: { ok: true },
     });
+  });
+});
+
+describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
+  const basePayload = {
+    generationDomain: "SKILLS" as const,
+    trainingPlanId: "plan-1",
+    trainingPlanVersionId: "version-1",
+    target: {
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemKey: "item-1",
+      itemType: "DRILL",
+      currentId: "drill-1",
+      label: "Target serve drill",
+      tags: [],
+    },
+    coachRequest: "Replace the bunker drill, it is too advanced.",
+    optionKind: "REPLACEMENT" as const,
+    limit: 4,
+  };
+
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("POSTs to the revision-options path with the full request body", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: { generationDomain: "SKILLS", target: {}, options: [] },
+    });
+
+    await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", basePayload);
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-generation/domain-drafts/revision-options",
+      expect.objectContaining({ method: "POST", cache: "no-store" }),
+    );
+
+    const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+    const body = JSON.parse(requestInit.body);
+    expect(body).toMatchObject({
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      coachRequest: "Replace the bunker drill, it is too advanced.",
+      optionKind: "REPLACEMENT",
+      limit: 4,
+    });
+    expect(body.target).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemKey: "item-1",
+      itemType: "DRILL",
+      currentId: "drill-1",
+      label: "Target serve drill",
+      tags: [],
+    });
+    // Contract sends trainingPlanVersionId, never versionId.
+    expect(body).not.toHaveProperty("versionId");
+  });
+
+  it("parses and rank-sorts DB/catalog/current-plan options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        target: { dayKey: "day-1" },
+        options: [
+          {
+            id: "opt-2",
+            rank: 2,
+            label: "Cross-court rally drill",
+            domain: "SKILLS",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            score: 0.8,
+            reason: "Similar load",
+            goalIds: ["goal-1"],
+            targetTags: ["serve"],
+            safetyTags: [],
+            levelTags: ["INTERMEDIATE"],
+            metadata: { catalogItemId: "cat-2" },
+          },
+          {
+            id: "opt-1",
+            rank: 1,
+            label: "Target serve drill",
+            domain: "SKILLS",
+            optionKind: "REPLACEMENT",
+            source: "DB",
+            score: 0.9,
+            reason: "Best fit",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: ["shoulder"],
+            levelTags: [],
+            metadata: null,
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.generationDomain).toBe("SKILLS");
+    expect(result.options.map((option) => option.id)).toEqual(["opt-1", "opt-2"]);
+    expect(result.options[0]).toMatchObject({
+      id: "opt-1",
+      rank: 1,
+      label: "Target serve drill",
+      source: "DB",
+      score: 0.9,
+      reason: "Best fit",
+      safetyTags: ["shoulder"],
+    });
+    expect(result.options[1]).toMatchObject({
+      id: "opt-2",
+      source: "CATALOG",
+      targetTags: ["serve"],
+      levelTags: ["INTERMEDIATE"],
+      metadata: { catalogItemId: "cat-2" },
+    });
+    // Skills payloads are unchanged: the Nutrition-only catalog field is never populated for them,
+    // and metadata.catalogItemId is never promoted into nutritionCatalogItemId.
+    expect(result.options[0]?.nutritionCatalogItemId).toBeUndefined();
+    expect(result.options[1]?.nutritionCatalogItemId).toBeUndefined();
+  });
+
+  it("preserves the explicit top-level nutritionCatalogItemId on Nutrition options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "NUTRITION",
+        target: { dayKey: "day-1", sessionKey: "meal-1" },
+        options: [
+          {
+            id: "opt-nut-1",
+            rank: 1,
+            label: "Oatmeal",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            // Authoritative catalog reference is the top-level field, distinct from metadata.
+            nutritionCatalogItemId: "nut-42",
+            metadata: { catalogItemId: "meta-should-not-be-used", serving: "1 cup" },
+          },
+          {
+            id: "opt-nut-2",
+            rank: 2,
+            label: "Toast",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            metadata: null,
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options[0]).toMatchObject({
+      id: "opt-nut-1",
+      nutritionCatalogItemId: "nut-42",
+    });
+    // Options without the field expose it as undefined (never inferred from metadata).
+    expect(result.options[1]?.nutritionCatalogItemId).toBeUndefined();
+  });
+
+  it("parses the backend's complete canonical item on Nutrition options", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "NUTRITION",
+        options: [
+          {
+            id: "opt-nut-1",
+            rank: 1,
+            label: "Oatmeal",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+            nutritionCatalogItemId: "nut-42",
+            // Complete canonical item: identity, serving, and every nutrition value preserved.
+            item: {
+              nutritionCatalogItemId: "nut-42",
+              itemType: "NUTRITION",
+              label: "Oatmeal",
+              serving: "1 cup",
+              calories: 320,
+              protein: 12,
+              carbs: 54,
+              fat: 6,
+              fiber: 8,
+              timing: "Breakfast",
+              notes: "High fibre",
+            },
+          },
+          {
+            id: "opt-nut-2",
+            rank: 2,
+            label: "Toast",
+            domain: "NUTRITION",
+            optionKind: "REPLACEMENT",
+            source: "CATALOG",
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options[0]?.item).toEqual({
+      nutritionCatalogItemId: "nut-42",
+      itemType: "NUTRITION",
+      label: "Oatmeal",
+      serving: "1 cup",
+      calories: 320,
+      protein: 12,
+      carbs: 54,
+      fat: 6,
+      fiber: 8,
+      timing: "Breakfast",
+      notes: "High fibre",
+    });
+    // Options without an item object expose it as null so submission stays blocked.
+    expect(result.options[1]?.item).toBeNull();
+  });
+
+  it("filters options missing id/label/optionKind or with an invalid source", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        options: [
+          { id: "ok", label: "Valid", optionKind: "REPLACEMENT", source: "CURRENT_PLAN" },
+          { rank: 1, label: "No id", optionKind: "REPLACEMENT", source: "DB" },
+          { id: "no-label", optionKind: "REPLACEMENT", source: "DB" },
+          { id: "no-kind", label: "No kind", source: "DB" },
+          { id: "bad-source", label: "Bad source", optionKind: "REPLACEMENT", source: "LLM" },
+          { id: "no-source", label: "No source", optionKind: "REPLACEMENT" },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options.map((option) => option.id)).toEqual(["ok"]);
+    expect(result.options[0]?.source).toBe("CURRENT_PLAN");
+  });
+
+  it("caps parsed options to the top 4", async () => {
+    const options = Array.from({ length: 6 }, (_unused, index) => ({
+      id: `opt-${index + 1}`,
+      label: `Option ${index + 1}`,
+      optionKind: "REPLACEMENT",
+      source: "CATALOG",
+    }));
+    apiRequestMock.mockResolvedValue({ data: { options } });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+
+    expect(result.options).toHaveLength(4);
+    expect(result.options.map((option) => option.id)).toEqual([
+      "opt-1",
+      "opt-2",
+      "opt-3",
+      "opt-4",
+    ]);
+  });
+
+  it("returns [] when options are empty or missing", async () => {
+    apiRequestMock.mockResolvedValue({ data: { generationDomain: "SKILLS", options: [] } });
+    const empty = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+    expect(empty.options).toEqual([]);
+
+    apiRequestMock.mockResolvedValue({ data: { generationDomain: "SKILLS" } });
+    const missing = await fetchCoachAthleteDomainDraftRevisionOptions(
+      "entity-1",
+      "athlete-1",
+      basePayload,
+    );
+    expect(missing.options).toEqual([]);
+  });
+
+  it("sends a clean SESSION target for ADD_ITEM: itemType set, item fields omitted, no null fields", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: { generationDomain: "SKILLS", target: {}, options: [] },
+    });
+
+    await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        // Even if item-level fields leak in, they must NOT be forwarded to the backend.
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Morning session",
+        tags: [],
+      },
+      coachRequest: "Add a volley drill to the morning session.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+    const body = JSON.parse(requestInit.body);
+    expect(body).toMatchObject({
+      generationDomain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+    // Domain-specific itemType, SESSION keys + label + tags only.
+    expect(body.target).toEqual({
+      dayKey: "day-1",
+      sessionKey: "session-1",
+      itemType: "SKILL",
+      label: "Morning session",
+      tags: [],
+    });
+    expect(body.target).not.toHaveProperty("itemKey");
+    expect(body.target).not.toHaveProperty("currentId");
+    // No field in the ADD_ITEM target is serialized as null.
+    expect(JSON.stringify(body.target)).not.toContain("null");
+  });
+
+  it("sends the domain-specific ADD_ITEM itemType for NUTRITION and S_AND_C", async () => {
+    for (const [domain, expectedItemType] of [
+      ["NUTRITION", "NUTRITION"],
+      ["S_AND_C", "EXERCISE"],
+    ] as const) {
+      apiRequestMock.mockReset();
+      apiRequestMock.mockResolvedValue({ data: { generationDomain: domain, options: [] } });
+      await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+        generationDomain: domain,
+        trainingPlanId: "plan-1",
+        trainingPlanVersionId: "version-1",
+        target: {
+          dayKey: "day-2",
+          sessionKey: "session-1",
+          label: "Balance and Lower Control",
+          tags: [],
+        },
+        coachRequest: "Add another item.",
+        optionKind: "ADD_ITEM",
+        limit: 4,
+      });
+      const requestInit = apiRequestMock.mock.calls[0]?.[1] as { body: string };
+      const body = JSON.parse(requestInit.body);
+      expect(body.target).toEqual({
+        dayKey: "day-2",
+        sessionKey: "session-1",
+        itemType: expectedItemType,
+        label: "Balance and Lower Control",
+        tags: [],
+      });
+      expect(JSON.stringify(body.target)).not.toContain("null");
+    }
+  });
+
+  it("maps a live S&C catalog ADD_ITEM option id to exerciseCatalogItemId", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
+            rank: 1,
+            label: "Trunk Rotation With Cable",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            score: 0.9,
+            reason: "Approved lower-body exercise",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            metadata: { catalogItemId: "do-not-infer" },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Lower body",
+        tags: [],
+      },
+      coachRequest: "Add another squat variation.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options).toHaveLength(1);
+    expect(result.options[0]).toMatchObject({
+      id: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
+      label: "Trunk Rotation With Cable",
+      optionKind: "ADD_ITEM",
+      source: "CATALOG",
+      exerciseCatalogItemId: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
+    });
+  });
+
+  it("keeps an explicit S&C exerciseCatalogItemId ahead of the option id", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "display-only-id",
+            rank: 1,
+            label: "High plank",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            exerciseCatalogItemId: "explicit-exercise-id",
+            metadata: {},
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a plank.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options[0]?.exerciseCatalogItemId).toBe("explicit-exercise-id");
+  });
+
+  it("does not infer an exercise id from option.id outside S&C catalog ADD_ITEM", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "display-only-id",
+            rank: 1,
+            label: "High catch",
+            domain: "SKILLS",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            metadata: {},
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a drill.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options[0]?.exerciseCatalogItemId).toBeUndefined();
+  });
+
+  it("drops an S&C option with no id instead of inferring from label or metadata", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            label: "High plank",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            metadata: { exerciseCatalogItemId: "do-not-infer" },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a plank.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options).toEqual([]);
   });
 });

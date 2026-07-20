@@ -14,6 +14,7 @@ import type {
   TrainingPlanWorkspaceOwnershipFlags,
   TrainingPlanWorkspacePlanningContext,
   TrainingPlanWorkspaceSummary,
+  TrainingPlanPendingRevisionRequest,
 } from "@/types/trainingPlanWorkspace";
 
 const TRAINING_PLAN_WORKSPACE_TIMEOUT_MS = 60_000;
@@ -45,6 +46,19 @@ function readStringList(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item !== "");
+}
+
+function parsePendingRevisionRequest(
+  value: unknown,
+): TrainingPlanPendingRevisionRequest | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    feedback: readString(record.feedback),
+    requestedAt: readString(record.requestedAt),
+    requestedBy: readString(record.requestedBy),
+    actorRole: readString(record.actorRole),
+  };
 }
 
 function assertIds(entityId: string, athleteId: string): {
@@ -100,6 +114,7 @@ function emptyWorkspaceDomain(
     submittedForReview: false,
     canOpen: false,
     allowedActions: [],
+    pendingRevisionRequest: null,
   };
 }
 
@@ -138,6 +153,9 @@ function parseWorkspaceDomain(
     submittedForReview: readBoolean(record.submittedForReview),
     canOpen: readBoolean(record.canOpen),
     allowedActions: readStringList(record.allowedActions),
+    pendingRevisionRequest: parsePendingRevisionRequest(
+      record.pendingRevisionRequest ?? summaryRecord.pendingRevisionRequest,
+    ),
   };
 }
 

@@ -2297,16 +2297,16 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
     }
   });
 
-  it("parses ADD_ITEM options returned by the backend", async () => {
+  it("maps a live S&C catalog ADD_ITEM option id to exerciseCatalogItemId", async () => {
     apiRequestMock.mockResolvedValue({
       data: {
         generationDomain: "S_AND_C",
         target: { dayKey: "day-1", sessionKey: "session-1" },
         options: [
           {
-            id: "ex-1",
+            id: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
             rank: 1,
-            label: "Goblet squat",
+            label: "Trunk Rotation With Cable",
             domain: "S_AND_C",
             optionKind: "ADD_ITEM",
             source: "CATALOG",
@@ -2316,8 +2316,7 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
             targetTags: [],
             safetyTags: [],
             levelTags: [],
-            exerciseCatalogItemId: "exercise-catalog-1",
-            metadata: { catalogItemId: "ex-1" },
+            metadata: { catalogItemId: "do-not-infer" },
           },
         ],
       },
@@ -2343,11 +2342,138 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
 
     expect(result.options).toHaveLength(1);
     expect(result.options[0]).toMatchObject({
-      id: "ex-1",
-      label: "Goblet squat",
+      id: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
+      label: "Trunk Rotation With Cable",
       optionKind: "ADD_ITEM",
       source: "CATALOG",
-      exerciseCatalogItemId: "exercise-catalog-1",
+      exerciseCatalogItemId: "10d68fc7-b875-4cf6-8139-86e2cbf57d53",
     });
+  });
+
+  it("keeps an explicit S&C exerciseCatalogItemId ahead of the option id", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "display-only-id",
+            rank: 1,
+            label: "High plank",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            exerciseCatalogItemId: "explicit-exercise-id",
+            metadata: {},
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a plank.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options[0]?.exerciseCatalogItemId).toBe("explicit-exercise-id");
+  });
+
+  it("does not infer an exercise id from option.id outside S&C catalog ADD_ITEM", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "SKILLS",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            id: "display-only-id",
+            rank: 1,
+            label: "High catch",
+            domain: "SKILLS",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            goalIds: [],
+            targetTags: [],
+            safetyTags: [],
+            levelTags: [],
+            metadata: {},
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "SKILLS",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a drill.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options[0]?.exerciseCatalogItemId).toBeUndefined();
+  });
+
+  it("drops an S&C option with no id instead of inferring from label or metadata", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        generationDomain: "S_AND_C",
+        target: { dayKey: "day-1", sessionKey: "session-1" },
+        options: [
+          {
+            label: "High plank",
+            domain: "S_AND_C",
+            optionKind: "ADD_ITEM",
+            source: "CATALOG",
+            metadata: { exerciseCatalogItemId: "do-not-infer" },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchCoachAthleteDomainDraftRevisionOptions("entity-1", "athlete-1", {
+      generationDomain: "S_AND_C",
+      trainingPlanId: "plan-1",
+      trainingPlanVersionId: "version-1",
+      target: {
+        dayKey: "day-1",
+        sessionKey: "session-1",
+        itemKey: null,
+        itemType: null,
+        currentId: null,
+        label: "Core",
+        tags: [],
+      },
+      coachRequest: "Add a plank.",
+      optionKind: "ADD_ITEM",
+      limit: 4,
+    });
+
+    expect(result.options).toEqual([]);
   });
 });

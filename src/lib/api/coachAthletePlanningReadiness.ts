@@ -1348,11 +1348,18 @@ function parseDomainDraftRevisionOption(
   if (normalizedSource === null || !DOMAIN_DRAFT_REVISION_OPTION_SOURCES.includes(normalizedSource)) {
     return null;
   }
+  const domain = readStringKey(records, ["domain", "generationDomain"]);
+  const explicitExerciseCatalogItemId = readStringKey(records, ["exerciseCatalogItemId"]);
+  const exerciseCatalogItemId =
+    explicitExerciseCatalogItemId ??
+    (domain === "S_AND_C" && optionKind === "ADD_ITEM" && normalizedSource === "CATALOG"
+      ? id
+      : undefined);
   return {
     id,
     rank: readNumberKey(records, ["rank"]),
     label,
-    domain: readStringKey(records, ["domain", "generationDomain"]),
+    domain,
     optionKind,
     source: normalizedSource,
     score: readNumberKey(records, ["score"]),
@@ -1363,7 +1370,8 @@ function parseDomainDraftRevisionOption(
     levelTags: readStringListKey(records, ["levelTags"]),
     // Preserve the backend's explicit catalog reference verbatim (no metadata/label/id inference).
     nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]) ?? undefined,
-    exerciseCatalogItemId: readStringKey(records, ["exerciseCatalogItemId"]) ?? undefined,
+    // S&C catalog ADD_ITEM options use their top-level option id as the authoritative exercise id.
+    exerciseCatalogItemId,
     // Preserve the backend's complete canonical food item verbatim for ADD_ITEM / REPLACE_ITEM.
     item: parseNutritionRevisionOptionItem(record.item),
     metadata: record.metadata ?? null,

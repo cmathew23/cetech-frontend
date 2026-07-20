@@ -4835,6 +4835,69 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(submission.revisionPatch.item).not.toHaveProperty("intensity");
     });
 
+    it("enables Add Apply and submits the exact 8/2/2 patch from a mapped catalog option id", async () => {
+      const optionId = "10d68fc7-b875-4cf6-8139-86e2cbf57d53";
+      const liveCatalogOption = {
+        ...approvedOption,
+        id: optionId,
+        label: "Trunk Rotation With Cable",
+        exerciseCatalogItemId: optionId,
+      };
+      const submission = buildSandCRevisionSubmission({
+        reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+        target: targets().find((entry) => entry.level === "SESSION")!,
+        actionKey: "ADD_ITEM",
+        option: liveCatalogOption,
+        durationMinutes: 8,
+        sets: 2,
+        reps: 2,
+      });
+
+      // The rendered Apply button uses this same non-null submission as its S&C can-apply gate.
+      expect(submission).not.toBeNull();
+      expect(submission?.revisionPatch).toEqual({
+        type: "ADD_ITEM",
+        dayIndex: 2,
+        sessionIndex: 1,
+        item: {
+          exerciseCatalogItemId: optionId,
+          durationMinutes: 8,
+          sets: 2,
+          reps: 2,
+        },
+      });
+
+      const revise = vi.fn(async (submitted: NonNullable<typeof submission>) => ({
+        planId: "sandc-plan-1",
+        versionId: "sandc-v3",
+        versionNumber: 3,
+        generationDomain: "S_AND_C" as const,
+        detail: null,
+        raw: submitted.revisionPatch,
+      }));
+      await runSandCStructuredRevisionSequence({
+        submit: () => revise(submission!),
+        pinReturnedVersion: vi.fn(),
+        reconcilePlan: vi.fn(async () => undefined),
+        reloadLatestPlan: vi.fn(async () => true),
+        reloadRevisionContext: vi.fn(async () => true),
+        resetTemporaryState: vi.fn(),
+      });
+      expect(revise).toHaveBeenCalledWith(submission);
+
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds: { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+          target: targets().find((entry) => entry.level === "SESSION")!,
+          actionKey: "ADD_ITEM",
+          option: { ...liveCatalogOption, id: "", exerciseCatalogItemId: undefined },
+          durationMinutes: 8,
+          sets: 2,
+          reps: 2,
+        }),
+      ).toBeNull();
+    });
+
     it("discards a pending options response after the target changes", async () => {
       const pending = {
         requestId: 1,

@@ -91,6 +91,7 @@ function baseWorkspace(
     workflowMode: "head_coach_review",
     currentDomain: null,
     initialTab: null,
+    nextCycleAction: "NONE",
     planningContext: {
       locked: true,
       resolved: true,

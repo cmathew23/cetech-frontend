@@ -1,8 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseTrainingPlanWorkspacePayload } from "@/lib/api/trainingPlanWorkspace";
+const { apiRequestMock } = vi.hoisted(() => ({
+  apiRequestMock: vi.fn(),
+}));
+
+vi.mock("@/lib/apiClient", () => ({
+  apiRequest: apiRequestMock,
+}));
+
+import {
+  createNextWeeklyPlanningContext,
+  parseTrainingPlanWorkspacePayload,
+} from "@/lib/api/trainingPlanWorkspace";
 
 describe("parseTrainingPlanWorkspacePayload", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
   it("preserves Workflow 2A Head Coach Skills owner workspace fields", () => {
     const workspace = parseTrainingPlanWorkspacePayload({
       workflowShape: "HEAD_COACH_SKILLS_OWNER",
@@ -10,6 +25,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       workflowMode: "HEAD_COACH_FUNCTION_AWARE",
       currentDomain: "SKILLS",
       initialTab: "DOMAIN",
+      nextCycleAction: "CREATE",
       planningContext: {
         planningContextLocked: true,
         resolved: true,
@@ -43,6 +59,7 @@ describe("parseTrainingPlanWorkspacePayload", () => {
     expect(workspace.shell).toBe("HEAD_COACH_FUNCTION_AWARE");
     expect(workspace.currentDomain).toBe("SKILLS");
     expect(workspace.initialTab).toBe("DOMAIN");
+    expect(workspace.nextCycleAction).toBe("CREATE");
     expect(workspace.planningContext.locked).toBe(true);
     expect(workspace.ownershipFlags.requesterOwnsCurrentDomain).toBe(true);
     expect(workspace.ownershipFlags.requesterOwnsSkillsForThisAthlete).toBe(true);
@@ -54,6 +71,12 @@ describe("parseTrainingPlanWorkspacePayload", () => {
     expect(workspace.domains.SKILLS.summary.trainingPlanId).toBeNull();
     expect(workspace.domains.SKILLS.summary.versionId).toBeNull();
     expect(workspace.assignmentContext).toBeUndefined();
+  });
+
+  it("defaults unknown next-cycle actions to NONE", () => {
+    expect(
+      parseTrainingPlanWorkspacePayload({ nextCycleAction: "UNKNOWN" }).nextCycleAction,
+    ).toBe("NONE");
   });
 
   it("preserves assignmentContext planning and domain permissions", () => {
@@ -201,6 +224,10 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       ownerType: "ASSIGNED_DOMAIN_COACH",
       ownerUserId: "skills-user",
       ownerCoachProfileId: "skills-profile",
+      ownerName: null,
+      ownerDisplayName: null,
+      assignedCoachName: null,
+      assignedCoachDisplayName: null,
       ownedByCurrentUser: false,
       canOpen: false,
       canGenerate: false,
@@ -216,6 +243,10 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       ownerType: "ASSIGNED_DOMAIN_COACH",
       ownerUserId: "nutrition-user",
       ownerCoachProfileId: "nutrition-profile",
+      ownerName: null,
+      ownerDisplayName: null,
+      assignedCoachName: null,
+      assignedCoachDisplayName: null,
       ownedByCurrentUser: true,
       canOpen: true,
       canGenerate: true,
@@ -231,6 +262,10 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       ownerType: "NONE",
       ownerUserId: null,
       ownerCoachProfileId: null,
+      ownerName: null,
+      ownerDisplayName: null,
+      assignedCoachName: null,
+      assignedCoachDisplayName: null,
       ownedByCurrentUser: false,
       canOpen: false,
       canGenerate: false,
@@ -241,5 +276,26 @@ describe("parseTrainingPlanWorkspacePayload", () => {
       canRelease: false,
       releaseMode: "DIRECT_DOMAIN_RELEASE",
     });
+  });
+});
+
+describe("createNextWeeklyPlanningContext", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+    apiRequestMock.mockResolvedValue({ success: true, data: {} });
+  });
+
+  it("posts to the exact next-cycle endpoint once", async () => {
+    await createNextWeeklyPlanningContext("entity-1", "athlete-1");
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-management/next-cycle",
+      {
+        method: "POST",
+        cache: "no-store",
+        timeoutMs: 60_000,
+      },
+    );
   });
 });

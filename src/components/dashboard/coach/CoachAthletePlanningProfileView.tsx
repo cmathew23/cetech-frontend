@@ -109,7 +109,10 @@ import {
   type CoachAthleteUpstreamPlanningContext,
   type TrainingPlanConstraintComplianceSummary,
 } from "@/lib/api/coachAthletePlanningReadiness";
-import { getTrainingPlanWorkspace } from "@/lib/api/trainingPlanWorkspace";
+import {
+  createNextWeeklyPlanningContext,
+  getTrainingPlanWorkspace,
+} from "@/lib/api/trainingPlanWorkspace";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   deriveWorkflowStatusFromWorkspaceDomain,
@@ -185,6 +188,7 @@ import type {
   TrainingPlanWorkspaceAssignmentDomainContext,
   TrainingPlanWorkspaceAssignmentPlanningContext,
   TrainingPlanWorkspaceAssignmentReleaseMode,
+  TrainingPlanWorkspaceNextCycleAction,
   TrainingPlanPendingRevisionRequest,
 } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -819,6 +823,71 @@ function formatApiError(e: unknown, fallback: string): string {
   }
   if (e instanceof Error) return e.message;
   return fallback;
+}
+
+export function NextCycleWorkspaceAction({
+  action,
+  loading,
+  onCreate,
+  onContinue,
+}: {
+  action: TrainingPlanWorkspaceNextCycleAction;
+  loading: boolean;
+  onCreate: () => void;
+  onContinue: () => void;
+}) {
+  if (action === "NONE") return null;
+
+  return (
+    <Button
+      type="button"
+      variant="primary"
+      loading={action === "CREATE" && loading}
+      disabled={action === "CREATE" && loading}
+      onClick={action === "CREATE" ? onCreate : onContinue}
+    >
+      {action === "CREATE" ? "Create New Plan" : "Continue Planning"}
+    </Button>
+  );
+}
+
+export async function runCreateNextWeeklyPlanAction({
+  pendingRef,
+  setLoading,
+  setError,
+  create,
+  refresh,
+  openPlanningContext,
+}: {
+  pendingRef: { current: boolean };
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  create: () => Promise<void>;
+  refresh: () => Promise<boolean>;
+  openPlanningContext: () => void;
+}): Promise<boolean> {
+  if (pendingRef.current) return false;
+
+  pendingRef.current = true;
+  setLoading(true);
+  setError(null);
+  try {
+    await create();
+    await refresh();
+    openPlanningContext();
+    return true;
+  } catch (error) {
+    setError(
+      formatApiError(
+        error,
+        "Could not create the next weekly plan. Please try again shortly.",
+      ),
+    );
+    return false;
+  } finally {
+    pendingRef.current = false;
+    setLoading(false);
+  }
 }
 
 function displayValue(
@@ -10629,6 +10698,8 @@ export function CoachAthletePlanningProfileView({
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [nextCycleCreateLoading, setNextCycleCreateLoading] = useState(false);
+  const [nextCycleCreateError, setNextCycleCreateError] = useState<string | null>(null);
   const [domainCoachWorkspaceTab, setDomainCoachWorkspaceTab] =
     useState<DomainCoachWorkspaceTab>("planning-context");
   const [domainPlanHistoryRows, setDomainPlanHistoryRows] = useState<
@@ -10648,6 +10719,7 @@ export function CoachAthletePlanningProfileView({
   } | null>(null);
   const workspaceRefreshGenRef = useRef(0);
   const workspaceHasLoadedRef = useRef(false);
+  const nextCycleCreatePendingRef = useRef(false);
   const assignmentContextMissingWarningScopeRef = useRef<string | null>(null);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
@@ -14504,6 +14576,9 @@ export function CoachAthletePlanningProfileView({
     setWorkspace(null);
     setWorkspaceLoading(false);
     setWorkspaceError(null);
+    nextCycleCreatePendingRef.current = false;
+    setNextCycleCreateLoading(false);
+    setNextCycleCreateError(null);
     setPlanningContextBootstrapState("idle");
     setCachedLockedPlanWindow(null);
     setPlanningContextLockLoading(false);
@@ -15313,6 +15388,19 @@ export function CoachAthletePlanningProfileView({
     workloadComplete,
     workflowStepStatusByKey,
   ]);
+
+  async function handleCreateNextWeeklyPlan() {
+    await runCreateNextWeeklyPlanAction({
+      pendingRef: nextCycleCreatePendingRef,
+      setLoading: setNextCycleCreateLoading,
+      setError: setNextCycleCreateError,
+      create: () => createNextWeeklyPlanningContext(entityId, athleteIdTrimmed),
+      refresh: () => refreshTrainingPlanWorkspace({ background: true }),
+      openPlanningContext: () => {
+        setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+      },
+    });
+  }
 
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
   useEffect(() => {
@@ -25914,16 +26002,33 @@ export function CoachAthletePlanningProfileView({
                   }
                   primary={
                     <div className="space-y-3">
-                  {canOpenLockedContextBuilderView ? (
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setShowLockedContextBuilderView(true)}
-                      >
-                        View Context
-                      </Button>
+                  {canOpenLockedContextBuilderView ||
+                  (workspace?.nextCycleAction ?? "NONE") !== "NONE" ? (
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {canOpenLockedContextBuilderView ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setShowLockedContextBuilderView(true)}
+                        >
+                          View Context
+                        </Button>
+                      ) : null}
+                      <NextCycleWorkspaceAction
+                        action={workspace?.nextCycleAction ?? "NONE"}
+                        loading={nextCycleCreateLoading}
+                        onCreate={() => {
+                          void handleCreateNextWeeklyPlan();
+                        }}
+                        onContinue={() => {
+                          setNextCycleCreateError(null);
+                          setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+                        }}
+                      />
                     </div>
+                  ) : null}
+                  {nextCycleCreateError ? (
+                    <Alert variant="danger">{nextCycleCreateError}</Alert>
                   ) : null}
                   {shouldUseDomainCoordinationMatrixLayout({
                     shell: trainingPlanShellModel.shell,

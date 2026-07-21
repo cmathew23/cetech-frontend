@@ -251,6 +251,8 @@ import {
   FYN_REVISION_SHOW_OPTIONS_LABEL,
   FYN_REVISION_PRESERVE_LINE,
   MAX_FYN_REVISION_CHANGES,
+  NextCycleWorkspaceAction,
+  runCreateNextWeeklyPlanAction,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -280,6 +282,142 @@ import type {
   CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
+
+describe("NextCycleWorkspaceAction", () => {
+  it("renders no action for NONE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "NONE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toBe("");
+  });
+
+  it("renders Create New Plan for CREATE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "CREATE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Create New Plan");
+    expect(html).not.toContain("Continue Planning");
+  });
+
+  it("renders Continue Planning for CONTINUE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Continue Planning");
+    expect(html).not.toContain("Create New Plan");
+  });
+
+  it("blocks duplicate CREATE requests while the first request is pending", async () => {
+    let resolveCreate!: () => void;
+    const create = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const pendingRef = { current: false };
+    const input = {
+      pendingRef,
+      setLoading: vi.fn(),
+      setError: vi.fn(),
+      create,
+      refresh: vi.fn().mockResolvedValue(true),
+      openPlanningContext: vi.fn(),
+    };
+
+    const first = runCreateNextWeeklyPlanAction(input);
+    const second = runCreateNextWeeklyPlanAction(input);
+
+    await expect(second).resolves.toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+
+    resolveCreate();
+    await expect(first).resolves.toBe(true);
+  });
+
+  it("refreshes the workspace and opens Planning Context after CREATE succeeds", async () => {
+    const refresh = vi.fn().mockResolvedValue(true);
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runCreateNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError: vi.fn(),
+        create: vi.fn().mockResolvedValue(undefined),
+        refresh,
+        openPlanningContext,
+      }),
+    ).resolves.toBe(true);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(openPlanningContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the current workspace path and exposes the existing error style on failure", async () => {
+    const setError = vi.fn();
+    const refresh = vi.fn();
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runCreateNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError,
+        create: vi.fn().mockRejectedValue(new Error("Next cycle unavailable")),
+        refresh,
+        openPlanningContext,
+      }),
+    ).resolves.toBe(false);
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(openPlanningContext).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenLastCalledWith("Next cycle unavailable");
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      '<Alert variant="danger">{nextCycleCreateError}</Alert>',
+    );
+  });
+
+  it("CONTINUE opens Planning Context without running CREATE", () => {
+    const onCreate = vi.fn();
+    const onContinue = vi.fn();
+    const element = NextCycleWorkspaceAction({
+      action: "CONTINUE",
+      loading: false,
+      onCreate,
+      onContinue,
+    });
+
+    if (element === null) throw new Error("Expected Continue Planning action");
+    (element.props as { onClick: () => void }).onClick();
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+});
 
 describe("RevisionRequestPanel", () => {
   it("renders revision feedback and available request metadata", () => {
@@ -14263,6 +14401,7 @@ function workflow1OwnedSkillsWorkspace(
     workflowMode: "specialist_domain",
     currentDomain: "SKILLS",
     initialTab: null,
+    nextCycleAction: "NONE",
     planningContext: {
       locked: true,
       resolved: true,

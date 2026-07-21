@@ -129,8 +129,11 @@ import {
   resolveCompetitionSeasonPhaseForDate,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
+  shouldUseCachedDomainPlanStateForWorkspace,
+  hasPlanningContextSnapshotChanged,
   resolveDomainReviewSurfaceIdentity,
   shouldKeepPreviousDomainReviewDetail,
+  domainIntegrationAssignedCoachLabel,
   domainReviewScheduleDescription,
   countDomainReviewTrainingDays,
   countLatestDomainDraftTrainingDays,
@@ -621,11 +624,90 @@ describe("Workflow 1 Head Coach review state", () => {
         resolveHeadCoachReviewActiveDetailAfterRefresh({
           refreshedActiveDetail: null,
           previousActiveDetail: previousDetail,
-          summaryPlanId: null,
+          summaryPlanId: `plan-${domain}`,
           preservePreviousDetail: true,
         }),
       ).toBe(previousDetail);
     }
+  });
+
+  it("drops previously loaded review content when the current snapshot has no plan", () => {
+    expect(
+      resolveHeadCoachReviewActiveDetailAfterRefresh({
+        refreshedActiveDetail: null,
+        previousActiveDetail: {
+          plan: { id: "snapshot-a-skills-plan" },
+          version: { id: "snapshot-a-skills-version" },
+          days: [],
+          allowedActions: ["RELEASE"],
+        } as never,
+        summaryPlanId: null,
+        preservePreviousDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("invalidates snapshot A domain caches while preserving all matrix rows and assignments", () => {
+    expect(hasPlanningContextSnapshotChanged("snapshot-a", "snapshot-b")).toBe(true);
+    expect(hasPlanningContextSnapshotChanged("snapshot-b", "snapshot-b")).toBe(false);
+    expect(hasPlanningContextSnapshotChanged(undefined, "snapshot-a")).toBe(false);
+
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      expect(
+        shouldUseCachedDomainPlanStateForWorkspace({
+          workspacePresent: true,
+          workspacePlanId: null,
+          cachedSummaryPlanId: `snapshot-a-${domain}-plan`,
+          cachedActiveDetailPlanId: `snapshot-a-${domain}-plan`,
+          cachedLatestDraftPlanId: `snapshot-a-${domain}-plan`,
+        }),
+      ).toBe(false);
+    }
+    expect(resolveDomainIntegrationMatrixDomains("head_coach_review")).toEqual([
+      "SKILLS",
+      "NUTRITION",
+      "S_AND_C",
+    ]);
+    expect(
+      domainIntegrationAssignedCoachLabel("NUTRITION", {
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownerUserId: "nutrition-coach-user",
+        ownerCoachProfileId: "nutrition-coach-profile",
+        ownerName: null,
+        ownerDisplayName: null,
+        assignedCoachName: "Current Nutrition Coach",
+        assignedCoachDisplayName: "Current Nutrition Coach",
+        ownedByCurrentUser: false,
+        canOpen: true,
+        canGenerate: true,
+        canRevise: true,
+        canSubmitForReview: true,
+        canApprove: false,
+        canRelease: false,
+        releaseMode: "HEAD_COACH_APPROVAL",
+      }),
+    ).toBe("Current Nutrition Coach");
+  });
+
+  it("accepts only a plan belonging to the current workspace snapshot", () => {
+    expect(
+      shouldUseCachedDomainPlanStateForWorkspace({
+        workspacePresent: true,
+        workspacePlanId: "snapshot-b-skills-plan",
+        cachedSummaryPlanId: "snapshot-a-skills-plan",
+        cachedActiveDetailPlanId: "snapshot-a-skills-plan",
+        cachedLatestDraftPlanId: "snapshot-a-skills-plan",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseCachedDomainPlanStateForWorkspace({
+        workspacePresent: true,
+        workspacePlanId: "snapshot-b-skills-plan",
+        cachedSummaryPlanId: "snapshot-b-skills-plan",
+        cachedActiveDetailPlanId: "snapshot-b-skills-plan",
+        cachedLatestDraftPlanId: null,
+      }),
+    ).toBe(true);
   });
 
   it("does not keep stale review detail outside the Workflow 1 preserve path unless plan ids match", () => {
@@ -11865,6 +11947,107 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe("approved");
   });
 
+  it("renders a null current-snapshot summary as not created despite snapshot A release state", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: null,
+            versionId: null,
+            latestVersionId: null,
+            approvedVersionId: null,
+            activeVersionId: null,
+            generationDomain: "SKILLS",
+            status: null,
+            versionNumber: null,
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace,
+        domain: "SKILLS",
+        summaryStatus: "ACTIVE",
+        summaryPlanId: "snapshot-a-skills-plan",
+        summaryVersionId: "snapshot-a-skills-version",
+        activeDetail: {
+          plan: { id: "snapshot-a-skills-plan", status: "ACTIVE" },
+          version: {
+            id: "snapshot-a-skills-version",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+          allowedActions: ["VIEW"],
+        } as never,
+      }),
+    ).toBe("not_created");
+  });
+
+  it("renders released and newly generated statuses only for the matching workspace plan", () => {
+    const releasedWorkspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "snapshot-a-skills-plan",
+            versionId: "snapshot-a-skills-version",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace: releasedWorkspace,
+        domain: "SKILLS",
+        summaryStatus: "ACTIVE",
+        summaryPlanId: "snapshot-a-skills-plan",
+        summaryVersionId: "snapshot-a-skills-version",
+        activeDetail: {
+          plan: { id: "snapshot-a-skills-plan", status: "ACTIVE" },
+          version: {
+            id: "snapshot-a-skills-version",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        } as never,
+      }),
+    ).toBe("released");
+
+    const currentPlanWorkspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "snapshot-b-skills-plan",
+            versionId: "snapshot-b-skills-version",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace: currentPlanWorkspace,
+        domain: "SKILLS",
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+        activeDetail: null,
+      }),
+    ).toBe("draft_generated");
+  });
+
   it("does not auto-open Plan Viewer after release for Workflow 3 Skills", () => {
     expect(
       shouldShowReleasedPlanViewerCanvas({
@@ -14069,6 +14252,32 @@ describe("deriveHeadCoachDomainWorkflowStatus", () => {
       versionId: "workspace-version-approved",
       status: "HEAD_COACH_APPROVED",
       hasWorkspaceIds: true,
+    });
+  });
+
+  it("does not restore a previous-cycle legacy plan when the workspace summary is empty", () => {
+    const workspace = workflow1OwnedSkillsWorkspace();
+
+    expect(
+      resolveHeadCoachReviewSummarySource({
+        workspace,
+        domain: "SKILLS",
+        legacySummary: {
+          trainingPlanId: "snapshot-a-skills-plan",
+          versionId: "snapshot-a-skills-version",
+          latestVersionId: "snapshot-a-skills-version",
+          approvedVersionId: null,
+          activeVersionId: "snapshot-a-skills-version",
+          versionNumber: 1,
+          status: "ACTIVE",
+          generationDomain: "SKILLS",
+        },
+      }),
+    ).toEqual({
+      planId: null,
+      versionId: null,
+      status: null,
+      hasWorkspaceIds: false,
     });
   });
 

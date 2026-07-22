@@ -91,6 +91,17 @@ export const paths = {
       params.set("weekEnd", query.weekEnd);
       return `${base}?${params.toString()}`;
     },
+    weeklyAdherenceComparison: (
+      entityId: string,
+      athleteId: string,
+      query: { snapshotAId: string; snapshotBId: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/weekly-adherence-comparison`;
+      const params = new URLSearchParams();
+      params.set("snapshotAId", query.snapshotAId);
+      params.set("snapshotBId", query.snapshotBId);
+      return `${base}?${params.toString()}`;
+    },
     athleteWearableSummary: (
       entityId: string,
       athleteId: string,

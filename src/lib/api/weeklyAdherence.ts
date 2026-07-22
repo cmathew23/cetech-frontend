@@ -123,6 +123,167 @@ export type WeeklyAdherenceSummary = {
   visibleDomains: WeeklyAdherenceDomainKey[];
 };
 
+export type WeeklyAdherenceComparisonAvailability =
+  | "COMPLETE"
+  | "PARTIAL"
+  | "NO_PLAN"
+  | "NO_SESSIONS"
+  | "NO_ADHERENCE";
+
+export type WeeklyAdherenceComparisonStatus =
+  | "COMPARABLE"
+  | "NOT_COMPARABLE";
+
+export type WeeklyAdherenceComparisonNutrients = {
+  caloriesKcal: number | null;
+  proteinG: number | null;
+  carbohydrateG: number | null;
+  fatG: number | null;
+  fiberG: number | null;
+  calciumMg: number | null;
+  magnesiumMg: number | null;
+  sodiumMg: number | null;
+  potassiumMg: number | null;
+};
+
+export type WeeklyAdherenceComparisonNutritionDetail = {
+  label: string | null;
+  plannedNutrients: WeeklyAdherenceComparisonNutrients;
+  consumedNutrients: WeeklyAdherenceComparisonNutrients;
+  variance: WeeklyAdherenceComparisonNutrients;
+};
+
+export type WeeklyAdherenceComparisonSession = {
+  plannedSessionId: string;
+  trainingDayId: string;
+  date: string;
+  sessionType: string;
+  domain: string;
+  plannedDurationMinutes: number;
+  logged: boolean;
+  adherenceOutcome: string;
+  completionPercent: number;
+  actualDurationMinutes: number;
+};
+
+export type WeeklyAdherenceComparisonNutritionSession =
+  WeeklyAdherenceComparisonSession & {
+    totalPrescribedItems: number;
+    loggedItems: number;
+    completedItems: number;
+    partialItems: number;
+    skippedItems: number;
+    unloggedItems: number;
+    nutritionDetail: WeeklyAdherenceComparisonNutritionDetail;
+  };
+
+export type WeeklyAdherenceComparisonDailyBreakdown = {
+  date: string;
+  plannedSessions: number;
+  loggedSessions: number;
+  totalPrescribedItems: number;
+  loggedItems: number;
+  completedItems: number;
+  partialItems: number;
+  skippedItems: number;
+  unloggedItems: number;
+  completionCredit: number;
+  adherencePercent: number;
+  sessions: Array<
+    WeeklyAdherenceComparisonSession | WeeklyAdherenceComparisonNutritionSession
+  >;
+};
+
+export type WeeklyAdherenceComparisonWeeklyBreakdown = {
+  plannedSessions: number;
+  loggedSessions: number;
+  totalPrescribedItems: number;
+  loggedItems: number;
+  completedItems: number;
+  partialItems: number;
+  skippedItems: number;
+  unloggedItems: number;
+  completionCredit: number;
+  adherencePercent: number;
+  context: Record<string, unknown>;
+  plannedMinutes?: number;
+  actualMinutes?: number;
+  fullItems?: number;
+  halfItems?: number;
+  missedItems?: number;
+  plannedCalories?: number;
+  actualCalories?: number;
+};
+
+export type WeeklyAdherenceComparisonDomainBreakdown = {
+  availability: WeeklyAdherenceComparisonAvailability;
+  weekly: WeeklyAdherenceComparisonWeeklyBreakdown;
+  daily: WeeklyAdherenceComparisonDailyBreakdown[];
+};
+
+export type WeeklyAdherenceComparisonSnapshot = {
+  planningContextSnapshotId: string;
+  planStartDate: string;
+  planEndDate: string;
+  weeklyAdherenceSummary: WeeklyAdherenceSummary;
+  domainBreakdowns: Partial<
+    Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomainBreakdown>
+  >;
+};
+
+export type WeeklyAdherenceComparisonDomainDelta = {
+  adherencePercent: number;
+  plannedSessions: number;
+  loggedSessions: number;
+  completedItems: number;
+  partialItems: number;
+  skippedItems: number;
+  unloggedItems: number;
+  completionCredit: number;
+  actualDurationMinutes: number | null;
+};
+
+export type WeeklyAdherenceComparisonDomain = {
+  comparisonStatus: WeeklyAdherenceComparisonStatus;
+  delta: WeeklyAdherenceComparisonDomainDelta | null;
+};
+
+export type WeeklyAdherenceComparisonOverallDelta = {
+  adherencePercent: number;
+  completedItems: number;
+  plannedItems: number;
+  partialItems: number;
+  missedItems: number;
+};
+
+export type WeeklyAdherenceComparisonOverall = {
+  comparisonStatus: WeeklyAdherenceComparisonStatus;
+  delta: WeeklyAdherenceComparisonOverallDelta;
+};
+
+export type WeeklyAdherenceComparisonData = {
+  athleteId: string;
+  visibleDomains: WeeklyAdherenceDomainKey[];
+  snapshotA: WeeklyAdherenceComparisonSnapshot;
+  snapshotB: WeeklyAdherenceComparisonSnapshot;
+  domains: Partial<
+    Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomain>
+  >;
+  overall: WeeklyAdherenceComparisonOverall | null;
+};
+
+export type WeeklyAdherenceComparisonResponse = {
+  message: string;
+  data: WeeklyAdherenceComparisonData;
+};
+
+export type FetchWeeklyAdherenceComparisonParams = {
+  entityId: string;
+  athleteId: string;
+  snapshotAId: string;
+  snapshotBId: string;
+};
+
 function parseRecentNotes(raw: unknown): WeeklyAdherenceRecentNote[] {
   if (!Array.isArray(raw)) return [];
   return raw.reduce<WeeklyAdherenceRecentNote[]>((acc, item) => {
@@ -532,6 +693,334 @@ export function parseWeeklyAdherenceSummaryPayload(
   };
 }
 
+function readComparisonString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readComparisonNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readComparisonNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readComparisonNullableNumber(value: unknown): number | null {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readComparisonBoolean(value: unknown): boolean {
+  return typeof value === "boolean" ? value : false;
+}
+
+function readComparisonVisibleDomains(raw: unknown): WeeklyAdherenceDomainKey[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (value): value is WeeklyAdherenceDomainKey =>
+      typeof value === "string" &&
+      DOMAIN_KEYS.includes(value as WeeklyAdherenceDomainKey),
+  );
+}
+
+function parseComparisonNutrients(
+  raw: unknown,
+): WeeklyAdherenceComparisonNutrients {
+  const record = asRecord(raw) ?? {};
+  return {
+    caloriesKcal: readComparisonNullableNumber(record.caloriesKcal),
+    proteinG: readComparisonNullableNumber(record.proteinG),
+    carbohydrateG: readComparisonNullableNumber(record.carbohydrateG),
+    fatG: readComparisonNullableNumber(record.fatG),
+    fiberG: readComparisonNullableNumber(record.fiberG),
+    calciumMg: readComparisonNullableNumber(record.calciumMg),
+    magnesiumMg: readComparisonNullableNumber(record.magnesiumMg),
+    sodiumMg: readComparisonNullableNumber(record.sodiumMg),
+    potassiumMg: readComparisonNullableNumber(record.potassiumMg),
+  };
+}
+
+function parseComparisonNutritionDetail(
+  raw: unknown,
+): WeeklyAdherenceComparisonNutritionDetail {
+  const record = asRecord(raw) ?? {};
+  return {
+    label: readComparisonNullableString(record.label),
+    plannedNutrients: parseComparisonNutrients(record.plannedNutrients),
+    consumedNutrients: parseComparisonNutrients(record.consumedNutrients),
+    variance: parseComparisonNutrients(record.variance),
+  };
+}
+
+function parseComparisonSessionBase(
+  record: Record<string, unknown>,
+): WeeklyAdherenceComparisonSession {
+  return {
+    plannedSessionId: readComparisonString(record.plannedSessionId),
+    trainingDayId: readComparisonString(record.trainingDayId),
+    date: readComparisonString(record.date),
+    sessionType: readComparisonString(record.sessionType),
+    domain: readComparisonString(record.domain),
+    plannedDurationMinutes: readComparisonNumber(record.plannedDurationMinutes),
+    logged: readComparisonBoolean(record.logged),
+    adherenceOutcome: readComparisonString(record.adherenceOutcome),
+    completionPercent: readComparisonNumber(record.completionPercent),
+    actualDurationMinutes: readComparisonNumber(record.actualDurationMinutes),
+  };
+}
+
+function parseComparisonSession(
+  raw: unknown,
+): WeeklyAdherenceComparisonSession | WeeklyAdherenceComparisonNutritionSession | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const base = parseComparisonSessionBase(record);
+  if (!asRecord(record.nutritionDetail)) return base;
+  return {
+    ...base,
+    totalPrescribedItems: readComparisonNumber(record.totalPrescribedItems),
+    loggedItems: readComparisonNumber(record.loggedItems),
+    completedItems: readComparisonNumber(record.completedItems),
+    partialItems: readComparisonNumber(record.partialItems),
+    skippedItems: readComparisonNumber(record.skippedItems),
+    unloggedItems: readComparisonNumber(record.unloggedItems),
+    nutritionDetail: parseComparisonNutritionDetail(record.nutritionDetail),
+  };
+}
+
+function parseComparisonDailyBreakdown(
+  raw: unknown,
+): WeeklyAdherenceComparisonDailyBreakdown | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    date: readComparisonString(record.date),
+    plannedSessions: readComparisonNumber(record.plannedSessions),
+    loggedSessions: readComparisonNumber(record.loggedSessions),
+    totalPrescribedItems: readComparisonNumber(record.totalPrescribedItems),
+    loggedItems: readComparisonNumber(record.loggedItems),
+    completedItems: readComparisonNumber(record.completedItems),
+    partialItems: readComparisonNumber(record.partialItems),
+    skippedItems: readComparisonNumber(record.skippedItems),
+    unloggedItems: readComparisonNumber(record.unloggedItems),
+    completionCredit: readComparisonNumber(record.completionCredit),
+    adherencePercent: readComparisonNumber(record.adherencePercent),
+    sessions: Array.isArray(record.sessions)
+      ? record.sessions
+          .map(parseComparisonSession)
+          .filter(
+            (
+              session,
+            ): session is
+              | WeeklyAdherenceComparisonSession
+              | WeeklyAdherenceComparisonNutritionSession => session !== null,
+          )
+      : [],
+  };
+}
+
+function copyOptionalComparisonNumber(
+  target: WeeklyAdherenceComparisonWeeklyBreakdown,
+  source: Record<string, unknown>,
+  key:
+    | "plannedMinutes"
+    | "actualMinutes"
+    | "fullItems"
+    | "halfItems"
+    | "missedItems"
+    | "plannedCalories"
+    | "actualCalories",
+) {
+  const value = source[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    target[key] = value;
+  }
+}
+
+function parseComparisonWeeklyBreakdown(
+  raw: unknown,
+): WeeklyAdherenceComparisonWeeklyBreakdown {
+  const record = asRecord(raw) ?? {};
+  const parsed: WeeklyAdherenceComparisonWeeklyBreakdown = {
+    plannedSessions: readComparisonNumber(record.plannedSessions),
+    loggedSessions: readComparisonNumber(record.loggedSessions),
+    totalPrescribedItems: readComparisonNumber(record.totalPrescribedItems),
+    loggedItems: readComparisonNumber(record.loggedItems),
+    completedItems: readComparisonNumber(record.completedItems),
+    partialItems: readComparisonNumber(record.partialItems),
+    skippedItems: readComparisonNumber(record.skippedItems),
+    unloggedItems: readComparisonNumber(record.unloggedItems),
+    completionCredit: readComparisonNumber(record.completionCredit),
+    adherencePercent: readComparisonNumber(record.adherencePercent),
+    context: { ...(asRecord(record.context) ?? {}) },
+  };
+  copyOptionalComparisonNumber(parsed, record, "plannedMinutes");
+  copyOptionalComparisonNumber(parsed, record, "actualMinutes");
+  copyOptionalComparisonNumber(parsed, record, "fullItems");
+  copyOptionalComparisonNumber(parsed, record, "halfItems");
+  copyOptionalComparisonNumber(parsed, record, "missedItems");
+  copyOptionalComparisonNumber(parsed, record, "plannedCalories");
+  copyOptionalComparisonNumber(parsed, record, "actualCalories");
+  return parsed;
+}
+
+function parseComparisonAvailability(
+  value: unknown,
+): WeeklyAdherenceComparisonAvailability | null {
+  return value === "COMPLETE" ||
+    value === "PARTIAL" ||
+    value === "NO_PLAN" ||
+    value === "NO_SESSIONS" ||
+    value === "NO_ADHERENCE"
+    ? value
+    : null;
+}
+
+function parseComparisonStatus(
+  value: unknown,
+): WeeklyAdherenceComparisonStatus | null {
+  return value === "COMPARABLE" || value === "NOT_COMPARABLE" ? value : null;
+}
+
+function parseComparisonDomainBreakdown(
+  raw: unknown,
+): WeeklyAdherenceComparisonDomainBreakdown | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const availability = parseComparisonAvailability(record.availability);
+  if (availability === null) return null;
+  return {
+    availability,
+    weekly: parseComparisonWeeklyBreakdown(record.weekly),
+    daily: Array.isArray(record.daily)
+      ? record.daily
+          .map(parseComparisonDailyBreakdown)
+          .filter(
+            (day): day is WeeklyAdherenceComparisonDailyBreakdown => day !== null,
+          )
+      : [],
+  };
+}
+
+function parseComparisonDomainBreakdowns(
+  raw: unknown,
+): Partial<
+  Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomainBreakdown>
+> {
+  const record = asRecord(raw) ?? {};
+  const parsed: Partial<
+    Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomainBreakdown>
+  > = {};
+  for (const domain of DOMAIN_KEYS) {
+    const breakdown = parseComparisonDomainBreakdown(record[domain]);
+    if (breakdown !== null) parsed[domain] = breakdown;
+  }
+  return parsed;
+}
+
+function parseComparisonSnapshot(
+  raw: unknown,
+): WeeklyAdherenceComparisonSnapshot {
+  const record = asRecord(raw) ?? {};
+  return {
+    planningContextSnapshotId: readComparisonString(
+      record.planningContextSnapshotId,
+    ),
+    planStartDate: readComparisonString(record.planStartDate),
+    planEndDate: readComparisonString(record.planEndDate),
+    weeklyAdherenceSummary: parseWeeklyAdherenceSummaryPayload(
+      record.weeklyAdherenceSummary,
+    ),
+    domainBreakdowns: parseComparisonDomainBreakdowns(record.domainBreakdowns),
+  };
+}
+
+function parseComparisonDomainDelta(
+  raw: unknown,
+): WeeklyAdherenceComparisonDomainDelta {
+  const record = asRecord(raw) ?? {};
+  return {
+    adherencePercent: readComparisonNumber(record.adherencePercent),
+    plannedSessions: readComparisonNumber(record.plannedSessions),
+    loggedSessions: readComparisonNumber(record.loggedSessions),
+    completedItems: readComparisonNumber(record.completedItems),
+    partialItems: readComparisonNumber(record.partialItems),
+    skippedItems: readComparisonNumber(record.skippedItems),
+    unloggedItems: readComparisonNumber(record.unloggedItems),
+    completionCredit: readComparisonNumber(record.completionCredit),
+    actualDurationMinutes: readComparisonNullableNumber(
+      record.actualDurationMinutes,
+    ),
+  };
+}
+
+function parseComparisonDomain(
+  raw: unknown,
+): WeeklyAdherenceComparisonDomain | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const comparisonStatus = parseComparisonStatus(record.comparisonStatus);
+  if (comparisonStatus === null) return null;
+  return {
+    comparisonStatus,
+    delta:
+      record.delta === null ? null : parseComparisonDomainDelta(record.delta),
+  };
+}
+
+function parseComparisonDomains(
+  raw: unknown,
+): Partial<Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomain>> {
+  const record = asRecord(raw) ?? {};
+  const parsed: Partial<
+    Record<WeeklyAdherenceDomainKey, WeeklyAdherenceComparisonDomain>
+  > = {};
+  for (const domain of DOMAIN_KEYS) {
+    const comparison = parseComparisonDomain(record[domain]);
+    if (comparison !== null) parsed[domain] = comparison;
+  }
+  return parsed;
+}
+
+function parseComparisonOverall(
+  raw: unknown,
+): WeeklyAdherenceComparisonOverall | null {
+  if (raw === null || raw === undefined) return null;
+  const record = asRecord(raw);
+  if (!record) return null;
+  const comparisonStatus = parseComparisonStatus(record.comparisonStatus);
+  const delta = asRecord(record.delta);
+  if (comparisonStatus === null || delta === null) return null;
+  return {
+    comparisonStatus,
+    delta: {
+      adherencePercent: readComparisonNumber(delta.adherencePercent),
+      completedItems: readComparisonNumber(delta.completedItems),
+      plannedItems: readComparisonNumber(delta.plannedItems),
+      partialItems: readComparisonNumber(delta.partialItems),
+      missedItems: readComparisonNumber(delta.missedItems),
+    },
+  };
+}
+
+export function parseWeeklyAdherenceComparisonPayload(
+  payload: unknown,
+): WeeklyAdherenceComparisonResponse {
+  const response = asRecord(payload) ?? {};
+  const data = asRecord(response.data) ?? {};
+  return {
+    message: readComparisonString(response.message),
+    data: {
+      athleteId: readComparisonString(data.athleteId),
+      visibleDomains: readComparisonVisibleDomains(data.visibleDomains),
+      snapshotA: parseComparisonSnapshot(data.snapshotA),
+      snapshotB: parseComparisonSnapshot(data.snapshotB),
+      domains: parseComparisonDomains(data.domains),
+      overall: parseComparisonOverall(data.overall),
+    },
+  };
+}
+
 export async function fetchWeeklyAdherenceSummary(params: {
   entityId: string;
   athleteId: string;
@@ -553,6 +1042,27 @@ export async function fetchWeeklyAdherenceSummary(params: {
   const parsed = parseWeeklyAdherenceSummaryPayload(raw);
   weeklyAdherenceOverallDiagnostic({ rawResponse: raw, parsed });
   return parsed;
+}
+
+export async function fetchWeeklyAdherenceComparison(
+  params: FetchWeeklyAdherenceComparisonParams,
+): Promise<WeeklyAdherenceComparisonResponse> {
+  const raw = await apiRequest(
+    paths.entities.weeklyAdherenceComparison(
+      params.entityId,
+      params.athleteId,
+      {
+        snapshotAId: params.snapshotAId,
+        snapshotBId: params.snapshotBId,
+      },
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS,
+    },
+  );
+  return parseWeeklyAdherenceComparisonPayload(raw);
 }
 
 export function hasNutritionAdherenceDomain(

@@ -3,8 +3,11 @@
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
+  fetchWeeklyAdherenceComparison,
   fetchWeeklyAdherenceSummary,
   hasNutritionAdherenceDomain,
+  type WeeklyAdherenceComparisonData,
+  type WeeklyAdherenceComparisonResponse,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 import {
@@ -48,6 +51,13 @@ export type AthleteWeeklyAdherenceState = {
   weekEnd: string;
   trainingPlanVersionId: string;
   reload: () => void;
+  comparisonData: WeeklyAdherenceComparisonData | null;
+  comparisonLoading: boolean;
+  comparisonError: string | null;
+  selectedSnapshotAId: string;
+  selectedSnapshotBId: string;
+  setSelectedSnapshotAId: (snapshotId: string) => void;
+  setSelectedSnapshotBId: (snapshotId: string) => void;
 };
 
 const AthleteWeeklyAdherenceContext =
@@ -57,6 +67,57 @@ function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
   if (e instanceof Error) return e.message;
   return "Unable to load";
+}
+
+export function validWeeklyAdherenceComparisonSnapshotIds(
+  snapshotAId: string,
+  snapshotBId: string,
+): boolean {
+  return (
+    snapshotAId.trim() !== "" &&
+    snapshotBId.trim() !== "" &&
+    snapshotAId.trim() !== snapshotBId.trim()
+  );
+}
+
+export async function runWeeklyAdherenceComparisonLifecycle({
+  snapshotAId,
+  snapshotBId,
+  isCurrent,
+  fetchComparison,
+  setComparisonData,
+  setComparisonLoading,
+  setComparisonError,
+}: {
+  snapshotAId: string;
+  snapshotBId: string;
+  isCurrent: () => boolean;
+  fetchComparison: () => Promise<WeeklyAdherenceComparisonResponse>;
+  setComparisonData: (data: WeeklyAdherenceComparisonData | null) => void;
+  setComparisonLoading: (loading: boolean) => void;
+  setComparisonError: (error: string | null) => void;
+}): Promise<void> {
+  setComparisonData(null);
+  setComparisonError(null);
+
+  if (
+    !validWeeklyAdherenceComparisonSnapshotIds(snapshotAId, snapshotBId)
+  ) {
+    setComparisonLoading(false);
+    return;
+  }
+
+  setComparisonLoading(true);
+  try {
+    const response = await fetchComparison();
+    if (!isCurrent()) return;
+    setComparisonData(response.data);
+  } catch (error) {
+    if (!isCurrent()) return;
+    setComparisonError(formatLoadError(error));
+  } finally {
+    if (isCurrent()) setComparisonLoading(false);
+  }
 }
 
 export function formatAdherencePercent(value: number | null | undefined): string {
@@ -83,6 +144,12 @@ export function AthleteWeeklyAdherenceProvider({
     useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [comparisonData, setComparisonData] =
+    useState<WeeklyAdherenceComparisonData | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [selectedSnapshotAId, setSelectedSnapshotAId] = useState("");
+  const [selectedSnapshotBId, setSelectedSnapshotBId] = useState("");
 
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
@@ -148,6 +215,33 @@ export function AthleteWeeklyAdherenceProvider({
     isGateReady,
     planningIds.phase,
     reloadKey,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void runWeeklyAdherenceComparisonLifecycle({
+      snapshotAId: selectedSnapshotAId,
+      snapshotBId: selectedSnapshotBId,
+      isCurrent: () => !cancelled,
+      fetchComparison: () =>
+        fetchWeeklyAdherenceComparison({
+          entityId,
+          athleteId,
+          snapshotAId: selectedSnapshotAId,
+          snapshotBId: selectedSnapshotBId,
+        }),
+      setComparisonData,
+      setComparisonLoading,
+      setComparisonError,
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    athleteId,
+    entityId,
+    selectedSnapshotAId,
+    selectedSnapshotBId,
   ]);
 
   const nutritionKpi: NutritionAdherenceKpiState = useMemo(() => {
@@ -236,14 +330,26 @@ export function AthleteWeeklyAdherenceProvider({
       weekEnd: planWeekRange?.weekEnd ?? "",
       trainingPlanVersionId,
       reload,
+      comparisonData,
+      comparisonLoading,
+      comparisonError,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+      setSelectedSnapshotAId,
+      setSelectedSnapshotBId,
     }),
     [
+      comparisonData,
+      comparisonError,
+      comparisonLoading,
       error,
       nutritionKpi,
       phase,
       planWeekRange?.weekEnd,
       planWeekRange?.weekStart,
       reload,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
       summary,
       trainingPlanVersionId,
     ],

@@ -255,6 +255,7 @@ import {
   FYN_REVISION_PRESERVE_LINE,
   MAX_FYN_REVISION_CHANGES,
   NextCycleWorkspaceAction,
+  PlanningContextWorkspaceAction,
   runCreateNextWeeklyPlanAction,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
@@ -419,6 +420,104 @@ describe("NextCycleWorkspaceAction", () => {
 
     expect(onContinue).toHaveBeenCalledTimes(1);
     expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("PlanningContextWorkspaceAction", () => {
+  it("renders Continue Planning only for a pending unlocked context", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: false,
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Continue Planning");
+    expect(html).not.toContain("View Context");
+  });
+
+  it("renders View Context only for a locked context", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: true,
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("View Context");
+    expect(html).not.toContain("Continue Planning");
+  });
+
+  it("Continue Planning uses the existing editable Context Builder action", () => {
+    const onContinue = vi.fn();
+    const element = PlanningContextWorkspaceAction({
+      planningContextLocked: false,
+      action: "CONTINUE",
+      loading: false,
+      onCreate: vi.fn(),
+      onContinue,
+      onView: vi.fn(),
+    });
+
+    const action = NextCycleWorkspaceAction(
+      element.props as Parameters<typeof NextCycleWorkspaceAction>[0],
+    );
+    if (action === null) throw new Error("Expected Continue Planning action");
+    (action.props as { onClick: () => void }).onClick();
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+  });
+
+  it("View Context uses the existing locked read-only Context Builder action", () => {
+    const onView = vi.fn();
+    const element = PlanningContextWorkspaceAction({
+      planningContextLocked: true,
+      action: "CONTINUE",
+      loading: false,
+      onCreate: vi.fn(),
+      onContinue: vi.fn(),
+      onView,
+    });
+
+    (element.props as { onClick: () => void }).onClick();
+
+    expect(onView).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains Back to Domain Plans Integration in the locked read-only view", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("Locked Context Builder");
+    expect(source).toContain("Read-only");
+    expect(source).toContain("Back to Domain Plans Integration");
+  });
+
+  it("still renders Create New Plan for an unlocked CREATE state", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: false,
+        action: "CREATE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Create New Plan");
+    expect(html).not.toContain("Continue Planning");
+    expect(html).not.toContain("View Context");
   });
 });
 

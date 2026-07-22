@@ -851,6 +851,39 @@ export function NextCycleWorkspaceAction({
   );
 }
 
+export function PlanningContextWorkspaceAction({
+  planningContextLocked,
+  action,
+  loading,
+  onCreate,
+  onContinue,
+  onView,
+}: {
+  planningContextLocked: boolean;
+  action: TrainingPlanWorkspaceNextCycleAction;
+  loading: boolean;
+  onCreate: () => void;
+  onContinue: () => void;
+  onView: () => void;
+}) {
+  if (planningContextLocked) {
+    return (
+      <Button type="button" variant="secondary" onClick={onView}>
+        View Context
+      </Button>
+    );
+  }
+
+  return (
+    <NextCycleWorkspaceAction
+      action={action}
+      loading={loading}
+      onCreate={onCreate}
+      onContinue={onContinue}
+    />
+  );
+}
+
 export async function runCreateNextWeeklyPlanAction({
   pendingRef,
   setLoading,
@@ -26070,11 +26103,6 @@ export function CoachAthletePlanningProfileView({
 
   function renderDomainPlansIntegrationWorkspace() {
     if (selectedWorkflowTab !== "generate") return null;
-    const canOpenLockedContextBuilderView =
-      planningContextLocked ||
-      headCoachLockedContextStepComplete ||
-      workspace?.planningContext.locked === true ||
-      upstreamPlanningContext?.planningContextLocked === true;
     if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
@@ -26142,19 +26170,11 @@ export function CoachAthletePlanningProfileView({
                   }
                   primary={
                     <div className="space-y-3">
-                  {canOpenLockedContextBuilderView ||
+                  {workspace?.planningContext.locked === true ||
                   (workspace?.nextCycleAction ?? "NONE") !== "NONE" ? (
                     <div className="flex flex-wrap justify-end gap-2">
-                      {canOpenLockedContextBuilderView ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => setShowLockedContextBuilderView(true)}
-                        >
-                          View Context
-                        </Button>
-                      ) : null}
-                      <NextCycleWorkspaceAction
+                      <PlanningContextWorkspaceAction
+                        planningContextLocked={workspace?.planningContext.locked === true}
                         action={workspace?.nextCycleAction ?? "NONE"}
                         loading={nextCycleCreateLoading}
                         onCreate={() => {
@@ -26164,6 +26184,7 @@ export function CoachAthletePlanningProfileView({
                           setNextCycleCreateError(null);
                           setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
                         }}
+                        onView={() => setShowLockedContextBuilderView(true)}
                       />
                     </div>
                   ) : null}

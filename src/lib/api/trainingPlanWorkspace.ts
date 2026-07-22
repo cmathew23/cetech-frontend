@@ -13,6 +13,7 @@ import type {
   TrainingPlanWorkspaceDomain,
   TrainingPlanWorkspaceOwnershipFlags,
   TrainingPlanWorkspacePlanningContext,
+  TrainingPlanWorkspaceNextCycleAction,
   TrainingPlanWorkspaceSummary,
   TrainingPlanPendingRevisionRequest,
 } from "@/types/trainingPlanWorkspace";
@@ -46,6 +47,14 @@ function readStringList(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item !== "");
+}
+
+function parseNextCycleAction(value: unknown): TrainingPlanWorkspaceNextCycleAction {
+  const normalized = readString(value)?.toUpperCase();
+  if (normalized === "CREATE" || normalized === "CONTINUE") {
+    return normalized;
+  }
+  return "NONE";
 }
 
 function parsePendingRevisionRequest(
@@ -335,6 +344,7 @@ export function parseTrainingPlanWorkspacePayload(data: unknown): TrainingPlanWo
     workflowMode: readString(nested.workflowMode) ?? "",
     currentDomain: readString(nested.currentDomain),
     initialTab: readString(nested.initialTab),
+    nextCycleAction: parseNextCycleAction(nested.nextCycleAction),
     planningContext: parsePlanningContext(nested.planningContext),
     ownershipFlags: parseOwnershipFlags(nested.ownershipFlags),
     blockers: readStringList(nested.blockers),
@@ -370,4 +380,19 @@ export async function getTrainingPlanWorkspace(
     },
   );
   return parseTrainingPlanWorkspacePayload(adaptBackendSuccess(raw));
+}
+
+export async function createNextWeeklyPlanningContext(
+  entityId: string,
+  athleteId: string,
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  await apiRequest(
+    paths.entities.athleteTrainingPlanNextCycle(ids.entityId, ids.athleteId),
+    {
+      method: "POST",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_WORKSPACE_TIMEOUT_MS,
+    },
+  );
 }

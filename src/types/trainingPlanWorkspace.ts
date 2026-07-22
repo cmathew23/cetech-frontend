@@ -1,5 +1,7 @@
 import type { GenerationDomain } from "@/lib/coachAuthority";
 
+export type TrainingPlanWorkspaceNextCycleAction = "NONE" | "CREATE" | "CONTINUE";
+
 export type TrainingPlanWorkspaceSummary = {
   trainingPlanId: string | null;
   versionId: string | null;
@@ -126,6 +128,7 @@ export type TrainingPlanWorkspace = {
   workflowMode: string;
   currentDomain: string | null;
   initialTab: string | null;
+  nextCycleAction: TrainingPlanWorkspaceNextCycleAction;
   planningContext: TrainingPlanWorkspacePlanningContext;
   ownershipFlags: TrainingPlanWorkspaceOwnershipFlags;
   blockers: string[];

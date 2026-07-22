@@ -109,7 +109,10 @@ import {
   type CoachAthleteUpstreamPlanningContext,
   type TrainingPlanConstraintComplianceSummary,
 } from "@/lib/api/coachAthletePlanningReadiness";
-import { getTrainingPlanWorkspace } from "@/lib/api/trainingPlanWorkspace";
+import {
+  createNextWeeklyPlanningContext,
+  getTrainingPlanWorkspace,
+} from "@/lib/api/trainingPlanWorkspace";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   deriveWorkflowStatusFromWorkspaceDomain,
@@ -185,6 +188,7 @@ import type {
   TrainingPlanWorkspaceAssignmentDomainContext,
   TrainingPlanWorkspaceAssignmentPlanningContext,
   TrainingPlanWorkspaceAssignmentReleaseMode,
+  TrainingPlanWorkspaceNextCycleAction,
   TrainingPlanPendingRevisionRequest,
 } from "@/types/trainingPlanWorkspace";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -819,6 +823,104 @@ function formatApiError(e: unknown, fallback: string): string {
   }
   if (e instanceof Error) return e.message;
   return fallback;
+}
+
+export function NextCycleWorkspaceAction({
+  action,
+  loading,
+  onCreate,
+  onContinue,
+}: {
+  action: TrainingPlanWorkspaceNextCycleAction;
+  loading: boolean;
+  onCreate: () => void;
+  onContinue: () => void;
+}) {
+  if (action === "NONE") return null;
+
+  return (
+    <Button
+      type="button"
+      variant="primary"
+      loading={action === "CREATE" && loading}
+      disabled={action === "CREATE" && loading}
+      onClick={action === "CREATE" ? onCreate : onContinue}
+    >
+      {action === "CREATE" ? "Create New Plan" : "Continue Planning"}
+    </Button>
+  );
+}
+
+export function PlanningContextWorkspaceAction({
+  planningContextLocked,
+  action,
+  loading,
+  onCreate,
+  onContinue,
+  onView,
+}: {
+  planningContextLocked: boolean;
+  action: TrainingPlanWorkspaceNextCycleAction;
+  loading: boolean;
+  onCreate: () => void;
+  onContinue: () => void;
+  onView: () => void;
+}) {
+  if (planningContextLocked) {
+    return (
+      <Button type="button" variant="secondary" onClick={onView}>
+        View Context
+      </Button>
+    );
+  }
+
+  return (
+    <NextCycleWorkspaceAction
+      action={action}
+      loading={loading}
+      onCreate={onCreate}
+      onContinue={onContinue}
+    />
+  );
+}
+
+export async function runCreateNextWeeklyPlanAction({
+  pendingRef,
+  setLoading,
+  setError,
+  create,
+  refresh,
+  openPlanningContext,
+}: {
+  pendingRef: { current: boolean };
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  create: () => Promise<void>;
+  refresh: () => Promise<boolean>;
+  openPlanningContext: () => void;
+}): Promise<boolean> {
+  if (pendingRef.current) return false;
+
+  pendingRef.current = true;
+  setLoading(true);
+  setError(null);
+  try {
+    await create();
+    await refresh();
+    openPlanningContext();
+    return true;
+  } catch (error) {
+    setError(
+      formatApiError(
+        error,
+        "Could not create the next weekly plan. Please try again shortly.",
+      ),
+    );
+    return false;
+  } finally {
+    pendingRef.current = false;
+    setLoading(false);
+  }
 }
 
 function displayValue(
@@ -1746,13 +1848,43 @@ export function resolveHeadCoachReviewActiveDetailAfterRefresh(input: {
     }
     return input.refreshedActiveDetail;
   }
-  if (input.preservePreviousDetail) return input.previousActiveDetail;
+  if (
+    input.preservePreviousDetail &&
+    input.summaryPlanId !== null &&
+    input.previousActiveDetail?.plan.id?.trim() === input.summaryPlanId
+  ) {
+    return input.previousActiveDetail;
+  }
   return (
     input.summaryPlanId !== null &&
     input.previousActiveDetail?.plan.id?.trim() === input.summaryPlanId
       ? input.previousActiveDetail
       : null
   );
+}
+
+export function shouldUseCachedDomainPlanStateForWorkspace(input: {
+  workspacePresent: boolean;
+  workspacePlanId: string | null | undefined;
+  cachedSummaryPlanId: string | null | undefined;
+  cachedActiveDetailPlanId: string | null | undefined;
+  cachedLatestDraftPlanId: string | null | undefined;
+}): boolean {
+  if (!input.workspacePresent) return true;
+  const workspacePlanId = input.workspacePlanId?.trim() ?? "";
+  if (workspacePlanId === "") return false;
+  return [
+    input.cachedSummaryPlanId,
+    input.cachedActiveDetailPlanId,
+    input.cachedLatestDraftPlanId,
+  ].some((planId) => (planId?.trim() ?? "") === workspacePlanId);
+}
+
+export function hasPlanningContextSnapshotChanged(
+  previousSnapshotId: string | null | undefined,
+  nextSnapshotId: string | null,
+): boolean {
+  return previousSnapshotId !== undefined && previousSnapshotId !== nextSnapshotId;
 }
 
 export function shouldKeepPreviousDomainReviewDetail(input: {
@@ -5347,19 +5479,25 @@ export function resolveHeadCoachReviewSummarySource(input: {
     workspaceSummary !== null ? resolveHeadCoachDomainSummaryVersionId(workspaceSummary) : null;
   const legacyPlanId = input.legacySummary.trainingPlanId?.trim() ?? "";
   const legacyVersionId = resolveHeadCoachDomainSummaryVersionId(input.legacySummary);
-  return {
-    planId: workspacePlanId !== "" ? workspacePlanId : legacyPlanId !== "" ? legacyPlanId : null,
-    versionId:
-      workspaceVersionId !== null && workspaceVersionId !== ""
-        ? workspaceVersionId
-        : legacyVersionId !== null && legacyVersionId !== ""
-          ? legacyVersionId
+  if (workspaceSummary !== null) {
+    return {
+      planId: workspacePlanId !== "" ? workspacePlanId : null,
+      versionId:
+        workspaceVersionId !== null && workspaceVersionId !== ""
+          ? workspaceVersionId
           : null,
-    status:
-      (workspaceSummary?.status?.trim() ?? "") !== ""
-        ? (workspaceSummary?.status?.trim() ?? null)
-        : input.legacySummary.status?.trim() || null,
-    hasWorkspaceIds: workspacePlanId !== "" && (workspaceVersionId ?? "") !== "",
+      status: workspaceSummary.status?.trim() || null,
+      hasWorkspaceIds: workspacePlanId !== "" && (workspaceVersionId ?? "") !== "",
+    };
+  }
+  return {
+    planId: legacyPlanId !== "" ? legacyPlanId : null,
+    versionId:
+      legacyVersionId !== null && legacyVersionId !== ""
+        ? legacyVersionId
+        : null,
+    status: input.legacySummary.status?.trim() || null,
+    hasWorkspaceIds: false,
   };
 }
 
@@ -8017,6 +8155,12 @@ export function resolveDomainReviewWorkflowStatus(input: {
     input.workspace !== null
       ? deriveWorkflowStatusFromWorkspaceDomain(input.workspace.domains[input.domain])
       : null;
+  if (
+    input.workspace !== null &&
+    (input.workspace.domains[input.domain].summary.trainingPlanId?.trim() ?? "") === ""
+  ) {
+    return fromWorkspace ?? "not_created";
+  }
   const candidates = [
     input.workflow2SkillsSlotProjection ?? null,
     fromWorkspace,
@@ -10629,6 +10773,8 @@ export function CoachAthletePlanningProfileView({
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [nextCycleCreateLoading, setNextCycleCreateLoading] = useState(false);
+  const [nextCycleCreateError, setNextCycleCreateError] = useState<string | null>(null);
   const [domainCoachWorkspaceTab, setDomainCoachWorkspaceTab] =
     useState<DomainCoachWorkspaceTab>("planning-context");
   const [domainPlanHistoryRows, setDomainPlanHistoryRows] = useState<
@@ -10648,6 +10794,8 @@ export function CoachAthletePlanningProfileView({
   } | null>(null);
   const workspaceRefreshGenRef = useRef(0);
   const workspaceHasLoadedRef = useRef(false);
+  const workspaceSnapshotIdRef = useRef<string | null | undefined>(undefined);
+  const nextCycleCreatePendingRef = useRef(false);
   const assignmentContextMissingWarningScopeRef = useRef<string | null>(null);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
@@ -14504,6 +14652,10 @@ export function CoachAthletePlanningProfileView({
     setWorkspace(null);
     setWorkspaceLoading(false);
     setWorkspaceError(null);
+    workspaceSnapshotIdRef.current = undefined;
+    nextCycleCreatePendingRef.current = false;
+    setNextCycleCreateLoading(false);
+    setNextCycleCreateError(null);
     setPlanningContextBootstrapState("idle");
     setCachedLockedPlanWindow(null);
     setPlanningContextLockLoading(false);
@@ -14532,6 +14684,49 @@ export function CoachAthletePlanningProfileView({
     downstreamWorkflowLandGenerateConsumedRef.current = null;
     setAssignedAthletePlanOwnership(null);
   }, [athleteIdTrimmed, entityId]);
+
+  useEffect(() => {
+    if (workspace === null) return;
+    const nextSnapshotId = workspace.planningContext.snapshotId;
+    const previousSnapshotId = workspaceSnapshotIdRef.current;
+    workspaceSnapshotIdRef.current = nextSnapshotId;
+    if (!hasPlanningContextSnapshotChanged(previousSnapshotId, nextSnapshotId)) return;
+
+    assistantDomainSummaryHydrationGenRef.current += 1;
+    step6WorkflowFetchGenRef.current += 1;
+    headCoachReviewDetailFetchKeyRef.current = null;
+    knownDomainPlanIdsRef.current = { SKILLS: "", NUTRITION: "", S_AND_C: "" };
+    if (domainReviewDrawerCloseTimeoutRef.current !== null) {
+      clearTimeout(domainReviewDrawerCloseTimeoutRef.current);
+      domainReviewDrawerCloseTimeoutRef.current = null;
+    }
+    setHeadCoachDomainPlanStates(createEmptyHeadCoachDomainPlanStates());
+    setSubmittedDomainPlansBootstrapState("idle");
+    setAssistantDomainSummaryHydrationPending(false);
+    setHeadCoachSubmittedReviewDomain(null);
+    setDomainReviewDrawerOpen(false);
+    setDomainReviewDrawerDomain(null);
+    setDomainReviewDrawerClosing(false);
+    setAssistantRevisePanelDomain(null);
+    setRequestRevisionModalOpen(false);
+    setRequestRevisionFeedback("");
+    setReleasedPlanViewerIntent(null);
+    setReleasedPlanViewerVisibleDetail(null);
+    setWorkflowRequestedPlanId(null);
+    setPersistedSkillsPlanDetail(null);
+    setPersistedVerifiedDomain(null);
+    setPersistedSkillsPlanError(null);
+    setPersistedPlanErrorDomain(null);
+    setPersistedSkillsPlanLoading(false);
+    setLatestSkillsDraft(null);
+    setLatestDraftDomain(null);
+    setLatestSkillsDraftRequestState("idle");
+    setLatestSkillsDraftMissing(false);
+    setLatestSkillsDraftError(null);
+    setGovernedPlanActionLoading(null);
+    setGovernedPlanActionError(null);
+    setGovernedPlanActionSuccess(null);
+  }, [workspace]);
 
   useEffect(() => {
     if (!trainingPlanShellModel.ready) return;
@@ -14797,7 +14992,12 @@ export function CoachAthletePlanningProfileView({
         setHeadCoachDomainPlanStates((prev) => ({
           SKILLS: {
             ...nextStates.SKILLS,
-            latestDraft: nextStates.SKILLS.latestDraft ?? prev.SKILLS.latestDraft,
+            latestDraft:
+              nextStates.SKILLS.summaryPlanId !== null &&
+              prev.SKILLS.latestDraft?.trainingPlanId?.trim() ===
+                nextStates.SKILLS.summaryPlanId
+                ? prev.SKILLS.latestDraft
+                : null,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
               refreshedActiveDetail: null,
               previousActiveDetail: prev.SKILLS.activeDetail,
@@ -14807,7 +15007,12 @@ export function CoachAthletePlanningProfileView({
           },
           NUTRITION: {
             ...nextStates.NUTRITION,
-            latestDraft: nextStates.NUTRITION.latestDraft ?? prev.NUTRITION.latestDraft,
+            latestDraft:
+              nextStates.NUTRITION.summaryPlanId !== null &&
+              prev.NUTRITION.latestDraft?.trainingPlanId?.trim() ===
+                nextStates.NUTRITION.summaryPlanId
+                ? prev.NUTRITION.latestDraft
+                : null,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
               refreshedActiveDetail: null,
               previousActiveDetail: prev.NUTRITION.activeDetail,
@@ -14817,7 +15022,12 @@ export function CoachAthletePlanningProfileView({
           },
           S_AND_C: {
             ...nextStates.S_AND_C,
-            latestDraft: nextStates.S_AND_C.latestDraft ?? prev.S_AND_C.latestDraft,
+            latestDraft:
+              nextStates.S_AND_C.summaryPlanId !== null &&
+              prev.S_AND_C.latestDraft?.trainingPlanId?.trim() ===
+                nextStates.S_AND_C.summaryPlanId
+                ? prev.S_AND_C.latestDraft
+                : null,
             activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
               refreshedActiveDetail: null,
               previousActiveDetail: prev.S_AND_C.activeDetail,
@@ -15313,6 +15523,19 @@ export function CoachAthletePlanningProfileView({
     workloadComplete,
     workflowStepStatusByKey,
   ]);
+
+  async function handleCreateNextWeeklyPlan() {
+    await runCreateNextWeeklyPlanAction({
+      pendingRef: nextCycleCreatePendingRef,
+      setLoading: setNextCycleCreateLoading,
+      setError: setNextCycleCreateError,
+      create: () => createNextWeeklyPlanningContext(entityId, athleteIdTrimmed),
+      refresh: () => refreshTrainingPlanWorkspace({ background: true }),
+      openPlanningContext: () => {
+        setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+      },
+    });
+  }
 
   /** When a workflow step completes, auto-advance selection to the next tab (no Next buttons) */
   useEffect(() => {
@@ -17292,18 +17515,47 @@ export function CoachAthletePlanningProfileView({
   function resolveDomainReviewSurfaceModel(
     domain: TrainingPlanGenerationDomain,
   ): DomainReviewSurfaceModel {
-    const state = headCoachDomainPlanStates[domain];
+    const cachedState = headCoachDomainPlanStates[domain];
+    const workspaceDomainEntry = workspace?.domains[domain] ?? null;
+    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
+    const useCachedState = shouldUseCachedDomainPlanStateForWorkspace({
+      workspacePresent: workspace !== null,
+      workspacePlanId,
+      cachedSummaryPlanId: cachedState.summaryPlanId,
+      cachedActiveDetailPlanId: cachedState.activeDetail?.plan.id,
+      cachedLatestDraftPlanId: cachedState.latestDraft?.trainingPlanId,
+    });
+    const state = useCachedState
+      ? cachedState
+      : createEmptyHeadCoachDomainPlanStates()[domain];
     const assignmentDomainContext = workspace?.assignmentContext?.domains[domain];
+    const workspaceMatchedOwnedSkillsDraft =
+      workspace === null ||
+      headCoachOwnedSkillsDraft?.trainingPlanId?.trim() === workspacePlanId
+        ? headCoachOwnedSkillsDraft
+        : null;
+    const workspaceMatchedOwnedSkillsActiveDetail =
+      workspace === null ||
+      headCoachOwnedSkillsActiveDetail?.plan.id?.trim() === workspacePlanId
+        ? headCoachOwnedSkillsActiveDetail
+        : null;
     const workflow2SkillsSlotProjection =
-      headCoachReviewMode && domain === "SKILLS"
+      headCoachReviewMode &&
+      domain === "SKILLS" &&
+      (workspace === null || workspacePlanId !== "")
         ? resolveWorkflow2SubmittedDomainSkillsSlotProjection({
             summaryStatus: state.summaryStatus,
             summaryPlanId: state.summaryPlanId,
             summaryVersionId: state.summaryVersionId,
             summaryActiveDetail: state.activeDetail,
-            ownedLatestDraft: headCoachOwnedSkillsDraft,
-            ownedActiveDetail: headCoachOwnedSkillsActiveDetail,
+            ownedLatestDraft: workspaceMatchedOwnedSkillsDraft,
+            ownedActiveDetail: workspaceMatchedOwnedSkillsActiveDetail,
           })
+        : null;
+    const workspaceMatchedLatestDraft =
+      workspace === null ||
+      latestSkillsDraft?.trainingPlanId?.trim() === workspacePlanId
+        ? latestSkillsDraft
         : null;
     const workflowStatus = resolveDomainReviewWorkflowStatus({
       workspace,
@@ -17312,12 +17564,11 @@ export function CoachAthletePlanningProfileView({
       summaryPlanId: state.summaryPlanId,
       summaryVersionId: state.summaryVersionId,
       activeDetail: state.activeDetail,
-      latestDraft: latestDraftDisplayDomain === domain ? latestSkillsDraft : state.latestDraft,
+      latestDraft:
+        latestDraftDisplayDomain === domain ? workspaceMatchedLatestDraft : state.latestDraft,
       workflow2SkillsSlotProjection: workflow2SkillsSlotProjection?.workflowStatus ?? null,
     });
     const activeDetail = state.activeDetail;
-    const workspaceDomainEntry = workspace?.domains[domain] ?? null;
-    const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
     const workspaceVersionId =
       workspaceDomainEntry !== null
         ? (resolveHeadCoachDomainSummaryVersionId(workspaceDomainEntry.summary) ?? "")
@@ -17332,18 +17583,28 @@ export function CoachAthletePlanningProfileView({
       activeDetailVersionId: activeDetail?.version.id,
       activeDetailVersionNumber: activeDetail?.version.versionNumber,
     });
-    const actionPlanIds = resolveDomainReviewActionPlanIds({
-      domain,
-      workspace,
-      surfacePlanId: surfaceIdentity.planId,
-      surfaceVersionId: surfaceIdentity.versionId,
-      persistedDetailDomain,
-      persistedPlanId: persistedSkillsPlanDetail?.plan.id,
-      persistedVersionId: persistedSkillsPlanDetail?.version.id,
-      latestDraftDomain: latestDraftDisplayDomain,
-      latestDraftPlanId: latestSkillsDraft?.trainingPlanId,
-      latestDraftVersionId: latestSkillsDraft?.trainingPlanVersionId,
-    });
+    const persistedDetailMatchesWorkspace =
+      workspace === null ||
+      persistedSkillsPlanDetail?.plan.id?.trim() === workspacePlanId;
+    const actionPlanIds =
+      workspace !== null && workspacePlanId === ""
+        ? { planId: "", versionId: "" }
+        : resolveDomainReviewActionPlanIds({
+            domain,
+            workspace,
+            surfacePlanId: surfaceIdentity.planId,
+            surfaceVersionId: surfaceIdentity.versionId,
+            persistedDetailDomain,
+            persistedPlanId: persistedDetailMatchesWorkspace
+              ? persistedSkillsPlanDetail?.plan.id
+              : null,
+            persistedVersionId: persistedDetailMatchesWorkspace
+              ? persistedSkillsPlanDetail?.version.id
+              : null,
+            latestDraftDomain: latestDraftDisplayDomain,
+            latestDraftPlanId: workspaceMatchedLatestDraft?.trainingPlanId,
+            latestDraftVersionId: workspaceMatchedLatestDraft?.trainingPlanVersionId,
+          });
     const planId = actionPlanIds.planId;
     const versionId = actionPlanIds.versionId;
     const planContext: GovernedPlanContext | null =
@@ -17450,9 +17711,9 @@ export function CoachAthletePlanningProfileView({
     // per-domain full-plan reload with a stale global object.
     const latestDraftForReview = resolveLatestDraftForDomainReview(domain, {
       isWorkflow2AHeadCoachOwnedSkillsDraft,
-      headCoachOwnedSkillsDraft,
+      headCoachOwnedSkillsDraft: workspaceMatchedOwnedSkillsDraft,
       latestDraftDisplayDomain,
-      latestSkillsDraft,
+      latestSkillsDraft: workspaceMatchedLatestDraft,
       perDomainLatestDraft: state.latestDraft,
     });
     const contentSource = resolveDomainReviewDrawerContentSource({
@@ -25842,11 +26103,6 @@ export function CoachAthletePlanningProfileView({
 
   function renderDomainPlansIntegrationWorkspace() {
     if (selectedWorkflowTab !== "generate") return null;
-    const canOpenLockedContextBuilderView =
-      planningContextLocked ||
-      headCoachLockedContextStepComplete ||
-      workspace?.planningContext.locked === true ||
-      upstreamPlanningContext?.planningContextLocked === true;
     if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
@@ -25914,16 +26170,26 @@ export function CoachAthletePlanningProfileView({
                   }
                   primary={
                     <div className="space-y-3">
-                  {canOpenLockedContextBuilderView ? (
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setShowLockedContextBuilderView(true)}
-                      >
-                        View Context
-                      </Button>
+                  {workspace?.planningContext.locked === true ||
+                  (workspace?.nextCycleAction ?? "NONE") !== "NONE" ? (
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <PlanningContextWorkspaceAction
+                        planningContextLocked={workspace?.planningContext.locked === true}
+                        action={workspace?.nextCycleAction ?? "NONE"}
+                        loading={nextCycleCreateLoading}
+                        onCreate={() => {
+                          void handleCreateNextWeeklyPlan();
+                        }}
+                        onContinue={() => {
+                          setNextCycleCreateError(null);
+                          setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+                        }}
+                        onView={() => setShowLockedContextBuilderView(true)}
+                      />
                     </div>
+                  ) : null}
+                  {nextCycleCreateError ? (
+                    <Alert variant="danger">{nextCycleCreateError}</Alert>
                   ) : null}
                   {shouldUseDomainCoordinationMatrixLayout({
                     shell: trainingPlanShellModel.shell,

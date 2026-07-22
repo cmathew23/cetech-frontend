@@ -129,8 +129,11 @@ import {
   resolveCompetitionSeasonPhaseForDate,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
+  shouldUseCachedDomainPlanStateForWorkspace,
+  hasPlanningContextSnapshotChanged,
   resolveDomainReviewSurfaceIdentity,
   shouldKeepPreviousDomainReviewDetail,
+  domainIntegrationAssignedCoachLabel,
   domainReviewScheduleDescription,
   countDomainReviewTrainingDays,
   countLatestDomainDraftTrainingDays,
@@ -251,6 +254,9 @@ import {
   FYN_REVISION_SHOW_OPTIONS_LABEL,
   FYN_REVISION_PRESERVE_LINE,
   MAX_FYN_REVISION_CHANGES,
+  NextCycleWorkspaceAction,
+  PlanningContextWorkspaceAction,
+  runCreateNextWeeklyPlanAction,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -280,6 +286,240 @@ import type {
   CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
+
+describe("NextCycleWorkspaceAction", () => {
+  it("renders no action for NONE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "NONE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toBe("");
+  });
+
+  it("renders Create New Plan for CREATE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "CREATE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Create New Plan");
+    expect(html).not.toContain("Continue Planning");
+  });
+
+  it("renders Continue Planning for CONTINUE", () => {
+    const html = renderToStaticMarkup(
+      createElement(NextCycleWorkspaceAction, {
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Continue Planning");
+    expect(html).not.toContain("Create New Plan");
+  });
+
+  it("blocks duplicate CREATE requests while the first request is pending", async () => {
+    let resolveCreate!: () => void;
+    const create = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const pendingRef = { current: false };
+    const input = {
+      pendingRef,
+      setLoading: vi.fn(),
+      setError: vi.fn(),
+      create,
+      refresh: vi.fn().mockResolvedValue(true),
+      openPlanningContext: vi.fn(),
+    };
+
+    const first = runCreateNextWeeklyPlanAction(input);
+    const second = runCreateNextWeeklyPlanAction(input);
+
+    await expect(second).resolves.toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+
+    resolveCreate();
+    await expect(first).resolves.toBe(true);
+  });
+
+  it("refreshes the workspace and opens Planning Context after CREATE succeeds", async () => {
+    const refresh = vi.fn().mockResolvedValue(true);
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runCreateNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError: vi.fn(),
+        create: vi.fn().mockResolvedValue(undefined),
+        refresh,
+        openPlanningContext,
+      }),
+    ).resolves.toBe(true);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(openPlanningContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the current workspace path and exposes the existing error style on failure", async () => {
+    const setError = vi.fn();
+    const refresh = vi.fn();
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runCreateNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError,
+        create: vi.fn().mockRejectedValue(new Error("Next cycle unavailable")),
+        refresh,
+        openPlanningContext,
+      }),
+    ).resolves.toBe(false);
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(openPlanningContext).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenLastCalledWith("Next cycle unavailable");
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      '<Alert variant="danger">{nextCycleCreateError}</Alert>',
+    );
+  });
+
+  it("CONTINUE opens Planning Context without running CREATE", () => {
+    const onCreate = vi.fn();
+    const onContinue = vi.fn();
+    const element = NextCycleWorkspaceAction({
+      action: "CONTINUE",
+      loading: false,
+      onCreate,
+      onContinue,
+    });
+
+    if (element === null) throw new Error("Expected Continue Planning action");
+    (element.props as { onClick: () => void }).onClick();
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("PlanningContextWorkspaceAction", () => {
+  it("renders Continue Planning only for a pending unlocked context", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: false,
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Continue Planning");
+    expect(html).not.toContain("View Context");
+  });
+
+  it("renders View Context only for a locked context", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: true,
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("View Context");
+    expect(html).not.toContain("Continue Planning");
+  });
+
+  it("Continue Planning uses the existing editable Context Builder action", () => {
+    const onContinue = vi.fn();
+    const element = PlanningContextWorkspaceAction({
+      planningContextLocked: false,
+      action: "CONTINUE",
+      loading: false,
+      onCreate: vi.fn(),
+      onContinue,
+      onView: vi.fn(),
+    });
+
+    const action = NextCycleWorkspaceAction(
+      element.props as Parameters<typeof NextCycleWorkspaceAction>[0],
+    );
+    if (action === null) throw new Error("Expected Continue Planning action");
+    (action.props as { onClick: () => void }).onClick();
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+  });
+
+  it("View Context uses the existing locked read-only Context Builder action", () => {
+    const onView = vi.fn();
+    const element = PlanningContextWorkspaceAction({
+      planningContextLocked: true,
+      action: "CONTINUE",
+      loading: false,
+      onCreate: vi.fn(),
+      onContinue: vi.fn(),
+      onView,
+    });
+
+    (element.props as { onClick: () => void }).onClick();
+
+    expect(onView).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains Back to Domain Plans Integration in the locked read-only view", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("Locked Context Builder");
+    expect(source).toContain("Read-only");
+    expect(source).toContain("Back to Domain Plans Integration");
+  });
+
+  it("still renders Create New Plan for an unlocked CREATE state", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: false,
+        action: "CREATE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Create New Plan");
+    expect(html).not.toContain("Continue Planning");
+    expect(html).not.toContain("View Context");
+  });
+});
 
 describe("RevisionRequestPanel", () => {
   it("renders revision feedback and available request metadata", () => {
@@ -483,11 +723,90 @@ describe("Workflow 1 Head Coach review state", () => {
         resolveHeadCoachReviewActiveDetailAfterRefresh({
           refreshedActiveDetail: null,
           previousActiveDetail: previousDetail,
-          summaryPlanId: null,
+          summaryPlanId: `plan-${domain}`,
           preservePreviousDetail: true,
         }),
       ).toBe(previousDetail);
     }
+  });
+
+  it("drops previously loaded review content when the current snapshot has no plan", () => {
+    expect(
+      resolveHeadCoachReviewActiveDetailAfterRefresh({
+        refreshedActiveDetail: null,
+        previousActiveDetail: {
+          plan: { id: "snapshot-a-skills-plan" },
+          version: { id: "snapshot-a-skills-version" },
+          days: [],
+          allowedActions: ["RELEASE"],
+        } as never,
+        summaryPlanId: null,
+        preservePreviousDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("invalidates snapshot A domain caches while preserving all matrix rows and assignments", () => {
+    expect(hasPlanningContextSnapshotChanged("snapshot-a", "snapshot-b")).toBe(true);
+    expect(hasPlanningContextSnapshotChanged("snapshot-b", "snapshot-b")).toBe(false);
+    expect(hasPlanningContextSnapshotChanged(undefined, "snapshot-a")).toBe(false);
+
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      expect(
+        shouldUseCachedDomainPlanStateForWorkspace({
+          workspacePresent: true,
+          workspacePlanId: null,
+          cachedSummaryPlanId: `snapshot-a-${domain}-plan`,
+          cachedActiveDetailPlanId: `snapshot-a-${domain}-plan`,
+          cachedLatestDraftPlanId: `snapshot-a-${domain}-plan`,
+        }),
+      ).toBe(false);
+    }
+    expect(resolveDomainIntegrationMatrixDomains("head_coach_review")).toEqual([
+      "SKILLS",
+      "NUTRITION",
+      "S_AND_C",
+    ]);
+    expect(
+      domainIntegrationAssignedCoachLabel("NUTRITION", {
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownerUserId: "nutrition-coach-user",
+        ownerCoachProfileId: "nutrition-coach-profile",
+        ownerName: null,
+        ownerDisplayName: null,
+        assignedCoachName: "Current Nutrition Coach",
+        assignedCoachDisplayName: "Current Nutrition Coach",
+        ownedByCurrentUser: false,
+        canOpen: true,
+        canGenerate: true,
+        canRevise: true,
+        canSubmitForReview: true,
+        canApprove: false,
+        canRelease: false,
+        releaseMode: "HEAD_COACH_APPROVAL",
+      }),
+    ).toBe("Current Nutrition Coach");
+  });
+
+  it("accepts only a plan belonging to the current workspace snapshot", () => {
+    expect(
+      shouldUseCachedDomainPlanStateForWorkspace({
+        workspacePresent: true,
+        workspacePlanId: "snapshot-b-skills-plan",
+        cachedSummaryPlanId: "snapshot-a-skills-plan",
+        cachedActiveDetailPlanId: "snapshot-a-skills-plan",
+        cachedLatestDraftPlanId: "snapshot-a-skills-plan",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseCachedDomainPlanStateForWorkspace({
+        workspacePresent: true,
+        workspacePlanId: "snapshot-b-skills-plan",
+        cachedSummaryPlanId: "snapshot-b-skills-plan",
+        cachedActiveDetailPlanId: "snapshot-b-skills-plan",
+        cachedLatestDraftPlanId: null,
+      }),
+    ).toBe(true);
   });
 
   it("does not keep stale review detail outside the Workflow 1 preserve path unless plan ids match", () => {
@@ -11727,6 +12046,107 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe("approved");
   });
 
+  it("renders a null current-snapshot summary as not created despite snapshot A release state", () => {
+    const workspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: null,
+            versionId: null,
+            latestVersionId: null,
+            approvedVersionId: null,
+            activeVersionId: null,
+            generationDomain: "SKILLS",
+            status: null,
+            versionNumber: null,
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace,
+        domain: "SKILLS",
+        summaryStatus: "ACTIVE",
+        summaryPlanId: "snapshot-a-skills-plan",
+        summaryVersionId: "snapshot-a-skills-version",
+        activeDetail: {
+          plan: { id: "snapshot-a-skills-plan", status: "ACTIVE" },
+          version: {
+            id: "snapshot-a-skills-version",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+          allowedActions: ["VIEW"],
+        } as never,
+      }),
+    ).toBe("not_created");
+  });
+
+  it("renders released and newly generated statuses only for the matching workspace plan", () => {
+    const releasedWorkspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "snapshot-a-skills-plan",
+            versionId: "snapshot-a-skills-version",
+            generationDomain: "SKILLS",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace: releasedWorkspace,
+        domain: "SKILLS",
+        summaryStatus: "ACTIVE",
+        summaryPlanId: "snapshot-a-skills-plan",
+        summaryVersionId: "snapshot-a-skills-version",
+        activeDetail: {
+          plan: { id: "snapshot-a-skills-plan", status: "ACTIVE" },
+          version: {
+            id: "snapshot-a-skills-version",
+            status: "ACTIVE",
+            versionNumber: 1,
+          },
+        } as never,
+      }),
+    ).toBe("released");
+
+    const currentPlanWorkspace = workflow3SkillsCoachWorkspace({
+      domains: {
+        ...workflow3SkillsCoachWorkspace().domains,
+        SKILLS: {
+          ...workflow3SkillsCoachWorkspace().domains.SKILLS,
+          summary: {
+            trainingPlanId: "snapshot-b-skills-plan",
+            versionId: "snapshot-b-skills-version",
+            generationDomain: "SKILLS",
+            status: "AI_GENERATED",
+            versionNumber: 1,
+          },
+        },
+      },
+    });
+    expect(
+      resolveDomainReviewWorkflowStatus({
+        workspace: currentPlanWorkspace,
+        domain: "SKILLS",
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+        activeDetail: null,
+      }),
+    ).toBe("draft_generated");
+  });
+
   it("does not auto-open Plan Viewer after release for Workflow 3 Skills", () => {
     expect(
       shouldShowReleasedPlanViewerCanvas({
@@ -13934,6 +14354,32 @@ describe("deriveHeadCoachDomainWorkflowStatus", () => {
     });
   });
 
+  it("does not restore a previous-cycle legacy plan when the workspace summary is empty", () => {
+    const workspace = workflow1OwnedSkillsWorkspace();
+
+    expect(
+      resolveHeadCoachReviewSummarySource({
+        workspace,
+        domain: "SKILLS",
+        legacySummary: {
+          trainingPlanId: "snapshot-a-skills-plan",
+          versionId: "snapshot-a-skills-version",
+          latestVersionId: "snapshot-a-skills-version",
+          approvedVersionId: null,
+          activeVersionId: "snapshot-a-skills-version",
+          versionNumber: 1,
+          status: "ACTIVE",
+          generationDomain: "SKILLS",
+        },
+      }),
+    ).toEqual({
+      planId: null,
+      versionId: null,
+      status: null,
+      hasWorkspaceIds: false,
+    });
+  });
+
   it("does not show no-data empty state when workspace summary has review ids", () => {
     expect(
       shouldShowHeadCoachReviewEmptyState({
@@ -14263,6 +14709,7 @@ function workflow1OwnedSkillsWorkspace(
     workflowMode: "specialist_domain",
     currentDomain: "SKILLS",
     initialTab: null,
+    nextCycleAction: "NONE",
     planningContext: {
       locked: true,
       resolved: true,

@@ -203,15 +203,23 @@ export function formatAdherencePercent(value: number | null | undefined): string
   return `${rounded % 1 === 0 ? Math.round(rounded) : rounded.toFixed(1)}%`;
 }
 
-export function AthleteWeeklyAdherenceProvider({
+export function WeeklyAdherenceProvider({
   children,
+  entityId,
+  athleteId,
+  isGateReady,
+  hasActiveAcademyMembership,
+  identifiersPhase,
+  loadCurrentSummary = true,
 }: {
   children: ReactNode;
+  entityId: string;
+  athleteId: string;
+  isGateReady: boolean;
+  hasActiveAcademyMembership: boolean;
+  identifiersPhase: "loading" | "ready" | "not_ready";
+  loadCurrentSummary?: boolean;
 }) {
-  const { isGateReady, hasActiveAcademyMembership, accessContext, accessGateReady } =
-    useAthleteInvitationGate();
-  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
-
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -232,8 +240,6 @@ export function AthleteWeeklyAdherenceProvider({
   const [snapshotsLoading, setSnapshotsLoading] = useState(true);
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
-  const entityId = planningIds.ids?.entityId ?? "";
-  const athleteId = planningIds.ids?.athleteId ?? "";
   const comparisonOwner = `${entityId}:${athleteId}`;
 
   const selectSnapshotA = useCallback(
@@ -285,10 +291,18 @@ export function AthleteWeeklyAdherenceProvider({
   }, []);
 
   useEffect(() => {
+    if (!loadCurrentSummary) {
+      setFetching(false);
+      setSummary(null);
+      setError(null);
+      setPlanWeekRange(null);
+      setTrainingPlanVersionId("");
+      return;
+    }
     if (
       !isGateReady ||
       !hasActiveAcademyMembership ||
-      planningIds.phase !== "ready" ||
+      identifiersPhase !== "ready" ||
       entityId === "" ||
       athleteId === ""
     ) {
@@ -339,7 +353,8 @@ export function AthleteWeeklyAdherenceProvider({
     entityId,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     reloadKey,
   ]);
 
@@ -422,16 +437,19 @@ export function AthleteWeeklyAdherenceProvider({
   ]);
 
   const nutritionKpi: NutritionAdherenceKpiState = useMemo(() => {
+    if (!loadCurrentSummary) {
+      return { status: "empty" };
+    }
     if (!isGateReady) {
       return { status: "loading" };
     }
     if (!hasActiveAcademyMembership) {
       return { status: "loading" };
     }
-    if (planningIds.phase === "loading") {
+    if (identifiersPhase === "loading") {
       return { status: "loading" };
     }
-    if (planningIds.phase !== "ready" || entityId === "" || athleteId === "") {
+    if (identifiersPhase !== "ready" || entityId === "" || athleteId === "") {
       return { status: "awaiting_identifiers" };
     }
     if (fetching) {
@@ -459,7 +477,8 @@ export function AthleteWeeklyAdherenceProvider({
     fetching,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     summary,
   ]);
 
@@ -470,11 +489,14 @@ export function AthleteWeeklyAdherenceProvider({
     if (!hasActiveAcademyMembership) {
       return "hidden";
     }
-    if (planningIds.phase === "loading") {
+    if (identifiersPhase === "loading") {
       return "loading";
     }
-    if (planningIds.phase !== "ready" || entityId === "" || athleteId === "") {
+    if (identifiersPhase !== "ready" || entityId === "" || athleteId === "") {
       return "awaiting_identifiers";
+    }
+    if (!loadCurrentSummary) {
+      return "loaded";
     }
     if (fetching) {
       return "loading";
@@ -493,7 +515,8 @@ export function AthleteWeeklyAdherenceProvider({
     fetching,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     summary,
   ]);
 
@@ -544,6 +567,35 @@ export function AthleteWeeklyAdherenceProvider({
     <AthleteWeeklyAdherenceContext.Provider value={value}>
       {children}
     </AthleteWeeklyAdherenceContext.Provider>
+  );
+}
+
+export function AthleteWeeklyAdherenceProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const {
+    isGateReady,
+    hasActiveAcademyMembership,
+    accessContext,
+    accessGateReady,
+  } = useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({
+    accessContext,
+    accessGateReady,
+  });
+
+  return (
+    <WeeklyAdherenceProvider
+      entityId={planningIds.ids?.entityId ?? ""}
+      athleteId={planningIds.ids?.athleteId ?? ""}
+      isGateReady={isGateReady}
+      hasActiveAcademyMembership={hasActiveAcademyMembership}
+      identifiersPhase={planningIds.phase}
+    >
+      {children}
+    </WeeklyAdherenceProvider>
   );
 }
 

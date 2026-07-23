@@ -3,6 +3,7 @@
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
+import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -214,6 +215,11 @@ export function CoachAthletePerformancePageContent() {
           {adherenceError ? (
             <Alert variant="danger">{adherenceError}</Alert>
           ) : null}
+
+          <CoachWeeklyAdherenceComparison
+            entityId={entityId}
+            athleteId={selectedAthleteId}
+          />
 
           {summary ? (
             <WeeklyAdherenceCards

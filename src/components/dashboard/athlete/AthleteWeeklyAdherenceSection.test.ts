@@ -617,6 +617,49 @@ describe("AthleteWeeklyAdherenceSection comparison controls", () => {
     expect(category).not.toContain(">S&amp;C<");
   });
 
+  it.each([
+    ["SKILL", "SKILLS_ADHERENCE", "Skills adherence", "Skills"],
+    [
+      "NUTRITION",
+      "NUTRITION_ADHERENCE",
+      "Nutrition adherence",
+      "Nutrition",
+    ],
+    [
+      "STRENGTH_CONDITIONING",
+      "S_AND_C_ADHERENCE",
+      "S&amp;C adherence",
+      "S&amp;C",
+    ],
+  ] as const)(
+    "auto-selects and hides a single backend-returned %s category",
+    (domain, parameter, parameterLabel, categoryLabel) => {
+      const data = comparisonData();
+      data.overall = null;
+      addDomainComparison(data, domain, {
+        earlier: 60,
+        later: 70,
+        delta: 10,
+      });
+      contextState.current = {
+        ...contextState.current!,
+        comparisonData: data,
+      };
+
+      const markup = renderToStaticMarkup(
+        createElement(AthleteWeeklyAdherenceSection),
+      );
+
+      expect(markup).not.toContain('id="weekly-adherence-category"');
+      expect(
+        renderedSelect(markup, "weekly-adherence-parameter"),
+      ).toContain(
+        `<option value="${parameter}" selected="">${parameterLabel}`,
+      );
+      expect(markup).toContain(`${categoryLabel} — ${parameterLabel}`);
+    },
+  );
+
   it("resets unavailable categories and stale parameters safely", () => {
     expect(
       reconcileWeeklyComparisonControlSelection(

@@ -253,7 +253,11 @@ function WeeklyAdherenceSectionCard({
   );
 }
 
-export function AthleteWeeklyAdherenceSection() {
+export function AthleteWeeklyAdherenceSection({
+  comparisonOnly = false,
+}: {
+  comparisonOnly?: boolean;
+} = {}) {
   const {
     phase,
     summary,
@@ -285,6 +289,10 @@ export function AthleteWeeklyAdherenceSection() {
     );
   const activeCategoryConfig =
     WEEKLY_COMPARISON_CATEGORY_CONFIG[activeCategory];
+  const hideCategory =
+    comparisonData !== null &&
+    categoryOptions.length === 1 &&
+    categoryOptions[0] !== "OVERALL";
 
   const weekLabel =
     weekStart !== "" && weekEnd !== ""
@@ -341,7 +349,11 @@ export function AthleteWeeklyAdherenceSection() {
       insufficientHistory ? (
         <Alert variant="warning">No historical weeks available.</Alert>
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className={`grid gap-4 sm:grid-cols-2 ${
+          hideCategory ? "lg:grid-cols-3" : "lg:grid-cols-4"
+        }`}
+      >
         <FormField id="weekly-adherence-snapshot-a" label="Earlier week">
           <Select
             id="weekly-adherence-snapshot-a"
@@ -407,25 +419,28 @@ export function AthleteWeeklyAdherenceSection() {
             ))}
           </Select>
         </FormField>
-        <FormField id="weekly-adherence-category" label="Category">
-          <Select
-            id="weekly-adherence-category"
-            value={activeCategory}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-              const category = event.target.value as WeeklyComparisonCategory;
-              setSelectedCategory(category);
-              setSelectedParameter(
-                WEEKLY_COMPARISON_CATEGORY_CONFIG[category].parameter,
-              );
-            }}
-          >
-            {categoryOptions.map((category) => (
-              <option key={category} value={category}>
-                {WEEKLY_COMPARISON_CATEGORY_CONFIG[category].label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+        {!hideCategory ? (
+          <FormField id="weekly-adherence-category" label="Category">
+            <Select
+              id="weekly-adherence-category"
+              value={activeCategory}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                const category =
+                  event.target.value as WeeklyComparisonCategory;
+                setSelectedCategory(category);
+                setSelectedParameter(
+                  WEEKLY_COMPARISON_CATEGORY_CONFIG[category].parameter,
+                );
+              }}
+            >
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {WEEKLY_COMPARISON_CATEGORY_CONFIG[category].label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        ) : null}
         <FormField id="weekly-adherence-parameter" label="Parameter">
           <Select
             id="weekly-adherence-parameter"
@@ -641,6 +656,10 @@ export function AthleteWeeklyAdherenceSection() {
       {comparisonBreakdown}
     </>
   );
+
+  if (comparisonOnly) {
+    return comparisonArea;
+  }
 
   if (phase === "loading") {
     return (

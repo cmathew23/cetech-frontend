@@ -270,6 +270,23 @@ describe("parseWeeklyAdherenceComparisonPayload", () => {
     });
   });
 
+  it("preserves a NOT_COMPARABLE overall status with a null delta", () => {
+    const payload = comparisonPayload();
+    (
+      payload.data.overall as {
+        comparisonStatus: string;
+        delta: unknown;
+      }
+    ).delta = null;
+
+    const parsed = parseWeeklyAdherenceComparisonPayload(payload);
+
+    expect(parsed.data.overall).toEqual({
+      comparisonStatus: "NOT_COMPARABLE",
+      delta: null,
+    });
+  });
+
   it("ignores unknown fields at decoded contract boundaries", () => {
     const parsed = parseWeeklyAdherenceComparisonPayload(comparisonPayload());
     const breakdown = parsed.data.snapshotA.domainBreakdowns.NUTRITION;

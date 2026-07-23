@@ -258,7 +258,7 @@ export type WeeklyAdherenceComparisonOverallDelta = {
 
 export type WeeklyAdherenceComparisonOverall = {
   comparisonStatus: WeeklyAdherenceComparisonStatus;
-  delta: WeeklyAdherenceComparisonOverallDelta;
+  delta: WeeklyAdherenceComparisonOverallDelta | null;
 };
 
 export type WeeklyAdherenceComparisonData = {
@@ -996,16 +996,19 @@ function parseComparisonOverall(
   if (!record) return null;
   const comparisonStatus = parseComparisonStatus(record.comparisonStatus);
   const delta = asRecord(record.delta);
-  if (comparisonStatus === null || delta === null) return null;
+  if (comparisonStatus === null) return null;
   return {
     comparisonStatus,
-    delta: {
-      adherencePercent: readComparisonNumber(delta.adherencePercent),
-      completedItems: readComparisonNumber(delta.completedItems),
-      plannedItems: readComparisonNumber(delta.plannedItems),
-      partialItems: readComparisonNumber(delta.partialItems),
-      missedItems: readComparisonNumber(delta.missedItems),
-    },
+    delta:
+      delta === null
+        ? null
+        : {
+            adherencePercent: readComparisonNumber(delta.adherencePercent),
+            completedItems: readComparisonNumber(delta.completedItems),
+            plannedItems: readComparisonNumber(delta.plannedItems),
+            partialItems: readComparisonNumber(delta.partialItems),
+            missedItems: readComparisonNumber(delta.missedItems),
+          },
   };
 }
 

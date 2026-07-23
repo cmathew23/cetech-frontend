@@ -287,6 +287,78 @@ describe("parseWeeklyAdherenceComparisonPayload", () => {
     });
   });
 
+  it("preserves backend weekly metric deltas for every domain", () => {
+    const commonDelta = {
+      adherencePercent: 1,
+      plannedSessions: 0,
+      loggedSessions: 0,
+      completedItems: 3,
+      partialItems: 0,
+      skippedItems: 0,
+      unloggedItems: 0,
+      completionCredit: 16,
+      actualDurationMinutes: null,
+    };
+    const parsed = parseWeeklyAdherenceComparisonPayload({
+      data: {
+        domains: {
+          SKILL: {
+            comparisonStatus: "COMPARABLE",
+            delta: {
+              ...commonDelta,
+              totalPrescribedItems: 8,
+              plannedMinutes: 58,
+              actualMinutes: -20,
+            },
+          },
+          NUTRITION: {
+            comparisonStatus: "COMPARABLE",
+            delta: {
+              ...commonDelta,
+              fullItems: 4,
+              halfItems: 0,
+              missedItems: -2,
+              plannedCalories: 350,
+              actualCalories: -125,
+            },
+          },
+          STRENGTH_CONDITIONING: {
+            comparisonStatus: "COMPARABLE",
+            delta: {
+              ...commonDelta,
+              totalPrescribedItems: 5,
+              plannedMinutes: -15,
+              actualMinutes: 0,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.data.domains.SKILL?.delta).toMatchObject({
+      totalPrescribedItems: 8,
+      completedItems: 3,
+      plannedMinutes: 58,
+      actualMinutes: -20,
+    });
+    expect(parsed.data.domains.NUTRITION?.delta).toMatchObject({
+      completionCredit: 16,
+      fullItems: 4,
+      halfItems: 0,
+      missedItems: -2,
+      plannedCalories: 350,
+      actualCalories: -125,
+    });
+    expect(
+      parsed.data.domains.STRENGTH_CONDITIONING?.delta,
+    ).toMatchObject({
+      totalPrescribedItems: 5,
+      completedItems: 3,
+      plannedMinutes: -15,
+      actualMinutes: 0,
+    });
+  });
+
   it("ignores unknown fields at decoded contract boundaries", () => {
     const parsed = parseWeeklyAdherenceComparisonPayload(comparisonPayload());
     const breakdown = parsed.data.snapshotA.domainBreakdowns.NUTRITION;

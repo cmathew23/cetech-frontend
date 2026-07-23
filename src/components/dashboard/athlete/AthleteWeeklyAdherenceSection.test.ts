@@ -215,7 +215,7 @@ function addDomainComparison(
     status?: "COMPARABLE" | "NOT_COMPARABLE";
   },
 ) {
-  const weekly = (adherencePercent: number) => ({
+  const weekly = (adherencePercent: number, laterWeek: boolean) => ({
     plannedSessions: 4,
     loggedSessions: 4,
     totalPrescribedItems: 8,
@@ -227,15 +227,22 @@ function addDomainComparison(
     completionCredit: 6.5,
     adherencePercent,
     context: {},
+    plannedMinutes: laterWeek ? 135 : 120,
+    actualMinutes: laterWeek ? 130 : 100,
+    fullItems: laterWeek ? 6 : 5,
+    halfItems: laterWeek ? 1 : 2,
+    missedItems: 1,
+    plannedCalories: laterWeek ? 15_000 : 14_000,
+    actualCalories: laterWeek ? 14_500 : 13_000,
   });
   data.snapshotA.domainBreakdowns[domain] = {
     availability: "COMPLETE",
-    weekly: weekly(earlier),
+    weekly: weekly(earlier, false),
     daily: [],
   };
   data.snapshotB.domainBreakdowns[domain] = {
     availability: "COMPLETE",
-    weekly: weekly(later),
+    weekly: weekly(later, true),
     daily: [],
   };
   data.domains[domain] = {
@@ -251,7 +258,20 @@ function addDomainComparison(
             partialItems: 0,
             skippedItems: 0,
             unloggedItems: 0,
-            completionCredit: 0,
+            completionCredit: domain === "NUTRITION" ? 16 : 0,
+            ...(domain === "NUTRITION"
+              ? {
+                  fullItems: 2,
+                  halfItems: 0,
+                  missedItems: -1,
+                  plannedCalories: 350,
+                  actualCalories: -125,
+                }
+              : {
+                  totalPrescribedItems: 8,
+                  plannedMinutes: 58,
+                  actualMinutes: -20,
+                }),
             actualDurationMinutes: 0,
           },
   };
@@ -874,5 +894,190 @@ describe("AthleteWeeklyAdherenceSection overall comparison", () => {
     expect(markup).not.toContain("session-comparison-secret");
     expect(markup).not.toContain("nutrition-comparison-secret");
     expect(markup).toContain("Current weekly adherence cards");
+  });
+});
+
+describe("AthleteWeeklyAdherenceSection weekly breakdown", () => {
+  beforeEach(() => {
+    contextState.current = {
+      ...state(),
+      selectedSnapshotAId: "snapshot-a",
+      selectedSnapshotBId: "snapshot-b",
+      comparisonData: comparisonData(),
+    };
+  });
+
+  it("does not add a weekly breakdown for Overall", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).toContain("Overall — Overall adherence");
+    expect(markup).not.toContain("Overall Weekly Breakdown");
+    expect(markup).not.toContain("Weekly breakdown unavailable");
+  });
+
+  it.each([
+    [
+      "SKILL",
+      "Skills Weekly Breakdown",
+      ["Prescribed drills", "Completed drills", "Planned minutes", "Actual minutes"],
+      ["120", "100", "135", "130"],
+      ["+8", "—", "+58 min", "-20 min"],
+    ],
+    [
+      "NUTRITION",
+      "Nutrition Weekly Breakdown",
+      [
+        "Weighted meal credit",
+        "Full meals",
+        "Half meals",
+        "Missed meals",
+        "Planned calories",
+        "Consumed calories",
+      ],
+      ["14000", "13000", "15000", "14500"],
+      ["+16", "+2", "—", "-1", "+350 kcal", "-125 kcal"],
+    ],
+    [
+      "STRENGTH_CONDITIONING",
+      "S&amp;C Weekly Breakdown",
+      [
+        "Prescribed exercises",
+        "Completed exercises",
+        "Planned minutes",
+        "Actual minutes",
+      ],
+      ["120", "100", "135", "130"],
+      ["+8", "—", "+58 min", "-20 min"],
+    ],
+  ] as const)(
+    "renders only the selected %s weekly backend fields",
+    (domain, heading, labels, values, deltaValues) => {
+      const data = comparisonData();
+      data.overall = null;
+      addDomainComparison(data, domain, {
+        earlier: 60,
+        later: 70,
+        delta: 10,
+      });
+      contextState.current = {
+        ...contextState.current!,
+        comparisonData: data,
+      };
+
+      const markup = renderToStaticMarkup(
+        createElement(AthleteWeeklyAdherenceSection),
+      );
+
+      expect(markup).toContain(heading);
+      for (const label of labels) expect(markup).toContain(label);
+      for (const value of values) expect(markup).toContain(`>${value}<`);
+      for (const value of deltaValues) expect(markup).toContain(`>${value}<`);
+      expect(markup).toContain(">Change<");
+      expect(markup).toContain("Current weekly adherence cards");
+      expect(contextState.current?.setSelectedSnapshotAId).not.toHaveBeenCalled();
+      expect(contextState.current?.setSelectedSnapshotBId).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders neutral copy when the selected weekly breakdown is absent", () => {
+    const data = comparisonData();
+    data.overall = null;
+    addDomainComparison(data, "SKILL", {
+      earlier: 60,
+      later: 70,
+      delta: 10,
+    });
+    delete data.snapshotA.domainBreakdowns.SKILL;
+    delete data.snapshotB.domainBreakdowns.SKILL;
+    contextState.current = {
+      ...contextState.current!,
+      comparisonData: data,
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).toContain("Skills Weekly Breakdown");
+    expect(markup).toContain("Weekly breakdown unavailable");
+    expect(markup).not.toContain("Prescribed drills");
+  });
+
+  it("renders Not available for missing nullable weekly fields", () => {
+    const data = comparisonData();
+    data.overall = null;
+    addDomainComparison(data, "STRENGTH_CONDITIONING", {
+      earlier: 60,
+      later: 70,
+      delta: 10,
+    });
+    delete data.snapshotA.domainBreakdowns.STRENGTH_CONDITIONING?.weekly
+      .plannedMinutes;
+    delete data.snapshotA.domainBreakdowns.STRENGTH_CONDITIONING?.weekly
+      .actualMinutes;
+    contextState.current = {
+      ...contextState.current!,
+      comparisonData: data,
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup.match(/Not available/g)).toHaveLength(2);
+    expect(markup).not.toContain(">null<");
+    expect(markup).not.toContain(">undefined<");
+  });
+
+  it("renders Not available when the backend domain delta is null", () => {
+    const data = comparisonData();
+    data.overall = null;
+    addDomainComparison(data, "SKILL", {
+      earlier: 60,
+      later: 70,
+      delta: null,
+      status: "NOT_COMPARABLE",
+    });
+    contextState.current = {
+      ...contextState.current!,
+      comparisonData: data,
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup.match(/Not available/g)).toHaveLength(4);
+    expect(markup).not.toContain(">+8<");
+    expect(markup).not.toContain(">—<");
+  });
+
+  it("does not render daily, session, item, or nutrient details", () => {
+    const data = comparisonData();
+    data.overall = null;
+    addDomainComparison(data, "NUTRITION", {
+      earlier: 60,
+      later: 70,
+      delta: 10,
+    });
+    data.snapshotA.domainBreakdowns.NUTRITION!.daily = [
+      {
+        marker: "daily-session-nutrient-secret",
+      } as never,
+    ];
+    contextState.current = {
+      ...contextState.current!,
+      comparisonData: data,
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).not.toContain("daily-session-nutrient-secret");
+    expect(markup).not.toContain("Nutrition detail");
+    expect(markup).not.toContain("Session comparison");
   });
 });

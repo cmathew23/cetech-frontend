@@ -20,6 +20,8 @@ import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import type {
   WeeklyAdherenceComparisonData,
+  WeeklyAdherenceComparisonDomainDelta,
+  WeeklyAdherenceComparisonWeeklyBreakdown,
   WeeklyAdherenceDomainKey,
 } from "@/lib/api/weeklyAdherence";
 import { useState, type ChangeEvent } from "react";
@@ -108,6 +110,126 @@ export function reconcileWeeklyComparisonControlSelection(
     category,
     selectedParameter === parameter ? selectedParameter : parameter,
   ];
+}
+
+type WeeklyBreakdownMetric = {
+  label: string;
+  value: number | null | undefined;
+  unit?: "min" | "kcal";
+};
+
+function selectedWeeklyBreakdownMetrics(
+  category: Exclude<WeeklyComparisonCategory, "OVERALL">,
+  weekly: WeeklyAdherenceComparisonWeeklyBreakdown | null,
+): WeeklyBreakdownMetric[] {
+  if (category === "NUTRITION") {
+    return [
+      { label: "Weighted meal credit", value: weekly?.completionCredit },
+      { label: "Full meals", value: weekly?.fullItems },
+      { label: "Half meals", value: weekly?.halfItems },
+      { label: "Missed meals", value: weekly?.missedItems },
+      { label: "Planned calories", value: weekly?.plannedCalories },
+      { label: "Consumed calories", value: weekly?.actualCalories },
+    ];
+  }
+  return [
+    {
+      label:
+        category === "SKILL"
+          ? "Prescribed drills"
+          : "Prescribed exercises",
+      value: weekly?.totalPrescribedItems,
+    },
+    {
+      label:
+        category === "SKILL" ? "Completed drills" : "Completed exercises",
+      value: weekly?.completedItems,
+    },
+    { label: "Planned minutes", value: weekly?.plannedMinutes },
+    { label: "Actual minutes", value: weekly?.actualMinutes },
+  ];
+}
+
+function selectedWeeklyBreakdownDeltaMetrics(
+  category: Exclude<WeeklyComparisonCategory, "OVERALL">,
+  delta: WeeklyAdherenceComparisonDomainDelta | null,
+): WeeklyBreakdownMetric[] {
+  if (category === "NUTRITION") {
+    return [
+      { label: "Weighted meal credit", value: delta?.completionCredit },
+      { label: "Full meals", value: delta?.fullItems },
+      { label: "Half meals", value: delta?.halfItems },
+      { label: "Missed meals", value: delta?.missedItems },
+      {
+        label: "Planned calories",
+        value: delta?.plannedCalories,
+        unit: "kcal",
+      },
+      {
+        label: "Consumed calories",
+        value: delta?.actualCalories,
+        unit: "kcal",
+      },
+    ];
+  }
+  return [
+    {
+      label:
+        category === "SKILL"
+          ? "Prescribed drills"
+          : "Prescribed exercises",
+      value: delta?.totalPrescribedItems,
+    },
+    {
+      label:
+        category === "SKILL" ? "Completed drills" : "Completed exercises",
+      value: delta?.completedItems,
+    },
+    { label: "Planned minutes", value: delta?.plannedMinutes, unit: "min" },
+    { label: "Actual minutes", value: delta?.actualMinutes, unit: "min" },
+  ];
+}
+
+function formatWeeklyBreakdownDelta(metric: WeeklyBreakdownMetric): string {
+  if (metric.value === null || metric.value === undefined) {
+    return "Not available";
+  }
+  if (metric.value === 0) return "—";
+  const value = `${metric.value > 0 ? "+" : ""}${metric.value}`;
+  return metric.unit ? `${value} ${metric.unit}` : value;
+}
+
+function WeeklyBreakdownColumn({
+  weekLabel,
+  metrics,
+  change = false,
+}: {
+  weekLabel: string;
+  metrics: WeeklyBreakdownMetric[];
+  change?: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-textPrimary">{weekLabel}</p>
+      <dl className="space-y-2">
+        {metrics.map((metric) => (
+          <div
+            key={metric.label}
+            className="flex items-center justify-between gap-4 text-sm"
+          >
+            <dt className="text-textSecondary">{metric.label}</dt>
+            <dd className="font-medium text-textPrimary">
+              {change
+                ? formatWeeklyBreakdownDelta(metric)
+                : metric.value === null || metric.value === undefined
+                  ? "Not available"
+                  : metric.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
 
 function WeeklyAdherenceSectionCard({
@@ -454,10 +576,69 @@ export function AthleteWeeklyAdherenceSection() {
       </div>
     </Card>
   ) : null;
+  const breakdownCategory =
+    activeCategory === "OVERALL" ? null : activeCategory;
+  const earlierWeeklyBreakdown =
+    activeDomain && comparisonData
+      ? (comparisonData.snapshotA.domainBreakdowns[activeDomain]?.weekly ??
+        null)
+      : null;
+  const laterWeeklyBreakdown =
+    activeDomain && comparisonData
+      ? (comparisonData.snapshotB.domainBreakdowns[activeDomain]?.weekly ??
+        null)
+      : null;
+  const activeDomainDelta =
+    activeDomain && comparisonData
+      ? (comparisonData.domains[activeDomain]?.delta ?? null)
+      : null;
+  const comparisonBreakdown =
+    showComparisonSummary && breakdownCategory ? (
+      <Card
+        title={`${activeCategoryConfig.label} Weekly Breakdown`}
+        accent={false}
+        padding="compact"
+        className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+        titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      >
+        {earlierWeeklyBreakdown === null &&
+        laterWeeklyBreakdown === null ? (
+          <p className="text-sm text-textSecondary">
+            Weekly breakdown unavailable
+          </p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <WeeklyBreakdownColumn
+              weekLabel="Earlier week"
+              metrics={selectedWeeklyBreakdownMetrics(
+                breakdownCategory,
+                earlierWeeklyBreakdown,
+              )}
+            />
+            <WeeklyBreakdownColumn
+              weekLabel="Later week"
+              metrics={selectedWeeklyBreakdownMetrics(
+                breakdownCategory,
+                laterWeeklyBreakdown,
+              )}
+            />
+            <WeeklyBreakdownColumn
+              weekLabel="Change"
+              metrics={selectedWeeklyBreakdownDeltaMetrics(
+                breakdownCategory,
+                activeDomainDelta,
+              )}
+              change
+            />
+          </div>
+        )}
+      </Card>
+    ) : null;
   const comparisonArea = (
     <>
       {snapshotSelectors}
       {comparisonSummary}
+      {comparisonBreakdown}
     </>
   );
 

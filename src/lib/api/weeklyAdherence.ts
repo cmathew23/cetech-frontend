@@ -235,11 +235,19 @@ export type WeeklyAdherenceComparisonDomainDelta = {
   adherencePercent: number;
   plannedSessions: number;
   loggedSessions: number;
+  totalPrescribedItems?: number;
   completedItems: number;
   partialItems: number;
   skippedItems: number;
   unloggedItems: number;
   completionCredit: number;
+  plannedMinutes?: number;
+  actualMinutes?: number;
+  fullItems?: number;
+  halfItems?: number;
+  missedItems?: number;
+  plannedCalories?: number;
+  actualCalories?: number;
   actualDurationMinutes: number | null;
 };
 
@@ -945,7 +953,7 @@ function parseComparisonDomainDelta(
   raw: unknown,
 ): WeeklyAdherenceComparisonDomainDelta {
   const record = asRecord(raw) ?? {};
-  return {
+  const parsed: WeeklyAdherenceComparisonDomainDelta = {
     adherencePercent: readComparisonNumber(record.adherencePercent),
     plannedSessions: readComparisonNumber(record.plannedSessions),
     loggedSessions: readComparisonNumber(record.loggedSessions),
@@ -958,6 +966,22 @@ function parseComparisonDomainDelta(
       record.actualDurationMinutes,
     ),
   };
+  for (const key of [
+    "totalPrescribedItems",
+    "plannedMinutes",
+    "actualMinutes",
+    "fullItems",
+    "halfItems",
+    "missedItems",
+    "plannedCalories",
+    "actualCalories",
+  ] as const) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      parsed[key] = value;
+    }
+  }
+  return parsed;
 }
 
 function parseComparisonDomain(

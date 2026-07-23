@@ -11,9 +11,15 @@ const contextState = vi.hoisted(() => ({
 
 vi.mock(
   "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext",
-  () => ({
-    useAthleteWeeklyAdherence: () => contextState.current,
-  }),
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/components/dashboard/athlete/AthleteWeeklyAdherenceContext")
+    >();
+    return {
+      ...actual,
+      useAthleteWeeklyAdherence: () => contextState.current,
+    };
+  },
 );
 
 vi.mock("@/components/ui/Select", async () => {
@@ -80,6 +86,11 @@ function state(): AthleteWeeklyAdherenceState {
         weekStart: "2026-07-13",
         weekEnd: "2026-07-19",
       },
+      {
+        id: "snapshot-c",
+        weekStart: "2026-07-20",
+        weekEnd: "2026-07-26",
+      },
     ],
     snapshotsLoading: false,
     snapshotsError: null,
@@ -103,23 +114,54 @@ function findSelect(node: ReactNode, id: string): ReactElement | null {
   return findSelect(children, id);
 }
 
+function optionValues(select: ReactElement | null): string[] {
+  const values: string[] = [];
+  const visit = (node: ReactNode) => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!isValidElement(node)) return;
+    const props = node.props as { value?: string; children?: ReactNode };
+    if (node.type === "option" && props.value) values.push(props.value);
+    visit(props.children);
+  };
+  visit((select?.props as { children?: ReactNode } | undefined)?.children);
+  return values;
+}
+
 describe("AthleteWeeklyAdherenceSection snapshot selectors", () => {
   beforeEach(() => {
     contextState.current = state();
   });
 
-  it("populates only Snapshot A and Snapshot B selectors", () => {
+  it("uses user-facing labels and formatted week ranges", () => {
     const markup = renderToStaticMarkup(
       createElement(AthleteWeeklyAdherenceSection),
     );
 
-    expect(markup).toContain("Snapshot A");
-    expect(markup).toContain("Snapshot B");
+    expect(markup).toContain("Earlier week");
+    expect(markup).toContain("Later week");
+    expect(markup).not.toContain(">Snapshot A<");
+    expect(markup).not.toContain(">Snapshot B<");
     expect(markup).toContain('value="snapshot-a"');
     expect(markup).toContain('value="snapshot-b"');
     expect(markup).toContain("06/07/2026 – 12/07/2026");
+    expect(markup).not.toContain(">snapshot-a<");
+    expect(markup).toContain("grid gap-4 sm:grid-cols-2");
     expect(markup).not.toContain("Comparison summary");
     expect(markup).not.toContain("Delta");
+  });
+
+  it("starts with both week selections empty", () => {
+    const tree = AthleteWeeklyAdherenceSection();
+    const earlier = findSelect(tree, "weekly-adherence-snapshot-a");
+    const later = findSelect(tree, "weekly-adherence-snapshot-b");
+
+    expect((earlier?.props as { value?: string }).value).toBe("");
+    expect((later?.props as { value?: string }).value).toBe("");
+    expect(renderToStaticMarkup(tree)).toContain("Select an earlier week");
+    expect(renderToStaticMarkup(tree)).toContain("Select a later week");
   });
 
   it("wires each selector to its comparison state setter", () => {
@@ -148,20 +190,54 @@ describe("AthleteWeeklyAdherenceSection snapshot selectors", () => {
     );
   });
 
-  it("disables the matching option and uses the existing field error pattern", () => {
+  it("filters Later week options to weeks after Earlier week", () => {
     contextState.current = {
       ...state(),
-      selectedSnapshotAId: "snapshot-a",
-      selectedSnapshotBId: "snapshot-a",
+      selectedSnapshotAId: "snapshot-b",
     };
 
-    const markup = renderToStaticMarkup(
+    const later = findSelect(
+      AthleteWeeklyAdherenceSection(),
+      "weekly-adherence-snapshot-b",
+    );
+
+    expect(optionValues(later)).toEqual(["snapshot-c"]);
+  });
+
+  it("filters Earlier week options to weeks before Later week", () => {
+    contextState.current = {
+      ...state(),
+      selectedSnapshotBId: "snapshot-b",
+    };
+
+    const earlier = findSelect(
+      AthleteWeeklyAdherenceSection(),
+      "weekly-adherence-snapshot-a",
+    );
+
+    expect(optionValues(earlier)).toEqual(["snapshot-a"]);
+  });
+
+  it("shows snapshot loading and empty-history states distinctly", () => {
+    contextState.current = {
+      ...state(),
+      snapshotsLoading: true,
+    };
+    const loadingMarkup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+    contextState.current = {
+      ...state(),
+      availableSnapshots: [state().availableSnapshots[0]!],
+    };
+    const emptyMarkup = renderToStaticMarkup(
       createElement(AthleteWeeklyAdherenceSection),
     );
 
-    expect(markup).toContain("Snapshot B must be different from Snapshot A.");
-    expect(markup).toContain('role="alert"');
-    expect(markup).toContain('value="snapshot-a" disabled=""');
+    expect(loadingMarkup).toContain("Loading historical weeks…");
+    expect(loadingMarkup).toContain('disabled=""');
+    expect(emptyMarkup).toContain("No historical weeks available.");
+    expect(emptyMarkup).not.toContain("Snapshot loading failed");
   });
 
   it("distinguishes snapshot loading failure from empty history", () => {
@@ -182,7 +258,9 @@ describe("AthleteWeeklyAdherenceSection snapshot selectors", () => {
       createElement(AthleteWeeklyAdherenceSection),
     );
 
-    expect(failedMarkup).toContain("Could not load snapshot history.");
+    expect(failedMarkup).toContain(
+      "Snapshot loading failed: Could not load snapshot history.",
+    );
     expect(emptyMarkup).not.toContain("Could not load snapshot history.");
   });
 
@@ -198,8 +276,28 @@ describe("AthleteWeeklyAdherenceSection snapshot selectors", () => {
       createElement(AthleteWeeklyAdherenceSection),
     );
 
-    expect(markup).toContain("Snapshot A");
-    expect(markup).toContain("Snapshot B");
+    expect(markup).toContain("Earlier week");
+    expect(markup).toContain("Later week");
     expect(markup).toContain("Current summary failed.");
+  });
+
+  it("shows comparison loading and error feedback without rendering data", () => {
+    contextState.current = {
+      ...state(),
+      comparisonLoading: true,
+      comparisonError: "Comparison request failed.",
+      comparisonData: {
+        athleteId: "comparison-result-must-not-render",
+      } as AthleteWeeklyAdherenceState["comparisonData"],
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).toContain("Loading comparison…");
+    expect(markup).toContain("Comparison request failed.");
+    expect(markup).not.toContain("comparison-result-must-not-render");
+    expect(markup).not.toContain("Comparison summary");
   });
 });

@@ -7,7 +7,10 @@ import {
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Card } from "@/components/ui/Card";
-import { useAthleteWeeklyAdherence } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
+import {
+  isChronologicalWeeklyAdherenceSnapshotPair,
+  useAthleteWeeklyAdherence,
+} from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
 import { formatDateOnly } from "@/lib/dateTime";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -47,6 +50,8 @@ export function AthleteWeeklyAdherenceSection() {
     availableSnapshots,
     snapshotsLoading,
     snapshotsError,
+    comparisonLoading,
+    comparisonError,
     selectedSnapshotAId,
     selectedSnapshotBId,
     setSelectedSnapshotAId,
@@ -72,26 +77,62 @@ export function AthleteWeeklyAdherenceSection() {
     );
   }
 
-  const sameSnapshot =
-    selectedSnapshotAId !== "" &&
-    selectedSnapshotAId === selectedSnapshotBId;
+  const insufficientHistory = availableSnapshots.length < 2;
+  const earlierOptions =
+    selectedSnapshotBId === ""
+      ? availableSnapshots
+      : availableSnapshots.filter((snapshot) =>
+          isChronologicalWeeklyAdherenceSnapshotPair(
+            availableSnapshots,
+            snapshot.id,
+            selectedSnapshotBId,
+          ),
+        );
+  const laterOptions =
+    selectedSnapshotAId === ""
+      ? availableSnapshots
+      : availableSnapshots.filter((snapshot) =>
+          isChronologicalWeeklyAdherenceSnapshotPair(
+            availableSnapshots,
+            selectedSnapshotAId,
+            snapshot.id,
+          ),
+        );
   const snapshotSelectors = (
     <div className="space-y-3">
-      {snapshotsError ? <Alert variant="danger">{snapshotsError}</Alert> : null}
+      {snapshotsLoading ? (
+        <p className="text-sm text-textSecondary">Loading historical weeks…</p>
+      ) : null}
+      {!snapshotsLoading && snapshotsError ? (
+        <Alert variant="danger">
+          Snapshot loading failed: {snapshotsError}
+        </Alert>
+      ) : null}
+      {!snapshotsLoading &&
+      !snapshotsError &&
+      insufficientHistory ? (
+        <Alert variant="warning">No historical weeks available.</Alert>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField id="weekly-adherence-snapshot-a" label="Snapshot A">
+        <FormField id="weekly-adherence-snapshot-a" label="Earlier week">
           <Select
             id="weekly-adherence-snapshot-a"
             value={selectedSnapshotAId}
-            disabled={snapshotsLoading || availableSnapshots.length === 0}
+            disabled={snapshotsLoading || snapshotsError !== null || insufficientHistory}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>
               setSelectedSnapshotAId(event.target.value)
             }
           >
             <option value="">
-              {snapshotsLoading ? "Loading snapshots…" : "Select a snapshot"}
+              {snapshotsLoading
+                ? "Loading historical weeks…"
+                : snapshotsError
+                  ? "Historical weeks unavailable"
+                  : insufficientHistory
+                    ? "No historical weeks available"
+                    : "Select an earlier week"}
             </option>
-            {availableSnapshots.map((snapshot) => (
+            {earlierOptions.map((snapshot) => (
               <option
                 key={snapshot.id}
                 value={snapshot.id}
@@ -106,23 +147,26 @@ export function AthleteWeeklyAdherenceSection() {
         </FormField>
         <FormField
           id="weekly-adherence-snapshot-b"
-          label="Snapshot B"
-          error={
-            sameSnapshot ? "Snapshot B must be different from Snapshot A." : undefined
-          }
+          label="Later week"
         >
           <Select
             id="weekly-adherence-snapshot-b"
             value={selectedSnapshotBId}
-            disabled={snapshotsLoading || availableSnapshots.length === 0}
+            disabled={snapshotsLoading || snapshotsError !== null || insufficientHistory}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>
               setSelectedSnapshotBId(event.target.value)
             }
           >
             <option value="">
-              {snapshotsLoading ? "Loading snapshots…" : "Select a snapshot"}
+              {snapshotsLoading
+                ? "Loading historical weeks…"
+                : snapshotsError
+                  ? "Historical weeks unavailable"
+                  : insufficientHistory
+                    ? "No historical weeks available"
+                    : "Select a later week"}
             </option>
-            {availableSnapshots.map((snapshot) => (
+            {laterOptions.map((snapshot) => (
               <option
                 key={snapshot.id}
                 value={snapshot.id}
@@ -136,14 +180,23 @@ export function AthleteWeeklyAdherenceSection() {
           </Select>
         </FormField>
       </div>
+      {comparisonLoading ? (
+        <p className="text-sm text-textSecondary">Loading comparison…</p>
+      ) : null}
+      {comparisonError ? (
+        <Alert variant="danger">{comparisonError}</Alert>
+      ) : null}
     </div>
   );
 
   if (phase === "loading") {
     return (
-      <WeeklyAdherenceSectionCard weekLabel={weekLabel}>
-        <p className="text-sm text-textSecondary">Loading…</p>
-      </WeeklyAdherenceSectionCard>
+      <>
+        {snapshotSelectors}
+        <WeeklyAdherenceSectionCard weekLabel={weekLabel}>
+          <p className="text-sm text-textSecondary">Loading…</p>
+        </WeeklyAdherenceSectionCard>
+      </>
     );
   }
 

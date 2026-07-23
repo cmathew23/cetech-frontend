@@ -1,5 +1,8 @@
 import {
+  chronologicalComparisonSnapshotIds,
   comparisonSnapshotIdsForOwner,
+  isChronologicalWeeklyAdherenceSnapshotPair,
+  reconcileWeeklyAdherenceSnapshotSelections,
   runWeeklyAdherenceComparisonLifecycle,
 } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
 import type {
@@ -26,6 +29,12 @@ const comparisonResponse = {
   message: "OK",
   data: comparisonData,
 } as WeeklyAdherenceComparisonResponse;
+
+const snapshots = [
+  { id: "snapshot-a", weekStart: "2026-07-06", weekEnd: "2026-07-12" },
+  { id: "snapshot-b", weekStart: "2026-07-13", weekEnd: "2026-07-19" },
+  { id: "snapshot-c", weekStart: "2026-07-20", weekEnd: "2026-07-26" },
+];
 
 function lifecycleInput(
   overrides: Partial<
@@ -70,6 +79,30 @@ describe("runWeeklyAdherenceComparisonLifecycle", () => {
     expect(input.setComparisonData).toHaveBeenLastCalledWith(comparisonData);
     expect(input.setComparisonError).toHaveBeenLastCalledWith(null);
     expect(input.setComparisonLoading).toHaveBeenLastCalledWith(false);
+  });
+
+  it("fetches one updated comparison when one valid selection changes", async () => {
+    const requests: string[] = [];
+    const runPair = async (snapshotAId: string, snapshotBId: string) => {
+      const input = lifecycleInput({
+        snapshotAId,
+        snapshotBId,
+        fetchComparison: vi.fn(() => {
+          requests.push(`${snapshotAId}:${snapshotBId}`);
+          return Promise.resolve(comparisonResponse);
+        }),
+      });
+      await runWeeklyAdherenceComparisonLifecycle(input);
+      expect(input.fetchComparison).toHaveBeenCalledTimes(1);
+    };
+
+    await runPair("snapshot-a", "snapshot-b");
+    await runPair("snapshot-a", "snapshot-c");
+
+    expect(requests).toEqual([
+      "snapshot-a:snapshot-b",
+      "snapshot-a:snapshot-c",
+    ]);
   });
 
   it("stores the existing formatted error and finishes loading on failure", async () => {
@@ -124,8 +157,6 @@ describe("runWeeklyAdherenceComparisonLifecycle", () => {
   it.each([
     ["", "snapshot-b"],
     ["snapshot-a", ""],
-    ["snapshot-a", "snapshot-a"],
-    [" snapshot-a ", "snapshot-a"],
   ])(
     "clears state and skips the request for invalid snapshot ids",
     async (snapshotAId, snapshotBId) => {
@@ -151,5 +182,101 @@ describe("weekly adherence snapshot selection", () => {
         "snapshot-b",
       ),
     ).toEqual(["", ""]);
+  });
+
+  it("accepts only chronologically ordered week pairs", () => {
+    expect(
+      isChronologicalWeeklyAdherenceSnapshotPair(
+        snapshots,
+        "snapshot-a",
+        "snapshot-b",
+      ),
+    ).toBe(true);
+    expect(
+      isChronologicalWeeklyAdherenceSnapshotPair(
+        snapshots,
+        "snapshot-b",
+        "snapshot-a",
+      ),
+    ).toBe(false);
+    expect(
+      isChronologicalWeeklyAdherenceSnapshotPair(
+        snapshots,
+        "snapshot-a",
+        "snapshot-a",
+      ),
+    ).toBe(false);
+  });
+
+  it("clears Later week when Earlier week makes the pair invalid", () => {
+    expect(
+      reconcileWeeklyAdherenceSnapshotSelections({
+        changedSelection: "earlier",
+        snapshotId: "snapshot-c",
+        earlierSnapshotId: "snapshot-a",
+        laterSnapshotId: "snapshot-b",
+        snapshots,
+      }),
+    ).toEqual(["snapshot-c", ""]);
+  });
+
+  it("clears Earlier week when Later week makes the pair invalid", () => {
+    expect(
+      reconcileWeeklyAdherenceSnapshotSelections({
+        changedSelection: "later",
+        snapshotId: "snapshot-a",
+        earlierSnapshotId: "snapshot-b",
+        laterSnapshotId: "snapshot-c",
+        snapshots,
+      }),
+    ).toEqual(["", "snapshot-a"]);
+  });
+
+  it("preserves the other selection while chronology remains valid", () => {
+    expect(
+      reconcileWeeklyAdherenceSnapshotSelections({
+        changedSelection: "earlier",
+        snapshotId: "snapshot-b",
+        earlierSnapshotId: "snapshot-a",
+        laterSnapshotId: "snapshot-c",
+        snapshots,
+      }),
+    ).toEqual(["snapshot-b", "snapshot-c"]);
+    expect(
+      reconcileWeeklyAdherenceSnapshotSelections({
+        changedSelection: "later",
+        snapshotId: "snapshot-b",
+        earlierSnapshotId: "snapshot-a",
+        laterSnapshotId: "snapshot-c",
+        snapshots,
+      }),
+    ).toEqual(["snapshot-a", "snapshot-b"]);
+  });
+
+  it("skips comparison fetch until the selected pair is chronological", async () => {
+    const invalidIds = chronologicalComparisonSnapshotIds(
+      snapshots,
+      "snapshot-b",
+      "snapshot-a",
+    );
+    const invalidInput = lifecycleInput({
+      snapshotAId: invalidIds[0],
+      snapshotBId: invalidIds[1],
+    });
+    await runWeeklyAdherenceComparisonLifecycle(invalidInput);
+
+    const validIds = chronologicalComparisonSnapshotIds(
+      snapshots,
+      "snapshot-a",
+      "snapshot-b",
+    );
+    const validInput = lifecycleInput({
+      snapshotAId: validIds[0],
+      snapshotBId: validIds[1],
+    });
+    await runWeeklyAdherenceComparisonLifecycle(validInput);
+
+    expect(invalidInput.fetchComparison).not.toHaveBeenCalled();
+    expect(validInput.fetchComparison).toHaveBeenCalledTimes(1);
   });
 });

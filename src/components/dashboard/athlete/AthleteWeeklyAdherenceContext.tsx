@@ -72,15 +72,11 @@ function formatLoadError(e: unknown): string {
   return "Unable to load";
 }
 
-export function validWeeklyAdherenceComparisonSnapshotIds(
+export function hasWeeklyAdherenceComparisonSnapshotIds(
   snapshotAId: string,
   snapshotBId: string,
 ): boolean {
-  return (
-    snapshotAId.trim() !== "" &&
-    snapshotBId.trim() !== "" &&
-    snapshotAId.trim() !== snapshotBId.trim()
-  );
+  return snapshotAId.trim() !== "" && snapshotBId.trim() !== "";
 }
 
 export function comparisonSnapshotIdsForOwner(
@@ -91,6 +87,71 @@ export function comparisonSnapshotIdsForOwner(
 ): [string, string] {
   return selectionOwner === currentOwner
     ? [snapshotAId, snapshotBId]
+    : ["", ""];
+}
+
+export function isChronologicalWeeklyAdherenceSnapshotPair(
+  snapshots: WeeklyAdherenceSnapshotOption[],
+  earlierSnapshotId: string,
+  laterSnapshotId: string,
+): boolean {
+  const earlier = snapshots.find((snapshot) => snapshot.id === earlierSnapshotId);
+  const later = snapshots.find((snapshot) => snapshot.id === laterSnapshotId);
+  return Boolean(
+    earlier?.weekStart &&
+      later?.weekStart &&
+      earlier.weekStart < later.weekStart,
+  );
+}
+
+export function reconcileWeeklyAdherenceSnapshotSelections({
+  changedSelection,
+  snapshotId,
+  earlierSnapshotId,
+  laterSnapshotId,
+  snapshots,
+}: {
+  changedSelection: "earlier" | "later";
+  snapshotId: string;
+  earlierSnapshotId: string;
+  laterSnapshotId: string;
+  snapshots: WeeklyAdherenceSnapshotOption[];
+}): [string, string] {
+  if (changedSelection === "earlier") {
+    return [
+      snapshotId,
+      isChronologicalWeeklyAdherenceSnapshotPair(
+        snapshots,
+        snapshotId,
+        laterSnapshotId,
+      )
+        ? laterSnapshotId
+        : "",
+    ];
+  }
+  return [
+    isChronologicalWeeklyAdherenceSnapshotPair(
+      snapshots,
+      earlierSnapshotId,
+      snapshotId,
+    )
+      ? earlierSnapshotId
+      : "",
+    snapshotId,
+  ];
+}
+
+export function chronologicalComparisonSnapshotIds(
+  snapshots: WeeklyAdherenceSnapshotOption[],
+  earlierSnapshotId: string,
+  laterSnapshotId: string,
+): [string, string] {
+  return isChronologicalWeeklyAdherenceSnapshotPair(
+    snapshots,
+    earlierSnapshotId,
+    laterSnapshotId,
+  )
+    ? [earlierSnapshotId, laterSnapshotId]
     : ["", ""];
 }
 
@@ -115,7 +176,7 @@ export async function runWeeklyAdherenceComparisonLifecycle({
   setComparisonError(null);
 
   if (
-    !validWeeklyAdherenceComparisonSnapshotIds(snapshotAId, snapshotBId)
+    !hasWeeklyAdherenceComparisonSnapshotIds(snapshotAId, snapshotBId)
   ) {
     setComparisonLoading(false);
     return;
@@ -168,7 +229,7 @@ export function AthleteWeeklyAdherenceProvider({
   const [availableSnapshots, setAvailableSnapshots] = useState<
     WeeklyAdherenceSnapshotOption[]
   >([]);
-  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(true);
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
   const entityId = planningIds.ids?.entityId ?? "";
@@ -177,18 +238,46 @@ export function AthleteWeeklyAdherenceProvider({
 
   const selectSnapshotA = useCallback(
     (snapshotId: string) => {
+      const [earlierSnapshotId, laterSnapshotId] =
+        reconcileWeeklyAdherenceSnapshotSelections({
+          changedSelection: "earlier",
+          snapshotId,
+          earlierSnapshotId: selectedSnapshotAId,
+          laterSnapshotId: selectedSnapshotBId,
+          snapshots: availableSnapshots,
+        });
       setComparisonSelectionOwner(comparisonOwner);
-      setSelectedSnapshotAId(snapshotId);
+      setSelectedSnapshotAId(earlierSnapshotId);
+      setSelectedSnapshotBId(laterSnapshotId);
     },
-    [comparisonOwner],
+    [
+      availableSnapshots,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    ],
   );
 
   const selectSnapshotB = useCallback(
     (snapshotId: string) => {
+      const [earlierSnapshotId, laterSnapshotId] =
+        reconcileWeeklyAdherenceSnapshotSelections({
+          changedSelection: "later",
+          snapshotId,
+          earlierSnapshotId: selectedSnapshotAId,
+          laterSnapshotId: selectedSnapshotBId,
+          snapshots: availableSnapshots,
+        });
       setComparisonSelectionOwner(comparisonOwner);
-      setSelectedSnapshotBId(snapshotId);
+      setSelectedSnapshotAId(earlierSnapshotId);
+      setSelectedSnapshotBId(laterSnapshotId);
     },
-    [comparisonOwner],
+    [
+      availableSnapshots,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    ],
   );
 
   const reload = useCallback(() => {
@@ -298,16 +387,22 @@ export function AthleteWeeklyAdherenceProvider({
       selectedSnapshotAId,
       selectedSnapshotBId,
     );
+    const [validSnapshotAId, validSnapshotBId] =
+      chronologicalComparisonSnapshotIds(
+        availableSnapshots,
+        snapshotAId,
+        snapshotBId,
+      );
     void runWeeklyAdherenceComparisonLifecycle({
-      snapshotAId,
-      snapshotBId,
+      snapshotAId: validSnapshotAId,
+      snapshotBId: validSnapshotBId,
       isCurrent: () => !cancelled,
       fetchComparison: () =>
         fetchWeeklyAdherenceComparison({
           entityId,
           athleteId,
-          snapshotAId,
-          snapshotBId,
+          snapshotAId: validSnapshotAId,
+          snapshotBId: validSnapshotBId,
         }),
       setComparisonData,
       setComparisonLoading,
@@ -317,6 +412,7 @@ export function AthleteWeeklyAdherenceProvider({
       cancelled = true;
     };
   }, [
+    availableSnapshots,
     athleteId,
     comparisonOwner,
     comparisonSelectionOwner,

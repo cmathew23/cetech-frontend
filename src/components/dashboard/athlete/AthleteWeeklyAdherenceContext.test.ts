@@ -1,4 +1,5 @@
 import {
+  comparisonSnapshotIdsForOwner,
   runWeeklyAdherenceComparisonLifecycle,
 } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceContext";
 import type {
@@ -65,6 +66,7 @@ describe("runWeeklyAdherenceComparisonLifecycle", () => {
 
     await runWeeklyAdherenceComparisonLifecycle(input);
 
+    expect(input.fetchComparison).toHaveBeenCalledTimes(1);
     expect(input.setComparisonData).toHaveBeenLastCalledWith(comparisonData);
     expect(input.setComparisonError).toHaveBeenLastCalledWith(null);
     expect(input.setComparisonLoading).toHaveBeenLastCalledWith(false);
@@ -137,4 +139,17 @@ describe("runWeeklyAdherenceComparisonLifecycle", () => {
       expect(input.setComparisonLoading).toHaveBeenCalledWith(false);
     },
   );
+});
+
+describe("weekly adherence snapshot selection", () => {
+  it("clears effective selections when the athlete owner changes", () => {
+    expect(
+      comparisonSnapshotIdsForOwner(
+        "entity-1:athlete-1",
+        "entity-1:athlete-2",
+        "snapshot-a",
+        "snapshot-b",
+      ),
+    ).toEqual(["", ""]);
+  });
 });

@@ -91,6 +91,8 @@ export const paths = {
       params.set("weekEnd", query.weekEnd);
       return `${base}?${params.toString()}`;
     },
+    weeklyAdherenceSnapshots: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/weekly-adherence-snapshots`,
     weeklyAdherenceComparison: (
       entityId: string,
       athleteId: string,

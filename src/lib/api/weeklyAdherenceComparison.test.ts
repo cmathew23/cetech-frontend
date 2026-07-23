@@ -1,7 +1,9 @@
 import { paths } from "@/config/endpoints";
 import {
   fetchWeeklyAdherenceComparison,
+  fetchWeeklyAdherenceSnapshots,
   parseWeeklyAdherenceComparisonPayload,
+  parseWeeklyAdherenceSnapshotsPayload,
 } from "@/lib/api/weeklyAdherence";
 import { apiRequest } from "@/lib/apiClient";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -325,5 +327,53 @@ describe("fetchWeeklyAdherenceComparison", () => {
       },
     );
     expect(result.data.athleteId).toBe("athlete-1");
+  });
+});
+
+describe("weekly adherence snapshot endpoint", () => {
+  beforeEach(() => {
+    vi.mocked(apiRequest).mockReset();
+  });
+
+  it("parses authoritative snapshot options without a domain dependency", () => {
+    expect(
+      parseWeeklyAdherenceSnapshotsPayload({
+        data: [
+          {
+            planningContextSnapshotId: "snapshot-nutrition-only",
+            planStartDate: "2026-07-06",
+            planEndDate: "2026-07-12",
+            ignored: true,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "snapshot-nutrition-only",
+        weekStart: "2026-07-06",
+        weekEnd: "2026-07-12",
+      },
+    ]);
+  });
+
+  it("uses the shared weekly snapshot endpoint instead of domain history", async () => {
+    vi.mocked(apiRequest).mockResolvedValue({ data: [] });
+
+    await fetchWeeklyAdherenceSnapshots({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+    });
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/weekly-adherence-snapshots",
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 240_000,
+      },
+    );
+    expect(vi.mocked(apiRequest).mock.calls[0]?.[0]).not.toContain(
+      "training-plan-management",
+    );
   });
 });

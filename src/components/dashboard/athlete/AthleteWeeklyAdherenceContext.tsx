@@ -4,15 +4,15 @@ import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthl
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchWeeklyAdherenceComparison,
+  fetchWeeklyAdherenceSnapshots,
   fetchWeeklyAdherenceSummary,
   hasNutritionAdherenceDomain,
   type WeeklyAdherenceComparisonData,
   type WeeklyAdherenceComparisonResponse,
+  type WeeklyAdherenceSnapshotOption,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
-import {
-  fetchAthleteWeeklyPlanJournal,
-} from "@/lib/api/coachAthletePlanningReadiness";
+import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   resolveWeeklyAdherencePlanRangeFromJournal,
@@ -56,6 +56,9 @@ export type AthleteWeeklyAdherenceState = {
   comparisonError: string | null;
   selectedSnapshotAId: string;
   selectedSnapshotBId: string;
+  availableSnapshots: WeeklyAdherenceSnapshotOption[];
+  snapshotsLoading: boolean;
+  snapshotsError: string | null;
   setSelectedSnapshotAId: (snapshotId: string) => void;
   setSelectedSnapshotBId: (snapshotId: string) => void;
 };
@@ -78,6 +81,17 @@ export function validWeeklyAdherenceComparisonSnapshotIds(
     snapshotBId.trim() !== "" &&
     snapshotAId.trim() !== snapshotBId.trim()
   );
+}
+
+export function comparisonSnapshotIdsForOwner(
+  selectionOwner: string,
+  currentOwner: string,
+  snapshotAId: string,
+  snapshotBId: string,
+): [string, string] {
+  return selectionOwner === currentOwner
+    ? [snapshotAId, snapshotBId]
+    : ["", ""];
 }
 
 export async function runWeeklyAdherenceComparisonLifecycle({
@@ -150,9 +164,32 @@ export function AthleteWeeklyAdherenceProvider({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [selectedSnapshotAId, setSelectedSnapshotAId] = useState("");
   const [selectedSnapshotBId, setSelectedSnapshotBId] = useState("");
+  const [comparisonSelectionOwner, setComparisonSelectionOwner] = useState("");
+  const [availableSnapshots, setAvailableSnapshots] = useState<
+    WeeklyAdherenceSnapshotOption[]
+  >([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
+  const comparisonOwner = `${entityId}:${athleteId}`;
+
+  const selectSnapshotA = useCallback(
+    (snapshotId: string) => {
+      setComparisonSelectionOwner(comparisonOwner);
+      setSelectedSnapshotAId(snapshotId);
+    },
+    [comparisonOwner],
+  );
+
+  const selectSnapshotB = useCallback(
+    (snapshotId: string) => {
+      setComparisonSelectionOwner(comparisonOwner);
+      setSelectedSnapshotBId(snapshotId);
+    },
+    [comparisonOwner],
+  );
 
   const reload = useCallback(() => {
     setReloadKey((k) => k + 1);
@@ -219,16 +256,58 @@ export function AthleteWeeklyAdherenceProvider({
 
   useEffect(() => {
     let cancelled = false;
+    setAvailableSnapshots([]);
+    setSelectedSnapshotAId("");
+    setSelectedSnapshotBId("");
+    setComparisonSelectionOwner("");
+    setComparisonData(null);
+    setComparisonLoading(false);
+    setComparisonError(null);
+    setSnapshotsError(null);
+
+    if (entityId === "" || athleteId === "") {
+      setSnapshotsLoading(false);
+      return;
+    }
+
+    setSnapshotsLoading(true);
+    void fetchWeeklyAdherenceSnapshots({ entityId, athleteId })
+      .then((snapshots) => {
+        if (!cancelled) setAvailableSnapshots(snapshots);
+      })
+      .catch((snapshotError) => {
+        if (!cancelled) {
+          setAvailableSnapshots([]);
+          setSnapshotsError(formatLoadError(snapshotError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSnapshotsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [athleteId, entityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const [snapshotAId, snapshotBId] = comparisonSnapshotIdsForOwner(
+      comparisonSelectionOwner,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    );
     void runWeeklyAdherenceComparisonLifecycle({
-      snapshotAId: selectedSnapshotAId,
-      snapshotBId: selectedSnapshotBId,
+      snapshotAId,
+      snapshotBId,
       isCurrent: () => !cancelled,
       fetchComparison: () =>
         fetchWeeklyAdherenceComparison({
           entityId,
           athleteId,
-          snapshotAId: selectedSnapshotAId,
-          snapshotBId: selectedSnapshotBId,
+          snapshotAId,
+          snapshotBId,
         }),
       setComparisonData,
       setComparisonLoading,
@@ -239,6 +318,8 @@ export function AthleteWeeklyAdherenceProvider({
     };
   }, [
     athleteId,
+    comparisonOwner,
+    comparisonSelectionOwner,
     entityId,
     selectedSnapshotAId,
     selectedSnapshotBId,
@@ -335,10 +416,14 @@ export function AthleteWeeklyAdherenceProvider({
       comparisonError,
       selectedSnapshotAId,
       selectedSnapshotBId,
-      setSelectedSnapshotAId,
-      setSelectedSnapshotBId,
+      availableSnapshots,
+      snapshotsLoading,
+      snapshotsError,
+      setSelectedSnapshotAId: selectSnapshotA,
+      setSelectedSnapshotBId: selectSnapshotB,
     }),
     [
+      availableSnapshots,
       comparisonData,
       comparisonError,
       comparisonLoading,
@@ -348,8 +433,12 @@ export function AthleteWeeklyAdherenceProvider({
       planWeekRange?.weekEnd,
       planWeekRange?.weekStart,
       reload,
+      selectSnapshotA,
+      selectSnapshotB,
       selectedSnapshotAId,
       selectedSnapshotBId,
+      snapshotsError,
+      snapshotsLoading,
       summary,
       trainingPlanVersionId,
     ],

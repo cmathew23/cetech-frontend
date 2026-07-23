@@ -284,6 +284,12 @@ export type FetchWeeklyAdherenceComparisonParams = {
   snapshotBId: string;
 };
 
+export type WeeklyAdherenceSnapshotOption = {
+  id: string;
+  weekStart: string;
+  weekEnd: string;
+};
+
 function parseRecentNotes(raw: unknown): WeeklyAdherenceRecentNote[] {
   if (!Array.isArray(raw)) return [];
   return raw.reduce<WeeklyAdherenceRecentNote[]>((acc, item) => {
@@ -1021,6 +1027,29 @@ export function parseWeeklyAdherenceComparisonPayload(
   };
 }
 
+export function parseWeeklyAdherenceSnapshotsPayload(
+  payload: unknown,
+): WeeklyAdherenceSnapshotOption[] {
+  const response = asRecord(payload) ?? {};
+  if (!Array.isArray(response.data)) return [];
+  return response.data.reduce<WeeklyAdherenceSnapshotOption[]>(
+    (snapshots, value) => {
+      const snapshot = asRecord(value);
+      const id = readComparisonString(
+        snapshot?.planningContextSnapshotId,
+      ).trim();
+      if (id === "") return snapshots;
+      snapshots.push({
+        id,
+        weekStart: readComparisonString(snapshot?.planStartDate),
+        weekEnd: readComparisonString(snapshot?.planEndDate),
+      });
+      return snapshots;
+    },
+    [],
+  );
+}
+
 export async function fetchWeeklyAdherenceSummary(params: {
   entityId: string;
   athleteId: string;
@@ -1042,6 +1071,24 @@ export async function fetchWeeklyAdherenceSummary(params: {
   const parsed = parseWeeklyAdherenceSummaryPayload(raw);
   weeklyAdherenceOverallDiagnostic({ rawResponse: raw, parsed });
   return parsed;
+}
+
+export async function fetchWeeklyAdherenceSnapshots(params: {
+  entityId: string;
+  athleteId: string;
+}): Promise<WeeklyAdherenceSnapshotOption[]> {
+  const raw = await apiRequest(
+    paths.entities.weeklyAdherenceSnapshots(
+      params.entityId,
+      params.athleteId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS,
+    },
+  );
+  return parseWeeklyAdherenceSnapshotsPayload(raw);
 }
 
 export async function fetchWeeklyAdherenceComparison(

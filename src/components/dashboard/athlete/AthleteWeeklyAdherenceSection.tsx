@@ -212,16 +212,16 @@ function WeeklyBreakdownColumn({
   change?: boolean;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       <p className="text-sm font-medium text-textPrimary">{weekLabel}</p>
       <dl className="space-y-2">
         {metrics.map((metric) => (
           <div
             key={metric.label}
-            className="flex items-center justify-between gap-4 text-sm"
+            className="flex min-w-0 items-center justify-between gap-4 text-sm"
           >
-            <dt className="text-textSecondary">{metric.label}</dt>
-            <dd className="font-medium text-textPrimary">
+            <dt className="min-w-0 text-textSecondary">{metric.label}</dt>
+            <dd className="shrink-0 font-medium text-textPrimary">
               {change
                 ? formatWeeklyBreakdownDelta(metric)
                 : metric.value === null || metric.value === undefined
@@ -247,6 +247,19 @@ const DAILY_SUMMARY_FIELDS = [
   ["Adherence percent", "adherencePercent"],
 ] as const;
 
+function formatDailySummaryValue(
+  field: (typeof DAILY_SUMMARY_FIELDS)[number][1],
+  value: number,
+): string | number {
+  return field === "adherencePercent" ? formatAdherencePercent(value) : value;
+}
+
+function dailyComparisonStatusLabel(
+  status: WeeklyAdherenceComparisonDay["comparisonStatus"],
+): string {
+  return status === "COMPARABLE" ? "Comparable" : "Comparison unavailable";
+}
+
 function DailySummary({
   title,
   summary,
@@ -267,12 +280,11 @@ function DailySummary({
           {DAILY_SUMMARY_FIELDS.map(([label, field]) => (
             <div
               key={field}
-              className="flex items-center justify-between gap-4 text-sm"
+              className="flex min-w-0 items-center justify-between gap-4 text-sm"
             >
               <dt className="text-textSecondary">{label}</dt>
-              <dd className="font-medium text-textPrimary">
-                {summary[field]}
-                {field === "adherencePercent" ? "%" : ""}
+              <dd className="shrink-0 font-medium text-textPrimary">
+                {formatDailySummaryValue(field, summary[field])}
               </dd>
             </div>
           ))}
@@ -284,27 +296,40 @@ function DailySummary({
 
 function DailyComparisonRow({ day }: { day: WeeklyAdherenceComparisonDay }) {
   return (
-    <details className="rounded-xl border border-border bg-card/80 p-3 text-sm shadow-sm">
-      <summary className="cursor-pointer list-none rounded-lg px-1 py-0.5 marker:text-textMuted">
-        <span className="grid items-center gap-3 sm:grid-cols-4">
-          <span className="font-medium text-textPrimary">
+    <details className="min-w-0 rounded-xl border border-border bg-card/80 p-3 text-sm shadow-sm">
+      <summary className="cursor-pointer list-none rounded-lg px-1 py-0.5 marker:text-textMuted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+        <span className="grid min-w-0 items-center gap-3 sm:grid-cols-4">
+          <span className="min-w-0 font-medium text-textPrimary">
             Day {day.dayIndex}
             {day.date ? ` — ${formatDateOnly(day.date, day.date)}` : ""}
           </span>
-          <span className="text-textSecondary">
+          <span className="min-w-0 text-textSecondary">
+            <span className="mr-2 font-medium text-textPrimary sm:hidden">
+              Earlier week:
+            </span>
             {day.snapshotA === null
               ? "Not available"
-              : `${day.snapshotA.adherencePercent}%`}
+              : formatAdherencePercent(day.snapshotA.adherencePercent)}
           </span>
-          <span className="text-textSecondary">
+          <span className="min-w-0 text-textSecondary">
+            <span className="mr-2 font-medium text-textPrimary sm:hidden">
+              Later week:
+            </span>
             {day.snapshotB === null
               ? "Not available"
-              : `${day.snapshotB.adherencePercent}%`}
+              : formatAdherencePercent(day.snapshotB.adherencePercent)}
           </span>
-          <Badge variant="neutral">{day.comparisonStatus}</Badge>
+          <span className="min-w-0">
+            <span className="mr-2 font-medium text-textPrimary sm:hidden">
+              Status:
+            </span>
+            <Badge variant="neutral">
+              {dailyComparisonStatusLabel(day.comparisonStatus)}
+            </Badge>
+          </span>
         </span>
       </summary>
-      <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-3">
+      <div className="mt-4 grid min-w-0 gap-4 border-t border-border pt-4 sm:grid-cols-3">
         <DailySummary title="Earlier week" summary={day.snapshotA} />
         <DailySummary title="Later week" summary={day.snapshotB} />
         <DailySummary title="Delta" summary={day.delta} />
@@ -328,18 +353,24 @@ function DailyComparison({
     >
       <div className="mb-3 hidden grid-cols-4 gap-3 px-4 text-sm font-medium text-textPrimary sm:grid">
         <span>Day</span>
-        <span>Earlier Week</span>
-        <span>Later Week</span>
+        <span>Earlier week</span>
+        <span>Later week</span>
         <span>Status</span>
       </div>
-      <div className="space-y-3">
-        {days.map((day, index) => (
-          <DailyComparisonRow
-            key={`${day.dayIndex}-${day.date}-${index}`}
-            day={day}
-          />
-        ))}
-      </div>
+      {days.length === 0 ? (
+        <p className="text-sm text-textSecondary">
+          Daily breakdown unavailable
+        </p>
+      ) : (
+        <div className="min-w-0 space-y-3">
+          {days.map((day, index) => (
+            <DailyComparisonRow
+              key={`${day.dayIndex}-${day.date}-${index}`}
+              day={day}
+            />
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
@@ -463,10 +494,14 @@ export function AthleteWeeklyAdherenceSection({
       ) : null}
       <div
         className={`grid gap-4 sm:grid-cols-2 ${
-          hideCategory ? "lg:grid-cols-3" : "lg:grid-cols-4"
+          hideCategory ? "xl:grid-cols-3" : "xl:grid-cols-4"
         }`}
       >
-        <FormField id="weekly-adherence-snapshot-a" label="Earlier week">
+        <FormField
+          id="weekly-adherence-snapshot-a"
+          label="Earlier week"
+          className="min-w-0"
+        >
           <Select
             id="weekly-adherence-snapshot-a"
             value={selectedSnapshotAId}
@@ -500,6 +535,7 @@ export function AthleteWeeklyAdherenceSection({
         <FormField
           id="weekly-adherence-snapshot-b"
           label="Later week"
+          className="min-w-0"
         >
           <Select
             id="weekly-adherence-snapshot-b"
@@ -532,7 +568,11 @@ export function AthleteWeeklyAdherenceSection({
           </Select>
         </FormField>
         {!hideCategory ? (
-          <FormField id="weekly-adherence-category" label="Category">
+          <FormField
+            id="weekly-adherence-category"
+            label="Category"
+            className="min-w-0"
+          >
             <Select
               id="weekly-adherence-category"
               value={activeCategory}
@@ -553,7 +593,11 @@ export function AthleteWeeklyAdherenceSection({
             </Select>
           </FormField>
         ) : null}
-        <FormField id="weekly-adherence-parameter" label="Parameter">
+        <FormField
+          id="weekly-adherence-parameter"
+          label="Parameter"
+          className="min-w-0"
+        >
           <Select
             id="weekly-adherence-parameter"
             value={activeParameter}

@@ -359,6 +359,16 @@ describe("AthleteWeeklyAdherenceSection snapshot selectors", () => {
     expect(markup).toContain("06/07/2026 – 12/07/2026");
     expect(markup).not.toContain(">snapshot-a<");
     expect(markup).toContain("grid gap-4 sm:grid-cols-2");
+    expect(markup).toContain("xl:grid-cols-4");
+    expect(markup).not.toContain("lg:grid-cols-4");
+    expect(markup).toContain(
+      '<label for="weekly-adherence-snapshot-a"',
+    );
+    expect(markup).toContain(
+      '<label for="weekly-adherence-snapshot-b"',
+    );
+    expect(markup).toContain('<label for="weekly-adherence-category"');
+    expect(markup).toContain('<label for="weekly-adherence-parameter"');
     expect(markup).not.toContain("Comparison summary");
     expect(markup).not.toContain("Delta");
   });
@@ -1175,6 +1185,7 @@ describe("AthleteWeeklyAdherenceSection daily comparison", () => {
         delta: 10,
       });
       addDailyComparisons(data, domain);
+      data.domains[domain]!.daily[1]!.snapshotA!.adherencePercent = 81.26;
       contextState.current = {
         ...contextState.current!,
         comparisonData: data,
@@ -1187,13 +1198,21 @@ describe("AthleteWeeklyAdherenceSection daily comparison", () => {
       expect(markup).toContain(`${categoryLabel} Weekly Breakdown`);
       expect(markup).toContain("Daily Comparison");
       expect(markup.match(/<details/g)).toHaveLength(7);
+      expect(markup.match(/<summary/g)).toHaveLength(7);
+      expect(markup).toContain("focus-visible:ring-2");
+      expect(markup).toContain("sm:grid-cols-4");
+      expect(markup).toContain("sm:grid-cols-3");
+      expect(markup).toContain("sm:hidden");
       expect(markup.indexOf("Day 1")).toBeLessThan(markup.indexOf("Day 2"));
       expect(markup.indexOf("Day 2")).toBeLessThan(markup.indexOf("Day 7"));
-      expect(markup).toContain("Earlier Week");
-      expect(markup).toContain("Later Week");
+      expect(markup).toContain("Earlier week");
+      expect(markup).toContain("Later week");
       expect(markup).toContain("Status");
-      expect(markup).toContain("NOT_COMPARABLE");
-      expect(markup).toContain("COMPARABLE");
+      expect(markup).toContain("Comparison unavailable");
+      expect(markup).toContain("Comparable");
+      expect(markup).not.toContain("NOT_COMPARABLE");
+      expect(markup).not.toContain(">COMPARABLE<");
+      expect(markup).toContain("81.3%");
       expect(markup).toContain("-12.5%");
       expect(markup).toContain("Not available");
       for (const label of [
@@ -1225,5 +1244,27 @@ describe("AthleteWeeklyAdherenceSection daily comparison", () => {
 
     expect(markup).toContain("Overall — Overall adherence");
     expect(markup).not.toContain("Daily Comparison");
+  });
+
+  it("renders a clear empty state when daily breakdown is missing", () => {
+    const data = comparisonData();
+    data.overall = null;
+    addDomainComparison(data, "SKILL", {
+      earlier: 60,
+      later: 70,
+      delta: 10,
+    });
+    contextState.current = {
+      ...contextState.current!,
+      comparisonData: data,
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).toContain("Daily Comparison");
+    expect(markup).toContain("Daily breakdown unavailable");
+    expect(markup).not.toContain("<details");
   });
 });

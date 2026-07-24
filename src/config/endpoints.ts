@@ -126,6 +126,27 @@ export const paths = {
       params.set("trainingPlanVersionId", query.trainingPlanVersionId);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsGolfComparison: (
+      entityId: string,
+      athleteId: string,
+      query: {
+        earlierTrainingPlanVersionId: string;
+        laterTrainingPlanVersionId: string;
+      },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/comparison`;
+      const params = new URLSearchParams();
+      params.set(
+        "earlierTrainingPlanVersionId",
+        query.earlierTrainingPlanVersionId,
+      );
+      params.set(
+        "laterTrainingPlanVersionId",
+        query.laterTrainingPlanVersionId,
+      );
+      return `${base}?${params.toString()}`;
+    },
     athleteSportMetricsGolfRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
     athleteWearableProviders: (entityId: string, athleteId: string) =>

@@ -11,9 +11,11 @@ vi.mock("@/lib/apiClient", () => ({
 
 import {
   buildGolfSportMetricRecordRequestBody,
+  fetchSportMetricsGolfComparison,
   fetchSportMetricsGolfWeeklySummary,
   formatSportMetricsStatusLabel,
   hasSportMetricsGolfEvidence,
+  parseSportMetricsGolfComparisonPayload,
   parseSportMetricsGolfWeeklySummaryPayload,
   postGolfSportMetricRecord,
 } from "@/lib/api/sportMetricsGolf";
@@ -240,6 +242,260 @@ describe("parseSportMetricsGolfWeeklySummaryPayload unlinkedEvidence", () => {
     });
 
     expect(parsed.prescribedSkillsCount).toBe(6);
+  });
+});
+
+const comparisonPayload = {
+  success: true,
+  message: "Sport metric comparison fetched successfully",
+  data: {
+    sport: "GOLF",
+    earlier: {
+      trainingPlanId: "plan-earlier",
+      trainingPlanVersionId: "version-earlier",
+      weekStartDate: "2026-05-25",
+      weekEndDate: "2026-05-31",
+    },
+    later: {
+      trainingPlanId: "plan-later",
+      trainingPlanVersionId: "version-later",
+      weekStartDate: "2026-06-01",
+      weekEndDate: "2026-06-07",
+    },
+    categories: [
+      {
+        sport: "GOLF",
+        taxonomyAreaKey: "distance_control",
+        status: "COMPARABLE",
+        drillMixChanged: false,
+        earlier: {
+          attempts: 0,
+          successes: 0,
+          targetHits: null,
+          successRate: null,
+        },
+        later: {
+          attempts: 15,
+          successes: 10,
+          targetHits: 5,
+          successRate: 66.67,
+        },
+        delta: {
+          attempts: 15,
+          successes: 10,
+          targetHits: null,
+          successRate: null,
+        },
+        drills: [
+          {
+            sport: "GOLF",
+            taxonomyAreaKey: "distance_control",
+            skillCode: "GOLF_WEDGE_001",
+            earlierSkillName: "Earlier Wedge",
+            laterSkillName: "Later Wedge",
+            taxonomyMismatch: false,
+            status: "NOT_COMPARABLE",
+            earlier: {
+              attempts: 0,
+              successes: null,
+              targetHits: 0,
+              successRate: null,
+            },
+            later: {
+              attempts: 0,
+              successes: null,
+              targetHits: 0,
+              successRate: null,
+            },
+            delta: {
+              attempts: 0,
+              successes: null,
+              targetHits: 0,
+              successRate: null,
+            },
+          },
+        ],
+      },
+      {
+        sport: "GOLF",
+        taxonomyAreaKey: "short_game",
+        status: "ONLY_IN_EARLIER",
+        drillMixChanged: true,
+        earlier: {
+          attempts: 8,
+          successes: 5,
+          targetHits: 4,
+          successRate: 62.5,
+        },
+        later: null,
+        delta: {
+          attempts: null,
+          successes: null,
+          targetHits: null,
+          successRate: null,
+        },
+        drills: [
+          {
+            sport: "GOLF",
+            taxonomyAreaKey: "short_game",
+            skillCode: "GOLF_CHIP_001",
+            earlierSkillName: "Landing Zone Chipping",
+            laterSkillName: null,
+            taxonomyMismatch: true,
+            status: "ONLY_IN_EARLIER",
+            earlier: {
+              attempts: 8,
+              successes: 5,
+              targetHits: 4,
+              successRate: 62.5,
+            },
+            later: null,
+            delta: {
+              attempts: null,
+              successes: null,
+              targetHits: null,
+              successRate: null,
+            },
+          },
+          {
+            sport: "GOLF",
+            taxonomyAreaKey: "short_game",
+            skillCode: "GOLF_CHIP_002",
+            earlierSkillName: null,
+            laterSkillName: "Later-only Chipping",
+            taxonomyMismatch: false,
+            status: "ONLY_IN_LATER",
+            earlier: null,
+            later: {
+              attempts: 4,
+              successes: 2,
+              targetHits: null,
+              successRate: 50,
+            },
+            delta: {
+              attempts: null,
+              successes: null,
+              targetHits: null,
+              successRate: null,
+            },
+          },
+        ],
+      },
+    ],
+    taxonomyMismatches: [
+      {
+        skillCode: "GOLF_CHIP_001",
+        earlierTaxonomyAreaKeys: ["short_game"],
+        laterTaxonomyAreaKeys: ["chipping"],
+      },
+    ],
+    unclassifiableCounts: {
+      earlier: 2,
+      later: 1,
+    },
+  },
+} as const;
+
+describe("sport metrics golf comparison", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("parses the complete response without calculating or replacing values", () => {
+    const parsed = parseSportMetricsGolfComparisonPayload(comparisonPayload);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.message).toBe("Sport metric comparison fetched successfully");
+    expect(parsed.data.sport).toBe("GOLF");
+    expect(parsed.data.earlier).toEqual(comparisonPayload.data.earlier);
+    expect(parsed.data.later).toEqual(comparisonPayload.data.later);
+    expect(parsed.data.categories.map((category) => category.taxonomyAreaKey)).toEqual([
+      "distance_control",
+      "short_game",
+    ]);
+    expect(parsed.data.categories[0]?.earlier).toEqual({
+      attempts: 0,
+      successes: 0,
+      targetHits: null,
+      successRate: null,
+    });
+    expect(parsed.data.categories[0]?.delta).toEqual(
+      comparisonPayload.data.categories[0].delta,
+    );
+    expect(parsed.data.categories[1]?.later).toBeNull();
+    expect(parsed.data.categories[1]?.drills.map((drill) => drill.status)).toEqual([
+      "ONLY_IN_EARLIER",
+      "ONLY_IN_LATER",
+    ]);
+    expect(parsed.data.categories[1]?.drills[0]?.laterSkillName).toBeNull();
+    expect(parsed.data.categories[1]?.drills[1]?.earlierSkillName).toBeNull();
+    expect(parsed.data.taxonomyMismatches).toEqual(
+      comparisonPayload.data.taxonomyMismatches,
+    );
+    expect(parsed.data.unclassifiableCounts).toEqual({ earlier: 2, later: 1 });
+  });
+
+  it("preserves backend array order", () => {
+    const payload = structuredClone(comparisonPayload) as unknown as {
+      data: {
+        categories: Array<{
+          drills: unknown[];
+        }>;
+      };
+    };
+    payload.data.categories.reverse();
+    payload.data.categories[0]!.drills.reverse();
+
+    const parsed = parseSportMetricsGolfComparisonPayload(payload);
+
+    expect(parsed.data.categories.map((category) => category.taxonomyAreaKey)).toEqual([
+      "short_game",
+      "distance_control",
+    ]);
+    expect(parsed.data.categories[0]?.drills.map((drill) => drill.skillCode)).toEqual([
+      "GOLF_CHIP_002",
+      "GOLF_CHIP_001",
+    ]);
+  });
+
+  it("normalizes contract error envelopes", () => {
+    expect(() =>
+      parseSportMetricsGolfComparisonPayload({
+        success: false,
+        message:
+          "earlierTrainingPlanVersionId and laterTrainingPlanVersionId must be different",
+        errorCode: "BAD_REQUEST",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        message:
+          "earlierTrainingPlanVersionId and laterTrainingPlanVersionId must be different",
+        status: 400,
+        code: "BAD_REQUEST",
+      }),
+    );
+  });
+
+  it("requests the exact comparison endpoint and query parameters", async () => {
+    apiRequestMock.mockResolvedValue(comparisonPayload);
+
+    const response = await fetchSportMetricsGolfComparison({
+      entityId: " entity/1 ",
+      athleteId: " athlete 1 ",
+      earlierTrainingPlanVersionId: " earlier/version ",
+      laterTrainingPlanVersionId: " later version ",
+    });
+
+    expect(response.data.categories).toHaveLength(2);
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity%2F1/athletes/athlete%201/sport-metrics/golf/comparison?earlierTrainingPlanVersionId=earlier%2Fversion&laterTrainingPlanVersionId=later+version",
+      {
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 240_000,
+      },
+    );
   });
 });
 

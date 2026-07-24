@@ -251,9 +251,31 @@ export type WeeklyAdherenceComparisonDomainDelta = {
   actualDurationMinutes: number | null;
 };
 
+export type WeeklyAdherenceComparisonDailyDelta = {
+  plannedSessions: number;
+  loggedSessions: number;
+  totalPrescribedItems: number;
+  completedItems: number;
+  partialItems: number;
+  skippedItems: number;
+  unloggedItems: number;
+  completionCredit: number;
+  adherencePercent: number;
+};
+
+export type WeeklyAdherenceComparisonDay = {
+  dayIndex: number;
+  date: string;
+  snapshotA: WeeklyAdherenceComparisonDailyBreakdown | null;
+  snapshotB: WeeklyAdherenceComparisonDailyBreakdown | null;
+  comparisonStatus: WeeklyAdherenceComparisonStatus;
+  delta: WeeklyAdherenceComparisonDailyDelta | null;
+};
+
 export type WeeklyAdherenceComparisonDomain = {
   comparisonStatus: WeeklyAdherenceComparisonStatus;
   delta: WeeklyAdherenceComparisonDomainDelta | null;
+  daily: WeeklyAdherenceComparisonDay[];
 };
 
 export type WeeklyAdherenceComparisonOverallDelta = {
@@ -984,6 +1006,48 @@ function parseComparisonDomainDelta(
   return parsed;
 }
 
+function parseComparisonDailyDelta(
+  raw: unknown,
+): WeeklyAdherenceComparisonDailyDelta {
+  const record = asRecord(raw) ?? {};
+  return {
+    plannedSessions: readComparisonNumber(record.plannedSessions),
+    loggedSessions: readComparisonNumber(record.loggedSessions),
+    totalPrescribedItems: readComparisonNumber(record.totalPrescribedItems),
+    completedItems: readComparisonNumber(record.completedItems),
+    partialItems: readComparisonNumber(record.partialItems),
+    skippedItems: readComparisonNumber(record.skippedItems),
+    unloggedItems: readComparisonNumber(record.unloggedItems),
+    completionCredit: readComparisonNumber(record.completionCredit),
+    adherencePercent: readComparisonNumber(record.adherencePercent),
+  };
+}
+
+function parseComparisonDay(
+  raw: unknown,
+): WeeklyAdherenceComparisonDay | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const comparisonStatus = parseComparisonStatus(record.comparisonStatus);
+  if (comparisonStatus === null) return null;
+  return {
+    dayIndex: readComparisonNumber(record.dayIndex),
+    date: readComparisonString(record.date),
+    snapshotA:
+      record.snapshotA === null
+        ? null
+        : parseComparisonDailyBreakdown(record.snapshotA),
+    snapshotB:
+      record.snapshotB === null
+        ? null
+        : parseComparisonDailyBreakdown(record.snapshotB),
+    comparisonStatus,
+    delta: asRecord(record.delta)
+      ? parseComparisonDailyDelta(record.delta)
+      : null,
+  };
+}
+
 function parseComparisonDomain(
   raw: unknown,
 ): WeeklyAdherenceComparisonDomain | null {
@@ -995,6 +1059,11 @@ function parseComparisonDomain(
     comparisonStatus,
     delta:
       record.delta === null ? null : parseComparisonDomainDelta(record.delta),
+    daily: Array.isArray(record.daily)
+      ? record.daily
+          .map(parseComparisonDay)
+          .filter((day): day is WeeklyAdherenceComparisonDay => day !== null)
+      : [],
   };
 }
 

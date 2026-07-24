@@ -20,6 +20,9 @@ import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import type {
   WeeklyAdherenceComparisonData,
+  WeeklyAdherenceComparisonDailyBreakdown,
+  WeeklyAdherenceComparisonDailyDelta,
+  WeeklyAdherenceComparisonDay,
   WeeklyAdherenceComparisonDomainDelta,
   WeeklyAdherenceComparisonWeeklyBreakdown,
   WeeklyAdherenceDomainKey,
@@ -229,6 +232,115 @@ function WeeklyBreakdownColumn({
         ))}
       </dl>
     </div>
+  );
+}
+
+const DAILY_SUMMARY_FIELDS = [
+  ["Planned sessions", "plannedSessions"],
+  ["Logged sessions", "loggedSessions"],
+  ["Total prescribed items", "totalPrescribedItems"],
+  ["Completed items", "completedItems"],
+  ["Partial items", "partialItems"],
+  ["Skipped items", "skippedItems"],
+  ["Unlogged items", "unloggedItems"],
+  ["Completion credit", "completionCredit"],
+  ["Adherence percent", "adherencePercent"],
+] as const;
+
+function DailySummary({
+  title,
+  summary,
+}: {
+  title: string;
+  summary:
+    | WeeklyAdherenceComparisonDailyBreakdown
+    | WeeklyAdherenceComparisonDailyDelta
+    | null;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-textPrimary">{title}</p>
+      {summary === null ? (
+        <p className="text-sm text-textSecondary">Not available</p>
+      ) : (
+        <dl className="space-y-2">
+          {DAILY_SUMMARY_FIELDS.map(([label, field]) => (
+            <div
+              key={field}
+              className="flex items-center justify-between gap-4 text-sm"
+            >
+              <dt className="text-textSecondary">{label}</dt>
+              <dd className="font-medium text-textPrimary">
+                {summary[field]}
+                {field === "adherencePercent" ? "%" : ""}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function DailyComparisonRow({ day }: { day: WeeklyAdherenceComparisonDay }) {
+  return (
+    <details className="rounded-xl border border-border bg-card/80 p-3 text-sm shadow-sm">
+      <summary className="cursor-pointer list-none rounded-lg px-1 py-0.5 marker:text-textMuted">
+        <span className="grid items-center gap-3 sm:grid-cols-4">
+          <span className="font-medium text-textPrimary">
+            Day {day.dayIndex}
+            {day.date ? ` — ${formatDateOnly(day.date, day.date)}` : ""}
+          </span>
+          <span className="text-textSecondary">
+            {day.snapshotA === null
+              ? "Not available"
+              : `${day.snapshotA.adherencePercent}%`}
+          </span>
+          <span className="text-textSecondary">
+            {day.snapshotB === null
+              ? "Not available"
+              : `${day.snapshotB.adherencePercent}%`}
+          </span>
+          <Badge variant="neutral">{day.comparisonStatus}</Badge>
+        </span>
+      </summary>
+      <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-3">
+        <DailySummary title="Earlier week" summary={day.snapshotA} />
+        <DailySummary title="Later week" summary={day.snapshotB} />
+        <DailySummary title="Delta" summary={day.delta} />
+      </div>
+    </details>
+  );
+}
+
+function DailyComparison({
+  days,
+}: {
+  days: WeeklyAdherenceComparisonDay[];
+}) {
+  return (
+    <Card
+      title="Daily Comparison"
+      accent={false}
+      padding="compact"
+      className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+    >
+      <div className="mb-3 hidden grid-cols-4 gap-3 px-4 text-sm font-medium text-textPrimary sm:grid">
+        <span>Day</span>
+        <span>Earlier Week</span>
+        <span>Later Week</span>
+        <span>Status</span>
+      </div>
+      <div className="space-y-3">
+        {days.map((day, index) => (
+          <DailyComparisonRow
+            key={`${day.dayIndex}-${day.date}-${index}`}
+            day={day}
+          />
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -477,12 +589,14 @@ export function AthleteWeeklyAdherenceSection({
     comparisonError === null &&
     comparisonData !== null;
   const activeDomain = activeCategoryConfig.domain;
+  const activeDomainComparison =
+    activeDomain && comparisonData
+      ? (comparisonData.domains[activeDomain] ?? null)
+      : null;
   const activeComparison =
     activeCategory === "OVERALL"
       ? (comparisonData?.overall ?? null)
-      : activeDomain
-        ? (comparisonData?.domains[activeDomain] ?? null)
-        : null;
+      : activeDomainComparison;
   const earlierComparisonValue =
     activeCategory === "OVERALL"
       ? (comparisonData?.snapshotA?.weeklyAdherenceSummary.overall
@@ -649,11 +763,16 @@ export function AthleteWeeklyAdherenceSection({
         )}
       </Card>
     ) : null;
+  const dailyComparison =
+    showComparisonSummary && breakdownCategory && activeDomainComparison ? (
+      <DailyComparison days={activeDomainComparison.daily} />
+    ) : null;
   const comparisonArea = (
     <>
       {snapshotSelectors}
       {comparisonSummary}
       {comparisonBreakdown}
+      {dailyComparison}
     </>
   );
 

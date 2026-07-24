@@ -274,7 +274,56 @@ function addDomainComparison(
                 }),
             actualDurationMinutes: 0,
           },
+    daily: [],
   };
+}
+
+function addDailyComparisons(
+  data: WeeklyAdherenceComparisonData,
+  domain: "SKILL" | "NUTRITION" | "STRENGTH_CONDITIONING",
+) {
+  const summary = (dayIndex: number, week: "A" | "B") => ({
+    date: `2026-07-${String(dayIndex + (week === "A" ? 5 : 12)).padStart(2, "0")}`,
+    plannedSessions: dayIndex,
+    loggedSessions: dayIndex + 10,
+    totalPrescribedItems: dayIndex + 20,
+    loggedItems: dayIndex + 30,
+    completedItems: dayIndex + 40,
+    partialItems: dayIndex + 50,
+    skippedItems: dayIndex + 60,
+    unloggedItems: dayIndex + 70,
+    completionCredit: dayIndex + 80,
+    adherencePercent: dayIndex + (week === "A" ? 0.1 : 0.2),
+    sessions:
+      domain === "NUTRITION"
+        ? ([{ nutritionDetail: "must-not-render" }] as never[])
+        : [],
+  });
+  data.domains[domain]!.daily = Array.from({ length: 7 }, (_, offset) => {
+    const dayIndex = offset + 1;
+    return {
+      dayIndex,
+      date: `2026-07-${String(dayIndex + 5).padStart(2, "0")}`,
+      snapshotA: summary(dayIndex, "A"),
+      snapshotB: dayIndex === 1 ? null : summary(dayIndex, "B"),
+      comparisonStatus:
+        dayIndex === 1 ? ("NOT_COMPARABLE" as const) : ("COMPARABLE" as const),
+      delta:
+        dayIndex === 1
+          ? null
+          : {
+              plannedSessions: -1,
+              loggedSessions: 2,
+              totalPrescribedItems: 3,
+              completedItems: 4,
+              partialItems: -5,
+              skippedItems: 6,
+              unloggedItems: -7,
+              completionCredit: 8.5,
+              adherencePercent: dayIndex === 2 ? -12.5 : 9.5,
+            },
+    };
+  });
 }
 
 function renderedSelect(markup: string, id: string): string {
@@ -916,6 +965,7 @@ describe("AthleteWeeklyAdherenceSection overall comparison", () => {
     data.domains.NUTRITION = {
       comparisonStatus: "COMPARABLE",
       delta: null,
+      daily: [],
     };
     Object.assign(data, {
       dailyMarker: "daily-comparison-secret",
@@ -958,6 +1008,7 @@ describe("AthleteWeeklyAdherenceSection weekly breakdown", () => {
     expect(markup).toContain("Overall — Overall adherence");
     expect(markup).not.toContain("Overall Weekly Breakdown");
     expect(markup).not.toContain("Weekly breakdown unavailable");
+    expect(markup).not.toContain("Daily Comparison");
   });
 
   it.each([
@@ -1097,30 +1148,82 @@ describe("AthleteWeeklyAdherenceSection weekly breakdown", () => {
     expect(markup).not.toContain(">—<");
   });
 
-  it("does not render daily, session, item, or nutrient details", () => {
-    const data = comparisonData();
-    data.overall = null;
-    addDomainComparison(data, "NUTRITION", {
-      earlier: 60,
-      later: 70,
-      delta: 10,
-    });
-    data.snapshotA.domainBreakdowns.NUTRITION!.daily = [
-      {
-        marker: "daily-session-nutrient-secret",
-      } as never,
-    ];
-    contextState.current = {
-      ...contextState.current!,
-      comparisonData: data,
-    };
+});
 
+describe("AthleteWeeklyAdherenceSection daily comparison", () => {
+  beforeEach(() => {
+    contextState.current = {
+      ...state(),
+      selectedSnapshotAId: "snapshot-a",
+      selectedSnapshotBId: "snapshot-b",
+      comparisonData: comparisonData(),
+    };
+  });
+
+  it.each([
+    ["SKILL", "Skills"],
+    ["NUTRITION", "Nutrition"],
+    ["STRENGTH_CONDITIONING", "S&amp;C"],
+  ] as const)(
+    "renders seven ordered expandable backend days for %s",
+    (domain, categoryLabel) => {
+      const data = comparisonData();
+      data.overall = null;
+      addDomainComparison(data, domain, {
+        earlier: 60,
+        later: 70,
+        delta: 10,
+      });
+      addDailyComparisons(data, domain);
+      contextState.current = {
+        ...contextState.current!,
+        comparisonData: data,
+      };
+
+      const markup = renderToStaticMarkup(
+        createElement(AthleteWeeklyAdherenceSection),
+      );
+
+      expect(markup).toContain(`${categoryLabel} Weekly Breakdown`);
+      expect(markup).toContain("Daily Comparison");
+      expect(markup.match(/<details/g)).toHaveLength(7);
+      expect(markup.indexOf("Day 1")).toBeLessThan(markup.indexOf("Day 2"));
+      expect(markup.indexOf("Day 2")).toBeLessThan(markup.indexOf("Day 7"));
+      expect(markup).toContain("Earlier Week");
+      expect(markup).toContain("Later Week");
+      expect(markup).toContain("Status");
+      expect(markup).toContain("NOT_COMPARABLE");
+      expect(markup).toContain("COMPARABLE");
+      expect(markup).toContain("-12.5%");
+      expect(markup).toContain("Not available");
+      for (const label of [
+        "Planned sessions",
+        "Logged sessions",
+        "Total prescribed items",
+        "Completed items",
+        "Partial items",
+        "Skipped items",
+        "Unlogged items",
+        "Completion credit",
+        "Adherence percent",
+      ]) {
+        expect(markup).toContain(label);
+      }
+      expect(markup).not.toContain("must-not-render");
+      expect(markup).not.toContain("Planned nutrients");
+      expect(markup).not.toContain("Consumed nutrients");
+      expect(markup).not.toContain("Variance");
+      expect(contextState.current?.setSelectedSnapshotAId).not.toHaveBeenCalled();
+      expect(contextState.current?.setSelectedSnapshotBId).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not render Daily Comparison for Overall", () => {
     const markup = renderToStaticMarkup(
       createElement(AthleteWeeklyAdherenceSection),
     );
 
-    expect(markup).not.toContain("daily-session-nutrient-secret");
-    expect(markup).not.toContain("Nutrition detail");
-    expect(markup).not.toContain("Session comparison");
+    expect(markup).toContain("Overall — Overall adherence");
+    expect(markup).not.toContain("Daily Comparison");
   });
 });

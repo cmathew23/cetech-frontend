@@ -2823,6 +2823,31 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(html).toContain("Cool down");
   });
 
+  it("keeps long revision basket text contained beside its action", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          selection: {
+            changes: [
+              {
+                acceptedChange:
+                  "Replace the selected item with a deliberately long responsive audit description that must wrap inside the drawer.",
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    expect(html).toContain("Revision basket");
+    expect(html).toContain(
+      'class="flex min-w-0 items-start justify-between gap-3"',
+    );
+    expect(html).toContain('class="min-w-0 flex-1 break-words"');
+    expect(html).toContain("shrink-0");
+  });
+
   const makeRevisionContext = (
     overrides: Record<string, unknown>,
   ): CoachAthleteDomainDraftRevisionContext =>

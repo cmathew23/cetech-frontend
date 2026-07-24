@@ -3,13 +3,16 @@
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
+  fetchWeeklyAdherenceComparison,
+  fetchWeeklyAdherenceSnapshots,
   fetchWeeklyAdherenceSummary,
   hasNutritionAdherenceDomain,
+  type WeeklyAdherenceComparisonData,
+  type WeeklyAdherenceComparisonResponse,
+  type WeeklyAdherenceSnapshotOption,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
-import {
-  fetchAthleteWeeklyPlanJournal,
-} from "@/lib/api/coachAthletePlanningReadiness";
+import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   resolveWeeklyAdherencePlanRangeFromJournal,
@@ -48,6 +51,16 @@ export type AthleteWeeklyAdherenceState = {
   weekEnd: string;
   trainingPlanVersionId: string;
   reload: () => void;
+  comparisonData: WeeklyAdherenceComparisonData | null;
+  comparisonLoading: boolean;
+  comparisonError: string | null;
+  selectedSnapshotAId: string;
+  selectedSnapshotBId: string;
+  availableSnapshots: WeeklyAdherenceSnapshotOption[];
+  snapshotsLoading: boolean;
+  snapshotsError: string | null;
+  setSelectedSnapshotAId: (snapshotId: string) => void;
+  setSelectedSnapshotBId: (snapshotId: string) => void;
 };
 
 const AthleteWeeklyAdherenceContext =
@@ -59,6 +72,129 @@ function formatLoadError(e: unknown): string {
   return "Unable to load";
 }
 
+export function hasWeeklyAdherenceComparisonSnapshotIds(
+  snapshotAId: string,
+  snapshotBId: string,
+): boolean {
+  return snapshotAId.trim() !== "" && snapshotBId.trim() !== "";
+}
+
+export function comparisonSnapshotIdsForOwner(
+  selectionOwner: string,
+  currentOwner: string,
+  snapshotAId: string,
+  snapshotBId: string,
+): [string, string] {
+  return selectionOwner === currentOwner
+    ? [snapshotAId, snapshotBId]
+    : ["", ""];
+}
+
+export function isChronologicalWeeklyAdherenceSnapshotPair(
+  snapshots: WeeklyAdherenceSnapshotOption[],
+  earlierSnapshotId: string,
+  laterSnapshotId: string,
+): boolean {
+  const earlier = snapshots.find((snapshot) => snapshot.id === earlierSnapshotId);
+  const later = snapshots.find((snapshot) => snapshot.id === laterSnapshotId);
+  return Boolean(
+    earlier?.weekStart &&
+      later?.weekStart &&
+      earlier.weekStart < later.weekStart,
+  );
+}
+
+export function reconcileWeeklyAdherenceSnapshotSelections({
+  changedSelection,
+  snapshotId,
+  earlierSnapshotId,
+  laterSnapshotId,
+  snapshots,
+}: {
+  changedSelection: "earlier" | "later";
+  snapshotId: string;
+  earlierSnapshotId: string;
+  laterSnapshotId: string;
+  snapshots: WeeklyAdherenceSnapshotOption[];
+}): [string, string] {
+  if (changedSelection === "earlier") {
+    return [
+      snapshotId,
+      isChronologicalWeeklyAdherenceSnapshotPair(
+        snapshots,
+        snapshotId,
+        laterSnapshotId,
+      )
+        ? laterSnapshotId
+        : "",
+    ];
+  }
+  return [
+    isChronologicalWeeklyAdherenceSnapshotPair(
+      snapshots,
+      earlierSnapshotId,
+      snapshotId,
+    )
+      ? earlierSnapshotId
+      : "",
+    snapshotId,
+  ];
+}
+
+export function chronologicalComparisonSnapshotIds(
+  snapshots: WeeklyAdherenceSnapshotOption[],
+  earlierSnapshotId: string,
+  laterSnapshotId: string,
+): [string, string] {
+  return isChronologicalWeeklyAdherenceSnapshotPair(
+    snapshots,
+    earlierSnapshotId,
+    laterSnapshotId,
+  )
+    ? [earlierSnapshotId, laterSnapshotId]
+    : ["", ""];
+}
+
+export async function runWeeklyAdherenceComparisonLifecycle({
+  snapshotAId,
+  snapshotBId,
+  isCurrent,
+  fetchComparison,
+  setComparisonData,
+  setComparisonLoading,
+  setComparisonError,
+}: {
+  snapshotAId: string;
+  snapshotBId: string;
+  isCurrent: () => boolean;
+  fetchComparison: () => Promise<WeeklyAdherenceComparisonResponse>;
+  setComparisonData: (data: WeeklyAdherenceComparisonData | null) => void;
+  setComparisonLoading: (loading: boolean) => void;
+  setComparisonError: (error: string | null) => void;
+}): Promise<void> {
+  setComparisonData(null);
+  setComparisonError(null);
+
+  if (
+    !hasWeeklyAdherenceComparisonSnapshotIds(snapshotAId, snapshotBId)
+  ) {
+    setComparisonLoading(false);
+    return;
+  }
+
+  setComparisonLoading(true);
+  try {
+    const response = await fetchComparison();
+    if (!isCurrent()) return;
+    setComparisonData(response.data);
+  } catch (error) {
+    if (!isCurrent()) return;
+    setComparisonError(formatLoadError(error));
+  } finally {
+    if (isCurrent()) setComparisonLoading(false);
+  }
+}
+
 export function formatAdherencePercent(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "—";
@@ -67,15 +203,23 @@ export function formatAdherencePercent(value: number | null | undefined): string
   return `${rounded % 1 === 0 ? Math.round(rounded) : rounded.toFixed(1)}%`;
 }
 
-export function AthleteWeeklyAdherenceProvider({
+export function WeeklyAdherenceProvider({
   children,
+  entityId,
+  athleteId,
+  isGateReady,
+  hasActiveAcademyMembership,
+  identifiersPhase,
+  loadCurrentSummary = true,
 }: {
   children: ReactNode;
+  entityId: string;
+  athleteId: string;
+  isGateReady: boolean;
+  hasActiveAcademyMembership: boolean;
+  identifiersPhase: "loading" | "ready" | "not_ready";
+  loadCurrentSummary?: boolean;
 }) {
-  const { isGateReady, hasActiveAcademyMembership, accessContext, accessGateReady } =
-    useAthleteInvitationGate();
-  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
-
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -83,19 +227,82 @@ export function AthleteWeeklyAdherenceProvider({
     useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [comparisonData, setComparisonData] =
+    useState<WeeklyAdherenceComparisonData | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [selectedSnapshotAId, setSelectedSnapshotAId] = useState("");
+  const [selectedSnapshotBId, setSelectedSnapshotBId] = useState("");
+  const [comparisonSelectionOwner, setComparisonSelectionOwner] = useState("");
+  const [availableSnapshots, setAvailableSnapshots] = useState<
+    WeeklyAdherenceSnapshotOption[]
+  >([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(true);
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
-  const entityId = planningIds.ids?.entityId ?? "";
-  const athleteId = planningIds.ids?.athleteId ?? "";
+  const comparisonOwner = `${entityId}:${athleteId}`;
+
+  const selectSnapshotA = useCallback(
+    (snapshotId: string) => {
+      const [earlierSnapshotId, laterSnapshotId] =
+        reconcileWeeklyAdherenceSnapshotSelections({
+          changedSelection: "earlier",
+          snapshotId,
+          earlierSnapshotId: selectedSnapshotAId,
+          laterSnapshotId: selectedSnapshotBId,
+          snapshots: availableSnapshots,
+        });
+      setComparisonSelectionOwner(comparisonOwner);
+      setSelectedSnapshotAId(earlierSnapshotId);
+      setSelectedSnapshotBId(laterSnapshotId);
+    },
+    [
+      availableSnapshots,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    ],
+  );
+
+  const selectSnapshotB = useCallback(
+    (snapshotId: string) => {
+      const [earlierSnapshotId, laterSnapshotId] =
+        reconcileWeeklyAdherenceSnapshotSelections({
+          changedSelection: "later",
+          snapshotId,
+          earlierSnapshotId: selectedSnapshotAId,
+          laterSnapshotId: selectedSnapshotBId,
+          snapshots: availableSnapshots,
+        });
+      setComparisonSelectionOwner(comparisonOwner);
+      setSelectedSnapshotAId(earlierSnapshotId);
+      setSelectedSnapshotBId(laterSnapshotId);
+    },
+    [
+      availableSnapshots,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    ],
+  );
 
   const reload = useCallback(() => {
     setReloadKey((k) => k + 1);
   }, []);
 
   useEffect(() => {
+    if (!loadCurrentSummary) {
+      setFetching(false);
+      setSummary(null);
+      setError(null);
+      setPlanWeekRange(null);
+      setTrainingPlanVersionId("");
+      return;
+    }
     if (
       !isGateReady ||
       !hasActiveAcademyMembership ||
-      planningIds.phase !== "ready" ||
+      identifiersPhase !== "ready" ||
       entityId === "" ||
       athleteId === ""
     ) {
@@ -146,21 +353,103 @@ export function AthleteWeeklyAdherenceProvider({
     entityId,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     reloadKey,
   ]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAvailableSnapshots([]);
+    setSelectedSnapshotAId("");
+    setSelectedSnapshotBId("");
+    setComparisonSelectionOwner("");
+    setComparisonData(null);
+    setComparisonLoading(false);
+    setComparisonError(null);
+    setSnapshotsError(null);
+
+    if (entityId === "" || athleteId === "") {
+      setSnapshotsLoading(false);
+      return;
+    }
+
+    setSnapshotsLoading(true);
+    void fetchWeeklyAdherenceSnapshots({ entityId, athleteId })
+      .then((snapshots) => {
+        if (!cancelled) setAvailableSnapshots(snapshots);
+      })
+      .catch((snapshotError) => {
+        if (!cancelled) {
+          setAvailableSnapshots([]);
+          setSnapshotsError(formatLoadError(snapshotError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSnapshotsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [athleteId, entityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const [snapshotAId, snapshotBId] = comparisonSnapshotIdsForOwner(
+      comparisonSelectionOwner,
+      comparisonOwner,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+    );
+    const [validSnapshotAId, validSnapshotBId] =
+      chronologicalComparisonSnapshotIds(
+        availableSnapshots,
+        snapshotAId,
+        snapshotBId,
+      );
+    void runWeeklyAdherenceComparisonLifecycle({
+      snapshotAId: validSnapshotAId,
+      snapshotBId: validSnapshotBId,
+      isCurrent: () => !cancelled,
+      fetchComparison: () =>
+        fetchWeeklyAdherenceComparison({
+          entityId,
+          athleteId,
+          snapshotAId: validSnapshotAId,
+          snapshotBId: validSnapshotBId,
+        }),
+      setComparisonData,
+      setComparisonLoading,
+      setComparisonError,
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    availableSnapshots,
+    athleteId,
+    comparisonOwner,
+    comparisonSelectionOwner,
+    entityId,
+    selectedSnapshotAId,
+    selectedSnapshotBId,
+  ]);
+
   const nutritionKpi: NutritionAdherenceKpiState = useMemo(() => {
+    if (!loadCurrentSummary) {
+      return { status: "empty" };
+    }
     if (!isGateReady) {
       return { status: "loading" };
     }
     if (!hasActiveAcademyMembership) {
       return { status: "loading" };
     }
-    if (planningIds.phase === "loading") {
+    if (identifiersPhase === "loading") {
       return { status: "loading" };
     }
-    if (planningIds.phase !== "ready" || entityId === "" || athleteId === "") {
+    if (identifiersPhase !== "ready" || entityId === "" || athleteId === "") {
       return { status: "awaiting_identifiers" };
     }
     if (fetching) {
@@ -188,7 +477,8 @@ export function AthleteWeeklyAdherenceProvider({
     fetching,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     summary,
   ]);
 
@@ -199,11 +489,14 @@ export function AthleteWeeklyAdherenceProvider({
     if (!hasActiveAcademyMembership) {
       return "hidden";
     }
-    if (planningIds.phase === "loading") {
+    if (identifiersPhase === "loading") {
       return "loading";
     }
-    if (planningIds.phase !== "ready" || entityId === "" || athleteId === "") {
+    if (identifiersPhase !== "ready" || entityId === "" || athleteId === "") {
       return "awaiting_identifiers";
+    }
+    if (!loadCurrentSummary) {
+      return "loaded";
     }
     if (fetching) {
       return "loading";
@@ -222,7 +515,8 @@ export function AthleteWeeklyAdherenceProvider({
     fetching,
     hasActiveAcademyMembership,
     isGateReady,
-    planningIds.phase,
+    identifiersPhase,
+    loadCurrentSummary,
     summary,
   ]);
 
@@ -236,14 +530,34 @@ export function AthleteWeeklyAdherenceProvider({
       weekEnd: planWeekRange?.weekEnd ?? "",
       trainingPlanVersionId,
       reload,
+      comparisonData,
+      comparisonLoading,
+      comparisonError,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+      availableSnapshots,
+      snapshotsLoading,
+      snapshotsError,
+      setSelectedSnapshotAId: selectSnapshotA,
+      setSelectedSnapshotBId: selectSnapshotB,
     }),
     [
+      availableSnapshots,
+      comparisonData,
+      comparisonError,
+      comparisonLoading,
       error,
       nutritionKpi,
       phase,
       planWeekRange?.weekEnd,
       planWeekRange?.weekStart,
       reload,
+      selectSnapshotA,
+      selectSnapshotB,
+      selectedSnapshotAId,
+      selectedSnapshotBId,
+      snapshotsError,
+      snapshotsLoading,
       summary,
       trainingPlanVersionId,
     ],
@@ -253,6 +567,35 @@ export function AthleteWeeklyAdherenceProvider({
     <AthleteWeeklyAdherenceContext.Provider value={value}>
       {children}
     </AthleteWeeklyAdherenceContext.Provider>
+  );
+}
+
+export function AthleteWeeklyAdherenceProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const {
+    isGateReady,
+    hasActiveAcademyMembership,
+    accessContext,
+    accessGateReady,
+  } = useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({
+    accessContext,
+    accessGateReady,
+  });
+
+  return (
+    <WeeklyAdherenceProvider
+      entityId={planningIds.ids?.entityId ?? ""}
+      athleteId={planningIds.ids?.athleteId ?? ""}
+      isGateReady={isGateReady}
+      hasActiveAcademyMembership={hasActiveAcademyMembership}
+      identifiersPhase={planningIds.phase}
+    >
+      {children}
+    </WeeklyAdherenceProvider>
   );
 }
 

@@ -5294,14 +5294,15 @@ export function FynRevisionContextPanel({
             {acceptedChanges.map((change, index) => (
               <li
                 key={`fyn-accepted-change-${index}`}
-                className="flex items-start justify-between gap-3"
+                className="flex min-w-0 items-start justify-between gap-3"
               >
-                <span>
+                <span className="min-w-0 flex-1 break-words">
                   <span className="font-medium">{index + 1}.</span> {change.acceptedChange}
                 </span>
                 <Button
                   type="button"
                   variant="secondary"
+                  className="shrink-0"
                   onClick={() => onSelectionChange(removeFynRevisionChange(selection, index))}
                   disabled={loading}
                 >

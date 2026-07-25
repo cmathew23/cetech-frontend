@@ -1,5 +1,6 @@
 "use client";
 
+import { GolfSportsMetricsComparisonControls } from "@/components/dashboard/GolfSportsMetricsComparisonControls";
 import { SportMetricsEvidenceCards } from "@/components/dashboard/SportMetricsEvidenceCards";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +17,14 @@ import { formatDateOnly } from "@/lib/dateTime";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
+
+type SportMetricsSectionProps = {
+  entityId: string;
+  athleteId: string;
+  trainingPlanVersionId?: string | null;
+  titleClassName?: string;
+  cardClassName?: string;
+};
 
 function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
@@ -48,19 +57,13 @@ function SportMetricsCardFrame({
   );
 }
 
-export function SportMetricsSection({
+function SportMetricsWeeklySummary({
   entityId,
   athleteId,
   trainingPlanVersionId,
   titleClassName,
   cardClassName,
-}: {
-  entityId: string;
-  athleteId: string;
-  trainingPlanVersionId?: string | null;
-  titleClassName?: string;
-  cardClassName?: string;
-}) {
+}: SportMetricsSectionProps) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resolvedFetchKey, setResolvedFetchKey] = useState("");
@@ -178,5 +181,22 @@ export function SportMetricsSection({
       titleClassName={titleClassName}
       cardClassName={cardClassName}
     />
+  );
+}
+
+export function SportMetricsSection(props: SportMetricsSectionProps) {
+  const hasIdentifiers =
+    props.entityId.trim() !== "" && props.athleteId.trim() !== "";
+
+  return (
+    <div className="min-w-0 space-y-4">
+      <SportMetricsWeeklySummary {...props} />
+      {hasIdentifiers ? (
+        <GolfSportsMetricsComparisonControls
+          entityId={props.entityId}
+          athleteId={props.athleteId}
+        />
+      ) : null}
+    </div>
   );
 }

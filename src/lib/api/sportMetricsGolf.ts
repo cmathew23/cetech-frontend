@@ -128,6 +128,90 @@ export type SportMetricsGolfWeeklySummary = {
   raw: unknown;
 };
 
+export type SportMetricsGolfComparisonStatus =
+  | "COMPARABLE"
+  | "NOT_COMPARABLE"
+  | "ONLY_IN_EARLIER"
+  | "ONLY_IN_LATER";
+
+export type SportMetricsGolfComparisonSnapshot = {
+  trainingPlanId: string;
+  trainingPlanVersionId: string;
+  weekStartDate: string;
+  weekEndDate: string;
+};
+
+export type SportMetricsGolfComparisonMetric = {
+  attempts: number | null;
+  successes: number | null;
+  targetHits: number | null;
+  successRate: number | null;
+};
+
+export type SportMetricsGolfComparisonDelta =
+  SportMetricsGolfComparisonMetric;
+
+export type SportMetricsGolfComparisonDrill = {
+  sport: "GOLF";
+  taxonomyAreaKey: string;
+  skillCode: string;
+  earlierSkillName: string | null;
+  laterSkillName: string | null;
+  taxonomyMismatch: boolean;
+  status: SportMetricsGolfComparisonStatus;
+  earlier: SportMetricsGolfComparisonMetric | null;
+  later: SportMetricsGolfComparisonMetric | null;
+  delta: SportMetricsGolfComparisonDelta;
+};
+
+export type SportMetricsGolfComparisonCategory = {
+  sport: "GOLF";
+  taxonomyAreaKey: string;
+  status: SportMetricsGolfComparisonStatus;
+  drillMixChanged: boolean;
+  earlier: SportMetricsGolfComparisonMetric | null;
+  later: SportMetricsGolfComparisonMetric | null;
+  delta: SportMetricsGolfComparisonDelta;
+  drills: SportMetricsGolfComparisonDrill[];
+};
+
+export type SportMetricsGolfTaxonomyMismatch = {
+  skillCode: string;
+  earlierTaxonomyAreaKeys: string[];
+  laterTaxonomyAreaKeys: string[];
+};
+
+export type SportMetricsGolfUnclassifiableCounts = {
+  earlier: number;
+  later: number;
+};
+
+export type SportMetricsGolfComparisonData = {
+  sport: "GOLF";
+  earlier: SportMetricsGolfComparisonSnapshot;
+  later: SportMetricsGolfComparisonSnapshot;
+  categories: SportMetricsGolfComparisonCategory[];
+  taxonomyMismatches: SportMetricsGolfTaxonomyMismatch[];
+  unclassifiableCounts: SportMetricsGolfUnclassifiableCounts;
+};
+
+export type SportMetricsGolfComparisonResponse = {
+  success: true;
+  message: "Sport metric comparison fetched successfully";
+  data: SportMetricsGolfComparisonData;
+};
+
+export type SportMetricsGolfComparisonRequest = {
+  earlierTrainingPlanVersionId: string;
+  laterTrainingPlanVersionId: string;
+};
+
+export type FetchSportMetricsGolfComparisonParams =
+  SportMetricsGolfComparisonRequest & {
+    entityId: string;
+    athleteId: string;
+  };
+
 function readFiniteNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "") {
@@ -367,6 +451,199 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
   };
 }
 
+function invalidComparisonPayload(): never {
+  throw new Error("SPORT Metrics Golf comparison response is invalid.");
+}
+
+function requireComparisonRecord(value: unknown): Record<string, unknown> {
+  return asRecord(value) ?? invalidComparisonPayload();
+}
+
+function requireComparisonString(value: unknown): string {
+  if (typeof value !== "string") return invalidComparisonPayload();
+  return value;
+}
+
+function requireComparisonNullableString(value: unknown): string | null {
+  if (value === null) return null;
+  return requireComparisonString(value);
+}
+
+function requireComparisonBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean") return invalidComparisonPayload();
+  return value;
+}
+
+function requireComparisonNullableNumber(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return invalidComparisonPayload();
+  }
+  return value;
+}
+
+function requireComparisonNullableInteger(value: unknown): number | null {
+  const parsed = requireComparisonNullableNumber(value);
+  if (parsed !== null && !Number.isInteger(parsed)) {
+    return invalidComparisonPayload();
+  }
+  return parsed;
+}
+
+function requireComparisonInteger(value: unknown): number {
+  const parsed = requireComparisonNullableInteger(value);
+  return parsed ?? invalidComparisonPayload();
+}
+
+function requireComparisonArray(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return invalidComparisonPayload();
+  return value;
+}
+
+function parseComparisonSport(value: unknown): "GOLF" {
+  if (value !== "GOLF") return invalidComparisonPayload();
+  return value;
+}
+
+function parseSportMetricsGolfComparisonStatus(
+  value: unknown,
+): SportMetricsGolfComparisonStatus {
+  if (
+    value === "COMPARABLE" ||
+    value === "NOT_COMPARABLE" ||
+    value === "ONLY_IN_EARLIER" ||
+    value === "ONLY_IN_LATER"
+  ) {
+    return value;
+  }
+  return invalidComparisonPayload();
+}
+
+function parseSportMetricsGolfComparisonSnapshot(
+  value: unknown,
+): SportMetricsGolfComparisonSnapshot {
+  const record = requireComparisonRecord(value);
+  return {
+    trainingPlanId: requireComparisonString(record.trainingPlanId),
+    trainingPlanVersionId: requireComparisonString(
+      record.trainingPlanVersionId,
+    ),
+    weekStartDate: requireComparisonString(record.weekStartDate),
+    weekEndDate: requireComparisonString(record.weekEndDate),
+  };
+}
+
+function parseSportMetricsGolfComparisonMetric(
+  value: unknown,
+): SportMetricsGolfComparisonMetric {
+  const record = requireComparisonRecord(value);
+  return {
+    attempts: requireComparisonNullableInteger(record.attempts),
+    successes: requireComparisonNullableInteger(record.successes),
+    targetHits: requireComparisonNullableInteger(record.targetHits),
+    successRate: requireComparisonNullableNumber(record.successRate),
+  };
+}
+
+function parseNullableSportMetricsGolfComparisonMetric(
+  value: unknown,
+): SportMetricsGolfComparisonMetric | null {
+  return value === null ? null : parseSportMetricsGolfComparisonMetric(value);
+}
+
+function parseSportMetricsGolfComparisonDrill(
+  value: unknown,
+): SportMetricsGolfComparisonDrill {
+  const record = requireComparisonRecord(value);
+  return {
+    sport: parseComparisonSport(record.sport),
+    taxonomyAreaKey: requireComparisonString(record.taxonomyAreaKey),
+    skillCode: requireComparisonString(record.skillCode),
+    earlierSkillName: requireComparisonNullableString(
+      record.earlierSkillName,
+    ),
+    laterSkillName: requireComparisonNullableString(record.laterSkillName),
+    taxonomyMismatch: requireComparisonBoolean(record.taxonomyMismatch),
+    status: parseSportMetricsGolfComparisonStatus(record.status),
+    earlier: parseNullableSportMetricsGolfComparisonMetric(record.earlier),
+    later: parseNullableSportMetricsGolfComparisonMetric(record.later),
+    delta: parseSportMetricsGolfComparisonMetric(record.delta),
+  };
+}
+
+function parseSportMetricsGolfComparisonCategory(
+  value: unknown,
+): SportMetricsGolfComparisonCategory {
+  const record = requireComparisonRecord(value);
+  return {
+    sport: parseComparisonSport(record.sport),
+    taxonomyAreaKey: requireComparisonString(record.taxonomyAreaKey),
+    status: parseSportMetricsGolfComparisonStatus(record.status),
+    drillMixChanged: requireComparisonBoolean(record.drillMixChanged),
+    earlier: parseNullableSportMetricsGolfComparisonMetric(record.earlier),
+    later: parseNullableSportMetricsGolfComparisonMetric(record.later),
+    delta: parseSportMetricsGolfComparisonMetric(record.delta),
+    drills: requireComparisonArray(record.drills).map(
+      parseSportMetricsGolfComparisonDrill,
+    ),
+  };
+}
+
+function parseSportMetricsGolfTaxonomyMismatch(
+  value: unknown,
+): SportMetricsGolfTaxonomyMismatch {
+  const record = requireComparisonRecord(value);
+  return {
+    skillCode: requireComparisonString(record.skillCode),
+    earlierTaxonomyAreaKeys: requireComparisonArray(
+      record.earlierTaxonomyAreaKeys,
+    ).map(requireComparisonString),
+    laterTaxonomyAreaKeys: requireComparisonArray(
+      record.laterTaxonomyAreaKeys,
+    ).map(requireComparisonString),
+  };
+}
+
+export function parseSportMetricsGolfComparisonPayload(
+  payload: unknown,
+): SportMetricsGolfComparisonResponse {
+  const envelope = requireComparisonRecord(payload);
+  if (envelope.success === false) {
+    adaptBackendSuccess(payload);
+  }
+  if (
+    envelope.success !== true ||
+    envelope.message !== "Sport metric comparison fetched successfully"
+  ) {
+    return invalidComparisonPayload();
+  }
+
+  const data = requireComparisonRecord(envelope.data);
+  const unclassifiableCounts = requireComparisonRecord(
+    data.unclassifiableCounts,
+  );
+
+  return {
+    success: true,
+    message: "Sport metric comparison fetched successfully",
+    data: {
+      sport: parseComparisonSport(data.sport),
+      earlier: parseSportMetricsGolfComparisonSnapshot(data.earlier),
+      later: parseSportMetricsGolfComparisonSnapshot(data.later),
+      categories: requireComparisonArray(data.categories).map(
+        parseSportMetricsGolfComparisonCategory,
+      ),
+      taxonomyMismatches: requireComparisonArray(data.taxonomyMismatches).map(
+        parseSportMetricsGolfTaxonomyMismatch,
+      ),
+      unclassifiableCounts: {
+        earlier: requireComparisonInteger(unclassifiableCounts.earlier),
+        later: requireComparisonInteger(unclassifiableCounts.later),
+      },
+    },
+  };
+}
+
 export function hasSportMetricsGolfEvidence(
   summary: SportMetricsGolfWeeklySummary | null | undefined,
 ): boolean {
@@ -432,6 +709,30 @@ export async function fetchSportMetricsGolfWeeklySummary(params: {
   );
 
   return parseSportMetricsGolfWeeklySummaryPayload(raw);
+}
+
+export async function fetchSportMetricsGolfComparison(
+  params: FetchSportMetricsGolfComparisonParams,
+): Promise<SportMetricsGolfComparisonResponse> {
+  const raw = await apiRequest(
+    paths.entities.athleteSportMetricsGolfComparison(
+      params.entityId.trim(),
+      params.athleteId.trim(),
+      {
+        earlierTrainingPlanVersionId:
+          params.earlierTrainingPlanVersionId.trim(),
+        laterTrainingPlanVersionId:
+          params.laterTrainingPlanVersionId.trim(),
+      },
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: SPORT_METRICS_GOLF_TIMEOUT_MS,
+    },
+  );
+
+  return parseSportMetricsGolfComparisonPayload(raw);
 }
 
 export type PostGolfSportMetricRecordPayload = {

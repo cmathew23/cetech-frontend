@@ -94,7 +94,7 @@ export type FynAssistantHistoryResult = {
 export type QueryFynAssistantInput = {
   entityId: string;
   athleteId: string;
-  promptKey: FynAssistantPromptKey;
+  promptKey?: FynAssistantPromptKey;
   message?: string;
   trainingPlanVersionId?: string | null;
 };
@@ -250,26 +250,33 @@ export async function queryFynAssistant(
 ): Promise<FynAssistantResponse> {
   const entityId = input.entityId.trim();
   const athleteId = input.athleteId.trim();
-  const promptKey = input.promptKey.trim();
+  const promptKey = input.promptKey?.trim() ?? "";
   const message = input.message?.trim() ?? "";
   const trainingPlanVersionId = input.trainingPlanVersionId?.trim() ?? "";
 
-  if (entityId === "" || athleteId === "" || promptKey === "") {
+  if (entityId === "" || athleteId === "") {
     throw {
-      message: "Entity, athlete, and prompt key are required.",
+      message: "Entity and athlete are required.",
+      status: 400,
+      code: "FYN_ASSISTANT_INPUT_REQUIRED",
+    };
+  }
+
+  if (promptKey === "" && message === "") {
+    throw {
+      message: "A message or prompt key is required.",
       status: 400,
       code: "FYN_ASSISTANT_INPUT_REQUIRED",
     };
   }
 
   const body: {
-    promptKey: FynAssistantPromptKey;
+    promptKey?: FynAssistantPromptKey;
     message?: string;
     trainingPlanVersionId?: string;
-  } = {
-    promptKey: promptKey as FynAssistantPromptKey,
-  };
+  } = {};
 
+  if (promptKey !== "") body.promptKey = promptKey as FynAssistantPromptKey;
   if (message !== "") body.message = message;
   if (trainingPlanVersionId !== "") {
     body.trainingPlanVersionId = trainingPlanVersionId;

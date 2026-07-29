@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fillMandatoryAthletePlanningProfileFields } from "./helpers/athlete-planning-profile-ensure";
 
 type HealthStatusPayload = {
   injuryStatus?: "HEALTHY" | "INJURED" | "IN_REHAB";
@@ -159,8 +160,8 @@ test.describe("athlete planning injury status", () => {
     const { createBodies, patchBodies } = await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
-    await page.getByLabel("Injury Status").selectOption("HEALTHY");
     await expect(page.getByLabel("Injury Area")).toHaveCount(0);
     await expect(page.getByLabel("Injury Notes")).toHaveCount(0);
     await page.getByRole("button", { name: "Save Profile" }).click();
@@ -199,6 +200,7 @@ test.describe("athlete planning injury status", () => {
     const { createBodies, patchBodies } = await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
     await page.getByLabel("Injury Status").selectOption("IN_REHAB");
     await page.getByLabel("Injury Area").fill("Right knee");

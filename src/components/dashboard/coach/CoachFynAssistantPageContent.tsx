@@ -5,10 +5,6 @@ import {
   FynChatThread,
   type FynChatMessage,
 } from "@/components/fyn/FynChatThread";
-import {
-  FynPromptButtonBar,
-  type FynPromptOption,
-} from "@/components/fyn/FynPromptButtonBar";
 
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -25,9 +21,7 @@ import {
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import {
   fetchFynAssistantHistory,
-  getFynPromptLabel,
   queryFynAssistant,
-  type FynAssistantPromptKey,
 } from "@/lib/api/fynAssistant";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,13 +37,6 @@ import {
 const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
 const FYN_HISTORY_LOAD_WARNING =
   "Could not load recent Fyn history. You can still send a new prompt.";
-
-const COACH_FYN_PROMPTS: Array<FynPromptOption<FynAssistantPromptKey>> = [
-  { key: "SUMMARIZE_ATHLETE", label: "Summarize athlete" },
-  { key: "SHOW_MISSING_LOGS", label: "Show missing logs" },
-  { key: "SUMMARIZE_GOLF_METRICS", label: "Summarize Golf Metrics" },
-  { key: "COACHING_TALKING_POINTS", label: "Give coaching talking points" },
-];
 
 function formatError(error: unknown, fallback: string): string {
   if (isNormalizedApiError(error)) return error.message;
@@ -69,8 +56,6 @@ export function CoachFynAssistantPageContent() {
   const [messages, setMessages] = useState<FynChatMessage[]>([]);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [activePromptKey, setActivePromptKey] =
-    useState<FynAssistantPromptKey>("SUMMARIZE_ATHLETE");
   const latestEntityIdRef = useRef(entityId);
   const latestSelectedAthleteIdRef = useRef(selectedAthleteId);
 
@@ -113,7 +98,6 @@ export function CoachFynAssistantPageContent() {
     setMessages([]);
     setHistoryWarning(null);
     setSubmitting(false);
-    setActivePromptKey("SUMMARIZE_ATHLETE");
     setTrainingPlanVersionId(null);
     if (entityId === "" || selectedAthleteId.trim() === "") {
       return;
@@ -167,29 +151,27 @@ export function CoachFynAssistantPageContent() {
     [athletes, selectedAthleteId],
   );
 
-  const sendPrompt = useCallback(
-    async (promptKey: FynAssistantPromptKey, message?: string) => {
+  const sendMessage = useCallback(
+    async (message: string) => {
       if (entityId === "" || selectedAthleteId.trim() === "") return;
 
       const requestedEntityId = entityId;
       const requestedAthleteId = selectedAthleteId;
       const requestedTrainingPlanVersionId = trainingPlanVersionId;
       const createdAt = new Date().toISOString();
-      const trimmedMessage = message?.trim() ?? "";
-      const userText =
-        trimmedMessage !== "" ? trimmedMessage : getFynPromptLabel(promptKey, "coach");
+      const trimmedMessage = message.trim();
+      if (trimmedMessage === "") return;
       const isCurrentSelection = () =>
         latestEntityIdRef.current === requestedEntityId &&
         latestSelectedAthleteIdRef.current === requestedAthleteId;
 
       setSubmitting(true);
-      setActivePromptKey(promptKey);
       setMessages((current) => [
         ...current,
         {
           id: `user-${Date.now()}`,
           role: "user",
-          text: userText,
+          text: trimmedMessage,
           createdAt,
         },
         {
@@ -204,8 +186,7 @@ export function CoachFynAssistantPageContent() {
         const response = await queryFynAssistant({
           entityId: requestedEntityId,
           athleteId: requestedAthleteId,
-          promptKey,
-          message: trimmedMessage !== "" ? trimmedMessage : undefined,
+          message: trimmedMessage,
           trainingPlanVersionId: requestedTrainingPlanVersionId,
         });
 
@@ -312,15 +293,10 @@ export function CoachFynAssistantPageContent() {
             <p className="text-sm text-textSecondary">
               Recent chats from the last 72 hours are shown for the selected athlete.
             </p>
-            <FynPromptButtonBar
-              prompts={COACH_FYN_PROMPTS}
-              disabled={submitting}
-              onSelectPrompt={(promptKey) => void sendPrompt(promptKey)}
-            />
             <FynComposer
               disabled={submitting}
-              placeholder="Ask Fyn a follow-up about this athlete"
-              onSubmit={(message) => sendPrompt(activePromptKey, message)}
+              placeholder="Ask Fyn a question about this athlete"
+              onSubmit={sendMessage}
             />
           </div>
         ) : (
@@ -339,7 +315,7 @@ export function CoachFynAssistantPageContent() {
       >
         {messages.length === 0 ? (
           <p className="text-sm text-textSecondary">
-            Choose an athlete and start with one of the guided prompts above.
+            Choose an athlete and ask Fyn a question.
           </p>
         ) : (
           <FynChatThread messages={messages} emptyState="" />

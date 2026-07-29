@@ -5,10 +5,6 @@ import {
   FynChatThread,
   type FynChatMessage,
 } from "@/components/fyn/FynChatThread";
-import {
-  FynPromptButtonBar,
-  type FynPromptOption,
-} from "@/components/fyn/FynPromptButtonBar";
 
 import { FynComposer } from "@/components/fyn/FynComposer";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
@@ -20,9 +16,7 @@ import { cn } from "@/lib/utils";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchFynAssistantHistory,
-  getFynPromptLabel,
   queryFynAssistant,
-  type FynAssistantPromptKey,
 } from "@/lib/api/fynAssistant";
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -31,13 +25,6 @@ import { useCallback, useEffect, useState } from "react";
 const FYN_LOADING_TEXT = "Fyn is checking your latest training data...";
 const FYN_HISTORY_LOAD_WARNING =
   "Could not load recent Fyn history. You can still send a new prompt.";
-
-const ATHLETE_FYN_PROMPTS: Array<FynPromptOption<FynAssistantPromptKey>> = [
-  { key: "EXPLAIN_TODAYS_PLAN", label: "Explain today’s plan" },
-  { key: "SUMMARIZE_MY_WEEK", label: "Summarize my week" },
-  { key: "WHAT_HAVE_I_MISSED", label: "What have I missed?" },
-  { key: "EXPLAIN_GOLF_METRICS", label: "Explain my Golf Metrics" },
-];
 
 function formatLoadError(error: unknown): string {
   if (isNormalizedApiError(error)) return error.message;
@@ -55,8 +42,6 @@ export function AthleteFynAssistantPageContent() {
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [activePromptKey, setActivePromptKey] =
-    useState<FynAssistantPromptKey>("SUMMARIZE_MY_WEEK");
 
   useEffect(() => {
     if (planningIds.phase !== "ready" || entityId === "" || athleteId === "") return;
@@ -104,22 +89,20 @@ export function AthleteFynAssistantPageContent() {
     };
   }, [athleteId, entityId, planningIds.phase]);
 
-  const sendPrompt = useCallback(
-    async (promptKey: FynAssistantPromptKey, message?: string) => {
+  const sendMessage = useCallback(
+    async (message: string) => {
       if (entityId === "" || athleteId === "") return;
 
       const createdAt = new Date().toISOString();
-      const trimmedMessage = message?.trim() ?? "";
-      const userLabel =
-        trimmedMessage !== "" ? trimmedMessage : getFynPromptLabel(promptKey, "athlete");
+      const trimmedMessage = message.trim();
+      if (trimmedMessage === "") return;
       setSubmitting(true);
-      setActivePromptKey(promptKey);
       setMessages((current) => [
         ...current,
         {
           id: `user-${Date.now()}`,
           role: "user",
-          text: userLabel,
+          text: trimmedMessage,
           createdAt,
         },
         {
@@ -134,8 +117,7 @@ export function AthleteFynAssistantPageContent() {
         const response = await queryFynAssistant({
           entityId,
           athleteId,
-          promptKey,
-          message: trimmedMessage !== "" ? trimmedMessage : undefined,
+          message: trimmedMessage,
           trainingPlanVersionId,
         });
 
@@ -209,20 +191,15 @@ export function AthleteFynAssistantPageContent() {
       >
         <div className="space-y-3">
           <p className="text-sm text-textSecondary">
-            Choose a prompt or ask a short follow-up. Fyn is read-only in this view.
+            Ask Fyn a question. Fyn is read-only in this view.
           </p>
           <p className="text-sm text-textSecondary">
             Recent chats from the last 72 hours are shown here.
           </p>
-          <FynPromptButtonBar
-            prompts={ATHLETE_FYN_PROMPTS}
-            disabled={submitting || planningIds.phase !== "ready"}
-            onSelectPrompt={(promptKey) => void sendPrompt(promptKey)}
-          />
           <FynComposer
             disabled={submitting || planningIds.phase !== "ready"}
-            placeholder="Ask Fyn a follow-up"
-            onSubmit={(message) => sendPrompt(activePromptKey, message)}
+            placeholder="Ask Fyn a question"
+            onSubmit={sendMessage}
           />
         </div>
       </Card>
@@ -236,7 +213,7 @@ export function AthleteFynAssistantPageContent() {
       >
         {messages.length === 0 ? (
           <p className="text-sm text-textSecondary">
-            Start with one of the guided prompts above to get a simple answer from Fyn.
+            Ask Fyn a question to start a conversation.
           </p>
         ) : (
           <FynChatThread messages={messages} emptyState="" />

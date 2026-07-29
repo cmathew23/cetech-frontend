@@ -11,9 +11,9 @@ const GROUPED_SECTION_TITLES = [
   "Health Status",
   "Nutrition Context",
   "Wearables",
-  "Derived Planning Inputs",
   "Blood Report Parameters",
   "Body Composition Parameters",
+  "Derived Planning Inputs",
 ] as const;
 
 test.describe.configure({ mode: "serial" });
@@ -31,6 +31,17 @@ test("APP: grouped section headings visible after profile exists", async ({
       page.getByRole("heading", { name: title, level: 3 }),
     ).toBeVisible({ timeout: 30_000 });
   }
+
+  const renderedSectionOrder = await page
+    .getByRole("heading", { level: 3 })
+    .allTextContents();
+  expect(
+    renderedSectionOrder.filter((title) =>
+      GROUPED_SECTION_TITLES.includes(
+        title as (typeof GROUPED_SECTION_TITLES)[number],
+      ),
+    ),
+  ).toEqual([...GROUPED_SECTION_TITLES]);
 
   await expect(
     page.getByRole("heading", { name: "Planning Profile Form", level: 3 }),

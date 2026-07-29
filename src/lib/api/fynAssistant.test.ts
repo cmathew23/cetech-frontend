@@ -82,7 +82,37 @@ describe("queryFynAssistant", () => {
     });
   });
 
-  it("omits empty optional fields", async () => {
+  it("serializes a message-only request without promptKey", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        answer: "Free-form answer.",
+        warnings: [],
+        usedSources: {
+          plan: true,
+          adherence: false,
+          sportMetrics: false,
+          wearables: false,
+        },
+      },
+    });
+
+    await queryFynAssistant({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      message: "  How should I train today?  ",
+    });
+
+    const [, options] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(JSON.parse(options.body as string)).toEqual({
+      message: "How should I train today?",
+    });
+  });
+
+  it("preserves legacy promptKey-only requests", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,
       data: {
@@ -114,6 +144,20 @@ describe("queryFynAssistant", () => {
     expect(body).toEqual({
       promptKey: "SUMMARIZE_MY_WEEK",
     });
+  });
+
+  it("rejects requests without a message or promptKey", async () => {
+    await expect(
+      queryFynAssistant({
+        entityId: "entity-1",
+        athleteId: "athlete-1",
+        message: "   ",
+      }),
+    ).rejects.toMatchObject({
+      code: "FYN_ASSISTANT_INPUT_REQUIRED",
+      status: 400,
+    });
+    expect(apiRequestMock).not.toHaveBeenCalled();
   });
 });
 

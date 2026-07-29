@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fillMandatoryAthletePlanningProfileFields } from "./helpers/athlete-planning-profile-ensure";
 
 type SportPerformancePayload = {
   highestCompetitionLevelReachedPast12Months?:
@@ -159,10 +160,11 @@ async function setupPlanningRoutes(page: Page) {
 }
 
 test.describe("athlete planning sport performance canonical fields", () => {
-  test("create with level only, then add ranking and reload", async ({ page }) => {
+  test("create with level and ranking, then edit ranking and reload", async ({ page }) => {
     const { createBodies, patchBodies } = await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
     await page
       .getByLabel("Highest Competition Level Reached in the Past 12 Months")
@@ -178,6 +180,7 @@ test.describe("athlete planning sport performance canonical fields", () => {
     expect(createBodies).toHaveLength(1);
     expect(createBodies[0].sportPerformance).toEqual({
       highestCompetitionLevelReachedPast12Months: "STATE",
+      highestRankingAchievedAtThatLevelPast12Months: 1,
     });
     expect(createBodies[0].sportPerformance).not.toHaveProperty("highestLevelReached");
     expect(createBodies[0].sportPerformance).not.toHaveProperty("rankingLevel");
@@ -205,10 +208,11 @@ test.describe("athlete planning sport performance canonical fields", () => {
     ).toHaveValue("8");
   });
 
-  test("clearing level clears and nulls ranking", async ({ page }) => {
+  test("clearing a required level and ranking is blocked", async ({ page }) => {
     const { createBodies, patchBodies } = await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
     await page
       .getByLabel("Highest Competition Level Reached in the Past 12 Months")
@@ -235,27 +239,10 @@ test.describe("athlete planning sport performance canonical fields", () => {
       ),
     ).toHaveValue("");
     await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText("Athlete profile planning updated.")).toBeVisible();
-
-    expect(patchBodies).toHaveLength(1);
-    expect(patchBodies[0].sportPerformance).toEqual({
-      highestCompetitionLevelReachedPast12Months: null,
-      highestRankingAchievedAtThatLevelPast12Months: null,
-    });
-
-    await page.reload();
     await expect(
-      page.getByLabel("Highest Competition Level Reached in the Past 12 Months"),
-    ).toHaveValue("");
-    await expect(
-      page.getByLabel(
-        "Highest Ranking Achieved at That Level in the Past 12 Months",
-      ),
-    ).toBeDisabled();
-    await expect(
-      page.getByLabel(
-        "Highest Ranking Achieved at That Level in the Past 12 Months",
-      ),
-    ).toHaveValue("");
+      page.getByText("Highest Competition Level is required."),
+    ).toBeVisible();
+    await expect(page.getByText("Highest Ranking is required.")).toBeVisible();
+    expect(patchBodies).toHaveLength(0);
   });
 });

@@ -2,6 +2,7 @@
 
 import { AssignmentCoachMultiSelect } from "@/components/dashboard/admin/AssignmentCoachMultiSelect";
 import { DeactivateMemberConfirmModal } from "@/components/dashboard/admin/DeactivateMemberConfirmModal";
+import { RevokeInvitationConfirmModal } from "@/components/dashboard/admin/RevokeInvitationConfirmModal";
 import { UnassignAssignmentConfirmDialog } from "@/components/dashboard/admin/UnassignAssignmentConfirmDialog";
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -462,6 +463,9 @@ export function AcademyAdminWorkspacePage({
     null,
   );
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [revokeInvitationTargetId, setRevokeInvitationTargetId] = useState<
+    string | null
+  >(null);
   const [revokingInvitationId, setRevokingInvitationId] = useState<
     string | null
   >(null);
@@ -990,12 +994,21 @@ export function AcademyAdminWorkspacePage({
     }
   }
 
-  async function handleRevokeInvitation(invitationId: string) {
+  function openRevokeInvitationModal(invitationId: string) {
+    if (revokingInvitationId !== null) return;
+    setRevokeError(null);
+    setRevokeInvitationTargetId(invitationId);
+  }
+
+  function closeRevokeInvitationModal() {
+    if (revokingInvitationId !== null) return;
+    setRevokeInvitationTargetId(null);
+  }
+
+  async function handleRevokeInvitation() {
+    const invitationId = revokeInvitationTargetId;
+    if (!invitationId) return;
     if (!selectedEntityId || revokingInvitationId !== null) return;
-    const ok = window.confirm(
-      "Revoke this invitation? The invitee will no longer be able to accept it.",
-    );
-    if (!ok) return;
     setRevokeError(null);
     setRevokingInvitationId(invitationId);
     try {
@@ -1005,6 +1018,7 @@ export function AcademyAdminWorkspacePage({
         invitationFilter === INVITATION_FILTER_ALL ? undefined : invitationFilter,
       );
       setInvitations(rows);
+      setRevokeInvitationTargetId(null);
     } catch (e) {
       setRevokeError(
         formatAdminApiError(e, "Could not revoke invitation."),
@@ -1645,7 +1659,7 @@ export function AcademyAdminWorkspacePage({
                                   loading={revokingInvitationId === row.invitationId}
                                   disabled={revokingInvitationId !== null}
                                   onClick={() =>
-                                    void handleRevokeInvitation(row.invitationId)
+                                    openRevokeInvitationModal(row.invitationId)
                                   }
                                 >
                                   Revoke
@@ -2043,6 +2057,13 @@ export function AcademyAdminWorkspacePage({
         error={deactivateError}
         onClose={closeDeactivateMemberModal}
         onConfirm={handleConfirmDeactivateMember}
+      />
+
+      <RevokeInvitationConfirmModal
+        open={revokeInvitationTargetId !== null}
+        submitting={revokingInvitationId !== null}
+        onClose={closeRevokeInvitationModal}
+        onConfirm={handleRevokeInvitation}
       />
 
       <UnassignAssignmentConfirmDialog

@@ -25,7 +25,9 @@ import {
   fetchPlanningProfileMe,
   getPlanningFieldType,
   isEditableField,
+  isPlanningProfileFieldRequired,
   patchPlanningProfileMe,
+  PLANNING_PROFILE_BMI_ERROR,
   shouldRenderField,
   validatePlanningProfileDraft,
   type PlanningAllergiesIntolerancesForm,
@@ -46,6 +48,7 @@ import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "
 const PLANNING_FORM_FIELD_LABEL = {
   labelClassName: DASHBOARD_PLANNING_FIELD_LABEL_CLASS,
 } as const;
+const ANTHROPOMETRIC_FIELDS = new Set(["dateOfBirth", "heightCm", "weightKg"]);
 
 function PlanningCardShell({
   titleClassName,
@@ -197,11 +200,6 @@ const SECTION_ORDER: Array<{
   { key: "nutritionContext", title: "Nutrition Context" },
   { key: "wearables", title: "Wearables" },
   {
-    key: "derivedPlanningInputs",
-    title: "Derived Planning Inputs",
-    description: "Read-only backend output",
-  },
-  {
     key: "bloodReportParameters",
     title: "Blood Report Parameters",
     description: "Advanced (Optional)",
@@ -210,6 +208,11 @@ const SECTION_ORDER: Array<{
     key: "bodyCompositionParameters",
     title: "Body Composition Parameters",
     description: "Advanced (Optional)",
+  },
+  {
+    key: "derivedPlanningInputs",
+    title: "Derived Planning Inputs",
+    description: "Read-only backend output",
   },
 ] as const;
 
@@ -296,6 +299,66 @@ function todayDateInputMax(): string {
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function planningNumberInputLimits(
+  group: PlanningProfileGroupName,
+  field: string,
+): { min?: number; max?: number; step?: number | "any" } {
+  if (group === "athleteContext" && field === "heightCm") {
+    return { min: 100, max: 220, step: 0.1 };
+  }
+  if (group === "athleteContext" && field === "weightKg") {
+    return { min: 15, max: 200, step: 0.1 };
+  }
+  if (group === "trainingExposure" && field === "trainingAgeYears") {
+    return { min: 1, step: "any" };
+  }
+  if (
+    group === "trainingExposure"
+    && field === "currentWeeklyTrainingExposureHours"
+  ) {
+    return { min: 1, max: 40, step: "any" };
+  }
+  if (group === "trainingExposure" && field === "weeklyAvailabilityDays") {
+    return { min: 1, max: 7, step: 1 };
+  }
+  if (group === "trainingExposure" && field === "weeklyAvailabilityHours") {
+    return { min: 1, max: 40, step: "any" };
+  }
+  if (group === "bloodReportParameters") {
+    if (field === "hemoglobin") return { min: 3, max: 25, step: "any" };
+    if (field === "vitaminD") return { min: 1, max: 250, step: "any" };
+    if (field === "vitaminB12") return { min: 50, max: 5000, step: "any" };
+    if (field === "ferritin") return { min: 1, max: 3000, step: "any" };
+    if (field === "crp") return { min: 0, max: 500, step: "any" };
+    if (field === FASTING_BLOOD_GLUCOSE_FIELD) {
+      return { min: 30, max: 600, step: "any" };
+    }
+    if (field === POSTPRANDIAL_BLOOD_GLUCOSE_FIELD) {
+      return { min: 30, max: 800, step: "any" };
+    }
+  }
+  if (group === "bodyCompositionParameters") {
+    if (field === "bodyFatPercent") return { min: 1, max: 70, step: "any" };
+    if (field === "skeletalLeanMassKg") {
+      return { min: 1, max: 200, step: "any" };
+    }
+    if (field === "skeletalFatMassKg") {
+      return { min: 0.5, max: 200, step: "any" };
+    }
+    if (field === "visceralFatLevel") return { min: 1, max: 30, step: 1 };
+    if (field === "visceralFatArea") {
+      return { min: 1, max: 500, step: "any" };
+    }
+    if (field === "bmrKcalDay") {
+      return { min: 500, max: 5000, step: "any" };
+    }
+    if (field === "muscleMassKg") {
+      return { min: 1, max: 200, step: "any" };
+    }
+  }
+  return {};
 }
 
 function toFieldLabel(field: string): string {
@@ -449,15 +512,26 @@ export function AthleteProfilePlanningPageContent() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [touchedValidationFields, setTouchedValidationFields] = useState<
+    Set<string>
+  >(() => new Set());
   const [isEditingExisting, setIsEditingExisting] = useState(false);
   const entityId = useMemo(
     () => accessContext?.academy.trainingEntityId?.trim() ?? "",
     [accessContext],
   );
   const validationErrors = useMemo(
-    () => collectPlanningProfileValidationErrors(draft),
-    [draft],
+    () =>
+      collectPlanningProfileValidationErrors(
+        draft,
+        state.phase === "ready" && state.mode === "existing"
+          ? { baseline: baseline ?? draft }
+          : undefined,
+      ),
+    [baseline, draft, state],
   );
+  const createSubmitDisabled =
+    saveBusy || Object.keys(validationErrors).length > 0;
 
   const load = useCallback(async () => {
     if (!accessGateReady) {
@@ -469,6 +543,7 @@ export function AthleteProfilePlanningPageContent() {
     setSaveError(null);
     setSaveSuccess(null);
     setShowValidationErrors(false);
+    setTouchedValidationFields(new Set());
 
     let defaults: AthleteProfileDefaults = {
       primarySport: "",
@@ -571,7 +646,8 @@ export function AthleteProfilePlanningPageContent() {
     e.preventDefault();
     if (!createMode || entityId === "") return;
     setShowValidationErrors(true);
-    const hasFieldErrors = Object.keys(validationErrors).length > 0;
+    const submitValidationErrors = collectPlanningProfileValidationErrors(draft);
+    const hasFieldErrors = Object.keys(submitValidationErrors).length > 0;
     if (hasFieldErrors) {
       setSaveError("Please fix the highlighted fields.");
       setSaveSuccess(null);
@@ -597,6 +673,7 @@ export function AthleteProfilePlanningPageContent() {
       setBaseline(createdDraft);
       setIsEditingExisting(false);
       setShowValidationErrors(false);
+      setTouchedValidationFields(new Set());
       setSaveSuccess("Athlete profile planning saved.");
     } catch (e2) {
       setSaveError(
@@ -611,14 +688,17 @@ export function AthleteProfilePlanningPageContent() {
     e.preventDefault();
     if (createMode || entityId === "") return;
     setShowValidationErrors(true);
-    const hasFieldErrors = Object.keys(validationErrors).length > 0;
-    if (hasFieldErrors) {
-      setSaveError("Please fix the highlighted fields.");
+    if (!baseline) {
+      setSaveError("Baseline profile data is missing. Reload and try again.");
       setSaveSuccess(null);
       return;
     }
-    if (!baseline) {
-      setSaveError("Baseline profile data is missing. Reload and try again.");
+    const submitValidationErrors = collectPlanningProfileValidationErrors(draft, {
+      baseline,
+    });
+    const hasFieldErrors = Object.keys(submitValidationErrors).length > 0;
+    if (hasFieldErrors) {
+      setSaveError("Please fix the highlighted fields.");
       setSaveSuccess(null);
       return;
     }
@@ -654,6 +734,7 @@ export function AthleteProfilePlanningPageContent() {
       setBaseline(updatedDraft);
       setIsEditingExisting(false);
       setShowValidationErrors(false);
+      setTouchedValidationFields(new Set());
       setSaveSuccess("Athlete profile planning updated.");
     } catch (e2) {
       setSaveError(
@@ -669,6 +750,17 @@ export function AthleteProfilePlanningPageContent() {
     field: string,
     value: PlanningFormValue,
   ) {
+    if (
+      (group === "athleteContext" && ANTHROPOMETRIC_FIELDS.has(field))
+      || group === "bloodReportParameters"
+      || group === "bodyCompositionParameters"
+    ) {
+      setTouchedValidationFields((previous) => {
+        const next = new Set(previous);
+        next.add(`${group}.${field}`);
+        return next;
+      });
+    }
     setDraft((prev) => ({
       ...prev,
       [group]: {
@@ -685,10 +777,33 @@ export function AthleteProfilePlanningPageContent() {
   ) {
     const type = getPlanningFieldType(group, field, record);
     const label = toFieldLabel(field);
+    const numberInputLimits = planningNumberInputLimits(group, field);
+    const required = isPlanningProfileFieldRequired(group, field);
     const readOnly = !isEditableField(group, field) || formDisabled;
-    const fieldError = showValidationErrors
-      ? validationErrors[`${group}.${field}`]
-      : undefined;
+    const fieldKey = `${group}.${field}`;
+    const validationError = validationErrors[fieldKey];
+    const bmiChanged =
+      touchedValidationFields.has("athleteContext.heightCm")
+      || touchedValidationFields.has("athleteContext.weightKg");
+    const showImmediateBmiError =
+      group === "athleteContext"
+      && field === "weightKg"
+      && validationError === PLANNING_PROFILE_BMI_ERROR
+      && bmiChanged;
+    const bodyCompositionChanged =
+      touchedValidationFields.has("athleteContext.weightKg")
+      || [...touchedValidationFields].some((key) =>
+        key.startsWith("bodyCompositionParameters.")
+      );
+    const showImmediateBodyCompositionError =
+      group === "bodyCompositionParameters" && bodyCompositionChanged;
+    const fieldError =
+      showValidationErrors
+      || touchedValidationFields.has(fieldKey)
+      || showImmediateBmiError
+      || showImmediateBodyCompositionError
+        ? validationError
+        : undefined;
     if (group === "nutritionContext" && field === "regionalCuisinePreference") {
       const selectedValues = Array.isArray(value) ? value : [];
       const selectedSet = new Set(selectedValues);
@@ -710,6 +825,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -735,7 +851,7 @@ export function AthleteProfilePlanningPageContent() {
           <p className="text-xs text-textSecondary">
             {selectedSummary.length > 0
               ? `Selected: ${selectedSummary.join(", ")}`
-              : "No selection yet. Leave empty if no preference."}
+              : "Select at least one preference."}
           </p>
         </FormField>
       );
@@ -805,6 +921,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -921,6 +1038,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -957,6 +1075,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -985,6 +1104,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1021,6 +1141,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1047,6 +1168,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1088,6 +1210,7 @@ export function AthleteProfilePlanningPageContent() {
             key={`${group}-${field}`}
             id={`${group}-${field}`}
             label={label}
+            required={required}
             {...PLANNING_FORM_FIELD_LABEL}
           >
             <textarea
@@ -1109,6 +1232,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1135,14 +1259,14 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           helperText="Unit: mg/dL"
           error={fieldError}
         >
           <Input
             id={`${group}-${field}`}
             type="number"
-            min={0}
-            step="any"
+            {...numberInputLimits}
             inputMode="decimal"
             value={typeof value === "string" ? value : ""}
             readOnly={!isEditableField(group, field)}
@@ -1162,6 +1286,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1185,6 +1310,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           error={fieldError}
           {...PLANNING_FORM_FIELD_LABEL}
         >
@@ -1211,6 +1337,7 @@ export function AthleteProfilePlanningPageContent() {
           key={`${group}-${field}`}
           id={`${group}-${field}`}
           label={label}
+          required={required}
           {...PLANNING_FORM_FIELD_LABEL}
         >
           <Select
@@ -1233,15 +1360,18 @@ export function AthleteProfilePlanningPageContent() {
         key={`${group}-${field}`}
         id={`${group}-${field}`}
         label={label}
+        required={required}
         error={fieldError}
         {...PLANNING_FORM_FIELD_LABEL}
       >
         <Input
           id={`${group}-${field}`}
+          type={type === "number" ? "number" : undefined}
           value={scalarValue}
           readOnly={!isEditableField(group, field)}
           disabled={readOnly}
           inputMode={type === "number" ? "decimal" : undefined}
+          {...numberInputLimits}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
             updateField(group, field, e.target.value)
           }
@@ -1402,6 +1532,7 @@ export function AthleteProfilePlanningPageContent() {
     setSaveError(null);
     setSaveSuccess(null);
     setShowValidationErrors(false);
+    setTouchedValidationFields(new Set());
     setIsEditingExisting(true);
   }
 
@@ -1413,6 +1544,7 @@ export function AthleteProfilePlanningPageContent() {
     setSaveError(null);
     setSaveSuccess(null);
     setShowValidationErrors(false);
+    setTouchedValidationFields(new Set());
     setIsEditingExisting(false);
   }
 
@@ -1463,7 +1595,7 @@ export function AthleteProfilePlanningPageContent() {
                 type="submit"
                 variant="primary"
                 loading={saveBusy}
-                disabled={saveBusy}
+                disabled={createSubmitDisabled}
               >
                 Save Profile
               </Button>

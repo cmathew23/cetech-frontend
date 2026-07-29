@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fillMandatoryAthletePlanningProfileFields } from "./helpers/athlete-planning-profile-ensure";
 
 type BloodReportPayload = {
   fastingBloodGlucoseFBS?: number | null;
@@ -158,6 +159,7 @@ test.describe("athlete planning blood glucose fields", () => {
     const { createBodies, patchBodies } = await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
     const fbs = page.getByLabel("Fasting Blood Glucose (FBS)");
     const ppbs = page.getByLabel("Postprandial Blood Glucose (PPBS)");
@@ -197,6 +199,7 @@ test.describe("athlete planning blood glucose fields", () => {
     await setupPlanningRoutes(page);
     await page.goto("/athlete/profile-planning");
     await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
+    await fillMandatoryAthletePlanningProfileFields(page);
 
     await page.getByLabel("Fasting Blood Glucose (FBS)").fill("-1");
     await page.getByRole("button", { name: "Save Profile" }).click();

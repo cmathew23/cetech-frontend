@@ -73,6 +73,9 @@ export type PlanningProfileBootstrapResult =
 
 export type PlanningFieldErrors = Record<string, string>;
 
+export const PLANNING_PROFILE_BMI_ERROR =
+  "Height and weight produce a BMI outside the allowed range of 10 to 60";
+
 const FIELD_TYPE_HINTS: Partial<
   Record<PlanningProfileGroupName, Record<string, PlanningFieldType>>
 > = {
@@ -233,6 +236,28 @@ const ALLOWED_SPORT_COMPETITION_LEVEL_VALUES = new Set([
   "INTERNATIONAL",
 ]);
 const ALLOWED_INJURY_STATUS_VALUES = new Set(["HEALTHY", "INJURED", "IN_REHAB"]);
+const REQUIRED_PLANNING_FIELDS: Partial<
+  Record<PlanningProfileGroupName, Set<string>>
+> = {
+  athleteContext: new Set(["dateOfBirth", "sex", "heightCm", "weightKg"]),
+  sportContext: new Set(["selfReportedLevel"]),
+  sportPerformance: new Set([
+    SPORT_PERFORMANCE_LEVEL_FIELD,
+    SPORT_PERFORMANCE_RANKING_FIELD,
+  ]),
+  trainingExposure: new Set([
+    TRAINING_EXPOSURE_YEARS_FIELD,
+    TRAINING_EXPOSURE_HOURS_FIELD,
+    "weeklyAvailabilityDays",
+    "weeklyAvailabilityHours",
+  ]),
+  healthStatus: new Set(["injuryStatus"]),
+  nutritionContext: new Set([
+    "dietType",
+    REGIONAL_CUISINE_FIELD,
+    ALLERGIES_FIELD,
+  ]),
+};
 const ALLOWED_ALLERGIES_IN_TOLERANCES_VALUES = new Set([
   "Celery",
   "Cereals containing gluten",
@@ -597,6 +622,15 @@ function isBloodGlucoseField(
   );
 }
 
+function isAdvancedOptionalNumberGroup(
+  group: PlanningProfileGroupName,
+): boolean {
+  return (
+    group === "bloodReportParameters"
+    || group === "bodyCompositionParameters"
+  );
+}
+
 function scalarToFormValue(
   group: PlanningProfileGroupName,
   field: string,
@@ -894,6 +928,9 @@ function convertPatchValue(
   if (isSportPerformanceRankingField(group, field)) {
     return rankingIntegerOrNull(value, field);
   }
+  if (isAdvancedOptionalNumberGroup(group) && type === "number") {
+    return numberOrUndefined(value, field) ?? null;
+  }
   if (type === "number") return numberWhenPresent(value, field);
   if (type === "boolean") return booleanWhenPresent(value, field);
   if (isSportPerformanceLevelField(group, field)) {
@@ -1110,6 +1147,17 @@ export function toIsoFromUiDob(value: string): string {
   return utc.toISOString();
 }
 
+function calculateUtcCalendarAge(dateOfBirthIso: string, now: Date): number {
+  const birthDate = new Date(dateOfBirthIso);
+  let age = now.getUTCFullYear() - birthDate.getUTCFullYear();
+  const birthdayHasNotOccurred =
+    now.getUTCMonth() < birthDate.getUTCMonth()
+    || (now.getUTCMonth() === birthDate.getUTCMonth()
+      && now.getUTCDate() < birthDate.getUTCDate());
+  if (birthdayHasNotOccurred) age -= 1;
+  return age;
+}
+
 export function buildPlanningProfileFormState(
   record: PlanningProfileRecord | null,
   defaults?: Partial<PlanningProfileFormState>,
@@ -1183,10 +1231,27 @@ export function getPlanningFieldType(
   return inferFieldType(group, field, record);
 }
 
+export function isPlanningProfileFieldRequired(
+  group: PlanningProfileGroupName,
+  field: string,
+): boolean {
+  return REQUIRED_PLANNING_FIELDS[group]?.has(field) ?? false;
+}
+
 export function buildPlanningProfileCreateBody(
   draft: PlanningProfileFormState,
   record?: PlanningProfileRecord | null,
 ): Record<string, unknown> {
+  const validationErrors = collectPlanningProfileValidationErrors(draft);
+  const firstValidationError = Object.values(validationErrors)[0];
+  if (firstValidationError) {
+    throw {
+      message: firstValidationError,
+      status: 400,
+      code: "INVALID_PLANNING_PROFILE",
+    } satisfies NormalizedApiError;
+  }
+
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
     if (groupName === "derivedPlanningInputs") continue;
@@ -1233,6 +1298,14 @@ export function buildPlanningProfilePatchBody(
     if (groupName === "sportPerformance") {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
+      const levelChanged = !formValuesEqual(
+        baseline[groupName][SPORT_PERFORMANCE_LEVEL_FIELD],
+        rawLevel,
+      );
+      const rankingChanged = !formValuesEqual(
+        baseline[groupName][SPORT_PERFORMANCE_RANKING_FIELD],
+        rawRanking,
+      );
       const levelTrimmed = valueAsString(
         rawLevel,
         SPORT_PERFORMANCE_LEVEL_FIELD,
@@ -1241,7 +1314,11 @@ export function buildPlanningProfilePatchBody(
         rawRanking,
         SPORT_PERFORMANCE_RANKING_FIELD,
       ).trim();
-      if (levelTrimmed === "" && rankingTrimmed !== "") {
+      if (
+        (levelChanged || rankingChanged)
+        && levelTrimmed === ""
+        && rankingTrimmed !== ""
+      ) {
         throw {
           message:
             "highestRankingAchievedAtThatLevelPast12Months requires highestCompetitionLevelReachedPast12Months",
@@ -1290,8 +1367,10 @@ export function validatePlanningProfileDraft(
 
 export function collectPlanningProfileValidationErrors(
   draft: PlanningProfileFormState,
+  options?: { baseline?: PlanningProfileFormState },
 ): PlanningFieldErrors {
   const errors: PlanningFieldErrors = {};
+  const baseline = options?.baseline;
 
   function readValue(
     group: PlanningProfileGroupName,
@@ -1299,6 +1378,24 @@ export function collectPlanningProfileValidationErrors(
   ): string {
     const raw = draft[group][field];
     return typeof raw === "string" ? raw.trim() : "";
+  }
+
+  function shouldValidate(
+    group: PlanningProfileGroupName,
+    field: string,
+  ): boolean {
+    if (!baseline) return true;
+    return !formValuesEqual(baseline[group][field], draft[group][field]);
+  }
+
+  function addRequiredStringError(
+    group: PlanningProfileGroupName,
+    field: string,
+    message: string,
+  ): void {
+    if (shouldValidate(group, field) && readValue(group, field) === "") {
+      errors[fieldErrorKey(group, field)] = message;
+    }
   }
 
   function validateNumber(
@@ -1313,6 +1410,7 @@ export function collectPlanningProfileValidationErrors(
       message: string;
     },
   ) {
+    if (!shouldValidate(group, field)) return;
     const value = readValue(group, field);
     if (value === "") {
       if (options.allowEmpty ?? true) return;
@@ -1343,9 +1441,17 @@ export function collectPlanningProfileValidationErrors(
   }
 
   const dob = readValue("athleteContext", "dateOfBirth");
-  if (dob !== "") {
+  if (shouldValidate("athleteContext", "dateOfBirth") && dob === "") {
+    errors[fieldErrorKey("athleteContext", "dateOfBirth")] =
+      "Date of Birth is required.";
+  } else if (shouldValidate("athleteContext", "dateOfBirth")) {
     try {
-      toIsoFromUiDob(dob);
+      const dateOfBirthIso = toIsoFromUiDob(dob);
+      const age = calculateUtcCalendarAge(dateOfBirthIso, new Date());
+      if (age < 5 || age > 80) {
+        errors[fieldErrorKey("athleteContext", "dateOfBirth")] =
+          "Athlete age must be between 5 and 80 years";
+      }
     } catch {
       errors[fieldErrorKey("athleteContext", "dateOfBirth")] =
         "Date of Birth must be a valid past date.";
@@ -1353,23 +1459,61 @@ export function collectPlanningProfileValidationErrors(
   }
 
   const sex = readValue("athleteContext", "sex");
-  if (sex !== "" && !ALLOWED_SEX_VALUES.has(sex)) {
+  if (shouldValidate("athleteContext", "sex") && sex === "") {
+    errors[fieldErrorKey("athleteContext", "sex")] = "Gender is required.";
+  } else if (
+    shouldValidate("athleteContext", "sex")
+    && !ALLOWED_SEX_VALUES.has(sex)
+  ) {
     errors[fieldErrorKey("athleteContext", "sex")] =
       "Gender must be Male or Female.";
   }
 
   validateNumber("athleteContext", "heightCm", {
-    positive: true,
-    message: "Height must be greater than 0.",
+    min: 100,
+    max: 220,
+    allowEmpty: false,
+    message: "Height must be between 100 and 220 cm",
   });
   validateNumber("athleteContext", "weightKg", {
-    positive: true,
-    message: "Weight must be greater than 0.",
+    min: 15,
+    max: 200,
+    allowEmpty: false,
+    message: "Weight must be between 15 and 200 kg",
   });
 
+  const heightValue = readValue("athleteContext", "heightCm");
+  const weightValue = readValue("athleteContext", "weightKg");
+  const height = Number(heightValue);
+  const weight = Number(weightValue);
+  const heightIsValid =
+    heightValue !== ""
+    && Number.isFinite(height)
+    && height >= 100
+    && height <= 220;
+  const weightIsValid =
+    weightValue !== ""
+    && Number.isFinite(weight)
+    && weight >= 15
+    && weight <= 200;
+  const anthropometricValueChanged =
+    shouldValidate("athleteContext", "heightCm")
+    || shouldValidate("athleteContext", "weightKg");
+  if (anthropometricValueChanged && heightIsValid && weightIsValid) {
+    const bmi = weight / ((height / 100) ** 2);
+    const boundaryTolerance = 1e-9;
+    if (bmi < 10 - boundaryTolerance || bmi > 60 + boundaryTolerance) {
+      errors[fieldErrorKey("athleteContext", "weightKg")] =
+        PLANNING_PROFILE_BMI_ERROR;
+    }
+  }
+
   const selfReportedLevel = readValue("sportContext", "selfReportedLevel");
-  if (
-    selfReportedLevel !== ""
+  if (shouldValidate("sportContext", "selfReportedLevel") && selfReportedLevel === "") {
+    errors[fieldErrorKey("sportContext", "selfReportedLevel")] =
+      "Self-Reported Level is required.";
+  } else if (
+    shouldValidate("sportContext", "selfReportedLevel")
     && !ALLOWED_SELF_REPORTED_LEVEL_VALUES.has(selfReportedLevel)
   ) {
     errors[fieldErrorKey("sportContext", "selfReportedLevel")] =
@@ -1377,24 +1521,28 @@ export function collectPlanningProfileValidationErrors(
   }
 
   validateNumber("trainingExposure", "trainingAgeYears", {
-    min: 0,
-    message: "Years of training must be greater than or equal to 0.",
+    min: 1,
+    allowEmpty: false,
+    message: "Years of training must be at least 1.",
   });
   validateNumber("trainingExposure", "currentWeeklyTrainingExposureHours", {
-    min: 0,
-    max: 168,
-    message: "Weekly training hours must be between 0 and 168.",
+    min: 1,
+    max: 40,
+    allowEmpty: false,
+    message: "Hours usually trained per week must be between 1 and 40.",
   });
   validateNumber("trainingExposure", "weeklyAvailabilityDays", {
-    min: 0,
+    min: 1,
     max: 7,
     integer: true,
-    message: "Weekly availability days must be an integer between 0 and 7.",
+    allowEmpty: false,
+    message: "Training days available must be an integer between 1 and 7.",
   });
   validateNumber("trainingExposure", "weeklyAvailabilityHours", {
-    min: 0,
-    max: 168,
-    message: "Weekly availability hours must be between 0 and 168.",
+    min: 1,
+    max: 40,
+    allowEmpty: false,
+    message: "Hours available per week must be between 1 and 40.",
   });
 
   const competitionLevel = readValue(
@@ -1402,17 +1550,32 @@ export function collectPlanningProfileValidationErrors(
     SPORT_PERFORMANCE_LEVEL_FIELD,
   );
   if (
-    competitionLevel !== "" &&
-    !ALLOWED_SPORT_COMPETITION_LEVEL_VALUES.has(competitionLevel)
+    shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
+    && competitionLevel === ""
+  ) {
+    errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)] =
+      "Highest Competition Level is required.";
+  } else if (
+    shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
+    && !ALLOWED_SPORT_COMPETITION_LEVEL_VALUES.has(competitionLevel)
   ) {
     errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)] =
       "Competition level must be District, State, National, or International.";
   }
   const ranking = readValue("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD);
-  if (ranking !== "" && competitionLevel === "") {
+  if (
+    shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
+    && ranking === ""
+  ) {
+    errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
+      "Highest Ranking is required.";
+  } else if (
+    shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
+    && competitionLevel === ""
+  ) {
     errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
       "Select competition level before entering ranking.";
-  } else if (ranking !== "") {
+  } else if (shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)) {
     validateNumber("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD, {
       integer: true,
       positive: true,
@@ -1422,11 +1585,17 @@ export function collectPlanningProfileValidationErrors(
   }
 
   const injuryStatus = readValue("healthStatus", "injuryStatus");
-  if (injuryStatus !== "" && !ALLOWED_INJURY_STATUS_VALUES.has(injuryStatus)) {
+  if (shouldValidate("healthStatus", "injuryStatus") && injuryStatus === "") {
+    errors[fieldErrorKey("healthStatus", "injuryStatus")] =
+      "Injury Status is required.";
+  } else if (
+    shouldValidate("healthStatus", "injuryStatus")
+    && !ALLOWED_INJURY_STATUS_VALUES.has(injuryStatus)
+  ) {
     errors[fieldErrorKey("healthStatus", "injuryStatus")] =
       "Injury status is invalid.";
   }
-  if (injuryStatus === "HEALTHY") {
+  if (shouldValidate("healthStatus", "injuryStatus") && injuryStatus === "HEALTHY") {
     const injuryArea = readValue("healthStatus", "injuryArea");
     const injuryNotes = readValue("healthStatus", "injuryNotes");
     if (injuryArea !== "" || injuryNotes !== "") {
@@ -1435,8 +1604,27 @@ export function collectPlanningProfileValidationErrors(
     }
   }
 
+  addRequiredStringError(
+    "nutritionContext",
+    "dietType",
+    "Diet Type is required.",
+  );
+
+  if (shouldValidate("nutritionContext", REGIONAL_CUISINE_FIELD)) {
+    const cuisineValue = draft.nutritionContext[REGIONAL_CUISINE_FIELD];
+    const selectedCuisines = Array.isArray(cuisineValue)
+      ? cuisineValue.map((item) => item.trim()).filter((item) => item !== "")
+      : [];
+    if (selectedCuisines.length === 0) {
+      errors[fieldErrorKey("nutritionContext", REGIONAL_CUISINE_FIELD)] =
+        "Select at least one Regional Cuisine Preference.";
+    }
+  }
+
   const allergiesValue = draft.nutritionContext[ALLERGIES_FIELD];
   if (
+    shouldValidate("nutritionContext", ALLERGIES_FIELD)
+    &&
     allergiesValue &&
     typeof allergiesValue === "object" &&
     !Array.isArray(allergiesValue)
@@ -1465,21 +1653,178 @@ export function collectPlanningProfileValidationErrors(
     } else if (selected.includes(ALLERGIES_OTHERS_OPTION) && othersText === "") {
       errors[fieldErrorKey("nutritionContext", ALLERGIES_FIELD)] =
         "Others requires additional text.";
+    } else if (!noFoodAllergies && selected.length === 0) {
+      errors[fieldErrorKey("nutritionContext", ALLERGIES_FIELD)] =
+        "Select at least one allergy or explicitly select I do not have food allergies.";
     }
+  } else if (shouldValidate("nutritionContext", ALLERGIES_FIELD)) {
+    errors[fieldErrorKey("nutritionContext", ALLERGIES_FIELD)] =
+      "Select at least one allergy or explicitly select I do not have food allergies.";
   }
 
-  for (const [field] of Object.entries(draft.bloodReportParameters)) {
-    validateNumber("bloodReportParameters", field, {
-      min: 0,
-      message: "Value must be greater than or equal to 0.",
-    });
+  validateNumber("bloodReportParameters", HEMOGLOBIN_FIELD, {
+    min: 3,
+    max: 25,
+    message: "Hemoglobin must be between 3 and 25 g/dL",
+  });
+  validateNumber("bloodReportParameters", VITAMIN_D_FIELD, {
+    min: 1,
+    max: 250,
+    message: "Vitamin D must be between 1 and 250 ng/mL",
+  });
+  validateNumber("bloodReportParameters", VITAMIN_B12_FIELD, {
+    min: 50,
+    max: 5000,
+    message: "Vitamin B12 must be between 50 and 5000 pg/mL",
+  });
+  validateNumber("bloodReportParameters", FERRITIN_FIELD, {
+    min: 1,
+    max: 3000,
+    message: "Ferritin must be between 1 and 3000 ng/mL",
+  });
+  validateNumber("bloodReportParameters", CRP_FIELD, {
+    min: 0,
+    max: 500,
+    message: "CRP must be between 0 and 500 mg/L",
+  });
+  validateNumber("bloodReportParameters", FASTING_BLOOD_GLUCOSE_FIELD, {
+    min: 30,
+    max: 600,
+    message: "Fasting Blood Glucose must be between 30 and 600 mg/dL",
+  });
+  validateNumber("bloodReportParameters", POSTPRANDIAL_BLOOD_GLUCOSE_FIELD, {
+    min: 30,
+    max: 800,
+    message: "Postprandial Blood Glucose must be between 30 and 800 mg/dL",
+  });
+
+  validateNumber("bodyCompositionParameters", "bodyFatPercent", {
+    min: 1,
+    max: 70,
+    message: "Body Fat Percentage must be between 1 and 70%",
+  });
+  validateNumber("bodyCompositionParameters", SKELETAL_LEAN_MASS_FIELD, {
+    min: 1,
+    max: 200,
+    message: "Skeletal Muscle Mass must be between 1 and 200 kg",
+  });
+  validateNumber("bodyCompositionParameters", SKELETAL_FAT_MASS_FIELD, {
+    min: 0.5,
+    max: 200,
+    message: "Body Fat Mass must be between 0.5 and 200 kg",
+  });
+  validateNumber("bodyCompositionParameters", "visceralFatLevel", {
+    min: 1,
+    max: 30,
+    integer: true,
+    message: "Visceral Fat Level must be a whole number between 1 and 30",
+  });
+  validateNumber("bodyCompositionParameters", "visceralFatArea", {
+    min: 1,
+    max: 500,
+    message: "Visceral Fat Area must be between 1 and 500",
+  });
+  validateNumber("bodyCompositionParameters", BMR_FIELD, {
+    min: 500,
+    max: 5000,
+    message: "Basal Metabolic Rate must be between 500 and 5000 kcal/day",
+  });
+  validateNumber("bodyCompositionParameters", "muscleMassKg", {
+    min: 1,
+    max: 200,
+    message: "Muscle Mass must be between 1 and 200 kg",
+  });
+
+  function readValidOptionalNumber(
+    group: PlanningProfileGroupName,
+    field: string,
+    min: number,
+    max: number,
+  ): number | null {
+    const raw = readValue(group, field);
+    if (raw === "") return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max
+      ? parsed
+      : null;
   }
 
-  for (const [field] of Object.entries(draft.bodyCompositionParameters)) {
-    validateNumber("bodyCompositionParameters", field, {
-      min: 0,
-      message: "Value must be greater than or equal to 0.",
-    });
+  const athleteWeight = readValidOptionalNumber(
+    "athleteContext",
+    "weightKg",
+    15,
+    200,
+  );
+  const skeletalMuscleMass = readValidOptionalNumber(
+    "bodyCompositionParameters",
+    SKELETAL_LEAN_MASS_FIELD,
+    1,
+    200,
+  );
+  const bodyFatMass = readValidOptionalNumber(
+    "bodyCompositionParameters",
+    SKELETAL_FAT_MASS_FIELD,
+    0.5,
+    200,
+  );
+  const muscleMass = readValidOptionalNumber(
+    "bodyCompositionParameters",
+    "muscleMassKg",
+    1,
+    200,
+  );
+
+  if (
+    athleteWeight !== null
+    && skeletalMuscleMass !== null
+    && (shouldValidate("athleteContext", "weightKg")
+      || shouldValidate(
+        "bodyCompositionParameters",
+        SKELETAL_LEAN_MASS_FIELD,
+      ))
+    && skeletalMuscleMass > athleteWeight
+  ) {
+    errors[
+      fieldErrorKey("bodyCompositionParameters", SKELETAL_LEAN_MASS_FIELD)
+    ] = "Skeletal Muscle Mass must not exceed athlete weight";
+  }
+  if (
+    athleteWeight !== null
+    && bodyFatMass !== null
+    && (shouldValidate("athleteContext", "weightKg")
+      || shouldValidate(
+        "bodyCompositionParameters",
+        SKELETAL_FAT_MASS_FIELD,
+      ))
+    && bodyFatMass > athleteWeight
+  ) {
+    errors[
+      fieldErrorKey("bodyCompositionParameters", SKELETAL_FAT_MASS_FIELD)
+    ] = "Body Fat Mass must not exceed athlete weight";
+  }
+  if (
+    athleteWeight !== null
+    && muscleMass !== null
+    && (shouldValidate("athleteContext", "weightKg")
+      || shouldValidate("bodyCompositionParameters", "muscleMassKg"))
+    && muscleMass > athleteWeight
+  ) {
+    errors[fieldErrorKey("bodyCompositionParameters", "muscleMassKg")] =
+      "Muscle Mass must not exceed athlete weight";
+  }
+  if (
+    skeletalMuscleMass !== null
+    && muscleMass !== null
+    && (shouldValidate(
+      "bodyCompositionParameters",
+      SKELETAL_LEAN_MASS_FIELD,
+    )
+      || shouldValidate("bodyCompositionParameters", "muscleMassKg"))
+    && skeletalMuscleMass > muscleMass
+  ) {
+    errors[
+      fieldErrorKey("bodyCompositionParameters", SKELETAL_LEAN_MASS_FIELD)
+    ] = "Skeletal Muscle Mass must not exceed Muscle Mass";
   }
 
   return errors;

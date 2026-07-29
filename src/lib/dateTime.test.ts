@@ -8,10 +8,21 @@ import {
   formatDateWithWeekday,
   formatPlanningProfileDateDisplay,
   getLocalDateKey,
+  getPlanningDateKey,
   getLocalWeekday,
   normalizeDateOnlyKey,
   parseTimestampMsForSort,
 } from "@/lib/dateTime";
+
+describe("getPlanningDateKey", () => {
+  it("uses Asia/Kolkata calendar date for late-evening UTC instants", () => {
+    expect(getPlanningDateKey("2026-07-29T19:00:00Z")).toBe("2026-07-30");
+  });
+
+  it("keeps the previous planning date before midnight IST", () => {
+    expect(getPlanningDateKey("2026-07-29T18:29:59Z")).toBe("2026-07-29");
+  });
+});
 
 describe("getLocalDateKey", () => {
   it("uses the browser-local calendar date, not UTC", () => {

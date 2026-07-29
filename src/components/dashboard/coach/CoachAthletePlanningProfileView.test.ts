@@ -127,6 +127,7 @@ import {
   resolveSetupStateAfterSeasonCreate,
   formatSeasonOptionLabel,
   resolveCompetitionSeasonPhaseForDate,
+  detectCurrentPhase,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
   shouldUseCachedDomainPlanStateForWorkspace,
@@ -12502,6 +12503,33 @@ describe("season create display state", () => {
         name: "2026 Golf Season",
       }),
     ).toBe("2026 Golf Season");
+  });
+});
+
+describe("detectCurrentPhase", () => {
+  const planningPhases = [
+    {
+      phaseId: "off-season-id",
+      seasonCycleId: "season-1",
+      phase: "OFF_SEASON",
+      startDate: "2026-06-01",
+      endDate: "2026-07-29",
+    },
+    {
+      phaseId: "pre-season-id",
+      seasonCycleId: "season-1",
+      phase: "PRE_SEASON",
+      startDate: "2026-07-30",
+      endDate: "2026-08-31",
+    },
+  ];
+
+  it("detects PRE_SEASON when the planning date matches its start date", () => {
+    expect(detectCurrentPhase(planningPhases, "2026-07-30")?.phase).toBe("PRE_SEASON");
+  });
+
+  it("detects OFF_SEASON for the planning date before PRE_SEASON starts", () => {
+    expect(detectCurrentPhase(planningPhases, "2026-07-29")?.phase).toBe("OFF_SEASON");
   });
 });
 

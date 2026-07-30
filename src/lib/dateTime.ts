@@ -21,6 +21,27 @@ export function getLocalDateKey(date: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+/** Planning calendar date as `YYYY-MM-DD` in the supplied timezone (default Asia/Kolkata). */
+export function getPlanningDateKey(
+  date: Date | string = new Date(),
+  timeZone = "Asia/Kolkata",
+): string {
+  const instant = typeof date === "string" ? new Date(date) : date;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) {
+    throw new Error("Unable to resolve planning date key");
+  }
+  return `${year}-${month}-${day}`;
+}
+
 /** Normalize API date strings to `YYYY-MM-DD` for comparison with {@link getLocalDateKey}. */
 export function normalizeDateOnlyKey(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";

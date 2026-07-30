@@ -145,6 +145,7 @@ import {
   formatDateRange,
   formatDateWithWeekday,
   formatPlanningProfileDateDisplay,
+  getPlanningDateKey,
 } from "@/lib/dateTime";
 import {
   formatEnumeratedLabel,
@@ -249,6 +250,8 @@ const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
   "NUTRITION",
   "S_AND_C",
 ];
+/** Hide competition schedule UI until competition-aware plan generation is end-to-end. */
+const SHOW_COMPETITION_SCHEDULE_UI = false;
 const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
   "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
 // Exact backend message for the deterministic Nutrition stale-version rejection.
@@ -9331,7 +9334,7 @@ function phaseSortValue(phase: string | null): number {
   return 99;
 }
 
-function detectCurrentPhase(
+export function detectCurrentPhase(
   phases: SeasonPhaseSummary[],
   today: string,
 ): SeasonPhaseSummary | null {
@@ -12039,7 +12042,7 @@ export function CoachAthletePlanningProfileView({
   const hasSelectedSeasonForPlan =
     selectedSeasonCycleId !== null && selectedSeason !== null;
   const showSeasonCreateForm = !hasEntitySeasons || seasonCreateFormExplicit;
-  const today = formatDateInputValue(new Date());
+  const today = getPlanningDateKey(new Date());
   const selectedSeasonPhases = selectedSeasonCycleId
     ? [...(setupState.phasesBySeasonCycleId[selectedSeasonCycleId] ?? [])].sort(
         (left, right) => phaseSortValue(left.phase) - phaseSortValue(right.phase),
@@ -23317,6 +23320,7 @@ export function CoachAthletePlanningProfileView({
                     <div className="space-y-5">
                 <section className="space-y-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
                   <div className="space-y-1">
+                    <p className="text-xs font-medium text-textMuted">Step 1</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season
                     </h3>
@@ -23521,6 +23525,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
+                    <p className="text-xs font-medium text-textMuted">Step 2</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season Phase
                     </h3>
@@ -23707,6 +23712,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
+                    <p className="text-xs font-medium text-textMuted">Step 3</p>
                     <h3 className="text-sm font-medium text-textPrimary">Creation of Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Add competition or custom goals, or choose from the goal library for this
@@ -23714,7 +23720,7 @@ export function CoachAthletePlanningProfileView({
                     </p>
                   </div>
 
-                {phaseByType.IN_SEASON ? (
+                {SHOW_COMPETITION_SCHEDULE_UI && phaseByType.IN_SEASON ? (
                   <div className="space-y-3">
                     <div className="space-y-1">
                       <h4 className="text-sm font-normal text-textPrimary">
@@ -24036,6 +24042,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
+                    <p className="text-xs font-medium text-textMuted">Step 4</p>
                     <h3 className="text-sm font-medium text-textPrimary">Setting / Selecting Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Choose the active goals that should shape this training plan.

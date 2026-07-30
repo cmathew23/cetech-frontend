@@ -18,10 +18,7 @@ import {
 } from "@/lib/api/coachAthleteLevelValidation";
 import { fetchCoachAthletePlanningProfile } from "@/lib/api/coachAthletePlanningProfile";
 import { isNormalizedApiError } from "@/lib/apiClient";
-import {
-  TRAINING_PLAN_VALIDATED_LEVELS,
-  type TrainingPlanLevelValidationView as LevelValidationData,
-} from "@/types/trainingPlanLevelValidation";
+import type { TrainingPlanLevelValidationView as LevelValidationData } from "@/types/trainingPlanLevelValidation";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
@@ -207,6 +204,7 @@ export function CoachAthleteLevelValidationView({
     planningPerformance?.highestRankingAchievedAtThatLevelPast12Months ??
     null;
 
+  const allowedLevels = data?.allowedLevels ?? [];
   const systemLevelForCompare = data?.finalSuggestedLevel?.trim() ?? "";
   const coachIntent = selectedLevel.trim() || data?.validatedLevel?.trim() || "";
   const showOverrideHint =
@@ -361,10 +359,10 @@ export function CoachAthleteLevelValidationView({
                   onChange={(e: ChangeEvent<HTMLSelectElement>) =>
                     setSelectedLevel(e.target.value)
                   }
-                  disabled={saving}
+                  disabled={saving || allowedLevels.length === 0}
                 >
                   <option value="">—</option>
-                  {TRAINING_PLAN_VALIDATED_LEVELS.map((lvl) => (
+                  {allowedLevels.map((lvl) => (
                     <option key={lvl} value={lvl}>
                       {lvl}
                     </option>

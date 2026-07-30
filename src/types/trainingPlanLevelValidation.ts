@@ -24,4 +24,5 @@ export type TrainingPlanLevelValidationView = {
   validatedLevel: string | null;
   validationStatus: string | null;
   reasons: string[];
+  allowedLevels: string[];
 };

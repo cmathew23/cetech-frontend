@@ -24,11 +24,13 @@ describe("coachAthleteLevelValidation API", () => {
       success: true,
       data: {
         validatedLevel: "INTERMEDIATE",
+        allowedLevels: ["BEGINNER", "INTERMEDIATE"],
       },
     });
 
-    await fetchCoachAthleteLevelValidation("entity-1", "athlete-1");
+    const result = await fetchCoachAthleteLevelValidation("entity-1", "athlete-1");
 
+    expect(result.allowedLevels).toEqual(["BEGINNER", "INTERMEDIATE"]);
     expect(apiRequestMock).toHaveBeenCalledWith(
       paths.entities.athleteTrainingPlanLevelValidation("entity-1", "athlete-1"),
       {
@@ -37,6 +39,35 @@ describe("coachAthleteLevelValidation API", () => {
         timeoutMs: 60_000,
       },
     );
+  });
+
+  it.each([
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE"],
+      expected: ["BEGINNER", "INTERMEDIATE"],
+    },
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
+      expected: ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
+    },
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE", "ADVANCED", "ELITE"],
+      expected: ["BEGINNER", "INTERMEDIATE", "ADVANCED", "ELITE"],
+    },
+    {
+      allowedLevels: [],
+      expected: [],
+    },
+  ])("parses allowedLevels from GET response: $expected", async ({ allowedLevels, expected }) => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        allowedLevels,
+      },
+    });
+
+    const result = await fetchCoachAthleteLevelValidation("entity-1", "athlete-1");
+    expect(result.allowedLevels).toEqual(expected);
   });
 
   it("uses the extended timeout for level validation writes", async () => {

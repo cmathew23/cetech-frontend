@@ -133,6 +133,7 @@ function parseLevelValidationPayload(data: unknown): TrainingPlanLevelValidation
     validatedLevel: readStringFrom(sources, "validatedLevel"),
     validationStatus: readStringFrom(sources, "validationStatus"),
     reasons: readStringListFrom(sources, "reasons"),
+    allowedLevels: readStringListFrom(sources, "allowedLevels"),
   };
 }
 

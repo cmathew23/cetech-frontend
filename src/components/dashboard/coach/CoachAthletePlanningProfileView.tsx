@@ -1615,12 +1615,17 @@ export function contextBuilderLedgerActionLabel(input: {
   step: ContextBuilderStepKey;
   complete: boolean;
   locked: boolean;
+  planningContextLocked: boolean;
 }): string {
   if (input.locked) return "Locked";
   if (input.step === "context-app") return "View APP Context";
+  if (input.planningContextLocked) {
+    if (input.step === "level-validation") return "View Validation";
+    if (input.step === "workload") return "View Workload";
+  }
   if (input.complete) {
     if (input.step === "level-validation") return "Edit Validation";
-    if (input.step === "workload") return "Edit Workload";
+    if (input.step === "workload") return "Reassess Workload";
     if (input.step === "season-goals") return "Edit Season & Goals";
     return "Edit Plan Dates";
   }
@@ -9002,6 +9007,7 @@ function TrainingPlanWorkloadAssessmentStep({
   workloadComplete,
   showWorkloadCompletionState,
   readinessGate,
+  readOnly = false,
   onRunWorkloadAssessment,
 }: {
   showValidateLevel: boolean;
@@ -9012,6 +9018,7 @@ function TrainingPlanWorkloadAssessmentStep({
   workloadComplete: boolean;
   showWorkloadCompletionState: boolean;
   readinessGate: WorkloadReadinessGate;
+  readOnly?: boolean;
   onRunWorkloadAssessment: () => void;
 }) {
   const transientCompletionVisible =
@@ -9056,7 +9063,8 @@ function TrainingPlanWorkloadAssessmentStep({
       {!transientCompletionVisible &&
       workloadAssessmentLoading === false &&
       !workloadAssessmentResult &&
-      showValidateLevel ? (
+      showValidateLevel &&
+      !readOnly ? (
         <div className="flex flex-wrap gap-2 pt-1">
           <div className="space-y-2">
             <p className="text-sm font-normal text-primary">
@@ -9150,6 +9158,22 @@ function TrainingPlanWorkloadAssessmentStep({
               Workload assessment completed, but no displayable result was returned.
             </div>
           )}
+          {!readOnly && hasWorkloadAssessmentResult(workloadAssessmentResult) ? (
+            <div className="pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={
+                  readinessLoading ||
+                  workloadAssessmentLoading ||
+                  !canRunWorkloadAssessment(readinessGate)
+                }
+                onClick={onRunWorkloadAssessment}
+              >
+                Reassess Workload
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -11796,6 +11820,51 @@ export function CoachAthletePlanningProfileView({
       readinessGenerationDomain,
       selectedSeasonCycleId,
     ]);
+
+  const refreshPlanningContextReadinessSources = useCallback(async () => {
+    if (!accessGateReady || entityId === "" || athleteIdTrimmed === "") {
+      return;
+    }
+    const trainingSportCode =
+      profile?.sportCode?.trim()
+      || profile?.primarySport?.trim()
+      || profile?.sportContext?.primarySport?.trim()
+      || undefined;
+    try {
+      const [readiness, completeness, upstreamContext] = await Promise.all([
+        fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
+          generationDomain: readinessGenerationDomain,
+          seasonCycleId: selectedSeasonCycleId,
+          sportCode: trainingSportCode,
+        }),
+        fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
+          sportCode: trainingSportCode,
+        }),
+        fetchCoachAthleteUpstreamPlanningContext(entityId, athleteIdTrimmed),
+      ]);
+      setReadinessSources((current) => ({
+        ...current,
+        readiness,
+        completeness,
+      }));
+      setUpstreamPlanningContext(upstreamContext);
+      setUpstreamPlanningContextError(null);
+      setPlanningContextBootstrapState("loaded");
+    } catch (e) {
+      setReadinessError(
+        formatApiError(e, "Could not refresh planning context. Please try again shortly."),
+      );
+    }
+  }, [
+    accessGateReady,
+    athleteIdTrimmed,
+    entityId,
+    profile?.primarySport,
+    profile?.sportCode,
+    profile?.sportContext?.primarySport,
+    readinessGenerationDomain,
+    selectedSeasonCycleId,
+  ]);
 
   const readinessPanel = useMemo(() => {
     const { levelValidation, readiness, completeness } = readinessSources;
@@ -22769,12 +22838,14 @@ export function CoachAthletePlanningProfileView({
       workloadAssessmentLoading ||
       entityId === "" ||
       athleteIdTrimmed === "" ||
-      !canRunWorkloadAssessment(readinessPanel)
+      !canRunWorkloadAssessment(readinessPanel) ||
+      planningContextLocked
     ) {
       return;
     }
     const ok = await loadWorkloadAssessment(true);
     if (!ok) return;
+    await refreshPlanningContextReadinessSources();
     setShowWorkloadCompletionState(true);
     if (workloadCompletionHoldTimeoutRef.current !== null) {
       window.clearTimeout(workloadCompletionHoldTimeoutRef.current);
@@ -23136,6 +23207,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderLevelValidationStepContent() {
+    const validationReadOnly = planningContextLocked;
     return (
                 !workflowPrecMap["level-validation"] ? (
                   <WorkflowLockedCard
@@ -23181,31 +23253,21 @@ export function CoachAthletePlanningProfileView({
                             </dd>
                           </div>
                         </dl>
-                        {showValidateLevel ? (
+                        {!validationReadOnly && showValidateLevel ? (
                           <div className="pt-1">
-                            {levelStepComplete ? (
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={() => setSelectedWorkflowTab("workload")}
-                              >
-                                Continue to Workload Assessment
-                              </Button>
-                            ) : (
                             <Button
                               type="button"
                               variant="secondary"
                               disabled={missingPlanningProfile}
                               onClick={() => setLevelValidationModalOpen(true)}
                             >
-                              Continue to Level Validation
+                              {levelStepComplete ? "Edit Validation" : "Validate Level"}
                             </Button>
-                            )}
                           </div>
                         ) : null}
                       </div>
                     )}
-                    {levelStepComplete ? (
+                    {!validationReadOnly && levelStepComplete ? (
                       <WorkflowTabNextButton
                         label="Next → Workload Assessment"
                         onClick={() => handleAdvanceContextBuilderStep("workload")}
@@ -23218,6 +23280,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function renderWorkloadAssessmentStepContent() {
+    const workloadReadOnly = planningContextLocked;
     return (
                 isDownstreamDomainCoach ? (
                   <div className="space-y-3">
@@ -23234,6 +23297,7 @@ export function CoachAthletePlanningProfileView({
                 ) : (
                   <>
                     {workloadComplete && !showWorkloadCompletionState ? (
+                      <>
                       <WorkflowCompactSummaryStrip
                         title="Step 3 — Workload Assessment"
                         values={[
@@ -23268,6 +23332,23 @@ export function CoachAthletePlanningProfileView({
                           },
                         ]}
                       />
+                      {!workloadReadOnly ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={
+                            readinessLoading ||
+                            workloadAssessmentLoading ||
+                            !canRunWorkloadAssessment(readinessPanel)
+                          }
+                          onClick={() => {
+                            void handleRunWorkloadAssessment();
+                          }}
+                        >
+                          Reassess Workload
+                        </Button>
+                      ) : null}
+                      </>
                     ) : (
                       <TrainingPlanWorkloadAssessmentStep
                         showValidateLevel={showValidateLevel}
@@ -23277,6 +23358,7 @@ export function CoachAthletePlanningProfileView({
                         workloadAssessmentResult={workloadAssessmentResult}
                         workloadComplete={workloadComplete}
                         showWorkloadCompletionState={showWorkloadCompletionState}
+                        readOnly={workloadReadOnly}
                         readinessGate={{
                           appCompleteness: readinessPanel.appCompleteness,
                           validationStatus: readinessPanel.validationStatus,
@@ -23287,7 +23369,7 @@ export function CoachAthletePlanningProfileView({
                         }}
                       />
                     )}
-                    {workloadComplete ? (
+                    {!workloadReadOnly && workloadComplete ? (
                       <WorkflowTabNextButton
                         label="Next → Goals"
                         onClick={() => handleAdvanceContextBuilderStep("season-goals")}
@@ -24664,6 +24746,7 @@ export function CoachAthletePlanningProfileView({
       step: input.step,
       complete,
       locked,
+      planningContextLocked,
     });
 
     return (

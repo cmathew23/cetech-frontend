@@ -8,10 +8,7 @@ import { Select } from "@/components/ui/Select";
 import { postCoachAthleteLevelValidation } from "@/lib/api/coachAthleteLevelValidation";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatPersonNameForDisplay } from "@/lib/textFormat";
-import {
-  TRAINING_PLAN_VALIDATED_LEVELS,
-  type TrainingPlanLevelValidationView,
-} from "@/types/trainingPlanLevelValidation";
+import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
 import {
   type ChangeEvent,
   useEffect,
@@ -93,6 +90,8 @@ export function CoachAthleteLevelValidationModal({
 
   if (!open) return null;
 
+  const allowedLevels = levelValidationSnapshot?.allowedLevels ?? [];
+
   async function handleSave() {
     if (
       entityIdTrimmed === "" ||
@@ -163,10 +162,10 @@ export function CoachAthleteLevelValidationModal({
             onChange={(e: ChangeEvent<HTMLSelectElement>) =>
               setSelectedLevel(e.target.value)
             }
-            disabled={saving}
+            disabled={saving || allowedLevels.length === 0}
           >
             <option value="">— Select level —</option>
-            {TRAINING_PLAN_VALIDATED_LEVELS.map((lvl) => (
+            {allowedLevels.map((lvl) => (
               <option key={lvl} value={lvl}>
                 {lvl}
               </option>

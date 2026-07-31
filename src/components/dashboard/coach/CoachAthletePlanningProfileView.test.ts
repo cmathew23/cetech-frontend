@@ -115,6 +115,7 @@ import {
   resolveContextAppStepCompleteForNavigation,
   resolveContextAppProfileStatusLabel,
   resolveContextAppEligibilityNoteLabel,
+  contextBuilderLedgerActionLabel,
   resolveContextBuilderPendingBeforeLock,
   resolveDomainIntegrationMatrixDomains,
   shouldRenderEmbeddedPlanViewerInDomainIntegration,
@@ -12333,6 +12334,63 @@ describe("Workflow 3 Skills coach Tab 6", () => {
 
     expect(canShowDirectApprove).toBe(true);
     expect(canShowRequestRevision).toBe(false);
+  });
+});
+
+describe("contextBuilderLedgerActionLabel", () => {
+  it("shows Edit Validation when planning context is unlocked and step is complete", () => {
+    expect(
+      contextBuilderLedgerActionLabel({
+        step: "level-validation",
+        complete: true,
+        locked: false,
+        planningContextLocked: false,
+      }),
+    ).toBe("Edit Validation");
+  });
+
+  it("shows Reassess Workload when planning context is unlocked and step is complete", () => {
+    expect(
+      contextBuilderLedgerActionLabel({
+        step: "workload",
+        complete: true,
+        locked: false,
+        planningContextLocked: false,
+      }),
+    ).toBe("Reassess Workload");
+  });
+
+  it("shows View Validation when planning context is locked", () => {
+    expect(
+      contextBuilderLedgerActionLabel({
+        step: "level-validation",
+        complete: true,
+        locked: false,
+        planningContextLocked: true,
+      }),
+    ).toBe("View Validation");
+  });
+
+  it("shows View Workload when planning context is locked", () => {
+    expect(
+      contextBuilderLedgerActionLabel({
+        step: "workload",
+        complete: true,
+        locked: false,
+        planningContextLocked: true,
+      }),
+    ).toBe("View Workload");
+  });
+
+  it("keeps prerequisite-locked steps disabled with Locked label", () => {
+    expect(
+      contextBuilderLedgerActionLabel({
+        step: "workload",
+        complete: false,
+        locked: true,
+        planningContextLocked: false,
+      }),
+    ).toBe("Locked");
   });
 });
 

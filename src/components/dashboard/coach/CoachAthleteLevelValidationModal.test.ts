@@ -59,6 +59,47 @@ vi.mock("@/components/ui/Select", async () => {
 });
 
 import { CoachAthleteLevelValidationModal } from "@/components/dashboard/coach/CoachAthleteLevelValidationModal";
+import type { TrainingPlanLevelValidationView } from "@/types/trainingPlanLevelValidation";
+
+function levelValidationSnapshot(
+  allowedLevels: string[],
+): TrainingPlanLevelValidationView {
+  return {
+    age: null,
+    ageBand: null,
+    highestCompetitionLevelReachedPast12Months: null,
+    highestRankingAchievedAtThatLevelPast12Months: null,
+    baseSuggestedLevel: null,
+    rankingOverrideApplied: null,
+    finalSuggestedLevel: null,
+    validatedLevel: null,
+    validationStatus: null,
+    reasons: [],
+    allowedLevels,
+  };
+}
+
+function renderModalHtml(
+  levelValidationSnapshotValue: TrainingPlanLevelValidationView | null,
+): string {
+  return renderToStaticMarkup(
+    createElement(CoachAthleteLevelValidationModal, {
+      open: true,
+      onClose: vi.fn(),
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      athleteDisplayName: "Jane Doe",
+      selfReportedLevelLabel: "Intermediate",
+      levelValidationSnapshot: levelValidationSnapshotValue,
+      onAfterSaveConfirmed: vi.fn(),
+    }),
+  );
+}
+
+function optionValues(html: string): string[] {
+  const matches = [...html.matchAll(/<option[^>]*value="([^"]*)"[^>]*>/g)];
+  return matches.map((match) => match[1]).filter((value) => value !== "");
+}
 
 describe("CoachAthleteLevelValidationModal", () => {
   it("renders the loaded athlete name instead of the athlete UUID", () => {
@@ -78,5 +119,32 @@ describe("CoachAthleteLevelValidationModal", () => {
 
     expect(html).toContain("Jane Doe");
     expect(html).not.toContain(athleteId);
+  });
+
+  it.each([
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE"],
+      expectedOptions: ["BEGINNER", "INTERMEDIATE"],
+    },
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
+      expectedOptions: ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
+    },
+    {
+      allowedLevels: ["BEGINNER", "INTERMEDIATE", "ADVANCED", "ELITE"],
+      expectedOptions: ["BEGINNER", "INTERMEDIATE", "ADVANCED", "ELITE"],
+    },
+  ])(
+    "renders dropdown options from allowedLevels in backend order: $expectedOptions",
+    ({ allowedLevels, expectedOptions }) => {
+      const html = renderModalHtml(levelValidationSnapshot(allowedLevels));
+      expect(optionValues(html)).toEqual(expectedOptions);
+    },
+  );
+
+  it("disables the dropdown when allowedLevels is empty", () => {
+    const html = renderModalHtml(levelValidationSnapshot([]));
+    expect(html).toMatch(/<select[^>]*disabled(?:=""|="disabled"|)[^>]*>/);
+    expect(optionValues(html)).toEqual([]);
   });
 });

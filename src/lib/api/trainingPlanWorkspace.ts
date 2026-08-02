@@ -280,6 +280,9 @@ function parseAssignmentContext(
 
 function parsePlanningContext(value: unknown): TrainingPlanWorkspacePlanningContext {
   const record = asRecord(value) ?? {};
+  const planWindow = asRecord(record.planWindow);
+  const planWindowStart = readString(planWindow?.startDate);
+  const planWindowEnd = readString(planWindow?.endDate);
   return {
     locked: readBoolean(record.locked) || readBoolean(record.planningContextLocked),
     resolved: readBoolean(record.resolved),
@@ -290,10 +293,10 @@ function parsePlanningContext(value: unknown): TrainingPlanWorkspacePlanningCont
     seasonId: readString(record.seasonId),
     selectedSeasonId: readString(record.selectedSeasonId),
     phase: readString(record.phase),
-    startDate: readString(record.startDate),
-    endDate: readString(record.endDate),
-    planStartDate: readString(record.planStartDate),
-    planEndDate: readString(record.planEndDate),
+    startDate: readString(record.startDate) ?? planWindowStart,
+    endDate: readString(record.endDate) ?? planWindowEnd,
+    planStartDate: readString(record.planStartDate) ?? planWindowStart,
+    planEndDate: readString(record.planEndDate) ?? planWindowEnd,
     durationDays: readNumber(record.durationDays),
     goalIds: readStringList(record.goalIds),
     lockedGoalIds: readStringList(record.lockedGoalIds),
@@ -391,6 +394,41 @@ export async function createNextWeeklyPlanningContext(
     paths.entities.athleteTrainingPlanNextCycle(ids.entityId, ids.athleteId),
     {
       method: "POST",
+      cache: "no-store",
+      timeoutMs: TRAINING_PLAN_WORKSPACE_TIMEOUT_MS,
+    },
+  );
+}
+
+export type NextCyclePlanWindowPayload = {
+  planWindow: {
+    startDate: string;
+    endDate: string;
+  };
+};
+
+export async function updateNextCyclePlanWindow(
+  entityId: string,
+  athleteId: string,
+  payload: NextCyclePlanWindowPayload,
+): Promise<void> {
+  const ids = assertIds(entityId, athleteId);
+  const startDate = payload.planWindow.startDate.trim();
+  const endDate = payload.planWindow.endDate.trim();
+  if (startDate === "" || endDate === "") {
+    throw {
+      message: "planWindow.startDate and planWindow.endDate are required",
+      status: 400,
+      code: "NEXT_CYCLE_PLAN_WINDOW_REQUIRED",
+    } satisfies NormalizedApiError;
+  }
+  await apiRequest(
+    paths.entities.athleteTrainingPlanNextCycle(ids.entityId, ids.athleteId),
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        planWindow: { startDate, endDate },
+      }),
       cache: "no-store",
       timeoutMs: TRAINING_PLAN_WORKSPACE_TIMEOUT_MS,
     },

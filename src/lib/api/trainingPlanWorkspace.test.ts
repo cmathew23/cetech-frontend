@@ -11,6 +11,7 @@ vi.mock("@/lib/apiClient", () => ({
 import {
   createNextWeeklyPlanningContext,
   parseTrainingPlanWorkspacePayload,
+  updateNextCyclePlanWindow,
 } from "@/lib/api/trainingPlanWorkspace";
 
 describe("parseTrainingPlanWorkspacePayload", () => {
@@ -297,5 +298,55 @@ describe("createNextWeeklyPlanningContext", () => {
         timeoutMs: 60_000,
       },
     );
+  });
+});
+
+describe("updateNextCyclePlanWindow", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+    apiRequestMock.mockResolvedValue({ success: true, data: {} });
+  });
+
+  it("patches the exact next-cycle endpoint once with planWindow", async () => {
+    await updateNextCyclePlanWindow("entity-1", "athlete-1", {
+      planWindow: {
+        startDate: "2026-08-03",
+        endDate: "2026-08-09",
+      },
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/training-plan-management/next-cycle",
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          planWindow: {
+            startDate: "2026-08-03",
+            endDate: "2026-08-09",
+          },
+        }),
+        cache: "no-store",
+        timeoutMs: 60_000,
+      },
+    );
+  });
+});
+
+describe("parseTrainingPlanWorkspacePayload planWindow", () => {
+  it("hydrates planningContext dates from nested planWindow", () => {
+    const workspace = parseTrainingPlanWorkspacePayload({
+      planningContext: {
+        planWindow: {
+          startDate: "2026-08-03",
+          endDate: "2026-08-09",
+        },
+      },
+    });
+
+    expect(workspace.planningContext.startDate).toBe("2026-08-03");
+    expect(workspace.planningContext.endDate).toBe("2026-08-09");
+    expect(workspace.planningContext.planStartDate).toBe("2026-08-03");
+    expect(workspace.planningContext.planEndDate).toBe("2026-08-09");
   });
 });

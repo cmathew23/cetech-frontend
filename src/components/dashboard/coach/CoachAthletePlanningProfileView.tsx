@@ -112,6 +112,7 @@ import {
 import {
   createNextWeeklyPlanningContext,
   getTrainingPlanWorkspace,
+  updateNextCyclePlanWindow,
 } from "@/lib/api/trainingPlanWorkspace";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
@@ -849,7 +850,7 @@ export function NextCycleWorkspaceAction({
       disabled={action === "CREATE" && loading}
       onClick={action === "CREATE" ? onCreate : onContinue}
     >
-      {action === "CREATE" ? "Create New Plan" : "Continue Planning"}
+      {action === "CREATE" ? "Start New Plan" : "Continue Planning"}
     </Button>
   );
 }
@@ -869,6 +870,17 @@ export function PlanningContextWorkspaceAction({
   onContinue: () => void;
   onView: () => void;
 }) {
+  if (action === "CREATE") {
+    return (
+      <NextCycleWorkspaceAction
+        action={action}
+        loading={loading}
+        onCreate={onCreate}
+        onContinue={onContinue}
+      />
+    );
+  }
+
   if (planningContextLocked) {
     return (
       <Button type="button" variant="secondary" onClick={onView}>
@@ -877,6 +889,8 @@ export function PlanningContextWorkspaceAction({
     );
   }
 
+  if (action === "NONE") return null;
+
   return (
     <NextCycleWorkspaceAction
       action={action}
@@ -884,6 +898,16 @@ export function PlanningContextWorkspaceAction({
       onCreate={onCreate}
       onContinue={onContinue}
     />
+  );
+}
+
+export function shouldRenderNextCycleWorkspaceActionPanel(
+  workspace: TrainingPlanWorkspace | null | undefined,
+  planningContextLocked = workspace?.planningContext.locked === true,
+): boolean {
+  return (
+    planningContextLocked ||
+    (workspace?.nextCycleAction ?? "NONE") !== "NONE"
   );
 }
 
@@ -899,7 +923,7 @@ export async function runCreateNextWeeklyPlanAction({
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   create: () => Promise<void>;
-  refresh: () => Promise<boolean>;
+  refresh: () => Promise<unknown>;
   openPlanningContext: () => void;
 }): Promise<boolean> {
   if (pendingRef.current) return false;
@@ -917,6 +941,82 @@ export async function runCreateNextWeeklyPlanAction({
       formatApiError(
         error,
         "Could not create the next weekly plan. Please try again shortly.",
+      ),
+    );
+    return false;
+  } finally {
+    pendingRef.current = false;
+    setLoading(false);
+  }
+}
+
+export function resolveAuthoritativePlanWindow(input: {
+  workspacePlanningContext?: {
+    planStartDate?: string | null;
+    planEndDate?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
+  upstreamPlanningContext?: {
+    planWindow?: { startDate: string | null; endDate: string | null } | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
+  fallbackStartDate: string;
+  fallbackEndDate: string;
+}): { startDate: string; endDate: string } {
+  const startDate =
+    input.workspacePlanningContext?.planStartDate?.trim() ||
+    input.workspacePlanningContext?.startDate?.trim() ||
+    input.upstreamPlanningContext?.planWindow?.startDate?.trim() ||
+    input.upstreamPlanningContext?.startDate?.trim() ||
+    input.fallbackStartDate;
+  const endDate =
+    input.workspacePlanningContext?.planEndDate?.trim() ||
+    input.workspacePlanningContext?.endDate?.trim() ||
+    input.upstreamPlanningContext?.planWindow?.endDate?.trim() ||
+    input.upstreamPlanningContext?.endDate?.trim() ||
+    input.fallbackEndDate;
+  return { startDate, endDate };
+}
+
+export async function runConfirmPlanDatesAction({
+  pendingRef,
+  setLoading,
+  setError,
+  setConfirmed,
+  planWindow,
+  patch,
+  refresh,
+  hydrate,
+}: {
+  pendingRef: { current: boolean };
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setConfirmed: (confirmed: boolean) => void;
+  planWindow: { startDate: string; endDate: string };
+  patch: (planWindow: { startDate: string; endDate: string }) => Promise<void>;
+  refresh: () => Promise<{ startDate: string; endDate: string } | null>;
+  hydrate: (planWindow: { startDate: string; endDate: string }) => void;
+}): Promise<boolean> {
+  if (pendingRef.current) return false;
+
+  pendingRef.current = true;
+  setLoading(true);
+  setError(null);
+  try {
+    await patch(planWindow);
+    const refreshedWindow = await refresh();
+    const confirmedWindow = refreshedWindow ?? planWindow;
+    hydrate(confirmedWindow);
+    setConfirmed(true);
+    return true;
+  } catch (error) {
+    setConfirmed(false);
+    setError(
+      formatApiError(
+        error,
+        "Could not confirm plan dates. Please try again shortly.",
       ),
     );
     return false;
@@ -7136,11 +7236,15 @@ function WorkflowGeminiPlanSetupPanel({
   currentPlanDurationDays,
   planStartDate,
   setPlanStartDate,
+  planStartDateMin,
+  planStartDateMax,
   planEndDate,
   currentPhaseDetected,
   planWindowInsideCurrentPhase,
   planDatesProceedEnabled,
   planDatesConfirmedForCurrentAthlete,
+  planDatesConfirmLoading,
+  planDatesConfirmError,
   planSeasonBoundsUi,
   onConfirmPlanDates,
 }: {
@@ -7150,11 +7254,15 @@ function WorkflowGeminiPlanSetupPanel({
   currentPlanDurationDays: number;
   planStartDate: string;
   setPlanStartDate: (value: string) => void;
+  planStartDateMin: string | null;
+  planStartDateMax: string | null;
   planEndDate: string;
   currentPhaseDetected: boolean;
   planWindowInsideCurrentPhase: boolean;
   planDatesProceedEnabled: boolean;
   planDatesConfirmedForCurrentAthlete: boolean;
+  planDatesConfirmLoading: boolean;
+  planDatesConfirmError: string | null;
   planSeasonBoundsUi: "idle" | "invalid" | "valid";
   onConfirmPlanDates: () => void;
 }) {
@@ -7190,6 +7298,12 @@ function WorkflowGeminiPlanSetupPanel({
             Plan window fits inside the detected current phase.
           </DashboardStatusNotice>
         )}
+
+        {planDatesConfirmError ? (
+          <DashboardStatusNotice type="error" compact>
+            {planDatesConfirmError}
+          </DashboardStatusNotice>
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -7251,9 +7365,17 @@ function WorkflowGeminiPlanSetupPanel({
           <input
             type="date"
             aria-label="Plan start date"
-            className="w-full cursor-pointer rounded-lg border-0 bg-transparent py-3 pl-11 pr-12 text-sm text-textPrimary caret-current focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+            className="w-full cursor-pointer rounded-lg border-0 bg-transparent py-3 pl-11 pr-12 text-sm text-textPrimary caret-current focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary disabled:cursor-not-allowed disabled:opacity-45"
             value={planStartDate}
-            onChange={(event) => setPlanStartDate(event.target.value)}
+            min={planStartDateMin ?? undefined}
+            max={planStartDateMax ?? undefined}
+            disabled={planStartDateMin === null || planStartDateMax === null}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (planStartDateMin !== null && value < planStartDateMin) return;
+              if (planStartDateMax !== null && value > planStartDateMax) return;
+              setPlanStartDate(value);
+            }}
           />
         </div>
         <dl className="space-y-2 border-border border-dashed border-t pt-4 text-xs text-textSecondary">
@@ -7270,7 +7392,12 @@ function WorkflowGeminiPlanSetupPanel({
         <Button
           type="button"
           variant="primary"
-          disabled={!planDatesProceedEnabled || planDatesConfirmedForCurrentAthlete}
+          loading={planDatesConfirmLoading}
+          disabled={
+            !planDatesProceedEnabled ||
+            planDatesConfirmedForCurrentAthlete ||
+            planDatesConfirmLoading
+          }
           onClick={() => onConfirmPlanDates()}
         >
           {planDatesConfirmedForCurrentAthlete ? "Plan Dates Confirmed" : "Confirm Plan Dates"}
@@ -9550,6 +9677,30 @@ function isPlanWindowInsidePhase(
   return phaseStart <= startDate && endDate <= phaseEnd;
 }
 
+export function resolvePlanStartDateInputBounds(input: {
+  today: string;
+  currentPhase: SeasonPhaseSummary | null;
+  planDurationDays: number;
+}): { min: string | null; max: string | null } {
+  if (input.planDurationDays < 1) {
+    return { min: null, max: null };
+  }
+  if (!input.currentPhase?.startDate || !input.currentPhase?.endDate) {
+    return { min: null, max: null };
+  }
+  const phaseStart = dateOnly(input.currentPhase.startDate);
+  const phaseEnd = dateOnly(input.currentPhase.endDate);
+  if (!phaseStart || !phaseEnd) {
+    return { min: null, max: null };
+  }
+  const min = input.today >= phaseStart ? input.today : phaseStart;
+  const max = addDaysToDateString(phaseEnd, -(input.planDurationDays - 1));
+  if (max === "" || max < min) {
+    return { min: null, max: null };
+  }
+  return { min, max };
+}
+
 function readSafeGenerationJobError(job: CoachAthleteTrainingPlanGenerationJob): string {
   return (
     job.errorMessage?.trim()
@@ -10824,6 +10975,7 @@ export function CoachAthletePlanningProfileView({
   const workspaceHasLoadedRef = useRef(false);
   const workspaceSnapshotIdRef = useRef<string | null | undefined>(undefined);
   const nextCycleCreatePendingRef = useRef(false);
+  const planDatesConfirmPendingRef = useRef(false);
   const assignmentContextMissingWarningScopeRef = useRef<string | null>(null);
   const [planningContextBootstrapState, setPlanningContextBootstrapState] =
     useState<TrainingPlanBootstrapLoadState>("idle");
@@ -11214,6 +11366,8 @@ export function CoachAthletePlanningProfileView({
   );
   const [planDatesConfirmedForCurrentAthlete, setPlanDatesConfirmedForCurrentAthlete] =
     useState(false);
+  const [planDatesConfirmLoading, setPlanDatesConfirmLoading] = useState(false);
+  const [planDatesConfirmError, setPlanDatesConfirmError] = useState<string | null>(null);
   const [seasonYear, setSeasonYear] = useState(() => new Date().getUTCFullYear());
   const [seasonName, setSeasonName] = useState("");
   const [seasonNameEdited, setSeasonNameEdited] = useState(false);
@@ -11369,9 +11523,9 @@ export function CoachAthletePlanningProfileView({
 
   const refreshTrainingPlanWorkspace = useCallback(async (
     options?: { background?: boolean },
-  ): Promise<boolean> => {
+  ): Promise<TrainingPlanWorkspace | null> => {
     if (!accessGateReady) {
-      return false;
+      return null;
     }
 
     if (entityId === "" || athleteIdTrimmed === "") {
@@ -11380,7 +11534,7 @@ export function CoachAthletePlanningProfileView({
       setWorkspaceLoading(false);
       setWorkspaceRefreshing(false);
       workspaceHasLoadedRef.current = false;
-      return false;
+      return null;
     }
 
     const background = options?.background ?? workspaceHasLoadedRef.current;
@@ -11400,15 +11554,15 @@ export function CoachAthletePlanningProfileView({
     try {
       const data = await getTrainingPlanWorkspace(entityId, athleteIdTrimmed);
       if (workspaceRefreshGenRef.current !== requestGeneration) {
-        return false;
+        return null;
       }
       setWorkspace(data);
       workspaceHasLoadedRef.current = true;
       setWorkspaceError(null);
-      return true;
+      return data;
     } catch (e) {
       if (workspaceRefreshGenRef.current !== requestGeneration) {
-        return false;
+        return null;
       }
       if (!background) {
         setWorkspace(null);
@@ -11419,7 +11573,7 @@ export function CoachAthletePlanningProfileView({
           "Could not load training plan workspace. Please try again shortly.",
         ),
       );
-      return false;
+      return null;
     } finally {
       if (workspaceRefreshGenRef.current === requestGeneration) {
         if (background) {
@@ -12711,6 +12865,15 @@ export function CoachAthletePlanningProfileView({
   const planEndDate = useMemo(
     () => addDaysToDateString(planStartDate, currentPlanDurationDays - 1),
     [currentPlanDurationDays, planStartDate],
+  );
+  const planStartDateInputBounds = useMemo(
+    () =>
+      resolvePlanStartDateInputBounds({
+        today,
+        currentPhase: activePhaseForSelectedSeason,
+        planDurationDays: currentPlanDurationDays,
+      }),
+    [activePhaseForSelectedSeason, currentPlanDurationDays, today],
   );
   const planWindowInsideCurrentPhase = isPlanWindowInsidePhase(
     activePhaseForSelectedSeason,
@@ -14749,6 +14912,9 @@ export function CoachAthletePlanningProfileView({
       workloadCompletionHoldTimeoutRef.current = null;
     }
     setPlanDatesConfirmedForCurrentAthlete(false);
+    setPlanDatesConfirmLoading(false);
+    setPlanDatesConfirmError(null);
+    planDatesConfirmPendingRef.current = false;
     setSeasonCreateFormExplicit(false);
     setSelectedWorkflowTab("context-app");
     workflowInitialTabResolvedRef.current = false;
@@ -15127,6 +15293,9 @@ export function CoachAthletePlanningProfileView({
 
   useEffect(() => {
     setPlanDatesConfirmedForCurrentAthlete(false);
+    setPlanDatesConfirmLoading(false);
+    setPlanDatesConfirmError(null);
+    planDatesConfirmPendingRef.current = false;
   }, [selectedSeasonCycleId, selectedGoalIdsSignature]);
 
   useEffect(() => {
@@ -17254,6 +17423,49 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  async function handleConfirmPlanDates() {
+    if (
+      planDatesConfirmLoading ||
+      planDatesConfirmedForCurrentAthlete ||
+      !planDatesWindowComplete ||
+      entityId === "" ||
+      athleteIdTrimmed === ""
+    ) {
+      return;
+    }
+
+    const selectedWindow = {
+      startDate: planStartDate,
+      endDate: planEndDate,
+    };
+
+    await runConfirmPlanDatesAction({
+      pendingRef: planDatesConfirmPendingRef,
+      setLoading: setPlanDatesConfirmLoading,
+      setError: setPlanDatesConfirmError,
+      setConfirmed: setPlanDatesConfirmedForCurrentAthlete,
+      planWindow: selectedWindow,
+      patch: (planWindow) =>
+        updateNextCyclePlanWindow(entityId, athleteIdTrimmed, { planWindow }),
+      refresh: async () => {
+        const latest = await refreshTrainingPlanWorkspace({ background: true });
+        await refreshPlanningContextReadinessSources();
+        if (latest === null) return null;
+        return resolveAuthoritativePlanWindow({
+          workspacePlanningContext: latest.planningContext,
+          upstreamPlanningContext: null,
+          fallbackStartDate: selectedWindow.startDate,
+          fallbackEndDate: selectedWindow.endDate,
+        });
+      },
+      hydrate: (planWindow) => {
+        if (planWindow.startDate.trim() !== "" && planWindow.startDate !== planStartDate) {
+          setPlanStartDate(planWindow.startDate);
+        }
+      },
+    });
+  }
+
   async function handleLockPlanningContext() {
     if (
       planningContextLockLoading ||
@@ -17271,14 +17483,21 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
+    const authoritativeWindow = resolveAuthoritativePlanWindow({
+      workspacePlanningContext: workspace?.planningContext ?? null,
+      upstreamPlanningContext: upstreamPlanningContext,
+      fallbackStartDate: planStartDate,
+      fallbackEndDate: planEndDate,
+    });
+
     setPlanningContextLockLoading(true);
     setPlanningContextLockError(null);
     setPlanningContextLockSuccess(null);
     try {
       const lockedContext = await lockCoachAthletePlanningContext(entityId, athleteIdTrimmed, {
         planWindow: {
-          startDate: planStartDate,
-          endDate: planEndDate,
+          startDate: authoritativeWindow.startDate,
+          endDate: authoritativeWindow.endDate,
         },
       });
       const isSkillsOwnedPlanningShell =
@@ -17304,14 +17523,17 @@ export function CoachAthletePlanningProfileView({
         const lockedStartDate =
           resolvedContext.planWindow?.startDate ??
           resolvedContext.startDate ??
-          planStartDate;
+          authoritativeWindow.startDate;
         const lockedEndDate =
           resolvedContext.planWindow?.endDate ??
           resolvedContext.endDate ??
-          planEndDate;
+          authoritativeWindow.endDate;
         setCachedLockedPlanWindow({ startDate: lockedStartDate, endDate: lockedEndDate });
       } else if (!isSkillsOwnedPlanningShell) {
-        setCachedLockedPlanWindow({ startDate: planStartDate, endDate: planEndDate });
+        setCachedLockedPlanWindow({
+          startDate: authoritativeWindow.startDate,
+          endDate: authoritativeWindow.endDate,
+        });
       }
       if (!shouldSkipPlanningOwnerReadinessCalls) {
         const [levelValidation, readiness, completeness] = await Promise.all([
@@ -24236,13 +24458,19 @@ export function CoachAthletePlanningProfileView({
                   currentPlanDurationDays={currentPlanDurationDays}
                   planStartDate={planStartDate}
                   setPlanStartDate={setPlanStartDate}
+                  planStartDateMin={planStartDateInputBounds.min}
+                  planStartDateMax={planStartDateInputBounds.max}
                   planEndDate={planEndDate}
                   currentPhaseDetected={currentPhaseDetected}
                   planWindowInsideCurrentPhase={planWindowInsideCurrentPhase}
                   planSeasonBoundsUi={planSeasonBoundsUi}
                   planDatesProceedEnabled={planDatesWindowComplete}
                   planDatesConfirmedForCurrentAthlete={planDatesConfirmedForCurrentAthlete}
-                  onConfirmPlanDates={() => setPlanDatesConfirmedForCurrentAthlete(true)}
+                  planDatesConfirmLoading={planDatesConfirmLoading}
+                  planDatesConfirmError={planDatesConfirmError}
+                  onConfirmPlanDates={() => {
+                    void handleConfirmPlanDates();
+                  }}
                 />
                   {planDatesStepComplete && !headCoachLockedContextStepComplete ? (
                     <DashboardStatusNotice
@@ -26192,12 +26420,42 @@ export function CoachAthletePlanningProfileView({
     return renderPlanViewerSelectedDomainContent();
   }
 
+  function renderNextCycleWorkspaceActionPanel() {
+    if (!shouldRenderNextCycleWorkspaceActionPanel(workspace, planningContextLocked)) return null;
+
+    return (
+      <>
+        <div className="flex flex-wrap justify-end gap-2">
+          <PlanningContextWorkspaceAction
+            planningContextLocked={planningContextLocked}
+            action={workspace?.nextCycleAction ?? "NONE"}
+            loading={nextCycleCreateLoading}
+            onCreate={() => {
+              void handleCreateNextWeeklyPlan();
+            }}
+            onContinue={() => {
+              setNextCycleCreateError(null);
+              setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+            }}
+            onView={() => setShowLockedContextBuilderView(true)}
+          />
+        </div>
+        {nextCycleCreateError ? (
+          <Alert variant="danger">{nextCycleCreateError}</Alert>
+        ) : null}
+      </>
+    );
+  }
+
   function renderDomainPlansIntegrationWorkspace() {
     if (selectedWorkflowTab !== "generate") return null;
     if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
-    if (shouldRenderReleasedPlanViewerCanvas()) {
+    if (
+      shouldRenderReleasedPlanViewerCanvas() &&
+      (workspace?.nextCycleAction ?? "NONE") === "NONE"
+    ) {
       return renderPlanViewerContent(renderPlanViewerLowerContent());
     }
     return (
@@ -26216,7 +26474,9 @@ export function CoachAthletePlanningProfileView({
                     </>
                   }
                   primary={
-                    <WorkflowLockedCard
+                    <div className="space-y-3">
+                      {renderNextCycleWorkspaceActionPanel()}
+                      <WorkflowLockedCard
                       title="Domain Plans Integration"
                       message={
                         isDownstreamDomainCoach
@@ -26242,6 +26502,7 @@ export function CoachAthletePlanningProfileView({
                           : undefined
                       }
                     />
+                    </div>
                   }
                 />
               ) : (
@@ -26261,27 +26522,7 @@ export function CoachAthletePlanningProfileView({
                   }
                   primary={
                     <div className="space-y-3">
-                  {workspace?.planningContext.locked === true ||
-                  (workspace?.nextCycleAction ?? "NONE") !== "NONE" ? (
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <PlanningContextWorkspaceAction
-                        planningContextLocked={workspace?.planningContext.locked === true}
-                        action={workspace?.nextCycleAction ?? "NONE"}
-                        loading={nextCycleCreateLoading}
-                        onCreate={() => {
-                          void handleCreateNextWeeklyPlan();
-                        }}
-                        onContinue={() => {
-                          setNextCycleCreateError(null);
-                          setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
-                        }}
-                        onView={() => setShowLockedContextBuilderView(true)}
-                      />
-                    </div>
-                  ) : null}
-                  {nextCycleCreateError ? (
-                    <Alert variant="danger">{nextCycleCreateError}</Alert>
-                  ) : null}
+                  {renderNextCycleWorkspaceActionPanel()}
                   {shouldUseDomainCoordinationMatrixLayout({
                     shell: trainingPlanShellModel.shell,
                     headCoachReviewMode,

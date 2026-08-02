@@ -129,6 +129,7 @@ import {
   formatSeasonOptionLabel,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
+  resolvePlanStartDateInputBounds,
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
   shouldUseCachedDomainPlanStateForWorkspace,
@@ -258,7 +259,10 @@ import {
   MAX_FYN_REVISION_CHANGES,
   NextCycleWorkspaceAction,
   PlanningContextWorkspaceAction,
+  resolveAuthoritativePlanWindow,
+  runConfirmPlanDatesAction,
   runCreateNextWeeklyPlanAction,
+  shouldRenderNextCycleWorkspaceActionPanel,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
 import {
   resolveLegacyAssistantCreateButtonDisabled,
@@ -303,7 +307,7 @@ describe("NextCycleWorkspaceAction", () => {
     expect(html).toBe("");
   });
 
-  it("renders Create New Plan for CREATE", () => {
+  it("renders Start New Plan for CREATE", () => {
     const html = renderToStaticMarkup(
       createElement(NextCycleWorkspaceAction, {
         action: "CREATE",
@@ -313,7 +317,7 @@ describe("NextCycleWorkspaceAction", () => {
       }),
     );
 
-    expect(html).toContain("Create New Plan");
+    expect(html).toContain("Start New Plan");
     expect(html).not.toContain("Continue Planning");
   });
 
@@ -328,7 +332,7 @@ describe("NextCycleWorkspaceAction", () => {
     );
 
     expect(html).toContain("Continue Planning");
-    expect(html).not.toContain("Create New Plan");
+    expect(html).not.toContain("Start New Plan");
   });
 
   it("blocks duplicate CREATE requests while the first request is pending", async () => {
@@ -425,6 +429,129 @@ describe("NextCycleWorkspaceAction", () => {
   });
 });
 
+describe("Confirm Plan Dates", () => {
+  const selectedWindow = {
+    startDate: "2026-08-03",
+    endDate: "2026-08-09",
+  };
+
+  it("PATCHes once with the selected planWindow and confirms only after success", async () => {
+    const patch = vi.fn().mockResolvedValue(undefined);
+    const refresh = vi.fn().mockResolvedValue({
+      startDate: "2026-08-03",
+      endDate: "2026-08-09",
+    });
+    const hydrate = vi.fn();
+    const setConfirmed = vi.fn();
+    const setError = vi.fn();
+
+    await expect(
+      runConfirmPlanDatesAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError,
+        setConfirmed,
+        planWindow: selectedWindow,
+        patch,
+        refresh,
+        hydrate,
+      }),
+    ).resolves.toBe(true);
+
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledWith(selectedWindow);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(hydrate).toHaveBeenCalledWith({
+      startDate: "2026-08-03",
+      endDate: "2026-08-09",
+    });
+    expect(setConfirmed).toHaveBeenCalledWith(true);
+    expect(setError).toHaveBeenCalledWith(null);
+  });
+
+  it("hydrates displayed dates from the refreshed backend window", async () => {
+    const hydrate = vi.fn();
+
+    await runConfirmPlanDatesAction({
+      pendingRef: { current: false },
+      setLoading: vi.fn(),
+      setError: vi.fn(),
+      setConfirmed: vi.fn(),
+      planWindow: selectedWindow,
+      patch: vi.fn().mockResolvedValue(undefined),
+      refresh: vi.fn().mockResolvedValue({
+        startDate: "2026-08-10",
+        endDate: "2026-08-16",
+      }),
+      hydrate,
+    });
+
+    expect(hydrate).toHaveBeenCalledWith({
+      startDate: "2026-08-10",
+      endDate: "2026-08-16",
+    });
+  });
+
+  it("keeps confirmed false and surfaces the error UI on PATCH failure", async () => {
+    const setConfirmed = vi.fn();
+    const setError = vi.fn();
+    const refresh = vi.fn();
+    const hydrate = vi.fn();
+
+    await expect(
+      runConfirmPlanDatesAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError,
+        setConfirmed,
+        planWindow: selectedWindow,
+        patch: vi.fn().mockRejectedValue(new Error("Plan window rejected")),
+        refresh,
+        hydrate,
+      }),
+    ).resolves.toBe(false);
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(hydrate).not.toHaveBeenCalled();
+    expect(setConfirmed).toHaveBeenCalledWith(false);
+    expect(setError).toHaveBeenLastCalledWith("Plan window rejected");
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("{planDatesConfirmError}");
+    expect(source).toContain("updateNextCyclePlanWindow");
+    expect(source).not.toContain(
+      "onConfirmPlanDates={() => setPlanDatesConfirmedForCurrentAthlete(true)}",
+    );
+  });
+
+  it("resolves Lock planWindow from the refreshed authoritative backend window", () => {
+    expect(
+      resolveAuthoritativePlanWindow({
+        workspacePlanningContext: {
+          planStartDate: "2026-08-10",
+          planEndDate: "2026-08-16",
+        },
+        upstreamPlanningContext: null,
+        fallbackStartDate: "2026-08-03",
+        fallbackEndDate: "2026-08-09",
+      }),
+    ).toEqual({
+      startDate: "2026-08-10",
+      endDate: "2026-08-16",
+    });
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("authoritativeWindow.startDate");
+    expect(source).toContain("authoritativeWindow.endDate");
+  });
+});
+
 describe("PlanningContextWorkspaceAction", () => {
   it("renders Continue Planning only for a pending unlocked context", () => {
     const html = renderToStaticMarkup(
@@ -442,11 +569,11 @@ describe("PlanningContextWorkspaceAction", () => {
     expect(html).not.toContain("View Context");
   });
 
-  it("renders View Context only for a locked context", () => {
+  it("preserves View Context for the first-cycle locked NONE state", () => {
     const html = renderToStaticMarkup(
       createElement(PlanningContextWorkspaceAction, {
         planningContextLocked: true,
-        action: "CONTINUE",
+        action: "NONE",
         loading: false,
         onCreate: vi.fn(),
         onContinue: vi.fn(),
@@ -456,6 +583,23 @@ describe("PlanningContextWorkspaceAction", () => {
 
     expect(html).toContain("View Context");
     expect(html).not.toContain("Continue Planning");
+    expect(html).not.toContain("Start New Plan");
+  });
+
+  it("renders Start New Plan for a locked CREATE state", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: true,
+        action: "CREATE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Start New Plan");
+    expect(html).not.toContain("View Context");
   });
 
   it("Continue Planning uses the existing editable Context Builder action", () => {
@@ -478,7 +622,7 @@ describe("PlanningContextWorkspaceAction", () => {
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
-  it("View Context uses the existing locked read-only Context Builder action", () => {
+  it("locked CONTINUE uses the existing locked read-only Context Builder action", () => {
     const onView = vi.fn();
     const element = PlanningContextWorkspaceAction({
       planningContextLocked: true,
@@ -494,7 +638,23 @@ describe("PlanningContextWorkspaceAction", () => {
     expect(onView).toHaveBeenCalledTimes(1);
   });
 
-  it("retains Back to Domain Plans Integration in the locked read-only view", () => {
+  it("renders View Context, not Continue Planning, for a locked CONTINUE state", () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanningContextWorkspaceAction, {
+        planningContextLocked: true,
+        action: "CONTINUE",
+        loading: false,
+        onCreate: vi.fn(),
+        onContinue: vi.fn(),
+        onView: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("View Context");
+    expect(html).not.toContain("Continue Planning");
+  });
+
+  it("keeps Domain Plans Integration exposed with a return path from locked context", () => {
     const source = readFileSync(
       new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
       "utf8",
@@ -502,10 +662,12 @@ describe("PlanningContextWorkspaceAction", () => {
 
     expect(source).toContain("Locked Context Builder");
     expect(source).toContain("Read-only");
+    expect(source).toContain('if (selectedWorkflowTab !== "generate") return null;');
+    expect(source).toContain("{renderNextCycleWorkspaceActionPanel()}");
     expect(source).toContain("Back to Domain Plans Integration");
   });
 
-  it("still renders Create New Plan for an unlocked CREATE state", () => {
+  it("still renders Start New Plan for an unlocked CREATE state", () => {
     const html = renderToStaticMarkup(
       createElement(PlanningContextWorkspaceAction, {
         planningContextLocked: false,
@@ -517,9 +679,41 @@ describe("PlanningContextWorkspaceAction", () => {
       }),
     );
 
-    expect(html).toContain("Create New Plan");
+    expect(html).toContain("Start New Plan");
     expect(html).not.toContain("Continue Planning");
     expect(html).not.toContain("View Context");
+  });
+});
+
+describe("shouldRenderNextCycleWorkspaceActionPanel", () => {
+  it("renders for CREATE even when planning context is locked", () => {
+    expect(
+      shouldRenderNextCycleWorkspaceActionPanel({
+        planningContext: { locked: true, resolved: true, lockId: "lock-1", snapshotId: null },
+        nextCycleAction: "CREATE",
+      } as TrainingPlanWorkspace),
+    ).toBe(true);
+  });
+
+  it("renders View Context access when the derived backend lock is ahead of the workspace lock", () => {
+    expect(
+      shouldRenderNextCycleWorkspaceActionPanel(
+        {
+          planningContext: { locked: false, resolved: true, lockId: null, snapshotId: null },
+          nextCycleAction: "NONE",
+        } as TrainingPlanWorkspace,
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not render when next-cycle action is NONE and context is unlocked", () => {
+    expect(
+      shouldRenderNextCycleWorkspaceActionPanel({
+        planningContext: { locked: false, resolved: false, lockId: null, snapshotId: null },
+        nextCycleAction: "NONE",
+      } as TrainingPlanWorkspace),
+    ).toBe(false);
   });
 });
 
@@ -12588,6 +12782,75 @@ describe("detectCurrentPhase", () => {
 
   it("detects OFF_SEASON for the planning date before PRE_SEASON starts", () => {
     expect(detectCurrentPhase(planningPhases, "2026-07-29")?.phase).toBe("OFF_SEASON");
+  });
+});
+
+describe("resolvePlanStartDateInputBounds", () => {
+  const preSeasonPhase = {
+    phaseId: "pre-season-id",
+    seasonCycleId: "season-1",
+    phase: "PRE_SEASON",
+    startDate: "2026-07-30",
+    endDate: "2026-08-31",
+  };
+
+  it("allows today and future dates inside the phase while blocking yesterday", () => {
+    const bounds = resolvePlanStartDateInputBounds({
+      today: "2026-07-30",
+      currentPhase: preSeasonPhase,
+      planDurationDays: 7,
+    });
+
+    expect(bounds.min).toBe("2026-07-30");
+    expect(bounds.max).toBe("2026-08-25");
+    expect("2026-07-29" < bounds.min!).toBe(true);
+    expect(bounds.min! <= "2026-07-30" && "2026-07-30" <= bounds.max!).toBe(true);
+    expect(bounds.min! <= "2026-08-20" && "2026-08-20" <= bounds.max!).toBe(true);
+  });
+
+  it("blocks start dates whose 7-day window would extend beyond the phase end", () => {
+    const bounds = resolvePlanStartDateInputBounds({
+      today: "2026-07-30",
+      currentPhase: preSeasonPhase,
+      planDurationDays: 7,
+    });
+
+    expect("2026-08-26" > bounds.max!).toBe(true);
+    expect("2026-08-25" <= bounds.max!).toBe(true);
+  });
+
+  it("blocks dates outside the selected phase", () => {
+    const bounds = resolvePlanStartDateInputBounds({
+      today: "2026-07-30",
+      currentPhase: preSeasonPhase,
+      planDurationDays: 7,
+    });
+
+    expect("2026-07-29" < bounds.min!).toBe(true);
+    expect("2026-09-01" > bounds.max!).toBe(true);
+  });
+
+  it("returns no selectable bounds when the phase cannot fit the plan window", () => {
+    expect(
+      resolvePlanStartDateInputBounds({
+        today: "2026-08-30",
+        currentPhase: {
+          ...preSeasonPhase,
+          endDate: "2026-08-31",
+        },
+        planDurationDays: 7,
+      }),
+    ).toEqual({ min: null, max: null });
+  });
+
+  it("returns no selectable bounds when the current phase is missing", () => {
+    expect(
+      resolvePlanStartDateInputBounds({
+        today: "2026-07-30",
+        currentPhase: null,
+        planDurationDays: 7,
+      }),
+    ).toEqual({ min: null, max: null });
   });
 });
 

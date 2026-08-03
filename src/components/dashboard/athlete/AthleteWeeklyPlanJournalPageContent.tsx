@@ -38,6 +38,7 @@ import {
   formatDateOnly,
   formatDateWithWeekday,
   getLocalDateKey,
+  getPlanningDateKey,
   normalizeDateOnlyKey,
   parseToLocalDate,
 } from "@/lib/dateTime";
@@ -1161,6 +1162,7 @@ type SkillsSportMetricsJournalOptions = {
   dayDate: string;
   sessionTitle: string;
   loggedDrillKeys: Record<string, LoggedDrillResultSummary>;
+  canLogSportResult: boolean;
   onOpenLog: (context: SportMetricsDrillLogContext) => void;
 };
 
@@ -1346,6 +1348,7 @@ function renderJournalStructureSections(
                               type="button"
                               variant="secondary"
                               className="text-xs"
+                              disabled={!skillsSportMetrics.canLogSportResult}
                               onClick={() => skillsSportMetrics.onOpenLog(drillLogContext)}
                             >
                               Log Sport Result
@@ -2447,6 +2450,15 @@ export function formatJournalDomainItemCount(count: number): string {
   return `${count} ${count === 1 ? "item" : "items"} released`;
 }
 
+/** Past and current planning dates may open Log Sport Result; future plan days may not. */
+export function canLogSportResultForDayDate(
+  dayDate: string,
+  planningDateKey: string = getPlanningDateKey(new Date()),
+): boolean {
+  const dayKey = normalizeDateOnlyKey(dayDate);
+  return dayKey !== null && dayKey <= planningDateKey;
+}
+
 function resolveJournalDayAdherenceLogging(day: AthleteWeeklyPlanJournalDay): {
   canLogAdherence: boolean;
   isFutureDay: boolean;
@@ -2548,10 +2560,11 @@ function renderJournalDayDomainGrid(
   journalOptions?: {
     skillsSportMetricsBase?: Omit<
       SkillsSportMetricsJournalOptions,
-      "plannedSessionId" | "dayDate" | "sessionTitle"
+      "plannedSessionId" | "dayDate" | "sessionTitle" | "canLogSportResult"
     >;
   },
 ): ReactElement {
+  const canLogSportResult = canLogSportResultForDayDate(day.date);
   const { canLogAdherence, loggingOpensOn, adherenceDayScopeKey } =
     resolveJournalDayAdherenceLogging(day);
   const domainItemsByKey = {
@@ -2630,6 +2643,7 @@ function renderJournalDayDomainGrid(
                             plannedSessionId: readPlannedSessionIdFromItem(item)!,
                             dayDate: day.date,
                             sessionTitle: readSessionTitleFromItem(item),
+                            canLogSportResult,
                           }
                         : undefined;
 

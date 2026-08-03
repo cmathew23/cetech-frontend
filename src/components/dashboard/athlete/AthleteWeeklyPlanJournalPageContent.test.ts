@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNutritionWeeklySummaryRows,
+  canLogSportResultForDayDate,
   collectDetailRows,
   collectStructureItemDetailRows,
   deriveNutritionTotalsFromFoodLeaves,
@@ -10,6 +11,59 @@ import {
   formatNutritionTotalsCompactLine,
   nutritionTotalsToRows,
 } from "@/components/dashboard/athlete/AthleteWeeklyPlanJournalPageContent";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+describe("Log Sport Result planning-date guard", () => {
+  const planningToday = "2026-08-03";
+
+  it("enables logging for yesterday", () => {
+    expect(canLogSportResultForDayDate("2026-08-02", planningToday)).toBe(true);
+  });
+
+  it("enables logging for today", () => {
+    expect(canLogSportResultForDayDate("2026-08-03", planningToday)).toBe(true);
+  });
+
+  it("disables logging for tomorrow", () => {
+    expect(canLogSportResultForDayDate("2026-08-04", planningToday)).toBe(false);
+  });
+
+  it("enables logging when the planning date advances to the plan day", () => {
+    expect(canLogSportResultForDayDate("2026-08-04", "2026-08-03")).toBe(false);
+    expect(canLogSportResultForDayDate("2026-08-04", "2026-08-04")).toBe(true);
+  });
+
+  it("disables logging when the plan day date is missing or invalid", () => {
+    expect(canLogSportResultForDayDate("", planningToday)).toBe(false);
+    expect(canLogSportResultForDayDate("not-a-date", planningToday)).toBe(false);
+  });
+
+  it("keeps Practice Facility, Simulator, and On Course modal flows unchanged", () => {
+    const modalSource = readFileSync(
+      fileURLToPath(new URL("./LogSportResultModal.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(modalSource).toContain('"PRACTICE_FACILITY"');
+    expect(modalSource).toContain('"SIMULATOR"');
+    expect(modalSource).toContain('"ACTUAL_ROUND"');
+    expect(modalSource).toContain("On Course");
+    expect(modalSource).not.toContain("canLogSportResult");
+  });
+
+  it("disables the journal Log Sport Result button for future plan days", () => {
+    const journalSource = readFileSync(
+      fileURLToPath(
+        new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+
+    expect(journalSource).toContain("disabled={!skillsSportMetrics.canLogSportResult}");
+    expect(journalSource).toContain("canLogSportResultForDayDate(day.date)");
+  });
+});
 
 describe("Athlete weekly plan Nutrition presentation", () => {
   it("renders backend-exposed planned weekly Nutrition summary fields", () => {

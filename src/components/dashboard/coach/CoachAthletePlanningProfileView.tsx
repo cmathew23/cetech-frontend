@@ -5795,7 +5795,6 @@ export function domainIntegrationNextActionLabel(input: {
   headCoachOwnedSkillsDraftApprove?: boolean;
 }): string {
   if (input.loading) return "Loading the latest plan state.";
-  if (input.hasError) return "Resolve the status warning, then refresh this track.";
 
   if (input.workflowStatus === "not_created") {
     if (input.canGenerate) return "Ready to generate this domain plan.";
@@ -8269,6 +8268,95 @@ const DOMAIN_REVIEW_WORKFLOW_STATUS_RANK: Record<AssistantDomainWorkflowStatus, 
   approved: 3,
   released: 4,
 };
+
+export type TrainingPlanPostActionKind =
+  | GovernedTrainingPlanWorkflowAction
+  | "REVISION_APPLY";
+
+type TrainingPlanPostActionOutcome<T> =
+  | { kind: "mutation_failed"; error: unknown }
+  | { kind: "refresh_failed"; result: T; error: unknown }
+  | { kind: "refreshed"; result: T };
+
+/**
+ * Keeps the authoritative mutation outcome separate from best-effort read reconciliation.
+ * A read failure after a 2xx mutation can therefore never be surfaced as a workflow failure.
+ */
+export async function runTrainingPlanPostActionRefresh<T>(input: {
+  mutate: () => Promise<T>;
+  applyMutationSuccess: (result: T) => void;
+  showMutationSuccess: (result: T) => void;
+  refresh: (result: T) => Promise<void>;
+  showRefreshWarning: (error: unknown) => void;
+}): Promise<TrainingPlanPostActionOutcome<T>> {
+  let result: T;
+  try {
+    result = await input.mutate();
+  } catch (error) {
+    return { kind: "mutation_failed", error };
+  }
+
+  input.applyMutationSuccess(result);
+  input.showMutationSuccess(result);
+
+  try {
+    await input.refresh(result);
+    return { kind: "refreshed", result };
+  } catch (error) {
+    input.showRefreshWarning(error);
+    return { kind: "refresh_failed", result, error };
+  }
+}
+
+function postActionStatus(action: TrainingPlanPostActionKind): string {
+  if (action === "SUBMIT_REVIEW") return "SUBMITTED_FOR_REVIEW";
+  if (action === "REQUEST_REVISION") return "REVISION_REQUESTED";
+  if (action === "HEAD_APPROVE") return "HEAD_COACH_APPROVED";
+  if (action === "RELEASE") return "ACTIVE";
+  return "AI_GENERATED";
+}
+
+export function projectWorkspaceAfterTrainingPlanMutation(input: {
+  workspace: TrainingPlanWorkspace | null;
+  domain: TrainingPlanGenerationDomain;
+  action: TrainingPlanPostActionKind;
+  planId: string;
+  versionId: string;
+  revisionFeedback?: string | null;
+}): TrainingPlanWorkspace | null {
+  if (input.workspace === null) return null;
+  const current = input.workspace.domains[input.domain];
+  const status = postActionStatus(input.action);
+  return {
+    ...input.workspace,
+    domains: {
+      ...input.workspace.domains,
+      [input.domain]: {
+        ...current,
+        submittedForReview: input.action === "SUBMIT_REVIEW",
+        pendingRevisionRequest:
+          input.action === "REQUEST_REVISION"
+            ? {
+                feedback: input.revisionFeedback?.trim() || null,
+                requestedAt: null,
+                requestedBy: null,
+                actorRole: null,
+              }
+            : input.action === "REVISION_APPLY"
+              ? null
+              : current.pendingRevisionRequest,
+        summary: {
+          ...current.summary,
+          trainingPlanId: input.planId,
+          versionId: input.versionId,
+          latestVersionId:
+            input.action === "REVISION_APPLY" ? input.versionId : current.summary.latestVersionId,
+          status,
+        },
+      },
+    },
+  };
+}
 
 export function resolveDomainReviewWorkflowStatus(input: {
   workspace: TrainingPlanWorkspace | null;
@@ -11051,6 +11139,8 @@ export function CoachAthletePlanningProfileView({
     useState<GovernedTrainingPlanWorkflowAction | null>(null);
   const [governedPlanActionError, setGovernedPlanActionError] = useState<string | null>(null);
   const [governedPlanActionSuccess, setGovernedPlanActionSuccess] =
+    useState<string | null>(null);
+  const [governedPlanRefreshWarning, setGovernedPlanRefreshWarning] =
     useState<string | null>(null);
   const [governedPlanActionSuccessFeedback, setGovernedPlanActionSuccessFeedback] =
     useState<string | null>(null);
@@ -14872,6 +14962,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionLoading(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanRefreshWarning(null);
     setAssistantGovernedDetailRefreshing(false);
     setLatestSkillsDraft(null);
     setLatestDraftDomain(null);
@@ -14965,6 +15056,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionLoading(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanRefreshWarning(null);
   }, [workspace]);
 
   useEffect(() => {
@@ -15205,7 +15297,7 @@ export function CoachAthletePlanningProfileView({
 
           if (summaryPlanId !== null && summaryPlanId !== "") {
             knownDomainPlanIdsRef.current[domain] = summaryPlanId;
-            if (summaryVersionId !== null || (summarySource.status?.trim() ?? "") === "") {
+            if (!shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent(summarySource.status)) {
               try {
                 versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
               } catch (e) {
@@ -15302,6 +15394,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionLoading(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanRefreshWarning(null);
   }, [requestedPlanIdDep, persistedPlanVersionIdDep]);
 
   useEffect(() => {
@@ -15396,6 +15489,57 @@ export function CoachAthletePlanningProfileView({
       }));
     },
     [headCoachReviewMode, trainingPlanShellModel.shell],
+  );
+
+  const applyTrainingPlanMutationSuccessLocally = useCallback(
+    (input: {
+      domain: TrainingPlanGenerationDomain;
+      action: TrainingPlanPostActionKind;
+      planId: string;
+      versionId: string;
+      revisionFeedback?: string | null;
+    }) => {
+      const status = postActionStatus(input.action);
+      setWorkspace((current) => projectWorkspaceAfterTrainingPlanMutation({
+        workspace: current,
+        ...input,
+      }));
+      setHeadCoachDomainPlanStates((current) => {
+        const domainState = current[input.domain];
+        const activeDetail =
+          domainState.activeDetail?.plan.id.trim() === input.planId
+            ? {
+                ...domainState.activeDetail,
+                plan: { ...domainState.activeDetail.plan, status },
+                version: { ...domainState.activeDetail.version, status },
+              }
+            : domainState.activeDetail;
+        return {
+          ...current,
+          [input.domain]: {
+            ...domainState,
+            loading: false,
+            error: null,
+            activeDetail,
+            summaryStatus: status,
+            summaryPlanId: input.planId,
+            summaryVersionId: input.versionId,
+          },
+        };
+      });
+      setPersistedSkillsPlanDetail((current) =>
+        current !== null &&
+        persistedVerifiedDomain === input.domain &&
+        current.plan.id.trim() === input.planId
+          ? {
+              ...current,
+              plan: { ...current.plan, status },
+              version: { ...current.version, status },
+            }
+          : current,
+      );
+    },
+    [persistedVerifiedDomain],
   );
 
   const reconcileRevisedDomainPlanDetail = useCallback(
@@ -15609,7 +15753,10 @@ export function CoachAthletePlanningProfileView({
   );
 
   const refreshHeadCoachDomainPlanState = useCallback(
-    async (domain: TrainingPlanGenerationDomain): Promise<void> => {
+    async (
+      domain: TrainingPlanGenerationDomain,
+      options?: { preserveOnFailure?: boolean },
+    ): Promise<void> => {
       if (!headCoachReviewMode || entityId === "" || athleteIdTrimmed === "") return;
 
       setHeadCoachDomainPlanStates((prev) => ({
@@ -15644,7 +15791,7 @@ export function CoachAthletePlanningProfileView({
               error = formatApiError(e, `Could not load review details for ${trainingPlanDomainLabel(domain)}.`);
             }
           }
-          if (resolvedSummaryVersionId !== null || (summarySource.status?.trim() ?? "") === "") {
+          if (!shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent(summarySource.status)) {
             try {
               versions = await fetchPersistedTrainingPlanVersions(summaryPlanId);
             } catch (e) {
@@ -15667,25 +15814,36 @@ export function CoachAthletePlanningProfileView({
         error = formatApiError(e, `Could not refresh ${trainingPlanDomainLabel(domain)} status.`);
       }
 
-      setHeadCoachDomainPlanStates((prev) => ({
-        ...prev,
-        [domain]: {
-          loading: false,
-          error,
-          latestDraft: prev[domain].latestDraft,
-          activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-            refreshedActiveDetail: activeDetail,
-            previousActiveDetail: prev[domain].activeDetail,
+      setHeadCoachDomainPlanStates((prev) => {
+        if (error !== null && options?.preserveOnFailure === true) {
+          return {
+            ...prev,
+            [domain]: { ...prev[domain], loading: false, error: null },
+          };
+        }
+        return {
+          ...prev,
+          [domain]: {
+            loading: false,
+            error,
+            latestDraft: prev[domain].latestDraft,
+            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+              refreshedActiveDetail: activeDetail,
+              previousActiveDetail: prev[domain].activeDetail,
+              summaryPlanId,
+              preservePreviousDetail:
+                workflow1HeadCoachReviewActionPanelMode &&
+                headCoachSubmittedReviewDomain === domain,
+            }),
+            summaryStatus,
             summaryPlanId,
-            preservePreviousDetail:
-              workflow1HeadCoachReviewActionPanelMode &&
-              headCoachSubmittedReviewDomain === domain,
-          }),
-          summaryStatus,
-          summaryPlanId,
-          summaryVersionId,
-        },
-      }));
+            summaryVersionId,
+          },
+        };
+      });
+      if (error !== null && options?.preserveOnFailure === true) {
+        throw new Error(error);
+      }
     },
     [
       athleteIdTrimmed,
@@ -16711,41 +16869,65 @@ export function CoachAthletePlanningProfileView({
     setReviseSkillsLoading(true);
     setReviseSkillsError(null);
     setReviseSkillsSuccess(null);
-    try {
-      const reviseResult = await reviseCoachAthleteSkillsTrainingPlan(
-        entityId,
-        athleteIdTrimmed,
-        payload,
-      );
-      const nextVersionId = nextSkillsRevisionVersionId(reviseResult);
-      if (nextVersionId !== null) {
-        setSkillsActiveReviseIds({
-          trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+    setGovernedPlanRefreshWarning(null);
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: () =>
+        reviseCoachAthleteSkillsTrainingPlan(entityId, athleteIdTrimmed, payload),
+      applyMutationSuccess: (reviseResult) => {
+        const nextVersionId =
+          nextSkillsRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
+        const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
+        setSkillsActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
+        applyTrainingPlanMutationSuccessLocally({
+          domain: "SKILLS",
+          action: "REVISION_APPLY",
+          planId: nextPlanId,
           versionId: nextVersionId,
         });
-      }
-      if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
-      await reconcileRevisedDomainPlanDetail("SKILLS", reviseResult, trainingPlanIdForReload);
-      if (isSinglePatch) {
-        await runNutritionReviewDrawerOpenRefresh({
-          loadLatestPlan: () => loadLatestSkillsDraft("SKILLS", true),
-          rebuildTargetOptions: () => loadFynRevisionContext("SKILLS"),
-        });
-      } else {
-        await loadLatestSkillsDraft("SKILLS", true);
-      }
-      setReviseSkillsFeedback("");
-      if (isSinglePatch) {
-        setFynRevisionSelections((current) => ({
-          ...current,
-          SKILLS: defaultFynRevisionBatchSelection(),
-        }));
-        setReviseSkillsSuccess(SKILLS_REVISION_APPLIED_MESSAGE);
-      } else {
-        setReviseSkillsSuccess("Revised skills plan version generated.");
-      }
-      void refreshTrainingPlanWorkspace({ background: true });
-    } catch (e) {
+      },
+      showMutationSuccess: () => {
+        if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
+        setReviseSkillsFeedback("");
+        if (isSinglePatch) {
+          setFynRevisionSelections((current) => ({
+            ...current,
+            SKILLS: defaultFynRevisionBatchSelection(),
+          }));
+          setReviseSkillsSuccess(SKILLS_REVISION_APPLIED_MESSAGE);
+        } else {
+          setReviseSkillsSuccess("Revised skills plan version generated.");
+        }
+      },
+      refresh: async (reviseResult) => {
+        await reconcileRevisedDomainPlanDetail("SKILLS", reviseResult, trainingPlanIdForReload);
+        if (isSinglePatch) {
+          await runNutritionReviewDrawerOpenRefresh({
+            loadLatestPlan: async () => {
+              if ((await loadLatestSkillsDraft("SKILLS", true, true)) === null) {
+                throw new Error("Unable to reload the revised Skills plan.");
+              }
+            },
+            rebuildTargetOptions: async () => {
+              if (!(await loadFynRevisionContext("SKILLS"))) {
+                throw new Error("Unable to reload Skills revision guidance.");
+              }
+            },
+          });
+        } else if ((await loadLatestSkillsDraft("SKILLS", true, true)) === null) {
+          throw new Error("Unable to reload the revised Skills plan.");
+        }
+        if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+      },
+      showRefreshWarning: (error) => {
+        setGovernedPlanRefreshWarning(
+          formatApiError(error, "Revision applied, but the latest Skills plan could not be refreshed."),
+        );
+      },
+    });
+    if (outcome.kind === "mutation_failed") {
+      const e = outcome.error;
       // Keep the currently rendered Skills plan and selection unchanged when the revision fails.
       console.error("Skills training plan revision failed", e);
       if (isAiGenerationValidationError(e)) {
@@ -16778,9 +16960,8 @@ export function CoachAthletePlanningProfileView({
         );
       }
       setReviseSkillsSuccess(null);
-    } finally {
-      setReviseSkillsLoading(false);
     }
+    setReviseSkillsLoading(false);
   }
 
   function setDomainReviseFeedback(
@@ -17171,13 +17352,16 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionLoading(action);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanRefreshWarning(null);
     setGovernedPlanActionSuccessFeedback(null);
 
     const actionDomain = actionContext.generationDomain;
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
+    let mutationContext = actionContext;
 
-    try {
-      if (action === "SUBMIT_REVIEW") {
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: async () => {
+        if (action === "SUBMIT_REVIEW") {
         const workspaceSubmitIds = resolveSubmitReviewPlanVersionIds({
           workspace,
           domain: actionDomain,
@@ -17208,10 +17392,9 @@ export function CoachAthletePlanningProfileView({
               visibleDraft,
             );
             if (detail === null) {
-              setGovernedPlanActionError(
+              throw new Error(
                 "Unable to refresh plan permissions before submit. Please try again.",
               );
-              return;
             }
             submitContext = {
               planId: detail.plan.id.trim(),
@@ -17225,15 +17408,19 @@ export function CoachAthletePlanningProfileView({
                 currentDomain: currentCoachGenerationDomain,
               })
             ) {
-              setGovernedPlanActionError(
+              throw new Error(
                 "Submit is unavailable until the saved plan matches the latest draft version. Please wait for sync to finish.",
               );
-              return;
             }
           }
           submitPlanId = submitContext.planId;
           submitVersionId = submitContext.versionId;
         }
+        mutationContext = {
+          planId: submitPlanId,
+          versionId: submitVersionId,
+          generationDomain: actionDomain,
+        };
         await submitReview(
           entityId,
           athleteIdTrimmed,
@@ -17241,7 +17428,7 @@ export function CoachAthletePlanningProfileView({
           submitVersionId,
           actionDomain,
         );
-      } else if (action === "HEAD_APPROVE") {
+        } else if (action === "HEAD_APPROVE") {
         const useDirectReleaseDomainOwnerApproval = shouldRouteDirectReleaseDomainOwnerApproval(
           {
             domain: actionDomain,
@@ -17282,7 +17469,7 @@ export function CoachAthletePlanningProfileView({
             actionDomain,
           );
         }
-      } else {
+        } else {
         await release(
           entityId,
           athleteIdTrimmed,
@@ -17290,36 +17477,53 @@ export function CoachAthletePlanningProfileView({
           actionContext.versionId,
           actionDomain,
         );
-      }
-      if (isHeadCoachPlanningContextOwner) {
-        if (
-          headCoachFunctionAwareMode &&
-          actionDomain === "SKILLS" &&
-          action === "SUBMIT_REVIEW"
-        ) {
-          await refreshWorkflow2HeadCoachSkillsDomainSlotAfterSubmit(
-            actionContext.planId,
-          );
+        }
+      },
+      applyMutationSuccess: () => {
+        applyTrainingPlanMutationSuccessLocally({
+          domain: actionDomain,
+          action,
+          planId: mutationContext.planId,
+          versionId: mutationContext.versionId,
+        });
+      },
+      showMutationSuccess: () => {
+        if (isHeadCoachPlanningContextOwner) {
+          if (!workflow1HeadCoachReviewActionPanelMode) {
+            setSelectedWorkflowTab("generate");
+          }
+          setHeadCoachSubmittedReviewDomain(actionDomain);
+        }
+        setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
+      },
+      refresh: async () => {
+        if (isHeadCoachPlanningContextOwner) {
+          await refreshHeadCoachDomainPlanState(actionDomain, { preserveOnFailure: true });
         } else {
-          await refreshHeadCoachDomainPlanState(actionDomain);
+          const detail = await refreshPersistedPlanDetail(
+            mutationContext.planId,
+            actionDomain,
+            { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
+          );
+          syncDomainCoordinationMatrixPlanState(actionDomain, detail);
         }
-      } else {
-        const detail = await refreshPersistedPlanDetail(
-          actionContext.planId,
-          actionDomain,
-          { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
+        const refreshedWorkspace = await refreshTrainingPlanWorkspace({ background: true });
+        if (refreshedWorkspace === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+      },
+      showRefreshWarning: (error) => {
+        setGovernedPlanRefreshWarning(
+          formatApiError(
+            error,
+            "The action succeeded, but the latest plan details could not be refreshed.",
+          ),
         );
-        syncDomainCoordinationMatrixPlanState(actionDomain, detail);
-      }
-      if (isHeadCoachPlanningContextOwner) {
-        if (!workflow1HeadCoachReviewActionPanelMode) {
-          setSelectedWorkflowTab("generate");
-        }
-        setHeadCoachSubmittedReviewDomain(actionDomain);
-      }
-      setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
-      void refreshTrainingPlanWorkspace({ background: true });
-    } catch (e) {
+      },
+    });
+
+    if (outcome.kind === "mutation_failed") {
+      const e = outcome.error;
       if (
         headCoachFunctionAwareMode &&
         action === "SUBMIT_REVIEW" &&
@@ -17332,15 +17536,15 @@ export function CoachAthletePlanningProfileView({
         if (recovered) {
           setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
           void refreshTrainingPlanWorkspace({ background: true });
+          setGovernedPlanActionLoading(null);
           return;
         }
       }
       setGovernedPlanActionError(
         formatApiError(e, governedPlanActionErrorFallback(action)),
       );
-    } finally {
-      setGovernedPlanActionLoading(null);
     }
+    setGovernedPlanActionLoading(null);
   }
 
   function handleCancelRequestRevision() {
@@ -17384,43 +17588,68 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionLoading("REQUEST_REVISION");
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
+    setGovernedPlanRefreshWarning(null);
     setGovernedPlanActionSuccessFeedback(null);
 
     const updateWorkflowRequestedPlanIdAfterAction = requestedPlanId !== null;
-
-    try {
-      await requestRevision(
-        entityId,
-        athleteIdTrimmed,
-        actionContext.planId,
-        actionContext.versionId,
-        actionDomain,
-        coachFeedback,
-      );
-      if (isHeadCoachPlanningContextOwner) {
-        await refreshHeadCoachDomainPlanState(actionDomain);
-      } else {
-        const detail = await refreshPersistedPlanDetail(
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: () =>
+        requestRevision(
+          entityId,
+          athleteIdTrimmed,
           actionContext.planId,
+          actionContext.versionId,
           actionDomain,
-          { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
+          coachFeedback,
+        ),
+      applyMutationSuccess: () => {
+        applyTrainingPlanMutationSuccessLocally({
+          domain: actionDomain,
+          action: "REQUEST_REVISION",
+          planId: actionContext.planId,
+          versionId: actionContext.versionId,
+          revisionFeedback: coachFeedback,
+        });
+      },
+      showMutationSuccess: () => {
+        setRequestRevisionFeedback("");
+        setRequestRevisionModalOpen(false);
+        setRequestRevisionDrawerComposerOpen(false);
+        setRequestRevisionActionContext(null);
+        const domainLabel = trainingPlanDomainLabel(actionDomain);
+        setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
+      },
+      refresh: async () => {
+        if (isHeadCoachPlanningContextOwner) {
+          await refreshHeadCoachDomainPlanState(actionDomain, { preserveOnFailure: true });
+        } else {
+          const detail = await refreshPersistedPlanDetail(
+            actionContext.planId,
+            actionDomain,
+            { updateWorkflowRequestedPlanId: updateWorkflowRequestedPlanIdAfterAction },
+          );
+          syncDomainCoordinationMatrixPlanState(actionDomain, detail);
+        }
+        const refreshedWorkspace = await refreshTrainingPlanWorkspace({ background: true });
+        if (refreshedWorkspace === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+      },
+      showRefreshWarning: (error) => {
+        setGovernedPlanRefreshWarning(
+          formatApiError(
+            error,
+            "The revision request succeeded, but the latest plan details could not be refreshed.",
+          ),
         );
-        syncDomainCoordinationMatrixPlanState(actionDomain, detail);
-      }
-      setRequestRevisionFeedback("");
-      setRequestRevisionModalOpen(false);
-      setRequestRevisionDrawerComposerOpen(false);
-      setRequestRevisionActionContext(null);
-      const domainLabel = trainingPlanDomainLabel(actionDomain);
-      setGovernedPlanActionSuccess(`Revision requested and sent back to ${domainLabel} Coach.`);
-      void refreshTrainingPlanWorkspace({ background: true });
-    } catch (e) {
+      },
+    });
+    if (outcome.kind === "mutation_failed") {
       setGovernedPlanActionError(
-        formatApiError(e, governedPlanActionErrorFallback("REQUEST_REVISION")),
+        formatApiError(outcome.error, governedPlanActionErrorFallback("REQUEST_REVISION")),
       );
-    } finally {
-      setGovernedPlanActionLoading(null);
     }
+    setGovernedPlanActionLoading(null);
   }
 
   async function handleConfirmPlanDates() {
@@ -18420,6 +18649,9 @@ export function CoachAthletePlanningProfileView({
 
         {governedPlanActionError && !workflow1HeadCoachReviewActionPanelMode ? (
           <Alert variant="danger">{governedPlanActionError}</Alert>
+        ) : null}
+        {governedPlanRefreshWarning && !workflow1HeadCoachReviewActionPanelMode ? (
+          <Alert variant="warning">{governedPlanRefreshWarning}</Alert>
         ) : null}
 
         {shouldShowSelectedDomainInspectorActionSuccess(governedPlanActionSuccess) &&
@@ -19441,6 +19673,11 @@ export function CoachAthletePlanningProfileView({
                 {domainState.error ? (
                   <DashboardStatusNotice type="warning" compact>
                     Unable to load submitted plan detail. {domainState.error}
+                  </DashboardStatusNotice>
+                ) : null}
+                {governedPlanRefreshWarning ? (
+                  <DashboardStatusNotice type="warning" compact>
+                    {governedPlanRefreshWarning}
                   </DashboardStatusNotice>
                 ) : null}
                 {governedPlanActionError ? (
@@ -22406,62 +22643,78 @@ export function CoachAthletePlanningProfileView({
     setReviseNutritionLoading(true);
     setReviseNutritionError(null);
     setReviseNutritionSuccess(null);
-    try {
-      const reviseResult = await reviseNutritionPlan(entityId, athleteIdTrimmed, payload);
-      // 1) Pin the version returned by this successful revision as the authoritative version for the
-      // NEXT revision. This is the source of truth even if the latest-plan reload below lags or
-      // resolves to stale state.
-      const nextVersionId = nextNutritionRevisionVersionId(reviseResult);
-      if (nextVersionId !== null) {
-        setNutritionActiveReviseIds({
-          trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
+    setGovernedPlanRefreshWarning(null);
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: () => reviseNutritionPlan(entityId, athleteIdTrimmed, payload),
+      applyMutationSuccess: (reviseResult) => {
+        const nextVersionId =
+          nextNutritionRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
+        const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
+        setNutritionActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
+        applyTrainingPlanMutationSuccessLocally({
+          domain: "NUTRITION",
+          action: "REVISION_APPLY",
+          planId: nextPlanId,
           versionId: nextVersionId,
         });
-      }
-      // 2) Clear the old revision targets/options up front so no stale target/option is shown or
-      // selectable while the latest plan reloads (single-patch dropdown flow only).
-      if (isSinglePatch) {
-        resetFynRevisionOptionsFlow("NUTRITION");
-      }
-      // 3 + 4) Reload the latest Nutrition plan/version for DISPLAY, THEN rebuild the revision target
-      // dropdown from that reloaded plan — strictly sequential (never concurrent), reusing the same
-      // refresh the drawer-open lifecycle uses so no new loader is introduced. The pinned version
-      // above stays authoritative for the next submission.
-      await reconcileRevisedDomainPlanDetail("NUTRITION", reviseResult, trainingPlanIdForReload);
-      if (isSinglePatch) {
-        await runNutritionReviewDrawerOpenRefresh({
-          loadLatestPlan: () => loadLatestSkillsDraft("NUTRITION", true),
-          rebuildTargetOptions: () => loadFynRevisionContext("NUTRITION"),
-        });
-      } else {
-        await loadLatestSkillsDraft("NUTRITION", true);
-      }
-      setReviseNutritionFeedback("");
-      if (isSinglePatch) {
-        // 5 + 6) Keep the drawer open; clear the previous single-change selection and show success so
-        // the coach can immediately revise another item against the newly rebuilt (new-version)
-        // dropdown, including any items just added.
-        setFynRevisionSelections((current) => ({
-          ...current,
-          NUTRITION: defaultFynRevisionBatchSelection(),
-        }));
-        setReviseNutritionSuccess(NUTRITION_REVISION_APPLIED_MESSAGE);
-      } else {
-        setReviseNutritionSuccess("Revised nutrition plan version generated.");
-      }
-      void refreshTrainingPlanWorkspace({ background: true });
-    } catch (e) {
+      },
+      showMutationSuccess: () => {
+        if (isSinglePatch) resetFynRevisionOptionsFlow("NUTRITION");
+        setReviseNutritionFeedback("");
+        if (isSinglePatch) {
+          setFynRevisionSelections((current) => ({
+            ...current,
+            NUTRITION: defaultFynRevisionBatchSelection(),
+          }));
+          setReviseNutritionSuccess(NUTRITION_REVISION_APPLIED_MESSAGE);
+        } else {
+          setReviseNutritionSuccess("Revised nutrition plan version generated.");
+        }
+      },
+      refresh: async (reviseResult) => {
+        await reconcileRevisedDomainPlanDetail("NUTRITION", reviseResult, trainingPlanIdForReload);
+        if (isSinglePatch) {
+          await runNutritionReviewDrawerOpenRefresh({
+            loadLatestPlan: async () => {
+              if ((await loadLatestSkillsDraft("NUTRITION", true, true)) === null) {
+                throw new Error("Unable to reload the revised Nutrition plan.");
+              }
+            },
+            rebuildTargetOptions: async () => {
+              if (!(await loadFynRevisionContext("NUTRITION"))) {
+                throw new Error("Unable to reload Nutrition revision guidance.");
+              }
+            },
+          });
+        } else if ((await loadLatestSkillsDraft("NUTRITION", true, true)) === null) {
+          throw new Error("Unable to reload the revised Nutrition plan.");
+        }
+        if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+      },
+      showRefreshWarning: (error) => {
+        setGovernedPlanRefreshWarning(
+          formatApiError(
+            error,
+            "Revision applied, but the latest Nutrition plan could not be refreshed.",
+          ),
+        );
+      },
+    });
+    if (outcome.kind === "mutation_failed") {
+      const e = outcome.error;
       console.error("Nutrition training plan revision failed", e);
-      const outcome = resolveNutritionRevisionErrorOutcome(e);
+      const errorOutcome = resolveNutritionRevisionErrorOutcome(e);
       setReviseNutritionSuccess(null);
       // Deterministic stale-version / interrupted rejection: reload the latest plan/version,
       // clear the stale selection, and never automatically retry the old revisionPatch.
-      if (outcome.reloadLatest) {
+      if (errorOutcome.reloadLatest) {
         // Drop the stale pin so the next revision derives its version from the reloaded latest plan.
         setNutritionActiveReviseIds(null);
         const reloadedDraft = await loadLatestSkillsDraft("NUTRITION", true);
         void refreshTrainingPlanWorkspace({ background: true });
-        if (outcome.clearSelection && isSinglePatch) {
+        if (errorOutcome.clearSelection && isSinglePatch) {
           resetFynRevisionOptionsFlow("NUTRITION");
           setFynRevisionSelections((current) => ({
             ...current,
@@ -22470,7 +22723,7 @@ export function CoachAthletePlanningProfileView({
           setReviseNutritionFeedback("");
         }
         if (
-          outcome.kind === "INTERRUPTED" &&
+          errorOutcome.kind === "INTERRUPTED" &&
           pendingSelection?.actionKey === "REMOVE_ITEM" &&
           pendingSelection.target !== null &&
           !nutritionRemoveItemTargetStillPresent(reloadedDraft?.days, pendingSelection.target)
@@ -22479,7 +22732,7 @@ export function CoachAthletePlanningProfileView({
           setReviseNutritionSuccess(NUTRITION_REVISION_ALREADY_APPLIED_MESSAGE);
           return;
         }
-      } else if (outcome.clearSelection && isSinglePatch) {
+      } else if (errorOutcome.clearSelection && isSinglePatch) {
         resetFynRevisionOptionsFlow("NUTRITION");
         setFynRevisionSelections((current) => ({
           ...current,
@@ -22488,10 +22741,9 @@ export function CoachAthletePlanningProfileView({
         setReviseNutritionFeedback("");
       }
       // Show the backend message (or the specific validation/generic copy) in the drawer.
-      setReviseNutritionError(outcome.message);
-    } finally {
-      setReviseNutritionLoading(false);
+      setReviseNutritionError(errorOutcome.message);
     }
+    setReviseNutritionLoading(false);
   }
 
   async function handleReviseSandCPlan(submission?: SandCRevisionSubmission | null) {
@@ -22532,60 +22784,56 @@ export function CoachAthletePlanningProfileView({
     setReviseSandCLoading(true);
     setReviseSandCError(null);
     setReviseSandCSuccess(null);
-    try {
-      if (isSinglePatch) {
-        await runSandCStructuredRevisionSequence({
-          submit: () =>
-            reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, payload),
-          pinReturnedVersion: (reviseResult) => {
-            const nextVersionId = nextSandCRevisionVersionId(reviseResult);
-            if (nextVersionId !== null) {
-              setSandCActiveReviseIds({
-                trainingPlanId:
-                  reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
-                versionId: nextVersionId,
-              });
-            }
-          },
-          reconcilePlan: (reviseResult) =>
-            reconcileRevisedDomainPlanDetail(
-              "S_AND_C",
-              reviseResult,
-              trainingPlanIdForReload,
-            ),
-          reloadLatestPlan: async () =>
-            (await loadLatestSkillsDraft("S_AND_C", true, true)) !== null,
-          reloadRevisionContext: () => loadFynRevisionContext("S_AND_C"),
-          resetTemporaryState: () => {
-            resetFynRevisionOptionsFlow("S_AND_C");
-            setFynRevisionSelections((current) => ({
-              ...current,
-              S_AND_C: defaultFynRevisionBatchSelection(),
-            }));
-            setReviseSandCFeedback("");
-          },
+    setGovernedPlanRefreshWarning(null);
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: () =>
+        reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, payload),
+      applyMutationSuccess: (reviseResult) => {
+        const nextVersionId =
+          nextSandCRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
+        const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
+        setSandCActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
+        applyTrainingPlanMutationSuccessLocally({
+          domain: "S_AND_C",
+          action: "REVISION_APPLY",
+          planId: nextPlanId,
+          versionId: nextVersionId,
         });
-        setReviseSandCSuccess(SANDC_REVISION_APPLIED_MESSAGE);
-      } else {
-        const reviseResult = await reviseCoachAthleteSandCTrainingPlan(
-          entityId,
-          athleteIdTrimmed,
-          payload,
-        );
-        const nextVersionId = nextSandCRevisionVersionId(reviseResult);
-        if (nextVersionId !== null) {
-          setSandCActiveReviseIds({
-            trainingPlanId: reviseResult.planId?.trim() || activeReviseIds.trainingPlanId,
-            versionId: nextVersionId,
-          });
+      },
+      showMutationSuccess: () => {
+        if (isSinglePatch) {
+          resetFynRevisionOptionsFlow("S_AND_C");
+          setFynRevisionSelections((current) => ({
+            ...current,
+            S_AND_C: defaultFynRevisionBatchSelection(),
+          }));
+          setReviseSandCSuccess(SANDC_REVISION_APPLIED_MESSAGE);
+        } else {
+          setReviseSandCSuccess("Revised S&C plan version generated.");
         }
-        await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
-        await loadLatestSkillsDraft("S_AND_C", true);
         setReviseSandCFeedback("");
-        setReviseSandCSuccess("Revised S&C plan version generated.");
-      }
-      void refreshTrainingPlanWorkspace({ background: true });
-    } catch (e) {
+      },
+      refresh: async (reviseResult) => {
+        await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
+        if ((await loadLatestSkillsDraft("S_AND_C", true, true)) === null) {
+          throw new Error("Unable to reload the revised S&C plan.");
+        }
+        if (isSinglePatch) {
+          const contextLoaded = await loadFynRevisionContext("S_AND_C");
+          if (!contextLoaded) throw new Error("Unable to reload S&C revision guidance.");
+        }
+        if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+      },
+      showRefreshWarning: (error) => {
+        setGovernedPlanRefreshWarning(
+          formatApiError(error, "Revision applied, but the latest S&C plan could not be refreshed."),
+        );
+      },
+    });
+    if (outcome.kind === "mutation_failed") {
+      const e = outcome.error;
       // Keep the rendered plan, pinned version, and current S&C selection unchanged on failure.
       console.error("S&C training plan revision failed", e);
       const errorRecord =
@@ -22607,9 +22855,8 @@ export function CoachAthletePlanningProfileView({
           : `Revision failed: ${message}`,
       );
       setReviseSandCSuccess(null);
-    } finally {
-      setReviseSandCLoading(false);
     }
+    setReviseSandCLoading(false);
   }
 
   function beginExplicitSeasonCreateForm() {

@@ -77,6 +77,8 @@ import {
   shouldShowDomainCoachWorkspaceGenerationProgress,
   shouldShowGeneratedDraftEmptyState,
   shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent,
+  runTrainingPlanPostActionRefresh,
+  projectWorkspaceAfterTrainingPlanMutation,
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
   resolveWorkspaceTrainingPlanShellOwnership,
@@ -5534,8 +5536,11 @@ describe("Training Plan Workspace lifecycle display", () => {
         new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
         "utf8",
       );
-      const pinStart = source.indexOf("pinReturnedVersion: (reviseResult)");
-      const pinEnd = source.indexOf("reconcilePlan:", pinStart);
+      const sandCMutationStart = source.indexOf(
+        "mutate: () =>\n        reviseCoachAthleteSandCTrainingPlan",
+      );
+      const pinStart = source.indexOf("setSandCActiveReviseIds(", sandCMutationStart);
+      const pinEnd = source.indexOf("applyTrainingPlanMutationSuccessLocally", pinStart);
       const pinCallback = source.slice(pinStart, pinEnd);
 
       expect(pinStart).toBeGreaterThan(-1);
@@ -14938,6 +14943,157 @@ describe("Workflow 2 submit-review reconciliation helpers", () => {
     expect(workflow2SkillsSubmitReviewReconciled("approved")).toBe(true);
     expect(workflow2SkillsSubmitReviewReconciled("released")).toBe(true);
     expect(workflow2SkillsSubmitReviewReconciled("draft_generated")).toBe(false);
+  });
+});
+
+describe("universal training-plan post-action refresh", () => {
+  it("applies and reports mutation success before a successful refresh", async () => {
+    const events: string[] = [];
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: async () => {
+        events.push("mutation");
+        return { versionId: "version-2" };
+      },
+      applyMutationSuccess: () => events.push("apply"),
+      showMutationSuccess: () => events.push("success"),
+      refresh: async () => {
+        events.push("refresh");
+      },
+      showRefreshWarning: () => events.push("warning"),
+    });
+
+    expect(outcome.kind).toBe("refreshed");
+    expect(events).toEqual(["mutation", "apply", "success", "refresh"]);
+  });
+
+  it.each([
+    new Error("Request timed out"),
+    { status: 503, message: "Service unavailable" },
+  ])("keeps mutation success and emits only a refresh warning when reads fail", async (error) => {
+    const applyMutationSuccess = vi.fn();
+    const showMutationSuccess = vi.fn();
+    const showRefreshWarning = vi.fn();
+
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: vi.fn().mockResolvedValue({ versionId: "version-2" }),
+      applyMutationSuccess,
+      showMutationSuccess,
+      refresh: vi.fn().mockRejectedValue(error),
+      showRefreshWarning,
+    });
+
+    expect(outcome.kind).toBe("refresh_failed");
+    expect(applyMutationSuccess).toHaveBeenCalledTimes(1);
+    expect(showMutationSuccess).toHaveBeenCalledTimes(1);
+    expect(showRefreshWarning).toHaveBeenCalledWith(error);
+  });
+
+  it("never regresses the projected workflow state after refresh failure", async () => {
+    let current = workflow1OwnedSkillsWorkspace();
+    current.domains.NUTRITION = {
+      ...current.domains.NUTRITION,
+      summary: {
+        ...current.domains.NUTRITION.summary,
+        trainingPlanId: "nutrition-plan",
+        versionId: "nutrition-v1",
+        status: "AI_GENERATED",
+      },
+    };
+
+    await runTrainingPlanPostActionRefresh({
+      mutate: vi.fn().mockResolvedValue(undefined),
+      applyMutationSuccess: () => {
+        current = projectWorkspaceAfterTrainingPlanMutation({
+          workspace: current,
+          domain: "NUTRITION",
+          action: "SUBMIT_REVIEW",
+          planId: "nutrition-plan",
+          versionId: "nutrition-v1",
+        })!;
+      },
+      showMutationSuccess: vi.fn(),
+      refresh: vi.fn().mockRejectedValue(new Error("Request timed out")),
+      showRefreshWarning: vi.fn(),
+    });
+
+    expect(current.domains.NUTRITION.summary.status).toBe("SUBMITTED_FOR_REVIEW");
+    expect(current.domains.NUTRITION.submittedForReview).toBe(true);
+  });
+
+  it("does not apply success or start refresh when the mutation fails", async () => {
+    const applyMutationSuccess = vi.fn();
+    const showMutationSuccess = vi.fn();
+    const refresh = vi.fn();
+    const showRefreshWarning = vi.fn();
+
+    const outcome = await runTrainingPlanPostActionRefresh({
+      mutate: vi.fn().mockRejectedValue(new Error("Mutation rejected")),
+      applyMutationSuccess,
+      showMutationSuccess,
+      refresh,
+      showRefreshWarning,
+    });
+
+    expect(outcome.kind).toBe("mutation_failed");
+    expect(applyMutationSuccess).not.toHaveBeenCalled();
+    expect(showMutationSuccess).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(showRefreshWarning).not.toHaveBeenCalled();
+  });
+
+  it("projects every action for Skills, Nutrition, and S&C without dropping actions", () => {
+    const actions = [
+      ["SUBMIT_REVIEW", "SUBMITTED_FOR_REVIEW"],
+      ["REQUEST_REVISION", "REVISION_REQUESTED"],
+      ["HEAD_APPROVE", "HEAD_COACH_APPROVED"],
+      ["RELEASE", "ACTIVE"],
+      ["REVISION_APPLY", "AI_GENERATED"],
+    ] as const;
+
+    for (const workflowShape of ["WORKFLOW_1", "WORKFLOW_2A", "WORKFLOW_2B", "WORKFLOW_3"]) {
+      for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+        for (const [action, status] of actions) {
+          const base = workflow1OwnedSkillsWorkspace({ workflowShape });
+          base.domains[domain] = {
+            ...base.domains[domain],
+            allowedActions: ["SUBMIT_REVIEW", "HEAD_APPROVE", "RELEASE"],
+          };
+          const projected = projectWorkspaceAfterTrainingPlanMutation({
+            workspace: base,
+            domain,
+            action,
+            planId: `${domain}-plan`,
+            versionId: `${domain}-version`,
+            revisionFeedback: "Change load",
+          });
+
+          expect(projected?.domains[domain].summary.status).toBe(status);
+          expect(projected?.domains[domain].allowedActions).toEqual([
+            "SUBMIT_REVIEW",
+            "HEAD_APPROVE",
+            "RELEASE",
+          ]);
+        }
+      }
+    }
+  });
+
+  it("keeps the valid next action while a non-blocking refresh warning exists", () => {
+    expect(
+      domainIntegrationNextActionLabel({
+        workflowStatus: "submitted_for_review",
+        assignmentDomainContext: null,
+        planningContextLocked: true,
+        loading: false,
+        hasError: true,
+        canGenerate: false,
+        canSubmitForReview: false,
+        canViewPlan: true,
+        canReview: false,
+        canRelease: false,
+        isCurrentReviewPlan: true,
+      }),
+    ).toBe("Ready for Head Coach review.");
   });
 });
 

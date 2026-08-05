@@ -122,12 +122,15 @@ import {
   resolveDomainIntegrationMatrixDomains,
   shouldRenderEmbeddedPlanViewerInDomainIntegration,
   shouldUseDomainCoordinationMatrixLayout,
+  resolveSelectedDomainInspectorDomain,
+  shouldAutoSelectSkillsDomainForHeadCoachReview,
   shouldKeepDomainReviewDrawerOpenForTab,
   resolveDomainIntegrationSkillsCreateVisible,
   resolveDomainIntegrationGenerateDisplayState,
   resolveDomainGenerationEligibilityModel,
   shouldAllowWorkflow3SkillsGenerationWithoutGenericBackendReady,
   resolveSetupStateAfterSeasonCreate,
+  resolveSetupStateAfterGoalsSeasonBackgroundRefresh,
   formatSeasonOptionLabel,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
@@ -261,8 +264,12 @@ import {
   MAX_FYN_REVISION_CHANGES,
   NextCycleWorkspaceAction,
   PlanningContextWorkspaceAction,
+  buildPendingPlanningContextHydrationStatePatch,
   resolveAuthoritativePlanWindow,
+  resolvePendingPlanningContextHydration,
+  resolvePlanDurationDaysFromWindow,
   runConfirmPlanDatesAction,
+  runContinueNextWeeklyPlanAction,
   runCreateNextWeeklyPlanAction,
   shouldRenderNextCycleWorkspaceActionPanel,
 } from "@/components/dashboard/coach/CoachAthletePlanningProfileView";
@@ -366,7 +373,8 @@ describe("NextCycleWorkspaceAction", () => {
   });
 
   it("refreshes the workspace and opens Planning Context after CREATE succeeds", async () => {
-    const refresh = vi.fn().mockResolvedValue(true);
+    const refresh = vi.fn().mockResolvedValue({ planningContext: { locked: false } });
+    const preparePlanningContext = vi.fn().mockResolvedValue(undefined);
     const openPlanningContext = vi.fn();
 
     await expect(
@@ -376,11 +384,13 @@ describe("NextCycleWorkspaceAction", () => {
         setError: vi.fn(),
         create: vi.fn().mockResolvedValue(undefined),
         refresh,
+        preparePlanningContext,
         openPlanningContext,
       }),
     ).resolves.toBe(true);
 
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(preparePlanningContext).toHaveBeenCalledTimes(1);
     expect(openPlanningContext).toHaveBeenCalledTimes(1);
   });
 
@@ -428,6 +438,176 @@ describe("NextCycleWorkspaceAction", () => {
 
     expect(onContinue).toHaveBeenCalledTimes(1);
     expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolvePendingPlanningContextHydration", () => {
+  function pendingWorkspace(input: {
+    seasonCycleId: string;
+    startDate: string;
+    endDate: string;
+    goalIds?: string[];
+    locked?: boolean;
+  }): TrainingPlanWorkspace {
+    return {
+      nextCycleAction: "CREATE",
+      planningContext: {
+        locked: input.locked ?? false,
+        resolved: true,
+        lockId: null,
+        snapshotId: "snapshot-next",
+        selectedSeasonCycleId: input.seasonCycleId,
+        planStartDate: input.startDate,
+        planEndDate: input.endDate,
+        goalIds: input.goalIds ?? [],
+        athletePlanningContextSnapshot: {
+          selectedSeasonCycleId: input.seasonCycleId,
+          planStartDate: input.startDate,
+          planEndDate: input.endDate,
+          goalIds: input.goalIds ?? [],
+        },
+      },
+    } as TrainingPlanWorkspace;
+  }
+
+  it("hydrates same-season pending snapshot values", () => {
+    const workspace = pendingWorkspace({
+      seasonCycleId: "season-2026",
+      startDate: "2026-08-10",
+      endDate: "2026-08-16",
+      goalIds: ["goal-a", "goal-b"],
+    });
+
+    expect(resolvePendingPlanningContextHydration(workspace)).toEqual({
+      seasonCycleId: "season-2026",
+      startDate: "2026-08-10",
+      endDate: "2026-08-16",
+      goalIds: ["goal-a", "goal-b"],
+    });
+  });
+
+  it("hydrates new-season pending snapshot values", () => {
+    const workspace = pendingWorkspace({
+      seasonCycleId: "season-2027",
+      startDate: "2027-01-05",
+      endDate: "2027-01-11",
+      goalIds: ["goal-new-1"],
+    });
+
+    const patch = buildPendingPlanningContextHydrationStatePatch(
+      resolvePendingPlanningContextHydration(workspace),
+      { fallbackPlanStartDate: "2026-08-03" },
+    );
+
+    expect(patch).toEqual({
+      selectedSeasonCycleId: "season-2027",
+      selectedGoalIds: ["goal-new-1"],
+      planStartDate: "2027-01-05",
+      durationDays: 7,
+      planDatesConfirmedForCurrentAthlete: false,
+    });
+  });
+
+  it("clears previous local season, goals, and dates when hydration is absent", () => {
+    expect(
+      buildPendingPlanningContextHydrationStatePatch(null, {
+        fallbackPlanStartDate: "2026-08-03",
+      }),
+    ).toEqual({
+      selectedSeasonCycleId: null,
+      selectedGoalIds: [],
+      planStartDate: "2026-08-03",
+      durationDays: 7,
+      planDatesConfirmedForCurrentAthlete: false,
+    });
+  });
+
+  it("ignores locked workspace planning context", () => {
+    expect(
+      resolvePendingPlanningContextHydration(
+        pendingWorkspace({
+          seasonCycleId: "season-2026",
+          startDate: "2026-08-10",
+          endDate: "2026-08-16",
+          locked: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("replaces previous local season, goals, and dates with the pending snapshot", () => {
+    const previousPatch = buildPendingPlanningContextHydrationStatePatch(
+      {
+        seasonCycleId: "season-2026",
+        startDate: "2026-08-03",
+        endDate: "2026-08-09",
+        goalIds: ["goal-old"],
+      },
+      { fallbackPlanStartDate: "2026-08-03" },
+    );
+    const nextPatch = buildPendingPlanningContextHydrationStatePatch(
+      resolvePendingPlanningContextHydration(
+        pendingWorkspace({
+          seasonCycleId: "season-2027",
+          startDate: "2027-01-05",
+          endDate: "2027-01-11",
+          goalIds: ["goal-new-1"],
+        }),
+      ),
+      { fallbackPlanStartDate: previousPatch.planStartDate },
+    );
+
+    expect(previousPatch.selectedSeasonCycleId).toBe("season-2026");
+    expect(nextPatch.selectedSeasonCycleId).toBe("season-2027");
+    expect(nextPatch.selectedGoalIds).toEqual(["goal-new-1"]);
+    expect(nextPatch.planStartDate).toBe("2027-01-05");
+    expect(nextPatch.selectedGoalIds).not.toContain("goal-old");
+  });
+
+  it("derives duration days from the pending plan window", () => {
+    expect(resolvePlanDurationDaysFromWindow("2026-08-03", "2026-08-09")).toBe(7);
+    expect(resolvePlanDurationDaysFromWindow("2026-08-03", "2026-08-17")).toBe(15);
+  });
+});
+
+describe("runContinueNextWeeklyPlanAction", () => {
+  it("refreshes workspace, prepares builder state, then opens Planning Context", async () => {
+    const refresh = vi.fn().mockResolvedValue({ planningContext: { locked: false } });
+    const preparePlanningContext = vi.fn().mockResolvedValue(undefined);
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runContinueNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError: vi.fn(),
+        refresh,
+        preparePlanningContext,
+        openPlanningContext,
+      }),
+    ).resolves.toBe(true);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(preparePlanningContext).toHaveBeenCalledTimes(1);
+    expect(openPlanningContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not open Planning Context when refresh fails", async () => {
+    const setError = vi.fn();
+    const openPlanningContext = vi.fn();
+
+    await expect(
+      runContinueNextWeeklyPlanAction({
+        pendingRef: { current: false },
+        setLoading: vi.fn(),
+        setError,
+        refresh: vi.fn().mockRejectedValue(new Error("Workspace unavailable")),
+        openPlanningContext,
+      }),
+    ).resolves.toBe(false);
+
+    expect(openPlanningContext).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenLastCalledWith("Workspace unavailable");
   });
 });
 
@@ -10764,6 +10944,75 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
   });
 
+  it("keeps Clear selected domain from being immediately reselected", () => {
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: null,
+        shell: "skills_coach_planning",
+        selectionCleared: false,
+      }),
+    ).toBe("SKILLS");
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: null,
+        shell: "skills_coach_planning",
+        selectionCleared: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: "NUTRITION",
+        shell: "head_coach_function_aware",
+        selectionCleared: true,
+      }),
+    ).toBe("NUTRITION");
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: "S_AND_C",
+        shell: "head_coach_review",
+        selectionCleared: false,
+      }),
+    ).toBe("S_AND_C");
+
+    expect(
+      shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode: true,
+        headCoachFunctionAwareMode: true,
+        headCoachSkillsCreateVisible: true,
+        headCoachSubmittedReviewDomain: null,
+        selectionCleared: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode: true,
+        headCoachFunctionAwareMode: true,
+        headCoachSkillsCreateVisible: true,
+        headCoachSubmittedReviewDomain: null,
+        selectionCleared: true,
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const clearStart = source.indexOf("function closeHeadCoachPlanReview()");
+    const clearEnd = source.indexOf(
+      "function renderWorkflow1HeadCoachReviewActionPanel()",
+      clearStart,
+    );
+    const clearHandler = source.slice(clearStart, clearEnd);
+    expect(clearStart).toBeGreaterThan(-1);
+    expect(clearHandler).toContain("setHeadCoachDomainSelectionCleared(true)");
+    expect(clearHandler).toContain("setHeadCoachSubmittedReviewDomain(null)");
+    expect(clearHandler).not.toContain("fetch");
+    expect(clearHandler).not.toContain("apiRequest");
+    expect(source).toContain(
+      "selectionCleared: headCoachDomainSelectionCleared",
+    );
+  });
+
   it("does not embed Plan Viewer content in Workflow 3 Domain Integration before release", () => {
     expect(shouldRenderEmbeddedPlanViewerInDomainIntegration("skills_coach_planning")).toBe(
       false,
@@ -12760,6 +13009,70 @@ describe("season create display state", () => {
         name: "2026 Golf Season",
       }),
     ).toBe("2026 Golf Season");
+  });
+
+  it("background post-create refresh preserves coach identity while refreshing seasons", () => {
+    const current = {
+      ...emptySetupState,
+      coachFunctions: ["HEAD_COACH", "SKILLS"],
+      hasHeadCoachConfigured: true,
+      academyCoachRole: "HEAD_COACH",
+      trainingPlanReleaseMode: "HEAD_COACH_REVIEW",
+      goals: [
+        {
+          goalId: "goal-1",
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          seasonCycleId: "season-custom-1",
+          seasonPhaseId: null,
+          domain: "SKILLS",
+          status: "ACTIVE",
+          goalType: "PERFORMANCE",
+          goalName: "Keep me",
+          successCriteria: null,
+          goalCategory: "TRAINING",
+          priority: "MEDIUM",
+          competitionEventId: null,
+          targetValue: null,
+          startDate: null,
+          targetDate: null,
+        },
+      ],
+    };
+    const next = resolveSetupStateAfterGoalsSeasonBackgroundRefresh(current, {
+      seasons: [createdCustomSeason],
+      phasesBySeasonCycleId: { "season-custom-1": [] },
+      goals: null,
+    });
+
+    expect(next.seasons).toEqual([createdCustomSeason]);
+    expect(next.phasesBySeasonCycleId["season-custom-1"]).toEqual([]);
+    expect(next.goals).toEqual(current.goals);
+    expect(next.coachFunctions).toEqual(["HEAD_COACH", "SKILLS"]);
+    expect(next.hasHeadCoachConfigured).toBe(true);
+    expect(next.academyCoachRole).toBe("HEAD_COACH");
+    expect(next.trainingPlanReleaseMode).toBe("HEAD_COACH_REVIEW");
+  });
+
+  it("keeps Create Season success inside Planning Context without route navigation", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const handlerStart = source.indexOf("async function handleCreateMvpSeason()");
+    const handlerEnd = source.indexOf("async function handleCreatePhase(", handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handler).toContain("await createSeasonCycle(payload)");
+    expect(handler.match(/createSeasonCycle\(/g)?.length).toBe(1);
+    expect(handler).toContain("await refreshGoalsSeasonSetup({ background: true })");
+    expect(handler).not.toContain("router.push");
+    expect(handler).not.toContain("router.replace");
+    expect(handler).not.toContain("setSelectedWorkflowTab(");
+    expect(handler).toContain('setSeasonSuccess("Season created and selected.")');
+    expect(handler).toContain("resolveSetupStateAfterSeasonCreate");
   });
 });
 

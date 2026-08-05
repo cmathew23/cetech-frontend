@@ -262,11 +262,19 @@ export const NUTRITION_STALE_VERSION_MESSAGE =
 const ASSIGNMENT_CONTEXT_MISSING_LEGACY_FALLBACK_WARNING =
   "[TrainingPlanWorkspace] assignmentContext missing; using legacy fallback";
 
-type TrainingPlanPersistenceContext = {
+export type TrainingPlanPersistenceContext = {
   seasonCycleId: string;
   startDate: string;
   endDate: string;
   goalIds?: string[];
+};
+
+export type PendingPlanningContextHydrationStatePatch = {
+  selectedSeasonCycleId: string | null;
+  selectedGoalIds: string[];
+  planStartDate: string;
+  durationDays: 7 | 15 | 30;
+  planDatesConfirmedForCurrentAthlete: boolean;
 };
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -619,6 +627,107 @@ function extractPersistenceContextFromSnapshot(
   };
 }
 
+export function resolvePendingPlanningContextHydration(
+  workspace: TrainingPlanWorkspace | null | undefined,
+): TrainingPlanPersistenceContext | null {
+  const planningContext = workspace?.planningContext ?? null;
+  if (!planningContext || planningContext.locked === true) {
+    return null;
+  }
+
+  const snapshotContexts = [
+    extractPersistenceContextFromSnapshot(planningContext.selectedGoalsSnapshot),
+    extractPersistenceContextFromSnapshot(planningContext.athletePlanningContextSnapshot),
+  ].filter((value): value is TrainingPlanPersistenceContext => value !== null);
+
+  const seasonCycleId = trimmedNonEmpty(
+    planningContext.selectedSeasonCycleId,
+    planningContext.seasonCycleId,
+    planningContext.selectedSeasonId,
+    planningContext.seasonId,
+    ...snapshotContexts.map((context) => context.seasonCycleId),
+  );
+  const startDate = trimmedNonEmpty(
+    planningContext.planStartDate,
+    planningContext.startDate,
+    ...snapshotContexts.map((context) => context.startDate),
+  );
+  const endDate = trimmedNonEmpty(
+    planningContext.planEndDate,
+    planningContext.endDate,
+    ...snapshotContexts.map((context) => context.endDate),
+  );
+  const goalIds = readLockedWorkspaceGoalIds({
+    selectedGoalsSnapshot: planningContext.selectedGoalsSnapshot,
+    athletePlanningContextSnapshot: planningContext.athletePlanningContextSnapshot,
+    goalIds: planningContext.goalIds,
+    lockedGoalIds: planningContext.lockedGoalIds,
+    fallbackGoalIds: snapshotContexts.flatMap((context) => context.goalIds ?? []),
+  });
+
+  if (
+    seasonCycleId === null &&
+    startDate === null &&
+    endDate === null &&
+    goalIds.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    seasonCycleId: seasonCycleId ?? "",
+    startDate: startDate ?? "",
+    endDate: endDate ?? "",
+    ...(goalIds.length > 0 ? { goalIds } : {}),
+  };
+}
+
+export function resolvePlanDurationDaysFromWindow(
+  startDate: string,
+  endDate: string,
+): 7 | 15 | 30 {
+  const days = calculateInclusiveDurationDays(startDate, endDate);
+  if (days === 15) return 15;
+  if (days === 30) return 30;
+  return 7;
+}
+
+export function buildPendingPlanningContextHydrationStatePatch(
+  hydration: TrainingPlanPersistenceContext | null,
+  options?: { fallbackPlanStartDate?: string },
+): PendingPlanningContextHydrationStatePatch {
+  const fallbackPlanStartDate =
+    options?.fallbackPlanStartDate?.trim() ?? formatDateInputValue(new Date());
+
+  if (hydration === null) {
+    return {
+      selectedSeasonCycleId: null,
+      selectedGoalIds: [],
+      planStartDate: fallbackPlanStartDate,
+      durationDays: 7,
+      planDatesConfirmedForCurrentAthlete: false,
+    };
+  }
+
+  const seasonCycleId =
+    hydration.seasonCycleId.trim() !== "" ? hydration.seasonCycleId.trim() : null;
+  const startDate =
+    hydration.startDate.trim() !== "" ? hydration.startDate.trim() : fallbackPlanStartDate;
+  const endDate = hydration.endDate.trim();
+  const durationDays =
+    startDate !== "" && endDate !== ""
+      ? resolvePlanDurationDaysFromWindow(startDate, endDate)
+      : 7;
+
+  return {
+    selectedSeasonCycleId: seasonCycleId,
+    selectedGoalIds: hydration.goalIds ?? [],
+    planStartDate: startDate,
+    durationDays,
+    planDatesConfirmedForCurrentAthlete: false,
+  };
+}
+
 function readGenerationValidationArray(value: unknown): unknown[] | null {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return null;
@@ -917,6 +1026,7 @@ export async function runCreateNextWeeklyPlanAction({
   setError,
   create,
   refresh,
+  preparePlanningContext,
   openPlanningContext,
 }: {
   pendingRef: { current: boolean };
@@ -924,7 +1034,8 @@ export async function runCreateNextWeeklyPlanAction({
   setError: (error: string | null) => void;
   create: () => Promise<void>;
   refresh: () => Promise<unknown>;
-  openPlanningContext: () => void;
+  preparePlanningContext?: (refreshed: unknown) => Promise<void>;
+  openPlanningContext: () => void | Promise<void>;
 }): Promise<boolean> {
   if (pendingRef.current) return false;
 
@@ -933,14 +1044,58 @@ export async function runCreateNextWeeklyPlanAction({
   setError(null);
   try {
     await create();
-    await refresh();
-    openPlanningContext();
+    const refreshed = await refresh();
+    if (preparePlanningContext) {
+      await preparePlanningContext(refreshed);
+    }
+    await Promise.resolve(openPlanningContext());
     return true;
   } catch (error) {
     setError(
       formatApiError(
         error,
         "Could not create the next weekly plan. Please try again shortly.",
+      ),
+    );
+    return false;
+  } finally {
+    pendingRef.current = false;
+    setLoading(false);
+  }
+}
+
+export async function runContinueNextWeeklyPlanAction({
+  pendingRef,
+  setLoading,
+  setError,
+  refresh,
+  preparePlanningContext,
+  openPlanningContext,
+}: {
+  pendingRef: { current: boolean };
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  refresh: () => Promise<unknown>;
+  preparePlanningContext?: (refreshed: unknown) => Promise<void>;
+  openPlanningContext: () => void | Promise<void>;
+}): Promise<boolean> {
+  if (pendingRef.current) return false;
+
+  pendingRef.current = true;
+  setLoading(true);
+  setError(null);
+  try {
+    const refreshed = await refresh();
+    if (preparePlanningContext) {
+      await preparePlanningContext(refreshed);
+    }
+    await Promise.resolve(openPlanningContext());
+    return true;
+  } catch (error) {
+    setError(
+      formatApiError(
+        error,
+        "Could not continue planning for the next weekly plan. Please try again shortly.",
       ),
     );
     return false;
@@ -8994,6 +9149,37 @@ export function shouldUseDomainCoordinationMatrixLayout(input: {
   );
 }
 
+/** Inspector/current-state selection for Domain Coordination Matrix. */
+export function resolveSelectedDomainInspectorDomain(input: {
+  headCoachSubmittedReviewDomain: TrainingPlanGenerationDomain | null;
+  shell: TrainingPlanPageShell;
+  selectionCleared: boolean;
+}): TrainingPlanGenerationDomain | null {
+  if (input.headCoachSubmittedReviewDomain !== null) {
+    return input.headCoachSubmittedReviewDomain;
+  }
+  if (input.selectionCleared) return null;
+  if (input.shell === "skills_coach_planning") return "SKILLS";
+  return null;
+}
+
+/** Initial HC function-aware SKILLS auto-select; skipped after explicit Clear. */
+export function shouldAutoSelectSkillsDomainForHeadCoachReview(input: {
+  headCoachReviewMode: boolean;
+  headCoachFunctionAwareMode: boolean;
+  headCoachSkillsCreateVisible: boolean;
+  headCoachSubmittedReviewDomain: TrainingPlanGenerationDomain | null;
+  selectionCleared: boolean;
+}): boolean {
+  if (input.selectionCleared) return false;
+  if (input.headCoachSubmittedReviewDomain !== null) return false;
+  return (
+    input.headCoachReviewMode &&
+    input.headCoachFunctionAwareMode &&
+    input.headCoachSkillsCreateVisible
+  );
+}
+
 export function shouldKeepDomainReviewDrawerOpenForTab(input: {
   selectedWorkflowTab: GuidedWorkflowStepKey;
   shell: TrainingPlanPageShell;
@@ -9536,6 +9722,26 @@ export function resolveSetupStateAfterSeasonCreate(
       ...current.phasesBySeasonCycleId,
       [createdSeason.seasonCycleId]: createdPhases,
     },
+  };
+}
+
+/**
+ * In-flow season/goals refreshes must preserve coach identity fields so workspace shell/tab
+ * selection does not re-bootstrap into Domain Plans Integration / Domain Coach Workspace.
+ */
+export function resolveSetupStateAfterGoalsSeasonBackgroundRefresh(
+  current: GoalsSeasonSetupState,
+  input: {
+    seasons: SeasonCycleSummary[];
+    phasesBySeasonCycleId: Record<string, SeasonPhaseSummary[]>;
+    goals: GoalSummary[] | null;
+  },
+): GoalsSeasonSetupState {
+  return {
+    ...current,
+    seasons: input.seasons,
+    phasesBySeasonCycleId: input.phasesBySeasonCycleId,
+    goals: input.goals ?? current.goals,
   };
 }
 
@@ -11124,6 +11330,9 @@ export function CoachAthletePlanningProfileView({
   /** Set only when Head Coach opens Submitted Domain Plans review — not URL persisted-plan sync. */
   const [headCoachSubmittedReviewDomain, setHeadCoachSubmittedReviewDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
+  /** Explicit Clear selected domain — blocks fallback/auto-reselect until user picks a domain again. */
+  const [headCoachDomainSelectionCleared, setHeadCoachDomainSelectionCleared] =
+    useState(false);
   const [domainReviewDrawerOpen, setDomainReviewDrawerOpen] = useState(false);
   const [domainReviewDrawerDomain, setDomainReviewDrawerDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
@@ -12065,35 +12274,107 @@ export function CoachAthletePlanningProfileView({
       selectedSeasonCycleId,
     ]);
 
-  const refreshPlanningContextReadinessSources = useCallback(async () => {
+  const refreshPlanningContextReadinessSources = useCallback(async (options?: {
+    seasonCycleId?: string | null;
+    refreshLevelValidation?: boolean;
+    refreshWorkloadLatest?: boolean;
+  }) => {
     if (!accessGateReady || entityId === "" || athleteIdTrimmed === "") {
       return;
     }
+    const seasonCycleId =
+      options?.seasonCycleId !== undefined ? options.seasonCycleId : selectedSeasonCycleId;
     const trainingSportCode =
       profile?.sportCode?.trim()
       || profile?.primarySport?.trim()
       || profile?.sportContext?.primarySport?.trim()
       || undefined;
     try {
-      const [readiness, completeness, upstreamContext] = await Promise.all([
+      const requests: Promise<unknown>[] = [
         fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
           generationDomain: readinessGenerationDomain,
-          seasonCycleId: selectedSeasonCycleId,
+          seasonCycleId,
           sportCode: trainingSportCode,
         }),
         fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
           sportCode: trainingSportCode,
         }),
         fetchCoachAthleteUpstreamPlanningContext(entityId, athleteIdTrimmed),
-      ]);
+      ];
+      if (options?.refreshLevelValidation === true) {
+        requests.unshift(fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed));
+      }
+      if (options?.refreshWorkloadLatest === true) {
+        requests.push(
+          fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest(entityId, athleteIdTrimmed),
+        );
+      }
+
+      const results = await Promise.allSettled(requests);
+      let index = 0;
+      let levelValidation = readinessSources.levelValidation;
+      if (options?.refreshLevelValidation === true) {
+        levelValidation =
+          results[index]?.status === "fulfilled"
+            ? (results[index]?.value as Awaited<
+                ReturnType<typeof fetchCoachAthleteLevelValidation>
+              >)
+            : null;
+        index += 1;
+      }
+
+      const readiness =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteTrainingPlanReadiness>
+            >)
+          : null;
+      index += 1;
+      const completeness =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteTrainingPlanCompleteness>
+            >)
+          : null;
+      index += 1;
+      const upstreamContext =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteUpstreamPlanningContext>
+            >)
+          : null;
+      index += 1;
+
       setReadinessSources((current) => ({
         ...current,
+        ...(options?.refreshLevelValidation === true ? { levelValidation } : {}),
         readiness,
         completeness,
       }));
-      setUpstreamPlanningContext(upstreamContext);
+      if (upstreamContext !== null) {
+        setUpstreamPlanningContext(upstreamContext);
+      }
       setUpstreamPlanningContextError(null);
       setPlanningContextBootstrapState("loaded");
+
+      if (options?.refreshWorkloadLatest === true) {
+        const workloadLatest =
+          results[index]?.status === "fulfilled"
+            ? (results[index]?.value as Awaited<
+                ReturnType<typeof fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest>
+              >)
+            : null;
+        if (workloadLatest?.workloadClassification) {
+          setWorkloadAssessmentResult(workloadLatest);
+          setWorkloadAssessmentCapturedForAthleteId(athleteIdTrimmed);
+          setWorkloadAssessmentExplicitlyRunForAthleteId(athleteIdTrimmed);
+          setWorkloadAssessmentError(null);
+        } else {
+          setWorkloadAssessmentResult(null);
+          setWorkloadAssessmentCapturedForAthleteId(null);
+          setWorkloadAssessmentExplicitlyRunForAthleteId(null);
+        }
+      }
     } catch (e) {
       setReadinessError(
         formatApiError(e, "Could not refresh planning context. Please try again shortly."),
@@ -12107,6 +12388,7 @@ export function CoachAthletePlanningProfileView({
     profile?.sportCode,
     profile?.sportContext?.primarySport,
     readinessGenerationDomain,
+    readinessSources.levelValidation,
     selectedSeasonCycleId,
   ]);
 
@@ -12166,9 +12448,12 @@ export function CoachAthletePlanningProfileView({
     ],
   );
 
-  const refreshGoalsSeasonSetup = useCallback(async () => {
+  const refreshGoalsSeasonSetup = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background === true;
     if (!accessGateReady) {
-      setSetupLoading(true);
+      if (!background) {
+        setSetupLoading(true);
+      }
       setSeasonError(null);
       return;
     }
@@ -12184,11 +12469,15 @@ export function CoachAthletePlanningProfileView({
       setSelectedSeasonCycleId(null);
       setSelectedGoalIds([]);
       setSeasonError(null);
-      setSetupLoading(false);
+      if (!background) {
+        setSetupLoading(false);
+      }
       return;
     }
 
-    setSetupLoading(true);
+    if (!background) {
+      setSetupLoading(true);
+    }
     setSeasonError(null);
 
     try {
@@ -12200,6 +12489,33 @@ export function CoachAthletePlanningProfileView({
         ...season,
         phases: season.phases ?? [],
       }));
+
+      if (background) {
+        let goals: GoalSummary[] | null = null;
+        try {
+          goals = await fetchGoalsForAthlete(athleteIdTrimmed);
+        } catch {
+          goals = null;
+        }
+        setSetupState((current) =>
+          resolveSetupStateAfterGoalsSeasonBackgroundRefresh(current, {
+            seasons,
+            phasesBySeasonCycleId,
+            goals,
+          }),
+        );
+        setSelectedSeasonCycleId((prev) => {
+          if (prev == null) return null;
+          return seasons.some((s) => s.seasonCycleId === prev) ? prev : null;
+        });
+        if (goals !== null) {
+          setSelectedGoalIds((prev) =>
+            prev.filter((id) => goals.some((g) => g.goalId === id)),
+          );
+        }
+        return;
+      }
+
       const [goalsResult, dashboardResult, academyCoachesResult] = await Promise.allSettled([
         fetchGoalsForAthlete(athleteIdTrimmed),
         fetchCoachMeDashboard(),
@@ -12251,7 +12567,9 @@ export function CoachAthletePlanningProfileView({
     } catch {
       setSeasonError("Failed to load seasons. Please try again.");
     } finally {
-      setSetupLoading(false);
+      if (!background) {
+        setSetupLoading(false);
+      }
     }
   }, [accessGateReady, athleteIdTrimmed, currentCoachUserId, entityId]);
 
@@ -14825,17 +15143,31 @@ export function CoachAthletePlanningProfileView({
   ]);
 
   useEffect(() => {
-    if (!headCoachReviewMode) return;
-    if (!headCoachFunctionAwareMode) return;
-    if (!headCoachSkillsCreateVisible) return;
-    if (headCoachSubmittedReviewDomain !== null) return;
+    if (
+      !shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode,
+        headCoachFunctionAwareMode,
+        headCoachSkillsCreateVisible,
+        headCoachSubmittedReviewDomain,
+        selectionCleared: headCoachDomainSelectionCleared,
+      })
+    ) {
+      return;
+    }
     setHeadCoachSubmittedReviewDomain("SKILLS");
   }, [
+    headCoachDomainSelectionCleared,
     headCoachFunctionAwareMode,
     headCoachReviewMode,
     headCoachSkillsCreateVisible,
     headCoachSubmittedReviewDomain,
   ]);
+
+  useEffect(() => {
+    if (headCoachSubmittedReviewDomain === null) return;
+    if (!headCoachDomainSelectionCleared) return;
+    setHeadCoachDomainSelectionCleared(false);
+  }, [headCoachDomainSelectionCleared, headCoachSubmittedReviewDomain]);
 
   useEffect(() => {
     return () => {
@@ -14957,6 +15289,7 @@ export function CoachAthletePlanningProfileView({
     setPersistedSkillsPlanDetail(null);
     setPersistedVerifiedDomain(null);
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setPersistedSkillsPlanError(null);
     setPersistedSkillsPlanLoading(false);
     setGovernedPlanActionLoading(null);
@@ -15034,6 +15367,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     setAssistantDomainSummaryHydrationPending(false);
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setDomainReviewDrawerOpen(false);
     setDomainReviewDrawerDomain(null);
     setDomainReviewDrawerClosing(false);
@@ -15115,6 +15449,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     knownDomainPlanIdsRef.current = { SKILLS: "", NUTRITION: "", S_AND_C: "" };
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
     setRequestRevisionFeedback("");
@@ -15924,13 +16259,69 @@ export function CoachAthletePlanningProfileView({
     workflowStepStatusByKey,
   ]);
 
+  const prepareNextCycleContextBuilderState = useCallback(
+    async (refreshedWorkspace: unknown) => {
+      const workspaceData =
+        refreshedWorkspace && typeof refreshedWorkspace === "object"
+          ? (refreshedWorkspace as TrainingPlanWorkspace)
+          : null;
+      const hydration = resolvePendingPlanningContextHydration(workspaceData);
+      const patch = buildPendingPlanningContextHydrationStatePatch(hydration, {
+        fallbackPlanStartDate: planStartDate,
+      });
+
+      setSeasonCreateFormExplicit(false);
+      setSelectedSeasonCycleId(patch.selectedSeasonCycleId);
+      setSelectedGoalIds(patch.selectedGoalIds);
+      setPlanStartDate(patch.planStartDate);
+      setDurationDays(patch.durationDays);
+      setPlanDatesConfirmedForCurrentAthlete(patch.planDatesConfirmedForCurrentAthlete);
+      setPlanDatesConfirmError(null);
+      setPlanDatesConfirmLoading(false);
+      planDatesConfirmPendingRef.current = false;
+
+      await refreshPlanningContextReadinessSources({
+        seasonCycleId: patch.selectedSeasonCycleId,
+        refreshLevelValidation: true,
+        refreshWorkloadLatest: true,
+      });
+    },
+    [planStartDate, refreshPlanningContextReadinessSources],
+  );
+
   async function handleCreateNextWeeklyPlan() {
     await runCreateNextWeeklyPlanAction({
       pendingRef: nextCycleCreatePendingRef,
       setLoading: setNextCycleCreateLoading,
       setError: setNextCycleCreateError,
       create: () => createNextWeeklyPlanningContext(entityId, athleteIdTrimmed),
-      refresh: () => refreshTrainingPlanWorkspace({ background: true }),
+      refresh: async () => {
+        const latest = await refreshTrainingPlanWorkspace({ background: true });
+        if (latest === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+        return latest;
+      },
+      preparePlanningContext: prepareNextCycleContextBuilderState,
+      openPlanningContext: () => {
+        setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+      },
+    });
+  }
+
+  async function handleContinueNextWeeklyPlan() {
+    await runContinueNextWeeklyPlanAction({
+      pendingRef: nextCycleCreatePendingRef,
+      setLoading: setNextCycleCreateLoading,
+      setError: setNextCycleCreateError,
+      refresh: async () => {
+        const latest = await refreshTrainingPlanWorkspace({ background: true });
+        if (latest === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+        return latest;
+      },
+      preparePlanningContext: prepareNextCycleContextBuilderState,
       openPlanningContext: () => {
         setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
       },
@@ -18568,6 +18959,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function closeHeadCoachPlanReview() {
+    setHeadCoachDomainSelectionCleared(true);
     setHeadCoachSubmittedReviewDomain(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
@@ -20118,9 +20510,11 @@ export function CoachAthletePlanningProfileView({
       trainingPlanShellModel.shell,
       currentCoachGenerationDomain,
     );
-    const selectedInspectorDomain =
-      headCoachSubmittedReviewDomain ??
-      (trainingPlanShellModel.shell === "skills_coach_planning" ? "SKILLS" : null);
+    const selectedInspectorDomain = resolveSelectedDomainInspectorDomain({
+      headCoachSubmittedReviewDomain,
+      shell: trainingPlanShellModel.shell,
+      selectionCleared: headCoachDomainSelectionCleared,
+    });
     return (
       <section className="space-y-4">
         <div className="space-y-2">
@@ -22930,7 +23324,8 @@ export function CoachAthletePlanningProfileView({
       const season = await createSeasonCycle(payload);
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
-      await refreshGoalsSeasonSetup();
+      // Background refresh: avoid setupLoading/coach-identity rebootstrap that leaves Context Builder.
+      await refreshGoalsSeasonSetup({ background: true });
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
       setSeasonCreateFormExplicit(false);
@@ -26681,8 +27076,7 @@ export function CoachAthletePlanningProfileView({
               void handleCreateNextWeeklyPlan();
             }}
             onContinue={() => {
-              setNextCycleCreateError(null);
-              setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+              void handleContinueNextWeeklyPlan();
             }}
             onView={() => setShowLockedContextBuilderView(true)}
           />

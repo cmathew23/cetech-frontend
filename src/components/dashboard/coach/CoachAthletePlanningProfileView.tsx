@@ -262,11 +262,19 @@ export const NUTRITION_STALE_VERSION_MESSAGE =
 const ASSIGNMENT_CONTEXT_MISSING_LEGACY_FALLBACK_WARNING =
   "[TrainingPlanWorkspace] assignmentContext missing; using legacy fallback";
 
-type TrainingPlanPersistenceContext = {
+export type TrainingPlanPersistenceContext = {
   seasonCycleId: string;
   startDate: string;
   endDate: string;
   goalIds?: string[];
+};
+
+export type PendingPlanningContextHydrationStatePatch = {
+  selectedSeasonCycleId: string | null;
+  selectedGoalIds: string[];
+  planStartDate: string;
+  durationDays: 7 | 15 | 30;
+  planDatesConfirmedForCurrentAthlete: boolean;
 };
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -619,6 +627,107 @@ function extractPersistenceContextFromSnapshot(
   };
 }
 
+export function resolvePendingPlanningContextHydration(
+  workspace: TrainingPlanWorkspace | null | undefined,
+): TrainingPlanPersistenceContext | null {
+  const planningContext = workspace?.planningContext ?? null;
+  if (!planningContext || planningContext.locked === true) {
+    return null;
+  }
+
+  const snapshotContexts = [
+    extractPersistenceContextFromSnapshot(planningContext.selectedGoalsSnapshot),
+    extractPersistenceContextFromSnapshot(planningContext.athletePlanningContextSnapshot),
+  ].filter((value): value is TrainingPlanPersistenceContext => value !== null);
+
+  const seasonCycleId = trimmedNonEmpty(
+    planningContext.selectedSeasonCycleId,
+    planningContext.seasonCycleId,
+    planningContext.selectedSeasonId,
+    planningContext.seasonId,
+    ...snapshotContexts.map((context) => context.seasonCycleId),
+  );
+  const startDate = trimmedNonEmpty(
+    planningContext.planStartDate,
+    planningContext.startDate,
+    ...snapshotContexts.map((context) => context.startDate),
+  );
+  const endDate = trimmedNonEmpty(
+    planningContext.planEndDate,
+    planningContext.endDate,
+    ...snapshotContexts.map((context) => context.endDate),
+  );
+  const goalIds = readLockedWorkspaceGoalIds({
+    selectedGoalsSnapshot: planningContext.selectedGoalsSnapshot,
+    athletePlanningContextSnapshot: planningContext.athletePlanningContextSnapshot,
+    goalIds: planningContext.goalIds,
+    lockedGoalIds: planningContext.lockedGoalIds,
+    fallbackGoalIds: snapshotContexts.flatMap((context) => context.goalIds ?? []),
+  });
+
+  if (
+    seasonCycleId === null &&
+    startDate === null &&
+    endDate === null &&
+    goalIds.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    seasonCycleId: seasonCycleId ?? "",
+    startDate: startDate ?? "",
+    endDate: endDate ?? "",
+    ...(goalIds.length > 0 ? { goalIds } : {}),
+  };
+}
+
+export function resolvePlanDurationDaysFromWindow(
+  startDate: string,
+  endDate: string,
+): 7 | 15 | 30 {
+  const days = calculateInclusiveDurationDays(startDate, endDate);
+  if (days === 15) return 15;
+  if (days === 30) return 30;
+  return 7;
+}
+
+export function buildPendingPlanningContextHydrationStatePatch(
+  hydration: TrainingPlanPersistenceContext | null,
+  options?: { fallbackPlanStartDate?: string },
+): PendingPlanningContextHydrationStatePatch {
+  const fallbackPlanStartDate =
+    options?.fallbackPlanStartDate?.trim() ?? formatDateInputValue(new Date());
+
+  if (hydration === null) {
+    return {
+      selectedSeasonCycleId: null,
+      selectedGoalIds: [],
+      planStartDate: fallbackPlanStartDate,
+      durationDays: 7,
+      planDatesConfirmedForCurrentAthlete: false,
+    };
+  }
+
+  const seasonCycleId =
+    hydration.seasonCycleId.trim() !== "" ? hydration.seasonCycleId.trim() : null;
+  const startDate =
+    hydration.startDate.trim() !== "" ? hydration.startDate.trim() : fallbackPlanStartDate;
+  const endDate = hydration.endDate.trim();
+  const durationDays =
+    startDate !== "" && endDate !== ""
+      ? resolvePlanDurationDaysFromWindow(startDate, endDate)
+      : 7;
+
+  return {
+    selectedSeasonCycleId: seasonCycleId,
+    selectedGoalIds: hydration.goalIds ?? [],
+    planStartDate: startDate,
+    durationDays,
+    planDatesConfirmedForCurrentAthlete: false,
+  };
+}
+
 function readGenerationValidationArray(value: unknown): unknown[] | null {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return null;
@@ -917,6 +1026,7 @@ export async function runCreateNextWeeklyPlanAction({
   setError,
   create,
   refresh,
+  preparePlanningContext,
   openPlanningContext,
 }: {
   pendingRef: { current: boolean };
@@ -924,7 +1034,8 @@ export async function runCreateNextWeeklyPlanAction({
   setError: (error: string | null) => void;
   create: () => Promise<void>;
   refresh: () => Promise<unknown>;
-  openPlanningContext: () => void;
+  preparePlanningContext?: (refreshed: unknown) => Promise<void>;
+  openPlanningContext: () => void | Promise<void>;
 }): Promise<boolean> {
   if (pendingRef.current) return false;
 
@@ -933,14 +1044,58 @@ export async function runCreateNextWeeklyPlanAction({
   setError(null);
   try {
     await create();
-    await refresh();
-    openPlanningContext();
+    const refreshed = await refresh();
+    if (preparePlanningContext) {
+      await preparePlanningContext(refreshed);
+    }
+    await Promise.resolve(openPlanningContext());
     return true;
   } catch (error) {
     setError(
       formatApiError(
         error,
         "Could not create the next weekly plan. Please try again shortly.",
+      ),
+    );
+    return false;
+  } finally {
+    pendingRef.current = false;
+    setLoading(false);
+  }
+}
+
+export async function runContinueNextWeeklyPlanAction({
+  pendingRef,
+  setLoading,
+  setError,
+  refresh,
+  preparePlanningContext,
+  openPlanningContext,
+}: {
+  pendingRef: { current: boolean };
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  refresh: () => Promise<unknown>;
+  preparePlanningContext?: (refreshed: unknown) => Promise<void>;
+  openPlanningContext: () => void | Promise<void>;
+}): Promise<boolean> {
+  if (pendingRef.current) return false;
+
+  pendingRef.current = true;
+  setLoading(true);
+  setError(null);
+  try {
+    const refreshed = await refresh();
+    if (preparePlanningContext) {
+      await preparePlanningContext(refreshed);
+    }
+    await Promise.resolve(openPlanningContext());
+    return true;
+  } catch (error) {
+    setError(
+      formatApiError(
+        error,
+        "Could not continue planning for the next weekly plan. Please try again shortly.",
       ),
     );
     return false;
@@ -12119,35 +12274,107 @@ export function CoachAthletePlanningProfileView({
       selectedSeasonCycleId,
     ]);
 
-  const refreshPlanningContextReadinessSources = useCallback(async () => {
+  const refreshPlanningContextReadinessSources = useCallback(async (options?: {
+    seasonCycleId?: string | null;
+    refreshLevelValidation?: boolean;
+    refreshWorkloadLatest?: boolean;
+  }) => {
     if (!accessGateReady || entityId === "" || athleteIdTrimmed === "") {
       return;
     }
+    const seasonCycleId =
+      options?.seasonCycleId !== undefined ? options.seasonCycleId : selectedSeasonCycleId;
     const trainingSportCode =
       profile?.sportCode?.trim()
       || profile?.primarySport?.trim()
       || profile?.sportContext?.primarySport?.trim()
       || undefined;
     try {
-      const [readiness, completeness, upstreamContext] = await Promise.all([
+      const requests: Promise<unknown>[] = [
         fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
           generationDomain: readinessGenerationDomain,
-          seasonCycleId: selectedSeasonCycleId,
+          seasonCycleId,
           sportCode: trainingSportCode,
         }),
         fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
           sportCode: trainingSportCode,
         }),
         fetchCoachAthleteUpstreamPlanningContext(entityId, athleteIdTrimmed),
-      ]);
+      ];
+      if (options?.refreshLevelValidation === true) {
+        requests.unshift(fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed));
+      }
+      if (options?.refreshWorkloadLatest === true) {
+        requests.push(
+          fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest(entityId, athleteIdTrimmed),
+        );
+      }
+
+      const results = await Promise.allSettled(requests);
+      let index = 0;
+      let levelValidation = readinessSources.levelValidation;
+      if (options?.refreshLevelValidation === true) {
+        levelValidation =
+          results[index]?.status === "fulfilled"
+            ? (results[index]?.value as Awaited<
+                ReturnType<typeof fetchCoachAthleteLevelValidation>
+              >)
+            : null;
+        index += 1;
+      }
+
+      const readiness =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteTrainingPlanReadiness>
+            >)
+          : null;
+      index += 1;
+      const completeness =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteTrainingPlanCompleteness>
+            >)
+          : null;
+      index += 1;
+      const upstreamContext =
+        results[index]?.status === "fulfilled"
+          ? (results[index]?.value as Awaited<
+              ReturnType<typeof fetchCoachAthleteUpstreamPlanningContext>
+            >)
+          : null;
+      index += 1;
+
       setReadinessSources((current) => ({
         ...current,
+        ...(options?.refreshLevelValidation === true ? { levelValidation } : {}),
         readiness,
         completeness,
       }));
-      setUpstreamPlanningContext(upstreamContext);
+      if (upstreamContext !== null) {
+        setUpstreamPlanningContext(upstreamContext);
+      }
       setUpstreamPlanningContextError(null);
       setPlanningContextBootstrapState("loaded");
+
+      if (options?.refreshWorkloadLatest === true) {
+        const workloadLatest =
+          results[index]?.status === "fulfilled"
+            ? (results[index]?.value as Awaited<
+                ReturnType<typeof fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest>
+              >)
+            : null;
+        if (workloadLatest?.workloadClassification) {
+          setWorkloadAssessmentResult(workloadLatest);
+          setWorkloadAssessmentCapturedForAthleteId(athleteIdTrimmed);
+          setWorkloadAssessmentExplicitlyRunForAthleteId(athleteIdTrimmed);
+          setWorkloadAssessmentError(null);
+        } else {
+          setWorkloadAssessmentResult(null);
+          setWorkloadAssessmentCapturedForAthleteId(null);
+          setWorkloadAssessmentExplicitlyRunForAthleteId(null);
+        }
+      }
     } catch (e) {
       setReadinessError(
         formatApiError(e, "Could not refresh planning context. Please try again shortly."),
@@ -12161,6 +12388,7 @@ export function CoachAthletePlanningProfileView({
     profile?.sportCode,
     profile?.sportContext?.primarySport,
     readinessGenerationDomain,
+    readinessSources.levelValidation,
     selectedSeasonCycleId,
   ]);
 
@@ -16031,13 +16259,69 @@ export function CoachAthletePlanningProfileView({
     workflowStepStatusByKey,
   ]);
 
+  const prepareNextCycleContextBuilderState = useCallback(
+    async (refreshedWorkspace: unknown) => {
+      const workspaceData =
+        refreshedWorkspace && typeof refreshedWorkspace === "object"
+          ? (refreshedWorkspace as TrainingPlanWorkspace)
+          : null;
+      const hydration = resolvePendingPlanningContextHydration(workspaceData);
+      const patch = buildPendingPlanningContextHydrationStatePatch(hydration, {
+        fallbackPlanStartDate: planStartDate,
+      });
+
+      setSeasonCreateFormExplicit(false);
+      setSelectedSeasonCycleId(patch.selectedSeasonCycleId);
+      setSelectedGoalIds(patch.selectedGoalIds);
+      setPlanStartDate(patch.planStartDate);
+      setDurationDays(patch.durationDays);
+      setPlanDatesConfirmedForCurrentAthlete(patch.planDatesConfirmedForCurrentAthlete);
+      setPlanDatesConfirmError(null);
+      setPlanDatesConfirmLoading(false);
+      planDatesConfirmPendingRef.current = false;
+
+      await refreshPlanningContextReadinessSources({
+        seasonCycleId: patch.selectedSeasonCycleId,
+        refreshLevelValidation: true,
+        refreshWorkloadLatest: true,
+      });
+    },
+    [planStartDate, refreshPlanningContextReadinessSources],
+  );
+
   async function handleCreateNextWeeklyPlan() {
     await runCreateNextWeeklyPlanAction({
       pendingRef: nextCycleCreatePendingRef,
       setLoading: setNextCycleCreateLoading,
       setError: setNextCycleCreateError,
       create: () => createNextWeeklyPlanningContext(entityId, athleteIdTrimmed),
-      refresh: () => refreshTrainingPlanWorkspace({ background: true }),
+      refresh: async () => {
+        const latest = await refreshTrainingPlanWorkspace({ background: true });
+        if (latest === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+        return latest;
+      },
+      preparePlanningContext: prepareNextCycleContextBuilderState,
+      openPlanningContext: () => {
+        setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+      },
+    });
+  }
+
+  async function handleContinueNextWeeklyPlan() {
+    await runContinueNextWeeklyPlanAction({
+      pendingRef: nextCycleCreatePendingRef,
+      setLoading: setNextCycleCreateLoading,
+      setError: setNextCycleCreateError,
+      refresh: async () => {
+        const latest = await refreshTrainingPlanWorkspace({ background: true });
+        if (latest === null) {
+          throw new Error("Could not refresh the latest training plan workspace.");
+        }
+        return latest;
+      },
+      preparePlanningContext: prepareNextCycleContextBuilderState,
       openPlanningContext: () => {
         setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
       },
@@ -26792,8 +27076,7 @@ export function CoachAthletePlanningProfileView({
               void handleCreateNextWeeklyPlan();
             }}
             onContinue={() => {
-              setNextCycleCreateError(null);
-              setSelectedWorkflowTab(resolvePreLockContextBuilderTab());
+              void handleContinueNextWeeklyPlan();
             }}
             onView={() => setShowLockedContextBuilderView(true)}
           />

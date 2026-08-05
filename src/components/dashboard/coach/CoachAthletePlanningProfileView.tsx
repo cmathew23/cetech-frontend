@@ -8994,6 +8994,37 @@ export function shouldUseDomainCoordinationMatrixLayout(input: {
   );
 }
 
+/** Inspector/current-state selection for Domain Coordination Matrix. */
+export function resolveSelectedDomainInspectorDomain(input: {
+  headCoachSubmittedReviewDomain: TrainingPlanGenerationDomain | null;
+  shell: TrainingPlanPageShell;
+  selectionCleared: boolean;
+}): TrainingPlanGenerationDomain | null {
+  if (input.headCoachSubmittedReviewDomain !== null) {
+    return input.headCoachSubmittedReviewDomain;
+  }
+  if (input.selectionCleared) return null;
+  if (input.shell === "skills_coach_planning") return "SKILLS";
+  return null;
+}
+
+/** Initial HC function-aware SKILLS auto-select; skipped after explicit Clear. */
+export function shouldAutoSelectSkillsDomainForHeadCoachReview(input: {
+  headCoachReviewMode: boolean;
+  headCoachFunctionAwareMode: boolean;
+  headCoachSkillsCreateVisible: boolean;
+  headCoachSubmittedReviewDomain: TrainingPlanGenerationDomain | null;
+  selectionCleared: boolean;
+}): boolean {
+  if (input.selectionCleared) return false;
+  if (input.headCoachSubmittedReviewDomain !== null) return false;
+  return (
+    input.headCoachReviewMode &&
+    input.headCoachFunctionAwareMode &&
+    input.headCoachSkillsCreateVisible
+  );
+}
+
 export function shouldKeepDomainReviewDrawerOpenForTab(input: {
   selectedWorkflowTab: GuidedWorkflowStepKey;
   shell: TrainingPlanPageShell;
@@ -9536,6 +9567,26 @@ export function resolveSetupStateAfterSeasonCreate(
       ...current.phasesBySeasonCycleId,
       [createdSeason.seasonCycleId]: createdPhases,
     },
+  };
+}
+
+/**
+ * In-flow season/goals refreshes must preserve coach identity fields so workspace shell/tab
+ * selection does not re-bootstrap into Domain Plans Integration / Domain Coach Workspace.
+ */
+export function resolveSetupStateAfterGoalsSeasonBackgroundRefresh(
+  current: GoalsSeasonSetupState,
+  input: {
+    seasons: SeasonCycleSummary[];
+    phasesBySeasonCycleId: Record<string, SeasonPhaseSummary[]>;
+    goals: GoalSummary[] | null;
+  },
+): GoalsSeasonSetupState {
+  return {
+    ...current,
+    seasons: input.seasons,
+    phasesBySeasonCycleId: input.phasesBySeasonCycleId,
+    goals: input.goals ?? current.goals,
   };
 }
 
@@ -11124,6 +11175,9 @@ export function CoachAthletePlanningProfileView({
   /** Set only when Head Coach opens Submitted Domain Plans review — not URL persisted-plan sync. */
   const [headCoachSubmittedReviewDomain, setHeadCoachSubmittedReviewDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
+  /** Explicit Clear selected domain — blocks fallback/auto-reselect until user picks a domain again. */
+  const [headCoachDomainSelectionCleared, setHeadCoachDomainSelectionCleared] =
+    useState(false);
   const [domainReviewDrawerOpen, setDomainReviewDrawerOpen] = useState(false);
   const [domainReviewDrawerDomain, setDomainReviewDrawerDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
@@ -12166,9 +12220,12 @@ export function CoachAthletePlanningProfileView({
     ],
   );
 
-  const refreshGoalsSeasonSetup = useCallback(async () => {
+  const refreshGoalsSeasonSetup = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background === true;
     if (!accessGateReady) {
-      setSetupLoading(true);
+      if (!background) {
+        setSetupLoading(true);
+      }
       setSeasonError(null);
       return;
     }
@@ -12184,11 +12241,15 @@ export function CoachAthletePlanningProfileView({
       setSelectedSeasonCycleId(null);
       setSelectedGoalIds([]);
       setSeasonError(null);
-      setSetupLoading(false);
+      if (!background) {
+        setSetupLoading(false);
+      }
       return;
     }
 
-    setSetupLoading(true);
+    if (!background) {
+      setSetupLoading(true);
+    }
     setSeasonError(null);
 
     try {
@@ -12200,6 +12261,33 @@ export function CoachAthletePlanningProfileView({
         ...season,
         phases: season.phases ?? [],
       }));
+
+      if (background) {
+        let goals: GoalSummary[] | null = null;
+        try {
+          goals = await fetchGoalsForAthlete(athleteIdTrimmed);
+        } catch {
+          goals = null;
+        }
+        setSetupState((current) =>
+          resolveSetupStateAfterGoalsSeasonBackgroundRefresh(current, {
+            seasons,
+            phasesBySeasonCycleId,
+            goals,
+          }),
+        );
+        setSelectedSeasonCycleId((prev) => {
+          if (prev == null) return null;
+          return seasons.some((s) => s.seasonCycleId === prev) ? prev : null;
+        });
+        if (goals !== null) {
+          setSelectedGoalIds((prev) =>
+            prev.filter((id) => goals.some((g) => g.goalId === id)),
+          );
+        }
+        return;
+      }
+
       const [goalsResult, dashboardResult, academyCoachesResult] = await Promise.allSettled([
         fetchGoalsForAthlete(athleteIdTrimmed),
         fetchCoachMeDashboard(),
@@ -12251,7 +12339,9 @@ export function CoachAthletePlanningProfileView({
     } catch {
       setSeasonError("Failed to load seasons. Please try again.");
     } finally {
-      setSetupLoading(false);
+      if (!background) {
+        setSetupLoading(false);
+      }
     }
   }, [accessGateReady, athleteIdTrimmed, currentCoachUserId, entityId]);
 
@@ -14825,17 +14915,31 @@ export function CoachAthletePlanningProfileView({
   ]);
 
   useEffect(() => {
-    if (!headCoachReviewMode) return;
-    if (!headCoachFunctionAwareMode) return;
-    if (!headCoachSkillsCreateVisible) return;
-    if (headCoachSubmittedReviewDomain !== null) return;
+    if (
+      !shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode,
+        headCoachFunctionAwareMode,
+        headCoachSkillsCreateVisible,
+        headCoachSubmittedReviewDomain,
+        selectionCleared: headCoachDomainSelectionCleared,
+      })
+    ) {
+      return;
+    }
     setHeadCoachSubmittedReviewDomain("SKILLS");
   }, [
+    headCoachDomainSelectionCleared,
     headCoachFunctionAwareMode,
     headCoachReviewMode,
     headCoachSkillsCreateVisible,
     headCoachSubmittedReviewDomain,
   ]);
+
+  useEffect(() => {
+    if (headCoachSubmittedReviewDomain === null) return;
+    if (!headCoachDomainSelectionCleared) return;
+    setHeadCoachDomainSelectionCleared(false);
+  }, [headCoachDomainSelectionCleared, headCoachSubmittedReviewDomain]);
 
   useEffect(() => {
     return () => {
@@ -14957,6 +15061,7 @@ export function CoachAthletePlanningProfileView({
     setPersistedSkillsPlanDetail(null);
     setPersistedVerifiedDomain(null);
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setPersistedSkillsPlanError(null);
     setPersistedSkillsPlanLoading(false);
     setGovernedPlanActionLoading(null);
@@ -15034,6 +15139,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     setAssistantDomainSummaryHydrationPending(false);
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setDomainReviewDrawerOpen(false);
     setDomainReviewDrawerDomain(null);
     setDomainReviewDrawerClosing(false);
@@ -15115,6 +15221,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     knownDomainPlanIdsRef.current = { SKILLS: "", NUTRITION: "", S_AND_C: "" };
     setHeadCoachSubmittedReviewDomain(null);
+    setHeadCoachDomainSelectionCleared(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
     setRequestRevisionFeedback("");
@@ -18568,6 +18675,7 @@ export function CoachAthletePlanningProfileView({
   }
 
   function closeHeadCoachPlanReview() {
+    setHeadCoachDomainSelectionCleared(true);
     setHeadCoachSubmittedReviewDomain(null);
     setGovernedPlanActionError(null);
     setGovernedPlanActionSuccess(null);
@@ -20118,9 +20226,11 @@ export function CoachAthletePlanningProfileView({
       trainingPlanShellModel.shell,
       currentCoachGenerationDomain,
     );
-    const selectedInspectorDomain =
-      headCoachSubmittedReviewDomain ??
-      (trainingPlanShellModel.shell === "skills_coach_planning" ? "SKILLS" : null);
+    const selectedInspectorDomain = resolveSelectedDomainInspectorDomain({
+      headCoachSubmittedReviewDomain,
+      shell: trainingPlanShellModel.shell,
+      selectionCleared: headCoachDomainSelectionCleared,
+    });
     return (
       <section className="space-y-4">
         <div className="space-y-2">
@@ -22930,7 +23040,8 @@ export function CoachAthletePlanningProfileView({
       const season = await createSeasonCycle(payload);
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
-      await refreshGoalsSeasonSetup();
+      // Background refresh: avoid setupLoading/coach-identity rebootstrap that leaves Context Builder.
+      await refreshGoalsSeasonSetup({ background: true });
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
       setSeasonCreateFormExplicit(false);

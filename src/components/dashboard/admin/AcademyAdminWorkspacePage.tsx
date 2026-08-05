@@ -1,6 +1,7 @@
 "use client";
 
 import { AssignmentCoachMultiSelect } from "@/components/dashboard/admin/AssignmentCoachMultiSelect";
+import { AssignmentValidationModal } from "@/components/dashboard/admin/AssignmentValidationModal";
 import { DeactivateMemberConfirmModal } from "@/components/dashboard/admin/DeactivateMemberConfirmModal";
 import { RevokeInvitationConfirmModal } from "@/components/dashboard/admin/RevokeInvitationConfirmModal";
 import { UnassignAssignmentConfirmDialog } from "@/components/dashboard/admin/UnassignAssignmentConfirmDialog";
@@ -44,6 +45,11 @@ import {
   type AcademyCoachRole,
   type AcademyCoachStructureRow,
 } from "@/lib/api/academyMeCoaches";
+import {
+  formatAssignmentApiError,
+  resolveAcademyAssignmentCoachRoster,
+  validateAssignmentSelection,
+} from "@/lib/academyAssignmentValidation";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import type {
   AthleteAssignmentOption,
@@ -491,6 +497,10 @@ export function AcademyAdminWorkspacePage({
     variant: "success" | "danger";
     message: string;
   } | null>(null);
+  const [assignmentValidationModalOpen, setAssignmentValidationModalOpen] =
+    useState(false);
+  const [assignmentValidationModalMessage, setAssignmentValidationModalMessage] =
+    useState("");
   const [unassignModalOpen, setUnassignModalOpen] = useState(false);
   const [unassignTarget, setUnassignTarget] = useState<{
     athleteProfileId: string;
@@ -595,6 +605,19 @@ export function AcademyAdminWorkspacePage({
       ]);
     });
   }, [assignments, workspaceListSearch, assignmentCoachFilter]);
+
+  const academyAssignmentCoachRoster = useMemo(() => {
+    return resolveAcademyAssignmentCoachRoster(
+      academyCoachRows.map((row) => ({
+        coachProfileId: row.coachProfileId,
+        email: row.email,
+        role: row.role,
+        functions: row.functions,
+        membershipStatus: row.membershipStatus,
+      })),
+      [...coachOptions, ...assignments],
+    );
+  }, [academyCoachRows, assignments, coachOptions]);
 
   const assignmentCoachDetails = useMemo(() => {
     const byProfileId = new Map<
@@ -1071,8 +1094,20 @@ export function AcademyAdminWorkspacePage({
       return;
     }
 
-    const toCreate = assignmentCoachesToCreate;
-    if (toCreate.length === 0) {
+    const validation = validateAssignmentSelection({
+      athleteProfileId,
+      selectedCoachProfileIds: assignmentSelectedCoachIds,
+      assignments,
+      academyCoaches: academyAssignmentCoachRoster,
+    });
+    if (!validation.ok) {
+      setAssignmentError(null);
+      setAssignmentSuccess(null);
+      setAssignmentValidationModalMessage(validation.message);
+      setAssignmentValidationModalOpen(true);
+      return;
+    }
+    if (validation.coachesToCreate.length === 0) {
       setAssignmentError(
         "All selected coaches already have an active assignment with this athlete.",
       );
@@ -1083,10 +1118,10 @@ export function AcademyAdminWorkspacePage({
     setAssignmentSubmitting(true);
     setAssignmentError(null);
     setAssignmentSuccess(null);
-    const errors: string[] = [];
     let successes = 0;
+    let submitError: string | null = null;
     try {
-      for (const coachProfileId of toCreate) {
+      for (const coachProfileId of validation.coachesToCreate) {
         try {
           await createAthleteCoachAssignment({
             entityId: selectedEntityId,
@@ -1096,15 +1131,21 @@ export function AcademyAdminWorkspacePage({
           });
           successes += 1;
         } catch (err) {
-          errors.push(formatAdminApiError(err, "Could not create assignment."));
+          submitError = formatAssignmentApiError(
+            err,
+            "Could not create assignment.",
+          );
+          break;
         }
       }
 
-      const rows = await fetchEntityAssignments(selectedEntityId);
-      setAssignments(rows);
-      setCandidatesRefreshKey((key) => key + 1);
+      if (successes > 0) {
+        const rows = await fetchEntityAssignments(selectedEntityId);
+        setAssignments(rows);
+        setCandidatesRefreshKey((key) => key + 1);
+      }
 
-      if (errors.length === 0) {
+      if (submitError === null) {
         setAssignmentSuccess(
           successes === 1
             ? "Assignment saved."
@@ -1112,15 +1153,13 @@ export function AcademyAdminWorkspacePage({
         );
         setAssignmentSelectedCoachIds([]);
       } else if (successes > 0) {
-        setAssignmentError("Some assignments could not be completed.");
+        setAssignmentError(submitError);
         setAssignmentSuccess(
           `${successes} assignment${successes !== 1 ? "s" : ""} saved.`,
         );
         setAssignmentSelectedCoachIds([]);
       } else {
-        setAssignmentError(
-          errors[0] ?? "Could not create assignments.",
-        );
+        setAssignmentError(submitError);
       }
     } catch (e) {
       setAssignmentError(
@@ -1766,6 +1805,133 @@ export function AcademyAdminWorkspacePage({
                 {assignmentsError}
               </Alert>
             ) : null}
+            {rosterLoading ? (
+              <p className="text-sm text-textSecondary">{LOADING_ROSTER}</p>
+            ) : null}
+            {!rosterLoading &&
+            selectedEntityId !== null &&
+            !hasAthleteOptions &&
+            !hasCoachOptions ? (
+              <p className="text-sm text-textSecondary">
+                No athletes or coaches with linked profiles are available for
+                this entity.
+              </p>
+            ) : null}
+            {!rosterLoading &&
+            selectedEntityId !== null &&
+            hasCoachOptions &&
+            !hasAthleteOptions ? (
+              <p className="text-sm text-textSecondary">
+                Coaches are available, but no athletes with linked profiles in
+                this entity are ready for assignment yet.
+              </p>
+            ) : null}
+            {!rosterLoading &&
+            selectedEntityId !== null &&
+            hasAthleteOptions &&
+            !hasCoachOptions ? (
+              <p className="text-sm text-textSecondary">
+                Athletes are available, but no coaches with linked profiles in
+                this entity are ready for assignment yet.
+              </p>
+            ) : null}
+            {!rosterLoading && selectedEntityId !== null ? (
+              <form
+                className="flex max-w-xl flex-col gap-4"
+                onSubmit={(e) => void handleCreateAssignment(e)}
+              >
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="assignment-athlete"
+                    className="text-xs font-medium text-textPrimary"
+                  >
+                    Athlete (profile)
+                  </label>
+                  <Select
+                    id="assignment-athlete"
+                    value={assignmentAthleteProfileId}
+                    disabled={
+                      assignmentSubmitting || athleteOptions.length === 0
+                    }
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                      onAssignmentAthleteChange(e.target.value)
+                    }
+                  >
+                    <option value="">Select athlete</option>
+                    {athleteOptions.map((opt) => (
+                      <option
+                        key={opt.athleteProfileId}
+                        value={opt.athleteProfileId}
+                      >
+                        {formatAdminPersonLabel(
+                          opt.displayName,
+                          opt.displayEmail,
+                          opt.athleteProfileId,
+                        )}
+                        {opt.missingHeadCoachAssignment ? " ⚠ Missing Head Coach" : ""}
+                      </option>
+                    ))}
+                  </Select>
+                  {!hasAthleteOptions ? (
+                    <p className="text-xs text-textSecondary">
+                      No assignable athletes with linked profiles are available yet.
+                    </p>
+                  ) : null}
+                </div>
+                <fieldset className="flex flex-col gap-1 border-0 p-0">
+                  <legend className="text-xs font-medium text-textPrimary">
+                    Coaches
+                  </legend>
+                  <AssignmentCoachMultiSelect
+                    id="assignment-coaches"
+                    coachOptions={coachOptions}
+                    selectedCoachProfileIds={assignmentSelectedCoachIds}
+                    disabled={
+                      assignmentSubmitting || coachOptions.length === 0
+                    }
+                    getOptionLines={(opt) =>
+                      formatCoachAssignmentOptionLines(
+                        opt,
+                        assignmentCoachDetails,
+                      )
+                    }
+                    onToggle={toggleAssignmentCoach}
+                  />
+                  <p className="text-xs text-textSecondary">
+                    {assignmentSelectedCoachIds.length === 0
+                      ? "No coaches selected"
+                      : assignmentSelectedCoachIds.length === 1
+                        ? "1 coach selected"
+                        : `${assignmentSelectedCoachIds.length} coaches selected`}
+                  </p>
+                  {!hasCoachOptions ? (
+                    <p className="text-xs text-textSecondary">
+                      No assignable coaches with linked profiles are available yet.
+                    </p>
+                  ) : null}
+                </fieldset>
+                {someSelectedCoachesAlreadyAssigned ? (
+                  <p className="text-xs text-warning">
+                    Some selected coaches already have an active assignment with
+                    this athlete. Those will be skipped.
+                  </p>
+                ) : null}
+                <Button
+                  type="submit"
+                  variant="primary"
+                  loading={assignmentSubmitting}
+                  disabled={
+                    assignmentSubmitting ||
+                    assignmentAthleteProfileId.trim() === "" ||
+                    assignmentSelectedCoachIds.length === 0
+                  }
+                >
+                  {assignmentSelectedCoachIds.length <= 1
+                    ? "Assign coach to athlete"
+                    : "Assign coaches to athlete"}
+                </Button>
+              </form>
+            ) : null}
             {assignmentsLoading ? (
               <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <p className="px-6 py-6 text-sm text-slate-500">Loading assignments...</p>
@@ -1917,133 +2083,6 @@ export function AcademyAdminWorkspacePage({
                 </div>
               )
             ) : null}
-            {rosterLoading ? (
-              <p className="text-sm text-textSecondary">{LOADING_ROSTER}</p>
-            ) : null}
-            {!rosterLoading &&
-            selectedEntityId !== null &&
-            !hasAthleteOptions &&
-            !hasCoachOptions ? (
-              <p className="text-sm text-textSecondary">
-                No athletes or coaches with linked profiles are available for
-                this entity.
-              </p>
-            ) : null}
-            {!rosterLoading &&
-            selectedEntityId !== null &&
-            hasCoachOptions &&
-            !hasAthleteOptions ? (
-              <p className="text-sm text-textSecondary">
-                Coaches are available, but no athletes with linked profiles in
-                this entity are ready for assignment yet.
-              </p>
-            ) : null}
-            {!rosterLoading &&
-            selectedEntityId !== null &&
-            hasAthleteOptions &&
-            !hasCoachOptions ? (
-              <p className="text-sm text-textSecondary">
-                Athletes are available, but no coaches with linked profiles in
-                this entity are ready for assignment yet.
-              </p>
-            ) : null}
-            {!rosterLoading && selectedEntityId !== null ? (
-              <form
-                className="flex max-w-xl flex-col gap-4"
-                onSubmit={(e) => void handleCreateAssignment(e)}
-              >
-                <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor="assignment-athlete"
-                    className="text-xs font-medium text-textPrimary"
-                  >
-                    Athlete (profile)
-                  </label>
-                  <Select
-                    id="assignment-athlete"
-                    value={assignmentAthleteProfileId}
-                    disabled={
-                      assignmentSubmitting || athleteOptions.length === 0
-                    }
-                    onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                      onAssignmentAthleteChange(e.target.value)
-                    }
-                  >
-                    <option value="">Select athlete</option>
-                    {athleteOptions.map((opt) => (
-                      <option
-                        key={opt.athleteProfileId}
-                        value={opt.athleteProfileId}
-                      >
-                        {formatAdminPersonLabel(
-                          opt.displayName,
-                          opt.displayEmail,
-                          opt.athleteProfileId,
-                        )}
-                        {opt.missingHeadCoachAssignment ? " ⚠ Missing Head Coach" : ""}
-                      </option>
-                    ))}
-                  </Select>
-                  {!hasAthleteOptions ? (
-                    <p className="text-xs text-textSecondary">
-                      No assignable athletes with linked profiles are available yet.
-                    </p>
-                  ) : null}
-                </div>
-                <fieldset className="flex flex-col gap-1 border-0 p-0">
-                  <legend className="text-xs font-medium text-textPrimary">
-                    Coaches
-                  </legend>
-                  <AssignmentCoachMultiSelect
-                    id="assignment-coaches"
-                    coachOptions={coachOptions}
-                    selectedCoachProfileIds={assignmentSelectedCoachIds}
-                    disabled={
-                      assignmentSubmitting || coachOptions.length === 0
-                    }
-                    getOptionLines={(opt) =>
-                      formatCoachAssignmentOptionLines(
-                        opt,
-                        assignmentCoachDetails,
-                      )
-                    }
-                    onToggle={toggleAssignmentCoach}
-                  />
-                  <p className="text-xs text-textSecondary">
-                    {assignmentSelectedCoachIds.length === 0
-                      ? "No coaches selected"
-                      : assignmentSelectedCoachIds.length === 1
-                        ? "1 coach selected"
-                        : `${assignmentSelectedCoachIds.length} coaches selected`}
-                  </p>
-                  {!hasCoachOptions ? (
-                    <p className="text-xs text-textSecondary">
-                      No assignable coaches with linked profiles are available yet.
-                    </p>
-                  ) : null}
-                </fieldset>
-                {someSelectedCoachesAlreadyAssigned ? (
-                  <p className="text-xs text-warning">
-                    Some selected coaches already have an active assignment with
-                    this athlete. Those will be skipped.
-                  </p>
-                ) : null}
-                <Button
-                  type="submit"
-                  variant="primary"
-                  loading={assignmentSubmitting}
-                  disabled={
-                    assignmentSubmitting ||
-                    assignmentAthleteProfileId.trim() === "" ||
-                    assignmentSelectedCoachIds.length === 0
-                  }
-                >
-                  {assignmentSelectedCoachIds.length <= 1
-                    ? "Assign coach to athlete"
-                    : "Assign coaches to athlete"}
-                </Button>
-              </form>
-            ) : null}
           </div>
         ) : null}
       </Card>
@@ -2082,6 +2121,12 @@ export function AcademyAdminWorkspacePage({
             unassignTarget.coachProfileId,
           );
         }}
+      />
+
+      <AssignmentValidationModal
+        open={assignmentValidationModalOpen}
+        message={assignmentValidationModalMessage}
+        onClose={() => setAssignmentValidationModalOpen(false)}
       />
     </div>
   );

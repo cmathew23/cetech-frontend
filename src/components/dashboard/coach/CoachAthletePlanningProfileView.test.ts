@@ -122,12 +122,15 @@ import {
   resolveDomainIntegrationMatrixDomains,
   shouldRenderEmbeddedPlanViewerInDomainIntegration,
   shouldUseDomainCoordinationMatrixLayout,
+  resolveSelectedDomainInspectorDomain,
+  shouldAutoSelectSkillsDomainForHeadCoachReview,
   shouldKeepDomainReviewDrawerOpenForTab,
   resolveDomainIntegrationSkillsCreateVisible,
   resolveDomainIntegrationGenerateDisplayState,
   resolveDomainGenerationEligibilityModel,
   shouldAllowWorkflow3SkillsGenerationWithoutGenericBackendReady,
   resolveSetupStateAfterSeasonCreate,
+  resolveSetupStateAfterGoalsSeasonBackgroundRefresh,
   formatSeasonOptionLabel,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
@@ -10764,6 +10767,75 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(steps.find((step) => step.key === "plan-viewer")?.state).toBe("locked");
   });
 
+  it("keeps Clear selected domain from being immediately reselected", () => {
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: null,
+        shell: "skills_coach_planning",
+        selectionCleared: false,
+      }),
+    ).toBe("SKILLS");
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: null,
+        shell: "skills_coach_planning",
+        selectionCleared: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: "NUTRITION",
+        shell: "head_coach_function_aware",
+        selectionCleared: true,
+      }),
+    ).toBe("NUTRITION");
+    expect(
+      resolveSelectedDomainInspectorDomain({
+        headCoachSubmittedReviewDomain: "S_AND_C",
+        shell: "head_coach_review",
+        selectionCleared: false,
+      }),
+    ).toBe("S_AND_C");
+
+    expect(
+      shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode: true,
+        headCoachFunctionAwareMode: true,
+        headCoachSkillsCreateVisible: true,
+        headCoachSubmittedReviewDomain: null,
+        selectionCleared: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoSelectSkillsDomainForHeadCoachReview({
+        headCoachReviewMode: true,
+        headCoachFunctionAwareMode: true,
+        headCoachSkillsCreateVisible: true,
+        headCoachSubmittedReviewDomain: null,
+        selectionCleared: true,
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const clearStart = source.indexOf("function closeHeadCoachPlanReview()");
+    const clearEnd = source.indexOf(
+      "function renderWorkflow1HeadCoachReviewActionPanel()",
+      clearStart,
+    );
+    const clearHandler = source.slice(clearStart, clearEnd);
+    expect(clearStart).toBeGreaterThan(-1);
+    expect(clearHandler).toContain("setHeadCoachDomainSelectionCleared(true)");
+    expect(clearHandler).toContain("setHeadCoachSubmittedReviewDomain(null)");
+    expect(clearHandler).not.toContain("fetch");
+    expect(clearHandler).not.toContain("apiRequest");
+    expect(source).toContain(
+      "selectionCleared: headCoachDomainSelectionCleared",
+    );
+  });
+
   it("does not embed Plan Viewer content in Workflow 3 Domain Integration before release", () => {
     expect(shouldRenderEmbeddedPlanViewerInDomainIntegration("skills_coach_planning")).toBe(
       false,
@@ -12760,6 +12832,70 @@ describe("season create display state", () => {
         name: "2026 Golf Season",
       }),
     ).toBe("2026 Golf Season");
+  });
+
+  it("background post-create refresh preserves coach identity while refreshing seasons", () => {
+    const current = {
+      ...emptySetupState,
+      coachFunctions: ["HEAD_COACH", "SKILLS"],
+      hasHeadCoachConfigured: true,
+      academyCoachRole: "HEAD_COACH",
+      trainingPlanReleaseMode: "HEAD_COACH_REVIEW",
+      goals: [
+        {
+          goalId: "goal-1",
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          seasonCycleId: "season-custom-1",
+          seasonPhaseId: null,
+          domain: "SKILLS",
+          status: "ACTIVE",
+          goalType: "PERFORMANCE",
+          goalName: "Keep me",
+          successCriteria: null,
+          goalCategory: "TRAINING",
+          priority: "MEDIUM",
+          competitionEventId: null,
+          targetValue: null,
+          startDate: null,
+          targetDate: null,
+        },
+      ],
+    };
+    const next = resolveSetupStateAfterGoalsSeasonBackgroundRefresh(current, {
+      seasons: [createdCustomSeason],
+      phasesBySeasonCycleId: { "season-custom-1": [] },
+      goals: null,
+    });
+
+    expect(next.seasons).toEqual([createdCustomSeason]);
+    expect(next.phasesBySeasonCycleId["season-custom-1"]).toEqual([]);
+    expect(next.goals).toEqual(current.goals);
+    expect(next.coachFunctions).toEqual(["HEAD_COACH", "SKILLS"]);
+    expect(next.hasHeadCoachConfigured).toBe(true);
+    expect(next.academyCoachRole).toBe("HEAD_COACH");
+    expect(next.trainingPlanReleaseMode).toBe("HEAD_COACH_REVIEW");
+  });
+
+  it("keeps Create Season success inside Planning Context without route navigation", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const handlerStart = source.indexOf("async function handleCreateMvpSeason()");
+    const handlerEnd = source.indexOf("async function handleCreatePhase(", handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handler).toContain("await createSeasonCycle(payload)");
+    expect(handler.match(/createSeasonCycle\(/g)?.length).toBe(1);
+    expect(handler).toContain("await refreshGoalsSeasonSetup({ background: true })");
+    expect(handler).not.toContain("router.push");
+    expect(handler).not.toContain("router.replace");
+    expect(handler).not.toContain("setSelectedWorkflowTab(");
+    expect(handler).toContain('setSeasonSuccess("Season created and selected.")');
+    expect(handler).toContain("resolveSetupStateAfterSeasonCreate");
   });
 });
 

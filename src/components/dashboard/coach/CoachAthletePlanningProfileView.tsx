@@ -103,7 +103,7 @@ import {
   type TrainingPlanRevisionPatch,
   type TrainingPlanRevisionPatchItem,
   type SandCRevisionPatch,
-  type SandCRevisionSubmission,
+  type RestDayRevisionPatch,
   type NutritionServingAdjustment,
   type CoachAthleteTrainingPlanWorkloadAssessment,
   type CoachAthleteUpstreamPlanningContext,
@@ -3365,12 +3365,21 @@ export type FynRevisionActionKey =
   | "ADD_ITEM"
   | "REMOVE_ITEM"
   | "REPLACE_ITEM"
-  | "UPDATE_ITEM";
+  | "UPDATE_ITEM"
+  | "ADD_TRAINING_TO_REST_DAY"
+  | "MAKE_DAY_REST_DAY"
+  | "MOVE_REST_DAY";
 
 export type FynRevisionDomainCapability = {
   levels: FynRevisionTargetLevel[];
   actionsByLevel: Record<FynRevisionTargetLevel, FynRevisionActionKey[]>;
 };
+
+/** Synthetic first-level Rest Day category target for Skills/S&C (not a calendar day). */
+export const FYN_REST_DAY_TARGET_KEY = "rest-day";
+
+export const FYN_REST_DAY_ADD_TRAINING_COPY =
+  "Copy one existing authoritative session from a training day onto the selected Rest Day. The source training day stays unchanged.";
 
 /**
  * What the backend supports per domain and target level. This is the single source of truth for
@@ -3381,10 +3390,10 @@ export const FYN_REVISION_CAPABILITIES: Record<
   FynRevisionDomainCapability
 > = {
   SKILLS: {
-    // Skills deterministic milestones: add to a session or remove/update an existing drill.
-    levels: ["SESSION", "ITEM"],
+    // Skills: Rest Day category + add/remove/update drill on sessions/items.
+    levels: ["DAY", "SESSION", "ITEM"],
     actionsByLevel: {
-      DAY: [],
+      DAY: ["ADD_TRAINING_TO_REST_DAY", "MAKE_DAY_REST_DAY", "MOVE_REST_DAY"],
       SESSION: ["ADD_ITEM"],
       ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
     },
@@ -3398,9 +3407,10 @@ export const FYN_REVISION_CAPABILITIES: Record<
     },
   },
   S_AND_C: {
-    levels: ["SESSION", "ITEM"],
+    // S&C: Rest Day category + add/remove/update exercise on sessions/items.
+    levels: ["DAY", "SESSION", "ITEM"],
     actionsByLevel: {
-      DAY: [],
+      DAY: ["ADD_TRAINING_TO_REST_DAY", "MAKE_DAY_REST_DAY", "MOVE_REST_DAY"],
       SESSION: ["ADD_ITEM"],
       ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
     },
@@ -3471,7 +3481,21 @@ export function fynRevisionActionLabel(
       if (domain === "NUTRITION") return "Change food item details";
       if (domain === "SKILLS") return "Change drill parameters";
       return `Adjust ${noun}`;
+    case "ADD_TRAINING_TO_REST_DAY":
+      return "Add training to Rest Day";
+    case "MAKE_DAY_REST_DAY":
+      return "Make day a Rest Day";
+    case "MOVE_REST_DAY":
+      return "Move Rest Day";
   }
+}
+
+function fynRevisionActionIsRestDay(key: FynRevisionActionKey): boolean {
+  return (
+    key === "ADD_TRAINING_TO_REST_DAY" ||
+    key === "MAKE_DAY_REST_DAY" ||
+    key === "MOVE_REST_DAY"
+  );
 }
 
 /**
@@ -3562,7 +3586,7 @@ export function fynRevisionAvailableActions(
       key,
       label: fynRevisionActionLabel(domain, key),
       requiresApprovedOptions: fynRevisionActionOptionKind(key) !== null,
-      requiresBriefRequest: key !== "REMOVE_ITEM",
+      requiresBriefRequest: key !== "REMOVE_ITEM" && !fynRevisionActionIsRestDay(key),
     }));
 }
 
@@ -3570,6 +3594,34 @@ export function fynRevisionAvailableActions(
  * Builds coach-selectable targets at every level the domain supports, keeping only targets that
  * expose at least one available action. Same source priority as {@link fynRevisionTargetOptions}.
  */
+function fynRestDayCategoryTargetOption(): FynRevisionTargetOption {
+  return {
+    key: FYN_REST_DAY_TARGET_KEY,
+    label: "Rest Day",
+    level: "DAY",
+    dayLabel: "Rest Day",
+    sessionLabel: null,
+    itemLabel: null,
+    serving: null,
+    durationMinutes: null,
+    sets: null,
+    numericReps: null,
+    reps: null,
+    daySessionCount: 0,
+    sessionItemCount: 0,
+    indices: { dayIndex: null, sessionIndex: null, itemIndex: null },
+    target: {
+      dayKey: null,
+      sessionKey: null,
+      itemKey: null,
+      itemType: null,
+      currentId: null,
+      label: "Rest Day",
+      tags: [],
+    },
+  };
+}
+
 export function fynRevisionLeveledTargetOptions(
   context: CoachAthleteDomainDraftRevisionContext | null,
   options?: {
@@ -3578,9 +3630,25 @@ export function fynRevisionLeveledTargetOptions(
   },
 ): FynRevisionTargetOption[] {
   const domain = options?.domain ?? context?.generationDomain ?? "SKILLS";
-  const levels = new Set(FYN_REVISION_CAPABILITIES[domain].levels);
+  const capability = FYN_REVISION_CAPABILITIES[domain];
+  // Rest Day uses one synthetic DAY category; do not emit per-calendar-day DAY targets.
+  const scheduleLevels = new Set(
+    capability.levels.filter((level) => level !== "DAY"),
+  );
   const withActions = (list: FynRevisionTargetOption[]) =>
     list.filter((option) => fynRevisionAvailableActions(domain, option).length > 0);
+  const withRestDayCategory = (list: FynRevisionTargetOption[]) => {
+    if (
+      (domain !== "SKILLS" && domain !== "S_AND_C") ||
+      !capability.levels.includes("DAY") ||
+      (capability.actionsByLevel.DAY?.length ?? 0) === 0
+    ) {
+      return list;
+    }
+    const restDayTarget = fynRestDayCategoryTargetOption();
+    if (fynRevisionAvailableActions(domain, restDayTarget).length === 0) return list;
+    return [restDayTarget, ...list];
+  };
 
   const sources: readonly unknown[][] = [
     fynTargetMapCandidateArray(context?.targetMap ?? null),
@@ -3589,12 +3657,18 @@ export function fynRevisionLeveledTargetOptions(
   ];
   for (const days of sources) {
     if (days.length === 0) continue;
-    const built = withActions(fynBuildLeveledTargets(domain, days, levels));
-    if (built.length > 0) return built;
+    // Rest Day category must not mask an empty nested walk — flat targetMap still needs a turn.
+    const built = withActions(fynBuildLeveledTargets(domain, days, scheduleLevels));
+    if (built.length > 0) return withRestDayCategory(built);
   }
-  // Flat targetMap fallback: ITEM-level targets only.
-  return withActions(
-    fynTargetOptionsFromFlatList(domain, fynTargetMapCandidateArray(context?.targetMap ?? null)),
+  // Flat targetMap fallback: ITEM-level targets only (+ Rest Day category when supported).
+  return withRestDayCategory(
+    withActions(
+      fynTargetOptionsFromFlatList(
+        domain,
+        fynTargetMapCandidateArray(context?.targetMap ?? null),
+      ),
+    ),
   );
 }
 
@@ -3639,6 +3713,11 @@ export function buildFynRevisionActionChangeText(
     case "REPLACE_ITEM":
       // Replacements go through the approved-options flow, not this quick-add path.
       return "";
+    case "ADD_TRAINING_TO_REST_DAY":
+    case "MAKE_DAY_REST_DAY":
+    case "MOVE_REST_DAY":
+      // Rest Day uses the deterministic single-patch Apply path, not the basket.
+      return "";
   }
 }
 
@@ -3654,6 +3733,166 @@ export const SANDC_SINGLE_PATCH_GUIDANCE =
 export const SANDC_REVISION_APPLIED_MESSAGE = "Revision applied successfully";
 export const SANDC_REMOVE_ITEM_MINIMUM_GUIDANCE =
   "A session must contain at least one exercise.";
+
+/* ------------------------------------------------------------------------------------------------
+ * Rest Day deterministic single-patch helpers (Skills + S&C)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type FynRestDaySelection = {
+  restDayIndex: number | null;
+  trainingDayIndex: number | null;
+  sessionIndex: number | null;
+  dayIndex: number | null;
+};
+
+export const EMPTY_FYN_REST_DAY_SELECTION: FynRestDaySelection = {
+  restDayIndex: null,
+  trainingDayIndex: null,
+  sessionIndex: null,
+  dayIndex: null,
+};
+
+/**
+ * Rest Day selectors/submissions may use only the pinned revision-context draft days whose
+ * plan/version match the revise ids. Returns null when that authoritative graph is unavailable.
+ */
+export function fynRestDayAuthoritativeScheduleDays(input: {
+  context: CoachAthleteDomainDraftRevisionContext | null | undefined;
+  reviseIds: { trainingPlanId: string; versionId: string } | null;
+}): readonly unknown[] | null {
+  if (input.reviseIds === null || input.context == null) return null;
+  const days = input.context.draft?.days;
+  if (!Array.isArray(days) || days.length === 0) return null;
+  const planId = (
+    input.context.ref?.trainingPlanId ??
+    input.context.draft?.trainingPlanId ??
+    ""
+  ).trim();
+  const versionId = (
+    input.context.ref?.trainingPlanVersionId ??
+    input.context.ref?.versionId ??
+    input.context.draft?.trainingPlanVersionId ??
+    ""
+  ).trim();
+  if (planId === "" || versionId === "") return null;
+  if (planId !== input.reviseIds.trainingPlanId.trim()) return null;
+  if (versionId !== input.reviseIds.versionId.trim()) return null;
+  return days;
+}
+
+export type FynRestDayScheduleDay = {
+  dayIndex: number;
+  label: string;
+  sessions: Array<{ sessionIndex: number; label: string }>;
+};
+
+/** Days filtered by authoritative `isRestDay` (`true` or `false` only; null excluded). */
+export function fynRevisionDaysByRestFlag(
+  scheduleDays: readonly unknown[],
+  isRestDay: boolean,
+): FynRestDayScheduleDay[] {
+  const days: FynRestDayScheduleDay[] = [];
+  scheduleDays.forEach((dayValue, dayArrayIndex) => {
+    const day = fynTargetAsRecord(dayValue);
+    if (day === null) return;
+    if (day.isRestDay !== isRestDay) return;
+    const dayIndex =
+      fynTargetReadNumber(day, ["dayIndex", "dayNumber"]) ?? dayArrayIndex + 1;
+    const dayLabel =
+      fynTargetReadString(day, ["dayLabel", "label"]) ??
+      (fynTargetReadString(day, ["dayIndex"]) !== null
+        ? `Day ${fynTargetReadString(day, ["dayIndex"])}`
+        : null) ??
+      fynTargetReadString(day, ["date"]) ??
+      `Day ${dayArrayIndex + 1}`;
+    const sessions = fynTargetReadArray(day, ["sessions"]).flatMap(
+      (sessionValue, sessionArrayIndex) => {
+        const session = fynTargetAsRecord(sessionValue);
+        if (session === null) return [];
+        const sessionIndex =
+          fynTargetReadNumber(session, ["sessionIndex", "sessionNumber"]) ??
+          sessionArrayIndex + 1;
+        const label =
+          fynTargetReadString(session, ["sessionLabel", "title", "label", "name"]) ??
+          `Session ${sessionIndex}`;
+        return [{ sessionIndex, label }];
+      },
+    );
+    days.push({ dayIndex, label: dayLabel, sessions });
+  });
+  return days;
+}
+
+/** Builds the canonical Rest Day revision patch, or null when required indices are missing. */
+export function buildRestDayRevisionPatch(input: {
+  actionKey: FynRevisionActionKey;
+  restDayIndex: number | null;
+  trainingDayIndex: number | null;
+  sessionIndex: number | null;
+  dayIndex: number | null;
+}): RestDayRevisionPatch | null {
+  if (input.actionKey === "ADD_TRAINING_TO_REST_DAY") {
+    if (
+      input.restDayIndex === null ||
+      input.trainingDayIndex === null ||
+      input.sessionIndex === null
+    ) {
+      return null;
+    }
+    return {
+      action: "ADD_TRAINING_TO_REST_DAY",
+      restDayIndex: input.restDayIndex,
+      trainingDayIndex: input.trainingDayIndex,
+      sessionIndex: input.sessionIndex,
+    };
+  }
+  if (input.actionKey === "MAKE_DAY_REST_DAY") {
+    if (input.dayIndex === null) return null;
+    return {
+      action: "MAKE_DAY_REST_DAY",
+      dayIndex: input.dayIndex,
+    };
+  }
+  if (input.actionKey === "MOVE_REST_DAY") {
+    if (
+      input.restDayIndex === null ||
+      input.trainingDayIndex === null ||
+      input.restDayIndex === input.trainingDayIndex
+    ) {
+      return null;
+    }
+    return {
+      action: "MOVE_REST_DAY",
+      restDayIndex: input.restDayIndex,
+      trainingDayIndex: input.trainingDayIndex,
+    };
+  }
+  return null;
+}
+
+/** Short coachFeedback summary required by the revise payload contract. */
+export function buildRestDayRevisionSummary(input: {
+  actionKey: FynRevisionActionKey;
+  restDayIndex: number | null;
+  trainingDayIndex: number | null;
+  sessionIndex: number | null;
+  dayIndex: number | null;
+}): string {
+  if (input.actionKey === "ADD_TRAINING_TO_REST_DAY") {
+    return `Copy session ${input.sessionIndex ?? "?"} from day ${
+      input.trainingDayIndex ?? "?"
+    } onto Rest Day ${input.restDayIndex ?? "?"}.`;
+  }
+  if (input.actionKey === "MAKE_DAY_REST_DAY") {
+    return `Make day ${input.dayIndex ?? "?"} a Rest Day.`;
+  }
+  if (input.actionKey === "MOVE_REST_DAY") {
+    return `Move Rest Day ${input.restDayIndex ?? "?"} with training day ${
+      input.trainingDayIndex ?? "?"
+    }.`;
+  }
+  return "Apply Rest Day revision.";
+}
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
 
@@ -3763,6 +4002,9 @@ export function buildSkillsRevisionSubmission(input: {
   coachRequest?: string;
   durationMinutes?: number | null;
   reps?: string | null;
+  restDaySelection?: FynRestDaySelection | null;
+  /** Authoritative revision-context draft days; required for Rest Day submissions. */
+  restDayScheduleDays?: readonly unknown[] | null;
 }): TrainingPlanRevisePayload | null {
   if (
     input.reviseIds === null ||
@@ -3770,6 +4012,34 @@ export function buildSkillsRevisionSubmission(input: {
     input.actionKey === null
   ) {
     return null;
+  }
+  if (
+    input.target.key === FYN_REST_DAY_TARGET_KEY &&
+    fynRevisionActionIsRestDay(input.actionKey)
+  ) {
+    const scheduleDays = input.restDayScheduleDays;
+    if (!Array.isArray(scheduleDays) || scheduleDays.length === 0) return null;
+    const selection = input.restDaySelection ?? EMPTY_FYN_REST_DAY_SELECTION;
+    const revisionPatch = buildRestDayRevisionPatch({
+      actionKey: input.actionKey,
+      restDayIndex: selection.restDayIndex,
+      trainingDayIndex: selection.trainingDayIndex,
+      sessionIndex: selection.sessionIndex,
+      dayIndex: selection.dayIndex,
+    });
+    if (revisionPatch === null) return null;
+    return {
+      trainingPlanId: input.reviseIds.trainingPlanId,
+      versionId: input.reviseIds.versionId,
+      coachFeedback: buildRestDayRevisionSummary({
+        actionKey: input.actionKey,
+        restDayIndex: selection.restDayIndex,
+        trainingDayIndex: selection.trainingDayIndex,
+        sessionIndex: selection.sessionIndex,
+        dayIndex: selection.dayIndex,
+      }),
+      revisionPatch,
+    };
   }
   const revisionPatch = buildSkillsRevisionPatch({
     target: input.target,
@@ -3999,8 +4269,39 @@ export function buildSandCRevisionSubmission(input: {
   durationMinutes?: number | null;
   sets?: number | null;
   reps?: number | null;
-}): SandCRevisionSubmission | null {
+  restDaySelection?: FynRestDaySelection | null;
+  /** Authoritative revision-context draft days; required for Rest Day submissions. */
+  restDayScheduleDays?: readonly unknown[] | null;
+}): TrainingPlanRevisePayload | null {
   if (input.reviseIds === null || input.target === null || input.actionKey === null) return null;
+  if (
+    input.target.key === FYN_REST_DAY_TARGET_KEY &&
+    fynRevisionActionIsRestDay(input.actionKey)
+  ) {
+    const scheduleDays = input.restDayScheduleDays;
+    if (!Array.isArray(scheduleDays) || scheduleDays.length === 0) return null;
+    const selection = input.restDaySelection ?? EMPTY_FYN_REST_DAY_SELECTION;
+    const revisionPatch = buildRestDayRevisionPatch({
+      actionKey: input.actionKey,
+      restDayIndex: selection.restDayIndex,
+      trainingDayIndex: selection.trainingDayIndex,
+      sessionIndex: selection.sessionIndex,
+      dayIndex: selection.dayIndex,
+    });
+    if (revisionPatch === null) return null;
+    return {
+      trainingPlanId: input.reviseIds.trainingPlanId,
+      versionId: input.reviseIds.versionId,
+      coachFeedback: buildRestDayRevisionSummary({
+        actionKey: input.actionKey,
+        restDayIndex: selection.restDayIndex,
+        trainingDayIndex: selection.trainingDayIndex,
+        sessionIndex: selection.sessionIndex,
+        dayIndex: selection.dayIndex,
+      }),
+      revisionPatch,
+    };
+  }
   const revisionPatch = buildSandCRevisionPatch({
     target: input.target,
     actionKey: input.actionKey,
@@ -5104,6 +5405,9 @@ export function FynRevisionContextPanel({
   onServingDecrement,
   sandCAddItemValues = null,
   onSandCAddItemAdjust,
+  scheduleDays = null,
+  restDaySelection = null,
+  onRestDaySelectionChange,
 }: {
   domain: TrainingPlanGenerationDomain;
   loading: boolean;
@@ -5140,6 +5444,10 @@ export function FynRevisionContextPanel({
     field: keyof SandCAddItemValues,
     direction: 1 | -1,
   ) => void;
+  /** Schedule used for Rest Day cascading selectors (Skills/S&C single-patch). */
+  scheduleDays?: readonly unknown[] | null;
+  restDaySelection?: FynRestDaySelection | null;
+  onRestDaySelectionChange?: (selection: FynRestDaySelection) => void;
 }) {
   const acceptedChanges = fynRevisionAcceptedChanges(selection);
   const acceptedCount = acceptedChanges.length;
@@ -5151,6 +5459,24 @@ export function FynRevisionContextPanel({
   const availableActions = fynRevisionAvailableActions(domain, selectedTargetOption);
   const selectedAction =
     availableActions.find((action) => action.key === selectedActionKey) ?? null;
+  const restDayTargetSelected =
+    singlePatchMode &&
+    (domain === "SKILLS" || domain === "S_AND_C") &&
+    selectedTargetOption?.key === FYN_REST_DAY_TARGET_KEY;
+  const restDayActionSelected =
+    restDayTargetSelected &&
+    selectedActionKey !== null &&
+    fynRevisionActionIsRestDay(selectedActionKey);
+  const restDaySelectionValue = restDaySelection ?? EMPTY_FYN_REST_DAY_SELECTION;
+  const restDays = restDayActionSelected
+    ? fynRevisionDaysByRestFlag(scheduleDays ?? [], true)
+    : [];
+  const trainingDays = restDayActionSelected
+    ? fynRevisionDaysByRestFlag(scheduleDays ?? [], false)
+    : [];
+  const selectedTrainingDay =
+    trainingDays.find((day) => day.dayIndex === restDaySelectionValue.trainingDayIndex) ??
+    null;
   // Nutrition "Change food item details" replaces the free-text input + option search with a
   // deterministic serving stepper ([ − ] {quantity} {unit} [ + ]).
   const nutritionServingAdjustmentAction =
@@ -5177,6 +5503,9 @@ export function FynRevisionContextPanel({
     loading ||
     optionsState.loading ||
     (selectedAction?.requiresBriefRequest === true && coachRequest.trim() === "");
+  const updateRestDaySelection = (patch: Partial<FynRestDaySelection>) => {
+    onRestDaySelectionChange?.({ ...restDaySelectionValue, ...patch });
+  };
 
   return (
     <div className="space-y-4 rounded-md border border-primary/20 bg-primary/5 p-3">
@@ -5327,11 +5656,13 @@ export function FynRevisionContextPanel({
           ) : null}
 
           {/* 3. Context third: Fyn only asks for detail once an action is chosen. Nutrition
-              serving adjustment uses a stepper instead of the free-text input + option search. */}
+              serving adjustment uses a stepper instead of the free-text input + option search.
+              Rest Day uses cascading selectors instead of free-text / approved options. */}
           {selectedAction !== null &&
           !nutritionServingAdjustmentAction &&
           !sandCRemoveItemAction &&
-          !sandCUpdateItemAction ? (
+          !sandCUpdateItemAction &&
+          !restDayActionSelected ? (
             <label className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Tell Fyn what to change</span>
               <textarea
@@ -5343,6 +5674,152 @@ export function FynRevisionContextPanel({
                 disabled={loading}
               />
             </label>
+          ) : null}
+
+          {restDayActionSelected && selectedActionKey === "ADD_TRAINING_TO_REST_DAY" ? (
+            <div className="space-y-3" data-testid="fyn-rest-day-add-training">
+              <p className="text-sm text-textSecondary">{FYN_REST_DAY_ADD_TRAINING_COPY}</p>
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Rest Day to change</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.restDayIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      restDayIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  disabled={loading}
+                >
+                  <option value="">Select a Rest Day…</option>
+                  {restDays.map((day) => (
+                    <option key={`rest-${day.dayIndex}`} value={day.dayIndex}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Training day to copy from</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.trainingDayIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      trainingDayIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                      sessionIndex: null,
+                    })
+                  }
+                  disabled={loading}
+                >
+                  <option value="">Select a training day…</option>
+                  {trainingDays.map((day) => (
+                    <option key={`training-${day.dayIndex}`} value={day.dayIndex}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Session to copy</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.sessionIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      sessionIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  disabled={loading || selectedTrainingDay === null}
+                >
+                  <option value="">Select a session…</option>
+                  {(selectedTrainingDay?.sessions ?? []).map((session) => (
+                    <option
+                      key={`session-${session.sessionIndex}`}
+                      value={session.sessionIndex}
+                    >
+                      {session.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
+
+          {restDayActionSelected && selectedActionKey === "MAKE_DAY_REST_DAY" ? (
+            <div className="space-y-3" data-testid="fyn-rest-day-make">
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Training day to make a Rest Day</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.dayIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      dayIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  disabled={loading}
+                >
+                  <option value="">Select a training day…</option>
+                  {trainingDays.map((day) => (
+                    <option key={`make-${day.dayIndex}`} value={day.dayIndex}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
+
+          {restDayActionSelected && selectedActionKey === "MOVE_REST_DAY" ? (
+            <div className="space-y-3" data-testid="fyn-rest-day-move">
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Rest Day to change</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.restDayIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      restDayIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  disabled={loading}
+                >
+                  <option value="">Select a Rest Day…</option>
+                  {restDays.map((day) => (
+                    <option key={`move-rest-${day.dayIndex}`} value={day.dayIndex}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm text-textPrimary">
+                <span className="font-medium">Training day to swap with</span>
+                <select
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={restDaySelectionValue.trainingDayIndex ?? ""}
+                  onChange={(event) =>
+                    updateRestDaySelection({
+                      trainingDayIndex:
+                        event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  disabled={loading}
+                >
+                  <option value="">Select a training day…</option>
+                  {trainingDays.map((day) => (
+                    <option key={`move-training-${day.dayIndex}`} value={day.dayIndex}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           ) : null}
 
           {nutritionServingAdjustmentAction && servingStepper !== null ? (
@@ -5426,7 +5903,7 @@ export function FynRevisionContextPanel({
             </p>
           ) : null}
 
-          {selectedAction?.requiresApprovedOptions ? (
+          {selectedAction?.requiresApprovedOptions && !restDayActionSelected ? (
             <Button
               type="button"
               variant="secondary"
@@ -5435,7 +5912,10 @@ export function FynRevisionContextPanel({
             >
               {optionsState.loading ? "Loading options..." : FYN_REVISION_SHOW_OPTIONS_LABEL}
             </Button>
-          ) : !singlePatchMode && selectedAction !== null && selectedTargetOption !== null ? (
+          ) : !singlePatchMode &&
+            selectedAction !== null &&
+            selectedTargetOption !== null &&
+            !restDayActionSelected ? (
             <Button
               type="button"
               variant="secondary"
@@ -11429,6 +11909,9 @@ export function CoachAthletePlanningProfileView({
   const [sandCAddItemValues, setSandCAddItemValues] = useState<SandCAddItemValues>({
     ...EMPTY_SANDC_ADD_ITEM_VALUES,
   });
+  const [fynRestDaySelections, setFynRestDaySelections] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, FynRestDaySelection>>
+  >({});
   const [assistantGovernedDetailRefreshing, setAssistantGovernedDetailRefreshing] =
     useState(false);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -13923,11 +14406,44 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.version?.id,
     workspace,
   ]);
+  const skillsFynRevisionIdentityRef = useRef<string | null>(null);
+  const sandCFynRevisionIdentityRef = useRef<string | null>(null);
   useEffect(() => {
     if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "SKILLS") {
       setSkillsActiveReviseIds(null);
+      resetFynRevisionOptionsFlow("SKILLS");
+      skillsFynRevisionIdentityRef.current = null;
+      return;
     }
-  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
+    const context = fynRevisionContexts.SKILLS?.context ?? null;
+    const contextVersionId = (
+      context?.ref?.trainingPlanVersionId ??
+      context?.ref?.versionId ??
+      context?.draft?.trainingPlanVersionId ??
+      ""
+    ).trim();
+    const planId =
+      skillsActiveReviseIds?.trainingPlanId ?? skillsReviseIds?.trainingPlanId ?? "";
+    const versionId =
+      skillsActiveReviseIds?.versionId ?? skillsReviseIds?.versionId ?? "";
+    const identity = `${planId}|${versionId}|${contextVersionId}`;
+    if (skillsFynRevisionIdentityRef.current === null) {
+      skillsFynRevisionIdentityRef.current = identity;
+      return;
+    }
+    if (skillsFynRevisionIdentityRef.current !== identity) {
+      skillsFynRevisionIdentityRef.current = identity;
+      resetFynRevisionOptionsFlow("SKILLS");
+    }
+  }, [
+    domainReviewDrawerOpen,
+    domainReviewDrawerDomain,
+    fynRevisionContexts.SKILLS?.context,
+    skillsActiveReviseIds?.trainingPlanId,
+    skillsActiveReviseIds?.versionId,
+    skillsReviseIds?.trainingPlanId,
+    skillsReviseIds?.versionId,
+  ]);
   // The pinned revision version is scoped to an OPEN Nutrition review drawer. Clear it only when the
   // drawer closes or switches to another domain (a different trainingPlanId is handled by the
   // resolver ignoring a mismatched pin). This deliberately does NOT clear on selection reset,
@@ -13935,11 +14451,6 @@ export function CoachAthletePlanningProfileView({
   useEffect(() => {
     if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "NUTRITION") {
       setNutritionActiveReviseIds(null);
-    }
-  }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
-  useEffect(() => {
-    if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "S_AND_C") {
-      setSandCActiveReviseIds(null);
     }
   }, [domainReviewDrawerOpen, domainReviewDrawerDomain]);
   // Nutrition Plan Review drawer open/close lifecycle. Keyed only on open+domain so it runs once per
@@ -14004,6 +14515,42 @@ export function CoachAthletePlanningProfileView({
     persistedSkillsPlanDetail?.plan?.id,
     persistedSkillsPlanDetail?.version?.id,
     workspace,
+  ]);
+  useEffect(() => {
+    if (!domainReviewDrawerOpen || domainReviewDrawerDomain !== "S_AND_C") {
+      setSandCActiveReviseIds(null);
+      resetFynRevisionOptionsFlow("S_AND_C");
+      sandCFynRevisionIdentityRef.current = null;
+      return;
+    }
+    const context = fynRevisionContexts.S_AND_C?.context ?? null;
+    const contextVersionId = (
+      context?.ref?.trainingPlanVersionId ??
+      context?.ref?.versionId ??
+      context?.draft?.trainingPlanVersionId ??
+      ""
+    ).trim();
+    const planId =
+      sandCActiveReviseIds?.trainingPlanId ?? sandCReviseIds?.trainingPlanId ?? "";
+    const versionId =
+      sandCActiveReviseIds?.versionId ?? sandCReviseIds?.versionId ?? "";
+    const identity = `${planId}|${versionId}|${contextVersionId}`;
+    if (sandCFynRevisionIdentityRef.current === null) {
+      sandCFynRevisionIdentityRef.current = identity;
+      return;
+    }
+    if (sandCFynRevisionIdentityRef.current !== identity) {
+      sandCFynRevisionIdentityRef.current = identity;
+      resetFynRevisionOptionsFlow("S_AND_C");
+    }
+  }, [
+    domainReviewDrawerOpen,
+    domainReviewDrawerDomain,
+    fynRevisionContexts.S_AND_C?.context,
+    sandCActiveReviseIds?.trainingPlanId,
+    sandCActiveReviseIds?.versionId,
+    sandCReviseIds?.trainingPlanId,
+    sandCReviseIds?.versionId,
   ]);
   useEffect(() => {
     delete fynRevisionOptionsRequestRef.current.S_AND_C;
@@ -17319,10 +17866,32 @@ export function CoachAthletePlanningProfileView({
     });
     if (outcome.kind === "mutation_failed") {
       const e = outcome.error;
-      // Keep the currently rendered Skills plan and selection unchanged when the revision fails.
+      // Ordinary failures keep the selection when the pinned version remains valid. Stale-version
+      // rejections clear Fyn/Rest Day state and reload the latest draft/context.
       console.error("Skills training plan revision failed", e);
-      if (isAiGenerationValidationError(e)) {
+      if (isNutritionStaleVersionRevisionError(e)) {
+        resetFynRevisionOptionsFlow("SKILLS");
+        setFynRevisionSelections((current) => ({
+          ...current,
+          SKILLS: defaultFynRevisionBatchSelection(),
+        }));
+        void runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: async () => {
+            await loadLatestSkillsDraft("SKILLS", true, true);
+          },
+          rebuildTargetOptions: async () => {
+            await loadFynRevisionContext("SKILLS");
+          },
+        });
+        setReviseSkillsError(
+          isNormalizedApiError(e) && e.message.trim() !== ""
+            ? e.message.trim()
+            : NUTRITION_STALE_VERSION_MESSAGE,
+        );
+        setReviseSkillsSuccess(null);
+      } else if (isAiGenerationValidationError(e)) {
         setReviseSkillsError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
+        setReviseSkillsSuccess(null);
       } else if (isNormalizedApiError(e)) {
         const message =
           e.message.trim() !== ""
@@ -17332,6 +17901,7 @@ export function CoachAthletePlanningProfileView({
         setReviseSkillsError(
           errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
         );
+        setReviseSkillsSuccess(null);
       } else {
         const errorRecord =
           typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
@@ -17349,8 +17919,8 @@ export function CoachAthletePlanningProfileView({
         setReviseSkillsError(
           errorCode ? `Revision failed: ${message} (${errorCode})` : `Revision failed: ${message}`,
         );
+        setReviseSkillsSuccess(null);
       }
-      setReviseSkillsSuccess(null);
     }
     setReviseSkillsLoading(false);
   }
@@ -17423,6 +17993,10 @@ export function CoachAthletePlanningProfileView({
     if (domain === "S_AND_C") {
       setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
     }
+    setFynRestDaySelections((current) => ({
+      ...current,
+      [domain]: { ...EMPTY_FYN_REST_DAY_SELECTION },
+    }));
   }
 
   function handleFynRevisionActionChange(
@@ -17454,6 +18028,11 @@ export function CoachAthletePlanningProfileView({
     if (domain === "S_AND_C") {
       setSandCAddItemValues(sandCParameterValuesForAction(target, key));
     }
+    // Rest Day cascading selections are action-specific; clear stale indices.
+    setFynRestDaySelections((current) => ({
+      ...current,
+      [domain]: { ...EMPTY_FYN_REST_DAY_SELECTION },
+    }));
   }
 
   /** Adds a non-replacement action (add/remove/update) to the revision basket as a friendly line. */
@@ -17507,6 +18086,10 @@ export function CoachAthletePlanningProfileView({
     if (domain === "S_AND_C") {
       setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
     }
+    setFynRestDaySelections((current) => ({
+      ...current,
+      [domain]: { ...EMPTY_FYN_REST_DAY_SELECTION },
+    }));
   }
 
   /** Fetches endpoint-backed replacement options for the selected target. Guards against
@@ -17521,6 +18104,10 @@ export function CoachAthletePlanningProfileView({
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
     const actionKey = fynRevisionActionKeys[domain] ?? null;
     const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
+    // Rest Day never fetches approved options; all other actions keep prior optionKind/fallback behaviour.
+    if (actionKey !== null && fynRevisionActionIsRestDay(actionKey)) {
+      return;
+    }
     const selectedTargetOption =
       targetOptions.find((option) => option.key === targetKey) ?? null;
     const request: FynRevisionOptionsRequestIdentity | null =
@@ -19837,6 +20424,15 @@ export function CoachAthletePlanningProfileView({
     const skillsDurationMinutes =
       skillsDurationMinutesDraft.trim() === "" ? null : Number(skillsDurationMinutesDraft);
     const skillsReps = skillsRepsDraft.trim() === "" ? null : skillsRepsDraft.trim();
+    const fynRestDaySelection =
+      fynRestDaySelections[reviewDomain] ?? EMPTY_FYN_REST_DAY_SELECTION;
+    const fynRestDayScheduleDays =
+      skillsSinglePatchMode || sandCSinglePatchMode
+        ? fynRestDayAuthoritativeScheduleDays({
+            context: fynRevisionContextState.context,
+            reviseIds: drawerReviseIds,
+          })
+        : null;
     const skillsRevisionSubmission = skillsSinglePatchMode
       ? buildSkillsRevisionSubmission({
           reviseIds: drawerReviseIds,
@@ -19846,6 +20442,8 @@ export function CoachAthletePlanningProfileView({
           coachRequest: fynRevisionCoachRequest,
           durationMinutes: skillsDurationMinutes,
           reps: skillsReps,
+          restDaySelection: fynRestDaySelection,
+          restDayScheduleDays: fynRestDayScheduleDays,
         })
       : null;
     // Nutrition "Change food item details" (UPDATE_ITEM) is a deterministic serving stepper. Parse
@@ -19911,6 +20509,8 @@ export function CoachAthletePlanningProfileView({
           durationMinutes: sandCAddItemValues.durationMinutes,
           sets: sandCAddItemValues.sets,
           reps: sandCAddItemValues.reps,
+          restDaySelection: fynRestDaySelection,
+          restDayScheduleDays: fynRestDayScheduleDays,
         })
       : null;
     const sandCCanApply = sandCRevisionSubmission !== null;
@@ -20260,6 +20860,22 @@ export function CoachAthletePlanningProfileView({
                       setSandCAddItemValues((current) => ({
                         ...current,
                         [field]: adjustSandCPositiveInteger(current[field], direction),
+                      }));
+                    }}
+                    scheduleDays={
+                      skillsSinglePatchMode || sandCSinglePatchMode
+                        ? fynRestDayScheduleDays
+                        : null
+                    }
+                    restDaySelection={
+                      skillsSinglePatchMode || sandCSinglePatchMode
+                        ? fynRestDaySelection
+                        : null
+                    }
+                    onRestDaySelectionChange={(selection) => {
+                      setFynRestDaySelections((current) => ({
+                        ...current,
+                        [reviewDomain]: selection,
                       }));
                     }}
                   />
@@ -23140,7 +23756,7 @@ export function CoachAthletePlanningProfileView({
     setReviseNutritionLoading(false);
   }
 
-  async function handleReviseSandCPlan(submission?: SandCRevisionSubmission | null) {
+  async function handleReviseSandCPlan(submission?: TrainingPlanRevisePayload | null) {
     const submittedReviseIds =
       submission != null
         ? { trainingPlanId: submission.trainingPlanId, versionId: submission.versionId }
@@ -23228,26 +23844,48 @@ export function CoachAthletePlanningProfileView({
     });
     if (outcome.kind === "mutation_failed") {
       const e = outcome.error;
-      // Keep the rendered plan, pinned version, and current S&C selection unchanged on failure.
+      // Ordinary failures keep selection when the pinned version remains valid. Stale-version
+      // rejections clear Fyn/Rest Day state and reload the latest draft/context.
       console.error("S&C training plan revision failed", e);
-      const errorRecord =
-        typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
-      const message =
-        (typeof errorRecord?.message === "string" && errorRecord.message.trim() !== ""
-          ? errorRecord.message.trim()
-          : null) ?? "Unable to revise plan. Please try again.";
-      const errorCode =
-        (typeof errorRecord?.errorCode === "string" && errorRecord.errorCode.trim() !== ""
-          ? errorRecord.errorCode.trim()
-          : null) ??
-        (typeof errorRecord?.code === "string" && errorRecord.code.trim() !== ""
-          ? errorRecord.code.trim()
-          : null);
-      setReviseSandCError(
-        errorCode
-          ? `Revision failed: ${message} (${errorCode})`
-          : `Revision failed: ${message}`,
-      );
+      if (isNutritionStaleVersionRevisionError(e)) {
+        resetFynRevisionOptionsFlow("S_AND_C");
+        setFynRevisionSelections((current) => ({
+          ...current,
+          S_AND_C: defaultFynRevisionBatchSelection(),
+        }));
+        void runNutritionReviewDrawerOpenRefresh({
+          loadLatestPlan: async () => {
+            await loadLatestSkillsDraft("S_AND_C", true, true);
+          },
+          rebuildTargetOptions: async () => {
+            await loadFynRevisionContext("S_AND_C");
+          },
+        });
+        setReviseSandCError(
+          isNormalizedApiError(e) && e.message.trim() !== ""
+            ? e.message.trim()
+            : NUTRITION_STALE_VERSION_MESSAGE,
+        );
+      } else {
+        const errorRecord =
+          typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
+        const message =
+          (typeof errorRecord?.message === "string" && errorRecord.message.trim() !== ""
+            ? errorRecord.message.trim()
+            : null) ?? "Unable to revise plan. Please try again.";
+        const errorCode =
+          (typeof errorRecord?.errorCode === "string" && errorRecord.errorCode.trim() !== ""
+            ? errorRecord.errorCode.trim()
+            : null) ??
+          (typeof errorRecord?.code === "string" && errorRecord.code.trim() !== ""
+            ? errorRecord.code.trim()
+            : null);
+        setReviseSandCError(
+          errorCode
+            ? `Revision failed: ${message} (${errorCode})`
+            : `Revision failed: ${message}`,
+        );
+      }
       setReviseSandCSuccess(null);
     }
     setReviseSandCLoading(false);

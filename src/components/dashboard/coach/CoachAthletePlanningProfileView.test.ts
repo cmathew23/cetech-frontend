@@ -224,6 +224,13 @@ import {
   nextSandCRevisionVersionId,
   resolveActiveSandCReviseIds,
   runSandCStructuredRevisionSequence,
+  FYN_REST_DAY_TARGET_KEY,
+  FYN_REST_DAY_ADD_TRAINING_COPY,
+  EMPTY_FYN_REST_DAY_SELECTION,
+  fynRevisionDaysByRestFlag,
+  fynRestDayAuthoritativeScheduleDays,
+  buildRestDayRevisionPatch,
+  buildRestDayRevisionSummary,
   buildNutritionRevisionPatch,
   buildNutritionRevisionSubmission,
   buildNutritionRevisionOptionItem,
@@ -3606,12 +3613,19 @@ describe("Training Plan Workspace lifecycle display", () => {
     );
 
   it("exposes a capability map that matches the documented backend contract", () => {
-    expect(FYN_REVISION_CAPABILITIES.SKILLS.levels).toEqual(["SESSION", "ITEM"]);
+    expect(FYN_REVISION_CAPABILITIES.SKILLS).toEqual({
+      levels: ["DAY", "SESSION", "ITEM"],
+      actionsByLevel: {
+        DAY: ["ADD_TRAINING_TO_REST_DAY", "MAKE_DAY_REST_DAY", "MOVE_REST_DAY"],
+        SESSION: ["ADD_ITEM"],
+        ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
+      },
+    });
     expect(FYN_REVISION_CAPABILITIES.NUTRITION.levels).toEqual(["SESSION", "ITEM"]);
     expect(FYN_REVISION_CAPABILITIES.S_AND_C).toEqual({
-      levels: ["SESSION", "ITEM"],
+      levels: ["DAY", "SESSION", "ITEM"],
       actionsByLevel: {
-        DAY: [],
+        DAY: ["ADD_TRAINING_TO_REST_DAY", "MAKE_DAY_REST_DAY", "MOVE_REST_DAY"],
         SESSION: ["ADD_ITEM"],
         ITEM: ["REMOVE_ITEM", "UPDATE_ITEM"],
       },
@@ -3628,7 +3642,13 @@ describe("Training Plan Workspace lifecycle display", () => {
     const sessionTarget = targets.find((option) => option.level === "SESSION");
     const itemTarget = targets.find((option) => option.level === "ITEM");
 
-    expect(dayTarget).toBeUndefined();
+    expect(dayTarget?.key).toBe("rest-day");
+    expect(dayTarget?.label).toBe("Rest Day");
+    expect(actionKeysFor("SKILLS", dayTarget)).toEqual([
+      "ADD_TRAINING_TO_REST_DAY",
+      "MAKE_DAY_REST_DAY",
+      "MOVE_REST_DAY",
+    ]);
     expect(actionKeysFor("SKILLS", sessionTarget)).toEqual(["ADD_ITEM"]);
     expect(actionKeysFor("SKILLS", itemTarget)).toEqual(["REMOVE_ITEM", "UPDATE_ITEM"]);
     expect(fynRevisionActionLabel("SKILLS", "ADD_ITEM")).toBe("Add drill");
@@ -3733,7 +3753,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(mealHtml).not.toContain("Remove food item");
   });
 
-  it("offers exactly S&C add/remove/update item actions and no day or unsupported actions", () => {
+  it("offers S&C Rest Day category plus add/remove/update item actions and no unsupported actions", () => {
     const context = makeRevisionContext({ generationDomain: "S_AND_C" });
     const sandcSchedule = [
       { dayIndex: 1, sessions: [] },
@@ -3756,10 +3776,16 @@ describe("Training Plan Workspace lifecycle display", () => {
       scheduleDays: sandcSchedule,
     });
 
+    const restDayTarget = targets.find((option) => option.key === "rest-day");
     const sessionTarget = targets.find((option) => option.level === "SESSION");
     const itemTarget = targets.find((option) => option.level === "ITEM");
 
-    expect(targets.some((option) => option.level === "DAY")).toBe(false);
+    expect(restDayTarget?.level).toBe("DAY");
+    expect(actionKeysFor("S_AND_C", restDayTarget)).toEqual([
+      "ADD_TRAINING_TO_REST_DAY",
+      "MAKE_DAY_REST_DAY",
+      "MOVE_REST_DAY",
+    ]);
     expect(actionKeysFor("S_AND_C", sessionTarget)).toEqual(["ADD_ITEM"]);
     expect(actionKeysFor("S_AND_C", itemTarget)).toEqual(["REMOVE_ITEM", "UPDATE_ITEM"]);
 
@@ -3769,7 +3795,16 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(allKeys).not.toContain("UPDATE_SESSION");
     expect(allKeys).not.toContain("UPDATE_SESSION_ITEMS");
     expect(allKeys).not.toContain("REPLACE_ITEM");
-    expect(new Set(allKeys)).toEqual(new Set(["ADD_ITEM", "REMOVE_ITEM", "UPDATE_ITEM"]));
+    expect(new Set(allKeys)).toEqual(
+      new Set([
+        "ADD_TRAINING_TO_REST_DAY",
+        "MAKE_DAY_REST_DAY",
+        "MOVE_REST_DAY",
+        "ADD_ITEM",
+        "REMOVE_ITEM",
+        "UPDATE_ITEM",
+      ]),
+    );
     expect(fynRevisionActionLabel("S_AND_C", "ADD_ITEM")).toBe("Add exercise");
     expect(fynRevisionActionLabel("S_AND_C", "REMOVE_ITEM")).toBe("Remove exercise");
     expect(fynRevisionActionLabel("S_AND_C", "UPDATE_ITEM")).toBe("Adjust exercise");
@@ -4127,7 +4162,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       );
 
     expect(renderPanel(sessionTarget.key, "ADD_ITEM")).toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
-    expect(skills.some((target) => target.level === "DAY")).toBe(false);
+    expect(skills.some((target) => target.key === FYN_REST_DAY_TARGET_KEY)).toBe(true);
     expect(skills.some((target) => target.level === "ITEM")).toBe(true);
   });
 
@@ -5960,6 +5995,585 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(targetKey).toBe("item|2|1|1");
       expect(values).toEqual({ durationMinutes: 25, sets: 4, reps: 9 });
       expect(reset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Rest Day deterministic single-patch flow", () => {
+    const restDaySchedule = [
+      {
+        dayIndex: 1,
+        isRestDay: true,
+        sessions: [],
+      },
+      {
+        dayIndex: 2,
+        isRestDay: false,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Short game",
+            items: [{ order: 0, label: "Pace ladder", skillCode: "PACE" }],
+          },
+          {
+            sessionIndex: 2,
+            title: "Putting",
+            items: [{ order: 0, label: "Lag putting", skillCode: "LAG" }],
+          },
+        ],
+      },
+      {
+        dayIndex: 3,
+        isRestDay: null,
+        sessions: [{ sessionIndex: 1, title: "Unknown", items: [] }],
+      },
+      {
+        dayIndex: 4,
+        isRestDay: true,
+        sessions: [],
+      },
+      {
+        dayIndex: 5,
+        isRestDay: false,
+        sessions: [
+          {
+            sessionIndex: 1,
+            title: "Strength",
+            items: [{ order: 0, label: "Squat", exerciseCatalogItemId: "ex-1" }],
+          },
+        ],
+      },
+    ];
+    const reviseIds = { trainingPlanId: "plan-rest-1", versionId: "ver-rest-1" };
+    const restDayTarget = () =>
+      fynRevisionLeveledTargetOptions(makeRevisionContext({ generationDomain: "SKILLS" }), {
+        domain: "SKILLS",
+        scheduleDays: restDaySchedule,
+      }).find((target) => target.key === FYN_REST_DAY_TARGET_KEY)!;
+
+    it("shows the Rest Day category and all three actions for Skills and S&C", () => {
+      for (const domain of ["SKILLS", "S_AND_C"] as const) {
+        const targets = fynRevisionLeveledTargetOptions(
+          makeRevisionContext({ generationDomain: domain }),
+          { domain, scheduleDays: restDaySchedule },
+        );
+        const target = targets.find((option) => option.key === FYN_REST_DAY_TARGET_KEY);
+        expect(target?.label).toBe("Rest Day");
+        expect(fynRevisionAvailableActions(domain, target ?? null).map((action) => action.key)).toEqual([
+          "ADD_TRAINING_TO_REST_DAY",
+          "MAKE_DAY_REST_DAY",
+          "MOVE_REST_DAY",
+        ]);
+        const html = renderToStaticMarkup(
+          createElement(
+            FynRevisionContextPanel,
+            fynPanelProps({
+              domain,
+              targetOptions: targets,
+              selectedTargetKey: target?.key ?? null,
+              singlePatchMode: true,
+            }),
+          ),
+        );
+        expect(html).toContain("Add training to Rest Day");
+        expect(html).toContain("Make day a Rest Day");
+        expect(html).toContain("Move Rest Day");
+        expect(html).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      }
+    });
+
+    it("filters Rest Day and training-day selectors with authoritative isRestDay", () => {
+      expect(fynRevisionDaysByRestFlag(restDaySchedule, true).map((day) => day.dayIndex)).toEqual([
+        1, 4,
+      ]);
+      expect(fynRevisionDaysByRestFlag(restDaySchedule, false).map((day) => day.dayIndex)).toEqual([
+        2, 5,
+      ]);
+      expect(
+        fynRevisionDaysByRestFlag(restDaySchedule.slice(0, 2), true).map(
+          (day) => day.dayIndex,
+        ),
+      ).toEqual([1]);
+    });
+
+    it("builds canonical Rest Day patches and keeps Apply disabled until selections exist", () => {
+      expect(
+        buildRestDayRevisionPatch({
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDayIndex: null,
+          trainingDayIndex: 2,
+          sessionIndex: 1,
+          dayIndex: null,
+        }),
+      ).toBeNull();
+      expect(
+        buildRestDayRevisionPatch({
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDayIndex: 1,
+          trainingDayIndex: 2,
+          sessionIndex: 1,
+          dayIndex: null,
+        }),
+      ).toEqual({
+        action: "ADD_TRAINING_TO_REST_DAY",
+        restDayIndex: 1,
+        trainingDayIndex: 2,
+        sessionIndex: 1,
+      });
+      expect(
+        buildRestDayRevisionPatch({
+          actionKey: "MAKE_DAY_REST_DAY",
+          restDayIndex: null,
+          trainingDayIndex: null,
+          sessionIndex: null,
+          dayIndex: 5,
+        }),
+      ).toEqual({
+        action: "MAKE_DAY_REST_DAY",
+        dayIndex: 5,
+      });
+      expect(
+        buildRestDayRevisionPatch({
+          actionKey: "MOVE_REST_DAY",
+          restDayIndex: 1,
+          trainingDayIndex: 1,
+          sessionIndex: null,
+          dayIndex: null,
+        }),
+      ).toBeNull();
+      expect(
+        buildRestDayRevisionPatch({
+          actionKey: "MOVE_REST_DAY",
+          restDayIndex: 1,
+          trainingDayIndex: 5,
+          sessionIndex: null,
+          dayIndex: null,
+        }),
+      ).toEqual({
+        action: "MOVE_REST_DAY",
+        restDayIndex: 1,
+        trainingDayIndex: 5,
+      });
+
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds,
+          target: restDayTarget(),
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDaySelection: {
+            restDayIndex: 1,
+            trainingDayIndex: 2,
+            sessionIndex: 1,
+            dayIndex: null,
+          },
+          restDayScheduleDays: null,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds,
+          target: restDayTarget(),
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDaySelection: EMPTY_FYN_REST_DAY_SELECTION,
+          restDayScheduleDays: restDaySchedule,
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionSubmission({
+          reviseIds,
+          target: restDayTarget(),
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDaySelection: {
+            restDayIndex: 1,
+            trainingDayIndex: 2,
+            sessionIndex: 1,
+            dayIndex: null,
+          },
+          restDayScheduleDays: restDaySchedule,
+        }),
+      ).toEqual({
+        trainingPlanId: "plan-rest-1",
+        versionId: "ver-rest-1",
+        coachFeedback: buildRestDayRevisionSummary({
+          actionKey: "ADD_TRAINING_TO_REST_DAY",
+          restDayIndex: 1,
+          trainingDayIndex: 2,
+          sessionIndex: 1,
+          dayIndex: null,
+        }),
+        revisionPatch: {
+          action: "ADD_TRAINING_TO_REST_DAY",
+          restDayIndex: 1,
+          trainingDayIndex: 2,
+          sessionIndex: 1,
+        },
+      });
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds,
+          target: restDayTarget(),
+          actionKey: "MAKE_DAY_REST_DAY",
+          restDaySelection: {
+            restDayIndex: null,
+            trainingDayIndex: null,
+            sessionIndex: null,
+            dayIndex: 2,
+          },
+          restDayScheduleDays: restDaySchedule,
+        })?.revisionPatch,
+      ).toEqual({
+        action: "MAKE_DAY_REST_DAY",
+        dayIndex: 2,
+      });
+      expect(
+        buildSandCRevisionSubmission({
+          reviseIds,
+          target: restDayTarget(),
+          actionKey: "MOVE_REST_DAY",
+          restDaySelection: {
+            restDayIndex: 4,
+            trainingDayIndex: 5,
+            sessionIndex: null,
+            dayIndex: null,
+          },
+          restDayScheduleDays: restDaySchedule,
+        })?.revisionPatch,
+      ).toEqual({
+        action: "MOVE_REST_DAY",
+        restDayIndex: 4,
+        trainingDayIndex: 5,
+      });
+    });
+
+    it("uses only revision-context draft days that match the pinned revise ids", () => {
+      const drawerOnlySchedule = [
+        { dayIndex: 9, isRestDay: true, sessions: [] },
+        {
+          dayIndex: 10,
+          isRestDay: false,
+          sessions: [{ sessionIndex: 1, title: "Drawer-only session", items: [] }],
+        },
+      ];
+      const context = makeRevisionContext({
+        generationDomain: "SKILLS",
+        draft: {
+          trainingPlanId: "plan-rest-1",
+          trainingPlanVersionId: "ver-rest-1",
+          days: restDaySchedule,
+        },
+        ref: {
+          trainingPlanId: "stale-ref-plan",
+          trainingPlanVersionId: "stale-ref-version",
+          versionId: "stale-ref-version",
+        },
+      });
+      expect(
+        fynRestDayAuthoritativeScheduleDays({
+          context,
+          reviseIds,
+        }),
+      ).toBe(restDaySchedule);
+      expect(
+        fynRestDayAuthoritativeScheduleDays({
+          context: makeRevisionContext({
+            draft: {
+              trainingPlanId: "plan-rest-1",
+              trainingPlanVersionId: "ver-other",
+              days: restDaySchedule,
+            },
+            ref: {
+              trainingPlanId: "plan-rest-1",
+              trainingPlanVersionId: "ver-other",
+            },
+          }),
+          reviseIds,
+        }),
+      ).toBeNull();
+      expect(
+        fynRestDayAuthoritativeScheduleDays({
+          context: makeRevisionContext({ draft: null, ref: null }),
+          reviseIds,
+        }),
+      ).toBeNull();
+
+      const contextDays = fynRestDayAuthoritativeScheduleDays({ context, reviseIds });
+      const targets = fynRevisionLeveledTargetOptions(context, {
+        domain: "SKILLS",
+        scheduleDays: drawerOnlySchedule,
+      });
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            targetOptions: targets,
+            selectedTargetKey: FYN_REST_DAY_TARGET_KEY,
+            selectedActionKey: "ADD_TRAINING_TO_REST_DAY",
+            singlePatchMode: true,
+            scheduleDays: contextDays,
+            restDaySelection: {
+              restDayIndex: 1,
+              trainingDayIndex: 2,
+              sessionIndex: null,
+              dayIndex: null,
+            },
+          }),
+        ),
+      );
+      // Cascading Rest Day selectors use revision-context days only (not the drawer schedule).
+      const restSection = html.split('data-testid="fyn-rest-day-add-training"')[1] ?? "";
+      expect(restSection).toContain(">Day 1<");
+      expect(restSection).toContain(">Day 2<");
+      expect(restSection).toContain("Short game");
+      expect(restSection).not.toContain("Drawer-only session");
+      expect(restSection).not.toContain(">Day 9<");
+      expect(restSection).not.toContain(">Day 10<");
+    });
+
+    it("aligns same-plan Skills and S&C pins to the authoritative context draft version", () => {
+      const drawerIds = { trainingPlanId: "plan-rest-1", versionId: "ver-stale" };
+      const contextIds = {
+        trainingPlanId: "plan-rest-1",
+        versionId: "ver-rest-1",
+      };
+      const context = makeRevisionContext({
+        draft: {
+          trainingPlanId: contextIds.trainingPlanId,
+          trainingPlanVersionId: contextIds.versionId,
+          days: restDaySchedule,
+        },
+      });
+
+      for (const alignedIds of [
+        resolveActiveSkillsReviseIds(drawerIds, contextIds),
+        resolveActiveSandCReviseIds(drawerIds, contextIds),
+      ]) {
+        expect(alignedIds).toEqual(contextIds);
+        expect(
+          fynRestDayAuthoritativeScheduleDays({
+            context,
+            reviseIds: alignedIds,
+          }),
+        ).toBe(restDaySchedule);
+      }
+    });
+
+    it("never aligns a revision-context pin from another plan", () => {
+      const drawerIds = { trainingPlanId: "plan-rest-1", versionId: "ver-drawer" };
+      const otherPlanContextIds = {
+        trainingPlanId: "plan-rest-2",
+        versionId: "ver-context",
+      };
+
+      expect(resolveActiveSkillsReviseIds(drawerIds, otherPlanContextIds)).toBe(drawerIds);
+      expect(resolveActiveSandCReviseIds(drawerIds, otherPlanContextIds)).toBe(drawerIds);
+    });
+
+    it("renders cascading selectors and copy semantics without approved options", () => {
+      const targets = fynRevisionLeveledTargetOptions(
+        makeRevisionContext({ generationDomain: "SKILLS" }),
+        { domain: "SKILLS", scheduleDays: restDaySchedule },
+      );
+      const addHtml = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            targetOptions: targets,
+            selectedTargetKey: FYN_REST_DAY_TARGET_KEY,
+            selectedActionKey: "ADD_TRAINING_TO_REST_DAY",
+            singlePatchMode: true,
+            scheduleDays: restDaySchedule,
+            restDaySelection: {
+              restDayIndex: 1,
+              trainingDayIndex: 2,
+              sessionIndex: null,
+              dayIndex: null,
+            },
+          }),
+        ),
+      );
+      expect(addHtml).toContain(FYN_REST_DAY_ADD_TRAINING_COPY);
+      expect(addHtml).toContain("Rest Day to change");
+      expect(addHtml).toContain("Training day to copy from");
+      expect(addHtml).toContain("Session to copy");
+      expect(addHtml).toContain("data-testid=\"fyn-rest-day-add-training\"");
+      expect(addHtml).toContain(">Day 1<");
+      expect(addHtml).toContain(">Day 4<");
+      expect(addHtml).toContain(">Day 2<");
+      expect(addHtml).not.toContain(">Day 3<");
+      expect(addHtml).toContain("Short game");
+      expect(addHtml).toContain("Putting");
+      const addRestSection =
+        addHtml.split('data-testid="fyn-rest-day-add-training"')[1] ?? "";
+      expect(addRestSection).not.toContain("Strength");
+      expect(addHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
+      expect(fynRevisionActionOptionKind("ADD_TRAINING_TO_REST_DAY")).toBeNull();
+      expect(fynRevisionActionOptionKind("MAKE_DAY_REST_DAY")).toBeNull();
+      expect(fynRevisionActionOptionKind("MOVE_REST_DAY")).toBeNull();
+
+      const moveHtml = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            targetOptions: targets,
+            selectedTargetKey: FYN_REST_DAY_TARGET_KEY,
+            selectedActionKey: "MOVE_REST_DAY",
+            singlePatchMode: true,
+            scheduleDays: restDaySchedule,
+            restDaySelection: {
+              restDayIndex: 1,
+              trainingDayIndex: null,
+              sessionIndex: null,
+              dayIndex: null,
+            },
+          }),
+        ),
+      );
+      expect(moveHtml).toContain("data-testid=\"fyn-rest-day-move\"");
+      expect(moveHtml).toContain("Rest Day to change");
+      expect(moveHtml).toContain("Training day to swap with");
+      expect(moveHtml).toContain(">Day 5<");
+      expect(moveHtml).not.toContain(">Day 3<");
+
+      const makeHtml = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "SKILLS",
+            targetOptions: targets,
+            selectedTargetKey: FYN_REST_DAY_TARGET_KEY,
+            selectedActionKey: "MAKE_DAY_REST_DAY",
+            singlePatchMode: true,
+            scheduleDays: restDaySchedule,
+          }),
+        ),
+      );
+      expect(makeHtml).toContain("Training day to make a Rest Day");
+    });
+
+    it("clears Rest Day state on drawer close, domain switch, version/context change, and stale reload", () => {
+      // Mirrors the Skills/S&C drawer identity effects: close/domain switch always resets;
+      // plan/version/context identity changes reset after the first stored identity.
+      const shouldClearOnDrawerOrDomain = (
+        drawerOpen: boolean,
+        drawerDomain: "SKILLS" | "S_AND_C" | "NUTRITION" | null,
+        domain: "SKILLS" | "S_AND_C",
+      ) => !drawerOpen || drawerDomain !== domain;
+
+      expect(shouldClearOnDrawerOrDomain(false, "SKILLS", "SKILLS")).toBe(true);
+      expect(shouldClearOnDrawerOrDomain(true, "S_AND_C", "SKILLS")).toBe(true);
+      expect(shouldClearOnDrawerOrDomain(true, "SKILLS", "S_AND_C")).toBe(true);
+      expect(shouldClearOnDrawerOrDomain(true, "SKILLS", "SKILLS")).toBe(false);
+
+      let previousIdentity: string | null = null;
+      const onIdentity = (next: string): boolean => {
+        if (previousIdentity === null) {
+          previousIdentity = next;
+          return false;
+        }
+        if (previousIdentity !== next) {
+          previousIdentity = next;
+          return true;
+        }
+        return false;
+      };
+      expect(onIdentity("plan-1|ver-1|")).toBe(false);
+      expect(onIdentity("plan-1|ver-1|")).toBe(false);
+      expect(onIdentity("plan-1|ver-2|ctx-2")).toBe(true);
+      expect(onIdentity("plan-1|ver-2|ctx-2")).toBe(false);
+
+      // resetFynRevisionOptionsFlow clears the Rest Day bag to empty.
+      let restDaySelection = {
+        restDayIndex: 1 as number | null,
+        trainingDayIndex: 2 as number | null,
+        sessionIndex: 1 as number | null,
+        dayIndex: 5 as number | null,
+      };
+      const resetFynRevisionOptionsFlow = () => {
+        restDaySelection = { ...EMPTY_FYN_REST_DAY_SELECTION };
+      };
+      resetFynRevisionOptionsFlow(); // drawer close / domain switch
+      expect(restDaySelection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
+      restDaySelection = {
+        restDayIndex: 1,
+        trainingDayIndex: 2,
+        sessionIndex: 1,
+        dayIndex: null,
+      };
+      resetFynRevisionOptionsFlow(); // plan/version/context identity change
+      expect(restDaySelection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
+      restDaySelection = {
+        restDayIndex: 4,
+        trainingDayIndex: 5,
+        sessionIndex: null,
+        dayIndex: null,
+      };
+      // Stale-version reload path also resets before/with context refresh.
+      expect(isNutritionStaleVersionRevisionError({
+        message: "This plan has changed since it was opened.",
+        status: 409,
+        code: "STALE_VERSION",
+      })).toBe(true);
+      resetFynRevisionOptionsFlow();
+      expect(restDaySelection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
+    });
+
+    it("skips approved-options loading only for Rest Day actions", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+      expect(source).toContain(
+        "if (actionKey !== null && fynRevisionActionIsRestDay(actionKey)) {\n      return;\n    }",
+      );
+      expect(source).toContain('optionKind: optionKind ?? "REPLACEMENT"');
+      expect(source).not.toContain(
+        "if (optionKind === null || (actionKey !== null && fynRevisionActionIsRestDay(actionKey)))",
+      );
+      expect(
+        fynRevisionAvailableActions("SKILLS", restDayTarget()).every(
+          (action) => action.requiresApprovedOptions === false,
+        ),
+      ).toBe(true);
+    });
+
+    it("clears Rest Day selections when the action changes and resets after successful refresh", async () => {
+      let selection = {
+        restDayIndex: 1 as number | null,
+        trainingDayIndex: 2 as number | null,
+        sessionIndex: 1 as number | null,
+        dayIndex: null as number | null,
+      };
+      const clearSelection = () => {
+        selection = { ...EMPTY_FYN_REST_DAY_SELECTION };
+      };
+      // Action change clears stale cascading indices (mirrors handleFynRevisionActionChange).
+      clearSelection();
+      expect(selection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
+
+      selection = {
+        restDayIndex: 1,
+        trainingDayIndex: 2,
+        sessionIndex: 1,
+        dayIndex: null,
+      };
+      await runSandCStructuredRevisionSequence({
+        submit: async () => ({
+          planId: "plan-rest-1",
+          versionId: "ver-rest-2",
+          versionNumber: null,
+          generationDomain: "S_AND_C",
+          detail: null,
+          raw: null,
+        }),
+        pinReturnedVersion: () => {},
+        reconcilePlan: async () => {},
+        reloadLatestPlan: async () => true,
+        reloadRevisionContext: async () => true,
+        resetTemporaryState: clearSelection,
+      });
+      expect(selection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
     });
   });
 
@@ -8487,9 +9101,12 @@ describe("Training Plan Workspace lifecycle display", () => {
     const addItem = fynRevisionAvailableActions("SKILLS", sessionTarget).find(
       (action) => action.key === "ADD_ITEM",
     );
-    // ADD_ITEM goes through the approved-options flow; no other Skills action is exposed.
+    // ADD_ITEM goes through the approved-options flow; Rest Day is the only DAY category.
     expect(addItem?.requiresApprovedOptions).toBe(true);
-    expect(dayTarget).toBeNull();
+    expect(dayTarget?.key).toBe(FYN_REST_DAY_TARGET_KEY);
+    expect(fynRevisionActionOptionKind("ADD_TRAINING_TO_REST_DAY")).toBeNull();
+    expect(fynRevisionActionOptionKind("MAKE_DAY_REST_DAY")).toBeNull();
+    expect(fynRevisionActionOptionKind("MOVE_REST_DAY")).toBeNull();
   });
 
   it("collapses any target to a clean SESSION target for ADD_ITEM (no null item fields)", () => {
@@ -14616,6 +15233,25 @@ describe("resolveTrainingPlanWorkflowMode", () => {
     }
   });
 
+  it("keeps Workflow 3 Skills shell loading while Planning Context is unresolved", () => {
+    expect(
+      resolveTrainingPlanWorkflowMode({
+        isCoachSetupLoaded: true,
+        coachUserId: "coach-1",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        academyCoachRole: "COACH",
+        hasHeadCoachConfigured: false,
+        trainingPlanReleaseMode: "DIRECT_RELEASE",
+        coachAssignedGenerationDomains: ["SKILLS"],
+        isPlanningContextResolved: false,
+        areHeadCoachDomainPlansResolved: true,
+        planningContextLocked: false,
+        hasSubmittedDomainPlans: false,
+      }),
+    ).toBe("loading");
+  });
+
   it("uses the Skills-owned planning-context tab shell in Direct Release without a Head Coach", () => {
     expect(
       resolveTrainingPlanWorkflowMode({
@@ -14891,6 +15527,24 @@ describe("resolveTrainingPlanPageBootstrapModel", () => {
     ).toMatchObject({ ready: false, waitingFor: "assignment", shell: "loading" });
   });
 
+  it("does not mark a shell ready while workflow mode is still loading", () => {
+    expect(
+      resolveTrainingPlanPageBootstrapModel({
+        identityReady: true,
+        assignmentReady: true,
+        workflowMode: "loading",
+        planningContextRequired: true,
+        planningContextLoadState: "idle",
+        submittedDomainPlansRequired: false,
+        submittedDomainPlansLoadState: "idle",
+      }),
+    ).toMatchObject({
+      ready: false,
+      waitingFor: "workflow_mode",
+      shell: "loading",
+    });
+  });
+
   it("waits for planning context before rendering a required shell", () => {
     expect(
       resolveTrainingPlanPageBootstrapModel({
@@ -14939,6 +15593,26 @@ describe("resolveTrainingPlanPageBootstrapModel", () => {
       waitingFor: null,
       shell: "specialist_domain",
     });
+  });
+
+  it("does not invent specialist_domain from assigned domains while workflow mode is loading", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const fallbackStart = source.indexOf("const fallbackWorkflowShell = useMemo");
+    const fallbackEnd = source.indexOf(
+      "const trainingPlanShellModel = useMemo",
+      fallbackStart,
+    );
+    expect(fallbackStart).toBeGreaterThan(-1);
+    expect(fallbackEnd).toBeGreaterThan(fallbackStart);
+    const fallbackBlock = source.slice(fallbackStart, fallbackEnd);
+    expect(fallbackBlock).toContain("isHeadCoachPlanningContextOwner");
+    expect(fallbackBlock).toContain("return null;");
+    expect(fallbackBlock).not.toContain("allowedGenerationDomains.length");
+    expect(fallbackBlock).not.toContain('return "specialist_domain"');
+    expect(fallbackBlock).not.toContain('return "skills_coach_planning"');
   });
 });
 

@@ -452,6 +452,8 @@ export type CoachAthleteGeneratedDraftDay = {
   date: string | null;
   dayFocus: string | null;
   notes: string | null;
+  /** Authoritative rest-day flag from the backend; missing/non-boolean values parse as null. */
+  isRestDay: boolean | null;
   estimatedDailyCalories: number | null;
   targetCalorieMin: number | null;
   targetCalorieMax: number | null;
@@ -891,6 +893,24 @@ export type SandCRevisionPatch =
   | SandCRemoveItemRevisionPatch
   | SandCExistingItemRevisionPatch;
 
+/** Deterministic Rest Day revision patch for Skills and S&C (canonical backend `action` contract). */
+export type RestDayRevisionPatch =
+  | {
+      action: "ADD_TRAINING_TO_REST_DAY";
+      restDayIndex: number;
+      trainingDayIndex: number;
+      sessionIndex: number;
+    }
+  | {
+      action: "MAKE_DAY_REST_DAY";
+      dayIndex: number;
+    }
+  | {
+      action: "MOVE_REST_DAY";
+      restDayIndex: number;
+      trainingDayIndex: number;
+    };
+
 export type TrainingPlanRevisePayload = {
   trainingPlanId: string;
   versionId: string;
@@ -899,7 +919,7 @@ export type TrainingPlanRevisePayload = {
    * Optional structured patch. When present (Nutrition, Skills, or S&C deterministic
    * single-patch flow) it is the executable source of truth.
    */
-  revisionPatch?: TrainingPlanRevisionPatch | SandCRevisionPatch | null;
+  revisionPatch?: TrainingPlanRevisionPatch | SandCRevisionPatch | RestDayRevisionPatch | null;
 };
 
 export type SandCRevisionSubmission = Omit<
@@ -1085,6 +1105,7 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
     date: readStringKey([record], ["date", "dayDate"]),
     dayFocus: readStringKey([record], ["dayFocus"]),
     notes: readStringKey([record], ["notes"]),
+    isRestDay: readBooleanKey([record], ["isRestDay"]),
     estimatedDailyCalories: readNumberKey([record], ["estimatedDailyCalories"]),
     targetCalorieMin: readNumberKey([record], ["targetCalorieMin"]),
     targetCalorieMax: readNumberKey([record], ["targetCalorieMax"]),
@@ -1109,6 +1130,7 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
     day.date ||
     day.dayFocus ||
     day.notes ||
+    day.isRestDay !== null ||
     day.estimatedDailyCalories !== null ||
     day.targetCalorieMin !== null ||
     day.targetCalorieMax !== null ||

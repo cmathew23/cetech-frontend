@@ -1625,6 +1625,7 @@ describe("training plan generation timeouts and helpers", () => {
           days: [
             {
               dayIndex: 1,
+              isRestDay: false,
               sessions: [
                 {
                   sessionIndex: 1,
@@ -1632,6 +1633,11 @@ describe("training plan generation timeouts and helpers", () => {
                   items: [{ label: "Target serve drill" }],
                 },
               ],
+            },
+            {
+              dayIndex: 2,
+              isRestDay: true,
+              sessions: [],
             },
           ],
         },
@@ -1672,6 +1678,19 @@ describe("training plan generation timeouts and helpers", () => {
     );
     expect(result.generationDomain).toBe("SKILLS");
     expect(result.draft?.trainingPlanId).toBe("plan-1");
+    expect(result.draft?.trainingPlanVersionId).toBe("version-1");
+    expect(result.draft?.days).toMatchObject([
+      {
+        dayIndex: 1,
+        isRestDay: false,
+        sessions: [{ sessionIndex: 1, title: "Serve practice" }],
+      },
+      {
+        dayIndex: 2,
+        isRestDay: true,
+        sessions: [],
+      },
+    ]);
     expect(result.ref?.versionId).toBe("version-1");
     expect(result.allowedChangeTypes).toEqual(["CHANGE_DRILL"]);
     expect(result.changeOptions[0]?.label).toBe("Change drill");

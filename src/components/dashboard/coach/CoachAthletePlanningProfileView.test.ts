@@ -208,9 +208,6 @@ import {
   FYN_REVISION_INPUT_PLACEHOLDER,
   FYN_REVISION_NO_OPTIONS_MESSAGE,
   FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE,
-  NUTRITION_MEAL_SLOT_MIN_ITEMS,
-  NUTRITION_MEAL_MINIMUMS_GUIDANCE,
-  NUTRITION_REMOVE_ITEM_MINIMUM_WARNING,
   NUTRITION_SINGLE_PATCH_GUIDANCE,
   SKILLS_SINGLE_PATCH_GUIDANCE,
   buildSkillsRevisionPatch,
@@ -242,10 +239,6 @@ import {
   nutritionRevisionCanApply,
   nextNutritionRevisionVersionId,
   resolveActiveNutritionReviseIds,
-  nutritionMealSlotKeyFromLabel,
-  nutritionMealSlotMinItems,
-  nutritionRemoveItemMinimumNotice,
-  nutritionRemoveItemMinimumMessage,
   nutritionOptionCatalogId,
   nutritionRevisionOptionMissingCatalogReference,
   NUTRITION_OPTION_MISSING_CATALOG_MESSAGE,
@@ -3684,7 +3677,6 @@ describe("Training Plan Workspace lifecycle display", () => {
 
   it("requires a Nutrition item target for update/replace/remove while meals offer add only", () => {
     const context = makeRevisionContext({ generationDomain: "NUTRITION" });
-    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible.
     const nutritionSchedule = [
       {
         dayIndex: 1,
@@ -4288,8 +4280,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(nutritionHtml).not.toContain("Edit several drills in this session");
   });
 
-  describe("Nutrition meal-minimum guidance", () => {
-    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
+  describe("Nutrition revision copy", () => {
     const nutritionSchedule = [
       {
         dayIndex: 1,
@@ -4300,73 +4291,13 @@ describe("Training Plan Workspace lifecycle display", () => {
             items: [
               { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
               { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
-              { order: 2, label: "Eggs", nutritionCatalogItemId: "nut-3" },
-              { order: 3, label: "Toast", nutritionCatalogItemId: "nut-4" },
             ],
           },
         ],
       },
     ];
 
-    const renderForDomain = (
-      domain: "SKILLS" | "NUTRITION" | "S_AND_C",
-      scheduleDays: unknown[],
-      extra: Record<string, unknown> = {},
-    ): string => {
-      const context = makeRevisionContext({ generationDomain: domain });
-      const targets = fynRevisionLeveledTargetOptions(context, { domain, scheduleDays });
-      return renderToStaticMarkup(
-        createElement(
-          FynRevisionContextPanel,
-          fynPanelProps({ domain, context, targetOptions: targets, ...extra }),
-        ),
-      );
-    };
-
-    it("mirrors the backend-confirmed meal-slot minimums as a frontend constant", () => {
-      expect(NUTRITION_MEAL_SLOT_MIN_ITEMS).toEqual({
-        BREAKFAST: 3,
-        MID_MORNING_SNACK: 2,
-        LUNCH: 4,
-        MID_AFTERNOON_SNACK: 2,
-        DINNER: 4,
-      });
-      // Only the five valid meal slots are represented.
-      expect(Object.keys(NUTRITION_MEAL_SLOT_MIN_ITEMS)).toEqual([
-        "BREAKFAST",
-        "MID_MORNING_SNACK",
-        "LUNCH",
-        "MID_AFTERNOON_SNACK",
-        "DINNER",
-      ]);
-    });
-
-    it("shows the meal-minimum guidance with exact values for Nutrition", () => {
-      const html = renderForDomain("NUTRITION", nutritionSchedule);
-      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
-      expect(html).toContain(
-        "Meal minimums: Breakfast requires at least 3 items, mid-morning snack at least 2, " +
-          "lunch at least 4, mid-afternoon snack at least 2, and dinner at least 4. " +
-          "If removing an item would drop a meal below its minimum, replace it instead or add " +
-          "another item to the same meal.",
-      );
-    });
-
-    it("lists only the five valid meal slots and no invalid ones", () => {
-      const html = renderForDomain("NUTRITION", nutritionSchedule);
-      expect(html).toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
-      const guidance = NUTRITION_MEAL_MINIMUMS_GUIDANCE.toLowerCase();
-      for (const slot of ["breakfast", "mid-morning snack", "lunch", "mid-afternoon snack", "dinner"]) {
-        expect(guidance).toContain(slot);
-      }
-      for (const invalid of ["hydration", "recovery", "pre-training", "post-training", "anytime"]) {
-        expect(guidance).not.toContain(invalid);
-      }
-      // A bare "snack" slot (without the mid-morning/afternoon qualifier) is never introduced.
-      expect(guidance).not.toMatch(/(?<!mid-morning |mid-afternoon )snack\b/);
-    });
-
-    it("shows the Remove-carefully warning only when Remove food item is selected for Nutrition", () => {
+    it("does not show obsolete generation-minimum guidance or removal warnings", () => {
       const context = makeRevisionContext({ generationDomain: "NUTRITION" });
       const targets = fynRevisionLeveledTargetOptions(context, {
         domain: "NUTRITION",
@@ -4386,70 +4317,9 @@ describe("Training Plan Workspace lifecycle display", () => {
           }),
         ),
       );
-      expect(withRemove).toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
-
-      const withReplace = renderToStaticMarkup(
-        createElement(
-          FynRevisionContextPanel,
-          fynPanelProps({
-            domain: "NUTRITION",
-            context,
-            targetOptions: targets,
-            selectedTargetKey: itemTarget.key,
-            selectedActionKey: "REPLACE_ITEM",
-          }),
-        ),
-      );
-      expect(withReplace).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
-    });
-
-    it("does not show Nutrition meal-minimum guidance for Skills", () => {
-      const html = renderForDomain("SKILLS", skillsSchedule);
-      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
-      expect(html).not.toContain("Meal minimums:");
-    });
-
-    it("does not show Nutrition meal-minimum guidance for S&C", () => {
-      const sandcSchedule = [
-        {
-          dayIndex: 2,
-          sessions: [
-            {
-              sessionIndex: 1,
-              title: "Lower body",
-              items: [
-                { order: 0, label: "Back squat", exerciseCatalogItemId: "ex-1" },
-                { order: 1, label: "Bench press", exerciseCatalogItemId: "ex-2" },
-              ],
-            },
-          ],
-        },
-      ];
-      const html = renderForDomain("S_AND_C", sandcSchedule);
-      expect(html).not.toContain(NUTRITION_MEAL_MINIMUMS_GUIDANCE);
-      expect(html).not.toContain("Meal minimums:");
-    });
-
-    it("exposes Skills Remove without Nutrition minimum warnings", () => {
-      const context = makeRevisionContext({ generationDomain: "SKILLS" });
-      const targets = fynRevisionLeveledTargetOptions(context, {
-        domain: "SKILLS",
-        scheduleDays: skillsSchedule,
-      });
-      const itemTarget = targets.find((option) => option.level === "ITEM")!;
-      const html = renderToStaticMarkup(
-        createElement(
-          FynRevisionContextPanel,
-          fynPanelProps({
-            domain: "SKILLS",
-            context,
-            targetOptions: targets,
-            selectedTargetKey: itemTarget.key,
-          }),
-        ),
-      );
-      expect(html).toContain("Remove drill");
-      expect(html).not.toContain(NUTRITION_REMOVE_ITEM_MINIMUM_WARNING);
+      expect(withRemove).not.toContain("Meal minimums:");
+      expect(withRemove).not.toContain("requires at least 3 items");
+      expect(withRemove).not.toContain("already at its minimum item count");
     });
   });
 
@@ -6578,7 +6448,6 @@ describe("Training Plan Workspace lifecycle display", () => {
   });
 
   describe("Nutrition deterministic single-patch flow", () => {
-    // Breakfast requires 3 items; keep 4 here so REMOVE_ITEM stays eligible for these tests.
     const nutritionSchedule = [
       {
         dayIndex: 1,
@@ -8052,7 +7921,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     });
   });
 
-  describe("Nutrition REMOVE_ITEM meal-minimum eligibility", () => {
+  describe("Nutrition REMOVE_ITEM one-item floor", () => {
     const buildMeal = (title: string, itemCount: number) => [
       {
         dayIndex: 1,
@@ -8076,110 +7945,52 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     const reviseIds = { trainingPlanId: "plan-1", versionId: "ver-1" };
 
-    it("maps meal labels to canonical slots and minimums (single source of truth)", () => {
-      expect(nutritionMealSlotKeyFromLabel("Breakfast")).toBe("BREAKFAST");
-      expect(nutritionMealSlotKeyFromLabel("Mid-morning snack")).toBe("MID_MORNING_SNACK");
-      expect(nutritionMealSlotKeyFromLabel("MID_AFTERNOON_SNACK")).toBe("MID_AFTERNOON_SNACK");
-      expect(nutritionMealSlotKeyFromLabel("Second lunch")).toBeNull();
-      expect(nutritionMealSlotMinItems("Lunch")).toBe(4);
-      expect(nutritionMealSlotMinItems("Dinner")).toBe(4);
-      expect(nutritionMealSlotMinItems("Breakfast")).toBe(3);
-      // Unrecognised meals fall back to the "never remove the last item" floor.
-      expect(nutritionMealSlotMinItems("Hydration")).toBe(1);
-    });
-
-    it("enables Remove food item when the meal has more items than its minimum", () => {
-      // Breakfast minimum is 3; 4 items leaves room to remove one.
-      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
-      expect(actionKeysFor("NUTRITION", aboveMin)).toContain("REMOVE_ITEM");
-    });
-
-    it("disables Remove food item when the meal is exactly at its minimum", () => {
-      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
-      expect(actionKeysFor("NUTRITION", atMin)).not.toContain("REMOVE_ITEM");
-    });
-
-    it("keeps Replace food item available at the minimum", () => {
-      // Lunch minimum is 4; at exactly 4 items Remove is blocked but Replace/Update remain.
-      const atMin = targetsFor("Lunch", 4).find((o) => o.level === "ITEM")!;
-      const keys = actionKeysFor("NUTRITION", atMin);
-      expect(keys).toContain("REPLACE_ITEM");
-      expect(keys).toContain("UPDATE_ITEM");
-      expect(keys).not.toContain("REMOVE_ITEM");
-    });
-
-    it("shows the exact minimum message when an item's meal is at the minimum", () => {
-      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
-      const targets = targetsFor("Breakfast", 3);
-      const itemTarget = targets.find((o) => o.level === "ITEM")!;
-      const html = renderToStaticMarkup(
-        createElement(
-          FynRevisionContextPanel,
-          fynPanelProps({
-            domain: "NUTRITION",
-            context,
-            targetOptions: targets,
-            selectedTargetKey: itemTarget.key,
-            selectedActionKey: "REPLACE_ITEM",
-          }),
-        ),
-      );
-      expect(html).toContain(nutritionRemoveItemMinimumMessage(3));
-      expect(html).toContain(
-        "This meal must contain at least 3 items. Replace this item instead of removing it.",
-      );
-      // Replace stays offered; Remove is not offered as an action at the minimum.
-      expect(html).toContain("Replace food item");
-      expect(html).not.toContain("Remove food item");
-    });
-
-    it("does not show the minimum message (and offers Remove) above the minimum", () => {
-      const context = makeRevisionContext({ generationDomain: "NUTRITION" });
-      const targets = targetsFor("Breakfast", 4);
-      const itemTarget = targets.find((o) => o.level === "ITEM")!;
-      const html = renderToStaticMarkup(
-        createElement(
-          FynRevisionContextPanel,
-          fynPanelProps({
-            domain: "NUTRITION",
-            context,
-            targetOptions: targets,
-            selectedTargetKey: itemTarget.key,
-            selectedActionKey: "REPLACE_ITEM",
-          }),
-        ),
-      );
-      expect(html).not.toContain("This meal must contain at least");
-      expect(html).toContain("Remove food item");
-    });
-
-    it("never builds (or allows submitting) a REMOVE_ITEM patch at the minimum", () => {
-      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
-      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
-      expect(buildNutritionRevisionPatch({ target: atMin, actionKey: "REMOVE_ITEM" })).toBeNull();
+    it.each([
+      ["Breakfast", 3],
+      ["Mid-morning snack", 2],
+      ["Lunch", 4],
+      ["Dinner", 4],
+    ])("allows %s removal below its generation minimum", (meal, itemCount) => {
+      const target = targetsFor(meal, itemCount).find((option) => option.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", target)).toContain("REMOVE_ITEM");
       expect(
-        nutritionRevisionCanApply({ reviseIds, target: atMin, actionKey: "REMOVE_ITEM" }),
-      ).toBe(false);
-      // Above the minimum a REMOVE_ITEM patch is still produced exactly as before.
+        buildNutritionRevisionPatch({ target, actionKey: "REMOVE_ITEM" }),
+      ).toMatchObject({
+        operation: "REMOVE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+      });
       expect(
-        buildNutritionRevisionPatch({ target: aboveMin, actionKey: "REMOVE_ITEM" }),
-      ).toMatchObject({ operation: "REMOVE_ITEM", dayIndex: 1, sessionIndex: 1, itemIndex: 1 });
-      expect(
-        nutritionRevisionCanApply({ reviseIds, target: aboveMin, actionKey: "REMOVE_ITEM" }),
+        nutritionRevisionCanApply({ reviseIds, target, actionKey: "REMOVE_ITEM" }),
       ).toBe(true);
     });
 
-    it("nutritionRemoveItemMinimumNotice fires only for at-minimum Nutrition items", () => {
-      const atMin = targetsFor("Breakfast", 3).find((o) => o.level === "ITEM")!;
-      const aboveMin = targetsFor("Breakfast", 4).find((o) => o.level === "ITEM")!;
-      const sessionTarget = targetsFor("Breakfast", 3).find((o) => o.level === "SESSION")!;
-      expect(nutritionRemoveItemMinimumNotice("NUTRITION", atMin)).toBe(
-        "This meal must contain at least 3 items. Replace this item instead of removing it.",
+    it("keeps Remove and Apply available with two items, allowing 2 to 1", () => {
+      const target = targetsFor("Breakfast", 2).find((option) => option.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", target)).toContain("REMOVE_ITEM");
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target, actionKey: "REMOVE_ITEM" }),
+      ).toBe(true);
+    });
+
+    it("blocks removing the last remaining food item", () => {
+      const target = targetsFor("Breakfast", 1).find((option) => option.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", target)).not.toContain("REMOVE_ITEM");
+      expect(buildNutritionRevisionPatch({ target, actionKey: "REMOVE_ITEM" })).toBeNull();
+      expect(
+        nutritionRevisionCanApply({ reviseIds, target, actionKey: "REMOVE_ITEM" }),
+      ).toBe(false);
+    });
+
+    it("keeps Add, Replace, and Update available at the one-item floor", () => {
+      const targets = targetsFor("Breakfast", 1);
+      const sessionTarget = targets.find((option) => option.level === "SESSION")!;
+      const itemTarget = targets.find((option) => option.level === "ITEM")!;
+      expect(actionKeysFor("NUTRITION", sessionTarget)).toContain("ADD_ITEM");
+      expect(actionKeysFor("NUTRITION", itemTarget)).toEqual(
+        expect.arrayContaining(["REPLACE_ITEM", "UPDATE_ITEM"]),
       );
-      expect(nutritionRemoveItemMinimumNotice("NUTRITION", aboveMin)).toBeNull();
-      expect(nutritionRemoveItemMinimumNotice("NUTRITION", sessionTarget)).toBeNull();
-      expect(nutritionRemoveItemMinimumNotice("SKILLS", atMin)).toBeNull();
-      expect(nutritionRemoveItemMinimumNotice("NUTRITION", null)).toBeNull();
     });
 
     it("leaves S&C REMOVE_ITEM gating unchanged (last-item rule, not meal minimums)", () => {

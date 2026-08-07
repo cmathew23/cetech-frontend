@@ -2838,68 +2838,6 @@ export const FYN_REVISION_NO_OPTIONS_MESSAGE =
 export const FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE =
   "No approved add-food options found for this meal.";
 
-/**
- * Nutrition meal-slot minimum item counts, mirrored from the backend authority in
- * `src/modules/aiGenerationOrchestrator/services/outputValidator.service.js`
- * (`assertNutritionOnlySanity`). This is the single frontend source of truth for meal minimums:
- * it drives coach-facing guidance copy AND gates Nutrition REMOVE_ITEM eligibility (a meal may not
- * be taken below its minimum). The backend remains authoritative and still enforces these limits.
- */
-export const NUTRITION_MEAL_SLOT_MIN_ITEMS = {
-  BREAKFAST: 3,
-  MID_MORNING_SNACK: 2,
-  LUNCH: 4,
-  MID_AFTERNOON_SNACK: 2,
-  DINNER: 4,
-} as const;
-
-export type NutritionMealSlotKey = keyof typeof NUTRITION_MEAL_SLOT_MIN_ITEMS;
-
-/**
- * Resolves a session/meal label (e.g. "Breakfast", "Mid-morning snack", or an enum-like
- * "MID_MORNING_SNACK") to a canonical meal-slot key. Returns null when the label is not one of the
- * five recognised slots.
- */
-export function nutritionMealSlotKeyFromLabel(
-  label: string | null | undefined,
-): NutritionMealSlotKey | null {
-  if (typeof label !== "string" || label.trim() === "") return null;
-  const token = label
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return token in NUTRITION_MEAL_SLOT_MIN_ITEMS ? (token as NutritionMealSlotKey) : null;
-}
-
-/**
- * Minimum item count a meal must retain. Recognised meal slots use their canonical minimum; any
- * unrecognised label falls back to 1 (never remove the last item), so gating stays safe without
- * inventing meal-specific rules.
- */
-export function nutritionMealSlotMinItems(label: string | null | undefined): number {
-  const key = nutritionMealSlotKeyFromLabel(label);
-  return key === null ? 1 : NUTRITION_MEAL_SLOT_MIN_ITEMS[key];
-}
-
-/** Deterministic message shown when REMOVE_ITEM is blocked because a meal is at its minimum. */
-export function nutritionRemoveItemMinimumMessage(minimum: number): string {
-  return `This meal must contain at least ${minimum} items. Replace this item instead of removing it.`;
-}
-
-/** Coach-facing guidance explaining Nutrition meal-slot minimums, shown only for the Nutrition domain. */
-export const NUTRITION_MEAL_MINIMUMS_GUIDANCE =
-  `Meal minimums: Breakfast requires at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.BREAKFAST} items, ` +
-  `mid-morning snack at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.MID_MORNING_SNACK}, ` +
-  `lunch at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.LUNCH}, ` +
-  `mid-afternoon snack at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.MID_AFTERNOON_SNACK}, ` +
-  `and dinner at least ${NUTRITION_MEAL_SLOT_MIN_ITEMS.DINNER}. ` +
-  `If removing an item would drop a meal below its minimum, replace it instead or add another item to the same meal.`;
-
-/** Contextual warning shown when a coach selects Remove food item for a Nutrition target. */
-export const NUTRITION_REMOVE_ITEM_MINIMUM_WARNING =
-  "Remove carefully: if this meal is already at its minimum item count, replace this food item instead or add another item to the same meal.";
-
 /** Shown when the coach has not matched their request to a concrete draft plan item. */
 export const FYN_REVISION_MISSING_TARGET_MESSAGE =
   "I could not match that to a plan item. Please mention the day and item more clearly.";
@@ -3538,11 +3476,9 @@ function fynRevisionActionAllowed(
     return target.daySessionCount === 0;
   }
   if (key === "REMOVE_ITEM") {
-    // Nutrition: only offer removal when the meal has MORE items than its required minimum, so a
-    // meal can never be taken to (or below) its minimum. Unrecognised meals fall back to "never
-    // remove the last item".
+    // Nutrition revisions may go below generation minimums, but must retain one item per meal.
     if (domain === "NUTRITION") {
-      return target.sessionItemCount > nutritionMealSlotMinItems(target.sessionLabel);
+      return target.sessionItemCount > 1;
     }
     // S&C is unchanged: never remove the last exercise in a session.
     if (domain === "S_AND_C") {
@@ -3551,22 +3487,6 @@ function fynRevisionActionAllowed(
     }
   }
   return true;
-}
-
-/**
- * The deterministic notice to show when a coach targets a Nutrition food item whose meal is already
- * at (or below) its required minimum: REMOVE_ITEM is not offered, so we explain why and point the
- * coach at REPLACE_ITEM. Returns null whenever removal is allowed or the domain/level is not a
- * Nutrition item.
- */
-export function nutritionRemoveItemMinimumNotice(
-  domain: TrainingPlanGenerationDomain,
-  target: FynRevisionTargetOption | null,
-): string | null {
-  if (domain !== "NUTRITION" || target === null || target.level !== "ITEM") return null;
-  const minimum = nutritionMealSlotMinItems(target.sessionLabel);
-  if (target.sessionItemCount > minimum) return null;
-  return nutritionRemoveItemMinimumMessage(minimum);
 }
 
 /**
@@ -4532,11 +4452,7 @@ export function buildNutritionRevisionPatch(
 
   if (operation === "REMOVE_ITEM") {
     if (itemIndex === null) return null;
-    // Deterministic eligibility guard: never emit a REMOVE_ITEM patch that would take a meal to or
-    // below its minimum. This blocks submission client-side rather than relying on backend failure.
-    if (input.target.sessionItemCount <= nutritionMealSlotMinItems(input.target.sessionLabel)) {
-      return null;
-    }
+    if (input.target.sessionItemCount <= 1) return null;
     return { operation, dayIndex, sessionIndex, itemIndex };
   }
 
@@ -5476,8 +5392,6 @@ export function FynRevisionContextPanel({
     domain === "S_AND_C" && selectedAction?.key === "REMOVE_ITEM";
   const sandCUpdateItemAction =
     domain === "S_AND_C" && selectedAction?.key === "UPDATE_ITEM";
-  // When a Nutrition item's meal is at its minimum, REMOVE_ITEM is not offered; explain why.
-  const nutritionRemoveMinimumNotice = nutritionRemoveItemMinimumNotice(domain, selectedTargetOption);
   const sandCRemoveMetadata =
     domain === "S_AND_C"
       ? sandCRemoveItemSessionMetadata(selectedTargetOption)
@@ -5512,14 +5426,6 @@ export function FynRevisionContextPanel({
           <p className="text-sm text-textSecondary">
             Fyn only shows revision actions this domain can safely execute.
           </p>
-          {domain === "NUTRITION" ? (
-            <p
-              className="text-sm text-textSecondary"
-              data-testid="fyn-nutrition-meal-minimums"
-            >
-              {NUTRITION_MEAL_MINIMUMS_GUIDANCE}
-            </p>
-          ) : null}
           {singlePatchMode ? (
             <p
               className="text-sm text-textSecondary"
@@ -5864,16 +5770,6 @@ export function FynRevisionContextPanel({
             </p>
           ) : null}
 
-          {nutritionRemoveMinimumNotice ? (
-            <p
-              role="status"
-              data-testid="fyn-nutrition-remove-minimum"
-              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-            >
-              {nutritionRemoveMinimumNotice}
-            </p>
-          ) : null}
-
           {sandCRemoveMinimumNotice ? (
             <p
               role="status"
@@ -5881,16 +5777,6 @@ export function FynRevisionContextPanel({
               className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
             >
               {SANDC_REMOVE_ITEM_MINIMUM_GUIDANCE}
-            </p>
-          ) : null}
-
-          {domain === "NUTRITION" && selectedAction?.key === "REMOVE_ITEM" ? (
-            <p
-              role="status"
-              data-testid="fyn-nutrition-remove-warning"
-              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-            >
-              {NUTRITION_REMOVE_ITEM_MINIMUM_WARNING}
             </p>
           ) : null}
 

@@ -6088,6 +6088,11 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(fynRevisionDaysByRestFlag(restDaySchedule, false).map((day) => day.dayIndex)).toEqual([
         2, 5,
       ]);
+      expect(
+        fynRevisionDaysByRestFlag(restDaySchedule.slice(0, 2), true).map(
+          (day) => day.dayIndex,
+        ),
+      ).toEqual([1]);
     });
 
     it("builds canonical Rest Day patches and keeps Apply disabled until selections exist", () => {
@@ -6256,9 +6261,9 @@ describe("Training Plan Workspace lifecycle display", () => {
           days: restDaySchedule,
         },
         ref: {
-          trainingPlanId: "plan-rest-1",
-          trainingPlanVersionId: "ver-rest-1",
-          versionId: "ver-rest-1",
+          trainingPlanId: "stale-ref-plan",
+          trainingPlanVersionId: "stale-ref-version",
+          versionId: "stale-ref-version",
         },
       });
       expect(
@@ -6324,6 +6329,45 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(restSection).not.toContain(">Day 10<");
     });
 
+    it("aligns same-plan Skills and S&C pins to the authoritative context draft version", () => {
+      const drawerIds = { trainingPlanId: "plan-rest-1", versionId: "ver-stale" };
+      const contextIds = {
+        trainingPlanId: "plan-rest-1",
+        versionId: "ver-rest-1",
+      };
+      const context = makeRevisionContext({
+        draft: {
+          trainingPlanId: contextIds.trainingPlanId,
+          trainingPlanVersionId: contextIds.versionId,
+          days: restDaySchedule,
+        },
+      });
+
+      for (const alignedIds of [
+        resolveActiveSkillsReviseIds(drawerIds, contextIds),
+        resolveActiveSandCReviseIds(drawerIds, contextIds),
+      ]) {
+        expect(alignedIds).toEqual(contextIds);
+        expect(
+          fynRestDayAuthoritativeScheduleDays({
+            context,
+            reviseIds: alignedIds,
+          }),
+        ).toBe(restDaySchedule);
+      }
+    });
+
+    it("never aligns a revision-context pin from another plan", () => {
+      const drawerIds = { trainingPlanId: "plan-rest-1", versionId: "ver-drawer" };
+      const otherPlanContextIds = {
+        trainingPlanId: "plan-rest-2",
+        versionId: "ver-context",
+      };
+
+      expect(resolveActiveSkillsReviseIds(drawerIds, otherPlanContextIds)).toBe(drawerIds);
+      expect(resolveActiveSandCReviseIds(drawerIds, otherPlanContextIds)).toBe(drawerIds);
+    });
+
     it("renders cascading selectors and copy semantics without approved options", () => {
       const targets = fynRevisionLeveledTargetOptions(
         makeRevisionContext({ generationDomain: "SKILLS" }),
@@ -6354,10 +6398,14 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(addHtml).toContain("Session to copy");
       expect(addHtml).toContain("data-testid=\"fyn-rest-day-add-training\"");
       expect(addHtml).toContain(">Day 1<");
+      expect(addHtml).toContain(">Day 4<");
       expect(addHtml).toContain(">Day 2<");
       expect(addHtml).not.toContain(">Day 3<");
       expect(addHtml).toContain("Short game");
       expect(addHtml).toContain("Putting");
+      const addRestSection =
+        addHtml.split('data-testid="fyn-rest-day-add-training"')[1] ?? "";
+      expect(addRestSection).not.toContain("Strength");
       expect(addHtml).not.toContain(FYN_REVISION_SHOW_OPTIONS_LABEL);
       expect(fynRevisionActionOptionKind("ADD_TRAINING_TO_REST_DAY")).toBeNull();
       expect(fynRevisionActionOptionKind("MAKE_DAY_REST_DAY")).toBeNull();
@@ -15185,6 +15233,25 @@ describe("resolveTrainingPlanWorkflowMode", () => {
     }
   });
 
+  it("keeps Workflow 3 Skills shell loading while Planning Context is unresolved", () => {
+    expect(
+      resolveTrainingPlanWorkflowMode({
+        isCoachSetupLoaded: true,
+        coachUserId: "coach-1",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        academyCoachRole: "COACH",
+        hasHeadCoachConfigured: false,
+        trainingPlanReleaseMode: "DIRECT_RELEASE",
+        coachAssignedGenerationDomains: ["SKILLS"],
+        isPlanningContextResolved: false,
+        areHeadCoachDomainPlansResolved: true,
+        planningContextLocked: false,
+        hasSubmittedDomainPlans: false,
+      }),
+    ).toBe("loading");
+  });
+
   it("uses the Skills-owned planning-context tab shell in Direct Release without a Head Coach", () => {
     expect(
       resolveTrainingPlanWorkflowMode({
@@ -15460,6 +15527,24 @@ describe("resolveTrainingPlanPageBootstrapModel", () => {
     ).toMatchObject({ ready: false, waitingFor: "assignment", shell: "loading" });
   });
 
+  it("does not mark a shell ready while workflow mode is still loading", () => {
+    expect(
+      resolveTrainingPlanPageBootstrapModel({
+        identityReady: true,
+        assignmentReady: true,
+        workflowMode: "loading",
+        planningContextRequired: true,
+        planningContextLoadState: "idle",
+        submittedDomainPlansRequired: false,
+        submittedDomainPlansLoadState: "idle",
+      }),
+    ).toMatchObject({
+      ready: false,
+      waitingFor: "workflow_mode",
+      shell: "loading",
+    });
+  });
+
   it("waits for planning context before rendering a required shell", () => {
     expect(
       resolveTrainingPlanPageBootstrapModel({
@@ -15508,6 +15593,26 @@ describe("resolveTrainingPlanPageBootstrapModel", () => {
       waitingFor: null,
       shell: "specialist_domain",
     });
+  });
+
+  it("does not invent specialist_domain from assigned domains while workflow mode is loading", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const fallbackStart = source.indexOf("const fallbackWorkflowShell = useMemo");
+    const fallbackEnd = source.indexOf(
+      "const trainingPlanShellModel = useMemo",
+      fallbackStart,
+    );
+    expect(fallbackStart).toBeGreaterThan(-1);
+    expect(fallbackEnd).toBeGreaterThan(fallbackStart);
+    const fallbackBlock = source.slice(fallbackStart, fallbackEnd);
+    expect(fallbackBlock).toContain("isHeadCoachPlanningContextOwner");
+    expect(fallbackBlock).toContain("return null;");
+    expect(fallbackBlock).not.toContain("allowedGenerationDomains.length");
+    expect(fallbackBlock).not.toContain('return "specialist_domain"');
+    expect(fallbackBlock).not.toContain('return "skills_coach_planning"');
   });
 });
 

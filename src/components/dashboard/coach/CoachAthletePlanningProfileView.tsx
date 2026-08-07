@@ -3763,17 +3763,8 @@ export function fynRestDayAuthoritativeScheduleDays(input: {
   if (input.reviseIds === null || input.context == null) return null;
   const days = input.context.draft?.days;
   if (!Array.isArray(days) || days.length === 0) return null;
-  const planId = (
-    input.context.ref?.trainingPlanId ??
-    input.context.draft?.trainingPlanId ??
-    ""
-  ).trim();
-  const versionId = (
-    input.context.ref?.trainingPlanVersionId ??
-    input.context.ref?.versionId ??
-    input.context.draft?.trainingPlanVersionId ??
-    ""
-  ).trim();
+  const planId = (input.context.draft?.trainingPlanId ?? "").trim();
+  const versionId = (input.context.draft?.trainingPlanVersionId ?? "").trim();
   if (planId === "" || versionId === "") return null;
   if (planId !== input.reviseIds.trainingPlanId.trim()) return null;
   if (versionId !== input.reviseIds.versionId.trim()) return null;
@@ -13469,21 +13460,13 @@ export function CoachAthletePlanningProfileView({
         ? "head_coach_review"
         : "head_coach_planning";
     }
-    if (allowedGenerationDomains.length > 0) {
-      return "specialist_domain";
-    }
-    if (trainingPlanShellReleaseMode === "direct_release") {
-      return "skills_coach_planning";
-    }
     return null;
   }, [
-    allowedGenerationDomains.length,
     clientTrainingPlanWorkflowMode,
     hasRenderableWorkflowFallback,
     hasSubmittedDomainPlans,
     isHeadCoachPlanningContextOwner,
     planningContextLocked,
-    trainingPlanShellReleaseMode,
   ]);
   const trainingPlanShellModel = useMemo((): TrainingPlanPageBootstrapModel => {
     if (trainingPlanPageModel.ready) {
@@ -18264,6 +18247,17 @@ export function CoachAthletePlanningProfileView({
         athleteIdTrimmed,
         domain,
       );
+      const contextReviseIds = {
+        trainingPlanId: context.draft?.trainingPlanId?.trim() ?? "",
+        versionId: context.draft?.trainingPlanVersionId?.trim() ?? "",
+      };
+      if (domain === "SKILLS") {
+        const alignedIds = resolveActiveSkillsReviseIds(skillsReviseIds, contextReviseIds);
+        if (alignedIds !== skillsReviseIds) setSkillsActiveReviseIds(alignedIds);
+      } else if (domain === "S_AND_C") {
+        const alignedIds = resolveActiveSandCReviseIds(sandCReviseIds, contextReviseIds);
+        if (alignedIds !== sandCReviseIds) setSandCActiveReviseIds(alignedIds);
+      }
       setFynRevisionContexts((current) => ({
         ...current,
         [domain]: {

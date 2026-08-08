@@ -253,6 +253,19 @@ import {
   NUTRITION_ITEM_NOT_IN_LATEST_PLAN_MESSAGE,
   resolveNutritionReviewDrawerLifecycle,
   runNutritionReviewDrawerOpenRefresh,
+  domainPlanSummaryFromWorkspace,
+  domainCoachDrawerDetailMatchesRequest,
+  fetchDomainCoachDrawerPlanContent,
+  fetchDomainPlanSummaryWithWorkspaceFallback,
+  fetchMissingDownstreamContextFallbacks,
+  fetchReadinessForPlanOwnership,
+  lockedUpstreamContextAuthority,
+  resolveDomainCoachDrawerPlanContentRequest,
+  runCoalescedTrainingPlanDetailRequest,
+  trainingPlanDetailRequestKey,
+  trainingPlanReadinessRequestKey,
+  workspaceHasAuthoritativeDomainAssignment,
+  workspaceHasResolvedDomainPlanIdentity,
   resolveNewerDomainReviewDraft,
   resolveLatestDraftForDomainReview,
   domainReviewDraftRenderKey,
@@ -298,6 +311,8 @@ import type {
   CoachAthleteDomainDraftRevisionContext,
   CoachAthleteDomainDraftRevisionOption,
   CoachAthleteLatestDomainDraft,
+  CoachAthleteUpstreamPlanningContext,
+  CoachAthleteTrainingPlanReadiness,
   CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
@@ -438,6 +453,467 @@ describe("NextCycleWorkspaceAction", () => {
 
     expect(onContinue).toHaveBeenCalledTimes(1);
     expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("training plan request deduplication", () => {
+  const readiness = (
+    overrides: Partial<CoachAthleteTrainingPlanReadiness> = {},
+  ): CoachAthleteTrainingPlanReadiness => ({
+    readinessStatus: "READY",
+    planningEligibilityStatus: "ELIGIBLE",
+    validatedLevel: "INTERMEDIATE",
+    validationStatus: "CONFIRMED",
+    appCompleteness: "COMPLETE",
+    isReady: true,
+    canGenerate: true,
+    canGeneratePlan: true,
+    canGenerateCurrentDomainPlan: true,
+    blockers: [],
+    missingRequiredFields: [],
+    sportCode: "GOLF",
+    ...overrides,
+  });
+
+  it("coalesces concurrent detail requests only for the same scoped version", async () => {
+    const requests = new Map<
+      string,
+      Promise<CoachPersistedTrainingPlanActiveDetail>
+    >();
+    let resolveDetail!: (detail: CoachPersistedTrainingPlanActiveDetail) => void;
+    const detailPromise = new Promise<CoachPersistedTrainingPlanActiveDetail>((resolve) => {
+      resolveDetail = resolve;
+    });
+    const fetchDetail = vi.fn(() => detailPromise);
+    const v1Key = trainingPlanDetailRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "NUTRITION",
+      planId: "plan-1",
+      versionId: "version-1",
+    });
+
+    const first = runCoalescedTrainingPlanDetailRequest(requests, v1Key, fetchDetail);
+    const second = runCoalescedTrainingPlanDetailRequest(requests, v1Key, fetchDetail);
+    const third = runCoalescedTrainingPlanDetailRequest(requests, v1Key, fetchDetail);
+    const fourth = runCoalescedTrainingPlanDetailRequest(requests, v1Key, fetchDetail);
+    const v2 = runCoalescedTrainingPlanDetailRequest(
+      requests,
+      trainingPlanDetailRequestKey({
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        generationDomain: "NUTRITION",
+        planId: "plan-1",
+        versionId: "version-2",
+      }),
+      async () => ({ version: { id: "version-2" } }) as CoachPersistedTrainingPlanActiveDetail,
+    );
+
+    expect(first).toBe(second);
+    expect(first).toBe(third);
+    expect(first).toBe(fourth);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(requests.size).toBe(2);
+
+    const detail = {
+      version: { id: "version-1" },
+    } as CoachPersistedTrainingPlanActiveDetail;
+    resolveDetail(detail);
+    await expect(first).resolves.toBe(detail);
+    await v2;
+    expect(requests.size).toBe(0);
+  });
+
+  it("does not retain a completed detail response as a cache", async () => {
+    const requests = new Map<
+      string,
+      Promise<CoachPersistedTrainingPlanActiveDetail>
+    >();
+    const key = trainingPlanDetailRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "NUTRITION",
+      planId: "plan-1",
+      versionId: "version-1",
+    });
+    const fetchDetail = vi.fn(
+      async () =>
+        ({ version: { id: "version-1" } }) as CoachPersistedTrainingPlanActiveDetail,
+    );
+
+    await runCoalescedTrainingPlanDetailRequest(requests, key, fetchDetail);
+    await runCoalescedTrainingPlanDetailRequest(requests, key, fetchDetail);
+
+    expect(fetchDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses matching primary readiness when ownership fields are present", async () => {
+    const key = trainingPlanReadinessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "NUTRITION",
+      seasonCycleId: "season-1",
+      sportCode: "GOLF",
+    });
+    const primary = readiness();
+    const fallback = vi.fn(async () => readiness({ canGeneratePlan: false }));
+
+    const result = await fetchReadinessForPlanOwnership({
+      key,
+      primaryRequest: { key, promise: Promise.resolve(primary) },
+      fetchReadiness: fallback,
+    });
+
+    expect(result).toBe(primary);
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("fetches ownership readiness when scope differs or ownership fields are absent", async () => {
+    const key = trainingPlanReadinessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "NUTRITION",
+      seasonCycleId: "season-1",
+      sportCode: "GOLF",
+    });
+    const fallback = vi.fn(async () => readiness({ canGeneratePlan: false }));
+
+    await fetchReadinessForPlanOwnership({
+      key,
+      primaryRequest: {
+        key,
+        promise: Promise.resolve(
+          readiness({
+            canGeneratePlan: null,
+            canGenerateCurrentDomainPlan: null,
+          }),
+        ),
+      },
+      fetchReadiness: fallback,
+    });
+    await fetchReadinessForPlanOwnership({
+      key,
+      primaryRequest: {
+        key: trainingPlanReadinessRequestKey({
+          athleteId: "athlete-1",
+          entityId: "entity-1",
+          generationDomain: "NUTRITION",
+          seasonCycleId: "season-1",
+          sportCode: "CRICKET",
+        }),
+        promise: Promise.resolve(readiness()),
+      },
+      fetchReadiness: fallback,
+    });
+
+    expect(fallback).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses workspace domain summaries without calling the legacy fallback", async () => {
+    const workspace = {
+      domains: {
+        SKILLS: {
+          summary: {
+            trainingPlanId: "skills-plan",
+            versionId: "skills-v1",
+            latestVersionId: "skills-v1",
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: 1,
+            status: "DRAFT",
+            generationDomain: "SKILLS",
+          },
+        },
+        NUTRITION: {
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: "nutrition-v2",
+            latestVersionId: "nutrition-v2",
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: 2,
+            status: "AI_GENERATED",
+            generationDomain: "NUTRITION",
+          },
+        },
+        S_AND_C: {
+          summary: {
+            trainingPlanId: null,
+            versionId: null,
+            latestVersionId: null,
+            approvedVersionId: null,
+            activeVersionId: null,
+            versionNumber: null,
+            status: null,
+            generationDomain: "S_AND_C",
+          },
+        },
+      },
+    } as TrainingPlanWorkspace;
+    const fallback = vi.fn(async () => {
+      throw new Error("legacy fallback should not run");
+    });
+
+    const mapped = domainPlanSummaryFromWorkspace(workspace);
+    const result = await fetchDomainPlanSummaryWithWorkspaceFallback(workspace, fallback);
+
+    expect(result).toEqual(mapped);
+    expect(result.NUTRITION).toMatchObject({
+      trainingPlanId: "nutrition-plan",
+      versionId: "nutrition-v2",
+      versionNumber: 2,
+    });
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("calls domain-summary only when workspace data is unavailable", async () => {
+    const legacy = {
+      SKILLS: {} as never,
+      NUTRITION: {} as never,
+      S_AND_C: {} as never,
+    };
+    const fallback = vi.fn(async () => legacy);
+
+    await expect(
+      fetchDomainPlanSummaryWithWorkspaceFallback(null, fallback),
+    ).resolves.toBe(legacy);
+    expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses workspace assignment and plan identity for resolved Domain Coach bootstrap", () => {
+    const workspace = {
+      assignmentContext: {
+        domains: {
+          SKILLS: { ownerType: "NONE", ownedByCurrentUser: false, canGenerate: false },
+          NUTRITION: {
+            ownerType: "ASSIGNED_DOMAIN_COACH",
+            ownedByCurrentUser: true,
+            canGenerate: true,
+          },
+          S_AND_C: { ownerType: "NONE", ownedByCurrentUser: false, canGenerate: false },
+        },
+      },
+      domains: {
+        SKILLS: { summary: {}, canOpen: false },
+        NUTRITION: {
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: "nutrition-v2",
+            latestVersionId: "nutrition-v2",
+            generationDomain: "NUTRITION",
+          },
+          canOpen: true,
+          allowedActions: ["SUBMIT_REVIEW"],
+        },
+        S_AND_C: { summary: {}, canOpen: false },
+      },
+    } as unknown as TrainingPlanWorkspace;
+
+    expect(workspaceHasAuthoritativeDomainAssignment(workspace, "NUTRITION")).toBe(true);
+    expect(workspaceHasResolvedDomainPlanIdentity(workspace, "NUTRITION")).toBe(true);
+    expect(resolveDomainCoachDrawerPlanContentRequest(workspace, "NUTRITION")).toEqual({
+      kind: "detail",
+      planId: "nutrition-plan",
+      versionId: "nutrition-v2",
+    });
+  });
+
+  it("keeps latest and ownership fallbacks when workspace authority is incomplete", () => {
+    const workspace = {
+      domains: {
+        SKILLS: { summary: {}, canOpen: false },
+        NUTRITION: {
+          summary: {
+            trainingPlanId: "nutrition-plan",
+            versionId: null,
+            generationDomain: "NUTRITION",
+          },
+          canOpen: true,
+        },
+        S_AND_C: { summary: {}, canOpen: false },
+      },
+    } as unknown as TrainingPlanWorkspace;
+
+    expect(workspaceHasAuthoritativeDomainAssignment(workspace, "NUTRITION")).toBe(false);
+    expect(workspaceHasResolvedDomainPlanIdentity(workspace, "NUTRITION")).toBe(false);
+    expect(resolveDomainCoachDrawerPlanContentRequest(workspace, "NUTRITION")).toEqual({
+      kind: "latest",
+    });
+  });
+
+  it("performs exactly one workspace-first drawer content request", async () => {
+    const request = {
+      kind: "detail" as const,
+      planId: "nutrition-plan",
+      versionId: "nutrition-v2",
+    };
+    const fetchDetail = vi.fn(async (planId: string, versionId: string) => ({
+      planId,
+      versionId,
+    }));
+    const fetchLatest = vi.fn(async () => ({ planId: "fallback" }));
+
+    await expect(
+      fetchDomainCoachDrawerPlanContent(request, { fetchDetail, fetchLatest }),
+    ).resolves.toEqual({
+      planId: "nutrition-plan",
+      versionId: "nutrition-v2",
+    });
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(fetchDetail).toHaveBeenCalledWith("nutrition-plan", "nutrition-v2");
+    expect(fetchLatest).not.toHaveBeenCalled();
+  });
+
+  it("uses latest as the single drawer request only without a usable workspace version", async () => {
+    const fetchDetail = vi.fn(async () => ({ source: "detail" }));
+    const fetchLatest = vi.fn(async () => ({ source: "latest" }));
+
+    await expect(
+      fetchDomainCoachDrawerPlanContent(
+        { kind: "latest" },
+        { fetchDetail, fetchLatest },
+      ),
+    ).resolves.toEqual({ source: "latest" });
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    expect(fetchDetail).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched plan or version detail for the selected drawer request", () => {
+    const matching = {
+      plan: { id: "nutrition-plan" },
+      version: { id: "nutrition-v2" },
+    } as CoachPersistedTrainingPlanActiveDetail;
+    const stale = {
+      plan: { id: "nutrition-plan" },
+      version: { id: "nutrition-v1" },
+    } as CoachPersistedTrainingPlanActiveDetail;
+
+    expect(
+      domainCoachDrawerDetailMatchesRequest(matching, {
+        planId: "nutrition-plan",
+        versionId: "nutrition-v2",
+      }),
+    ).toBe(true);
+    expect(
+      domainCoachDrawerDetailMatchesRequest(stale, {
+        planId: "nutrition-plan",
+        versionId: "nutrition-v2",
+      }),
+    ).toBe(false);
+  });
+
+  it("suppresses downstream level and workload fallbacks only when locked context supplies both", async () => {
+    const upstream = {
+      planningContextLocked: true,
+      upstreamPlanningContextLocked: true,
+      planWindow: { startDate: "2026-08-10", endDate: "2026-08-16" },
+      seasonCycleId: "season-1",
+      goalIds: [],
+      startDate: "2026-08-10",
+      endDate: "2026-08-16",
+      phase: "IN_SEASON",
+      workloadSummary: {
+        weeklyTrainingHours: 8,
+        recommendedMinHours: 7,
+        recommendedMaxHours: 10,
+        status: "ON_TARGET",
+        sportCode: "GOLF",
+        validatedLevel: "INTERMEDIATE",
+      },
+      season: null,
+      workload: null,
+      goals: [],
+      planningContext: {
+        seasonCycleId: "season-1",
+        goalIds: [],
+        lockedGoalIds: [],
+        startDate: "2026-08-10",
+        endDate: "2026-08-16",
+        phase: "IN_SEASON",
+        validatedLevel: "INTERMEDIATE",
+        season: null,
+        workload: {
+          weeklyTrainingHours: 8,
+          recommendedMinHours: 7,
+          recommendedMaxHours: 10,
+          status: "ON_TARGET",
+          sportCode: "GOLF",
+          sport: "GOLF",
+          ageBand: null,
+          validatedLevel: "INTERMEDIATE",
+          classificationStatus: "COMPLETE",
+          trainingLoadStatus: "ON_TARGET",
+          recommendedRange: { minHours: 7, maxHours: 10, label: "7–10 hours" },
+          restrictionSummary: null,
+          summary: "On target",
+        },
+        goals: [],
+      },
+      blockers: [],
+      raw: {},
+    } satisfies CoachAthleteUpstreamPlanningContext;
+    const fetchLevelValidation = vi.fn(async () => ({ validatedLevel: "INTERMEDIATE" }));
+    const fetchWorkloadLatest = vi.fn(async () => ({ workloadClassification: {} }));
+
+    const authority = lockedUpstreamContextAuthority(upstream);
+    const result = await fetchMissingDownstreamContextFallbacks({
+      authority,
+      fetchLevelValidation,
+      fetchWorkloadLatest,
+    });
+
+    expect(authority).toEqual({ hasValidatedLevel: true, hasWorkload: true });
+    expect(result).toEqual({ levelValidation: null, latestWorkload: null });
+    expect(fetchLevelValidation).not.toHaveBeenCalled();
+    expect(fetchWorkloadLatest).not.toHaveBeenCalled();
+  });
+
+  it("retains each missing locked-context fallback independently", async () => {
+    const fetchLevelValidation = vi.fn(async () => ({ validatedLevel: "INTERMEDIATE" }));
+    const fetchWorkloadLatest = vi.fn(async () => ({ workloadClassification: {} }));
+
+    await fetchMissingDownstreamContextFallbacks({
+      authority: { hasValidatedLevel: false, hasWorkload: true },
+      fetchLevelValidation,
+      fetchWorkloadLatest,
+    });
+    expect(fetchLevelValidation).toHaveBeenCalledTimes(1);
+    expect(fetchWorkloadLatest).not.toHaveBeenCalled();
+
+    await fetchMissingDownstreamContextFallbacks({
+      authority: { hasValidatedLevel: true, hasWorkload: false },
+      fetchLevelValidation,
+      fetchWorkloadLatest,
+    });
+    expect(fetchLevelValidation).toHaveBeenCalledTimes(1);
+    expect(fetchWorkloadLatest).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps resolved Domain Coach plan discovery and detail hydration out of bootstrap", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const latestEffectStart = source.indexOf(
+      "if (shouldForceAssistantDomainWorkspace) {",
+      source.indexOf("const loadLatestSkillsDraft = useCallback"),
+    );
+    const latestEffectEnd = source.indexOf("  ]);", latestEffectStart);
+    const latestEffect = source.slice(latestEffectStart, latestEffectEnd);
+    expect(latestEffect.indexOf("workspaceResolvesDownstreamDomainBootstrap")).toBeLessThan(
+      latestEffect.indexOf("loadLatestSkillsDraft(domainForLatestDomainDraft"),
+    );
+
+    const hydrationStart = source.indexOf(
+      "if (workspaceResolvesDownstreamDomainBootstrap) {",
+      latestEffectEnd,
+    );
+    const hydrationEnd = source.indexOf(
+      "assistantDomainSummaryHydrationGenRef.current += 1",
+      hydrationStart,
+    );
+    expect(hydrationStart).toBeGreaterThan(-1);
+    expect(hydrationEnd).toBeGreaterThan(hydrationStart);
   });
 });
 
@@ -8318,26 +8794,35 @@ describe("Training Plan Workspace lifecycle display", () => {
   });
 
   describe("Nutrition Plan Review drawer reopen lifecycle", () => {
-    it("clears stale transient messages and loads latest plan + dropdown on open", () => {
-      // Reopening after a prior success/error: transient messages are cleared, the latest plan is
-      // reloaded, and the target dropdown is rebuilt from that plan — all on open.
+    it("clears stale revision state without loading latest or revision-context on open", () => {
       const lifecycle = resolveNutritionReviewDrawerLifecycle({
         drawerOpen: true,
         drawerDomain: "NUTRITION",
       });
       expect(lifecycle.clearTransientMessages).toBe(true);
-      expect(lifecycle.loadLatestPlan).toBe(true);
-      expect(lifecycle.rebuildTargetOptions).toBe(true);
+      expect(lifecycle.clearTargetOptions).toBe(true);
+      expect(lifecycle.loadLatestPlan).toBe(false);
+      expect(lifecycle.rebuildTargetOptions).toBe(false);
     });
 
-    it("reopen does not depend on the Revise Plan button to refresh plan data", () => {
-      // The dropdown rebuild + latest-plan load are gated on the drawer OPENING, not on clicking
-      // Revise Plan a second time. Both are true purely from open + NUTRITION domain.
+    it("defers Nutrition revision-context until Revise Plan activation", () => {
       const lifecycle = resolveNutritionReviewDrawerLifecycle({
         drawerOpen: true,
         drawerDomain: "NUTRITION",
       });
-      expect(lifecycle.loadLatestPlan && lifecycle.rebuildTargetOptions).toBe(true);
+      expect(lifecycle.loadLatestPlan || lifecycle.rebuildTargetOptions).toBe(false);
+
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+      const start = source.indexOf("function openFynGuidedReviseComposer");
+      const end = source.indexOf(
+        "async function handlePersistedGovernedPlanAction",
+        start,
+      );
+      const activation = source.slice(start, end);
+      expect(activation.match(/loadFynRevisionContext\(domain\)/g)).toHaveLength(1);
     });
 
     it("clears messages and selection when the drawer closes", () => {
@@ -8371,7 +8856,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(lifecycle.clearSelection).toBe(false);
     });
 
-    it("rebuilds the target dropdown only after the latest plan load resolves (never concurrent)", async () => {
+    it("keeps post-revision latest-to-context refresh sequential", async () => {
       const order: string[] = [];
       let resolveLatestPlan: (() => void) | null = null;
       const latestPlanGate = new Promise<void>((resolve) => {
@@ -8406,9 +8891,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(order).toEqual(["latest:start", "latest:end", "rebuild:start"]);
     });
 
-    it("clears old target options immediately, then shows fresh options only after the sequential refresh", async () => {
-      // Mirrors the drawer-open effect orchestration using the real exported pieces: the lifecycle
-      // descriptor drives the synchronous clear, then the sequential refresh runs.
+    it("clears old target options on open without starting plan or Fyn requests", async () => {
       const events: string[] = [];
       const lifecycle = resolveNutritionReviewDrawerLifecycle({
         drawerOpen: true,
@@ -8421,16 +8904,10 @@ describe("Training Plan Workspace lifecycle display", () => {
         events.push("clear-target-options");
       }
 
-      let resolveLatestPlan: (() => void) | null = null;
-      const latestPlanGate = new Promise<void>((resolve) => {
-        resolveLatestPlan = resolve;
-      });
       const running = runNutritionReviewDrawerOpenRefresh({
         loadLatestPlan: lifecycle.loadLatestPlan
           ? async () => {
               events.push("latest:start");
-              await latestPlanGate;
-              events.push("latest:end");
             }
           : null,
         rebuildTargetOptions: lifecycle.rebuildTargetOptions
@@ -8440,20 +8917,12 @@ describe("Training Plan Workspace lifecycle display", () => {
           : null,
       });
 
-      // While the latest-plan load is still pending: old options already cleared, NO fresh options.
       await Promise.resolve();
-      expect(events).toEqual(["clear-target-options", "latest:start"]);
+      expect(events).toEqual(["clear-target-options"]);
       expect(events).not.toContain("fresh-options");
 
-      // Fresh options appear only after the sequential refresh completes.
-      resolveLatestPlan!();
       await running;
-      expect(events).toEqual([
-        "clear-target-options",
-        "latest:start",
-        "latest:end",
-        "fresh-options",
-      ]);
+      expect(events).toEqual(["clear-target-options"]);
     });
 
     it("does not clear target options on close (close clears the whole selection instead)", () => {

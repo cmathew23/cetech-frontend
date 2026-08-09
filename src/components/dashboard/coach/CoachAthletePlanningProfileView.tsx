@@ -2397,6 +2397,20 @@ export function shouldShowDomainReviewSubmittedPlanEmptyState(input: {
   return input.contentSource === "none" && !input.loading && input.error === null;
 }
 
+export function resolveDomainReviewPlanLoadMessage(input: {
+  domain: TrainingPlanGenerationDomain;
+  contentSource: DomainReviewDrawerContentSource;
+  loading: boolean;
+  error: string | null;
+}): string | null {
+  if (input.contentSource !== "none") return null;
+  if (input.loading) {
+    return `Loading generated ${domainPlanHistoryDomainLabel(input.domain)} plan...`;
+  }
+  if (input.error !== null) return "Generated draft could not be loaded.";
+  return "No submitted plan data available for this domain.";
+}
+
 export function shouldHydrateDirectReleaseDomainDrawerDetail(input: {
   domain: TrainingPlanGenerationDomain;
   assignmentReleaseMode:
@@ -11431,6 +11445,62 @@ export function trainingPlanReadinessRequestKey(input: {
   ]);
 }
 
+export function athleteGoalsRequestKey(athleteId: string): string {
+  return athleteId.trim();
+}
+
+export function trainingPlanCompletenessRequestKey(input: {
+  athleteId: string;
+  entityId: string;
+  sportCode?: string | null;
+}): string {
+  return JSON.stringify([
+    input.entityId.trim(),
+    input.athleteId.trim(),
+    input.sportCode?.trim() ?? "",
+  ]);
+}
+
+export function latestDomainDraftRequestKey(input: {
+  athleteId: string;
+  entityId: string;
+  generationDomain: TrainingPlanGenerationDomain;
+}): string {
+  return JSON.stringify([
+    input.entityId.trim(),
+    input.athleteId.trim(),
+    input.generationDomain,
+  ]);
+}
+
+export function runCoalescedPlanningRequest<T>(
+  requests: Map<string, Promise<T>>,
+  key: string,
+  request: () => Promise<T>,
+  options?: { force?: boolean },
+): Promise<T> {
+  if (options?.force !== true) {
+    const existing = requests.get(key);
+    if (existing !== undefined) return existing;
+  }
+
+  const pending = request();
+  requests.set(key, pending);
+  const clear = () => {
+    if (requests.get(key) === pending) {
+      requests.delete(key);
+    }
+  };
+  void pending.then(clear, clear);
+  return pending;
+}
+
+function fulfilledSettledValue<T>(
+  result: PromiseSettledResult<unknown> | undefined,
+): T | null {
+  return result?.status === "fulfilled" ? (result.value as T) : null;
+}
+
 export function readinessHasPlanOwnershipFields(
   readiness: CoachAthleteTrainingPlanReadiness,
 ): boolean {
@@ -11759,6 +11829,7 @@ export function CoachAthletePlanningProfileView({
   >(null);
   const [readinessLoading, setReadinessLoading] = useState(true);
   const [readinessError, setReadinessError] = useState<string | null>(null);
+  const [completenessError, setCompletenessError] = useState<string | null>(null);
   const [readinessSources, setReadinessSources] = useState<PlanningReadinessSources>({
     levelValidation: null,
     readiness: null,
@@ -11784,27 +11855,32 @@ export function CoachAthletePlanningProfileView({
     useState<string | null>(null);
   /** Brief UX hold after workload success — tab advance waits until cleared. */
   const [showWorkloadCompletionState, setShowWorkloadCompletionState] = useState(false);
+  const stableProfileSportCode = useMemo(
+    () =>
+      profile?.sportCode?.trim()
+      || profile?.primarySport?.trim()
+      || profile?.sportContext?.primarySport?.trim()
+      || null,
+    [
+      profile?.primarySport,
+      profile?.sportCode,
+      profile?.sportContext?.primarySport,
+    ],
+  );
   /**
    * Sport code for training-plan generation: prefer parsed planning profile, then readiness echo,
    * then workload classification (same athlete) when APP field names differ from backend.
    */
   const athleteSportCode = useMemo(() => {
-    const fromProfile =
-      profile?.sportCode?.trim()
-      || profile?.primarySport?.trim()
-      || profile?.sportContext?.primarySport?.trim()
-      || null;
-    if (fromProfile) return fromProfile;
+    if (stableProfileSportCode) return stableProfileSportCode;
     const fromReadiness = readinessSources.readiness?.sportCode?.trim() ?? null;
     if (fromReadiness) return fromReadiness;
     return (
       workloadAssessmentResult?.workloadClassification?.sportCode?.trim() ?? null
     );
   }, [
-    profile?.primarySport,
-    profile?.sportCode,
-    profile?.sportContext?.primarySport,
     readinessSources.readiness?.sportCode,
+    stableProfileSportCode,
     workloadAssessmentResult?.workloadClassification?.sportCode,
   ]);
 
@@ -11813,9 +11889,98 @@ export function CoachAthletePlanningProfileView({
   /** Tracks athlete/entity scope so readiness refetches for season changes do not wipe workload state. */
   const readinessLoadScopeRef = useRef("");
   const primaryReadinessRequestRef = useRef<PrimaryReadinessRequest | null>(null);
+  const goalsRequestsInFlightRef = useRef(
+    new Map<string, Promise<GoalSummary[]>>(),
+  );
+  const completenessRequestsInFlightRef = useRef(
+    new Map<string, Promise<CoachAthleteTrainingPlanCompleteness>>(),
+  );
+  const readinessRequestsInFlightRef = useRef(
+    new Map<string, Promise<CoachAthleteTrainingPlanReadiness>>(),
+  );
+  const latestDraftRequestsInFlightRef = useRef(
+    new Map<string, Promise<CoachAthleteLatestDomainDraft>>(),
+  );
   const latestSkillsDraftRequestGenRef = useRef(0);
   const detailRequestsInFlightRef = useRef(
     new Map<string, Promise<CoachPersistedTrainingPlanActiveDetail>>(),
+  );
+  const fetchCoalescedGoals = useCallback(
+    (force = false) =>
+      runCoalescedPlanningRequest(
+        goalsRequestsInFlightRef.current,
+        athleteGoalsRequestKey(athleteIdTrimmed),
+        () => fetchGoalsForAthlete(athleteIdTrimmed),
+        { force },
+      ),
+    [athleteIdTrimmed],
+  );
+  const fetchCoalescedCompleteness = useCallback(
+    (sportCode?: string | null, force = false) =>
+      runCoalescedPlanningRequest(
+        completenessRequestsInFlightRef.current,
+        trainingPlanCompletenessRequestKey({
+          athleteId: athleteIdTrimmed,
+          entityId,
+          sportCode,
+        }),
+        () =>
+          fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
+            sportCode,
+          }),
+        { force },
+      ),
+    [athleteIdTrimmed, entityId],
+  );
+  const fetchCoalescedReadiness = useCallback(
+    (
+      options: {
+        generationDomain: TrainingPlanGenerationDomain;
+        seasonCycleId?: string | null;
+        sportCode?: string | null;
+      },
+      force = false,
+    ) => {
+      const key = trainingPlanReadinessRequestKey({
+        athleteId: athleteIdTrimmed,
+        entityId,
+        ...options,
+      });
+      return {
+        key,
+        promise: runCoalescedPlanningRequest(
+          readinessRequestsInFlightRef.current,
+          key,
+          () =>
+            fetchCoachAthleteTrainingPlanReadiness(
+              entityId,
+              athleteIdTrimmed,
+              options,
+            ),
+          { force },
+        ),
+      };
+    },
+    [athleteIdTrimmed, entityId],
+  );
+  const fetchCoalescedLatestDraft = useCallback(
+    (generationDomain: TrainingPlanGenerationDomain, force = false) =>
+      runCoalescedPlanningRequest(
+        latestDraftRequestsInFlightRef.current,
+        latestDomainDraftRequestKey({
+          athleteId: athleteIdTrimmed,
+          entityId,
+          generationDomain,
+        }),
+        () =>
+          fetchLatestCoachAthleteDomainDraft(
+            entityId,
+            athleteIdTrimmed,
+            generationDomain,
+          ),
+        { force },
+      ),
+    [athleteIdTrimmed, entityId],
   );
   const generatePlanJobRequestGenRef = useRef<
     Partial<Record<TrainingPlanGenerationDomain, number>>
@@ -11845,6 +12010,8 @@ export function CoachAthletePlanningProfileView({
     useState<TrainingPlanGenerationDomain | null>(null);
   const [upstreamPlanningContext, setUpstreamPlanningContext] =
     useState<CoachAthleteUpstreamPlanningContext | null>(null);
+  const upstreamPlanningContextRef = useRef<CoachAthleteUpstreamPlanningContext | null>(null);
+  upstreamPlanningContextRef.current = upstreamPlanningContext;
   const [upstreamPlanningContextLoading, setUpstreamPlanningContextLoading] = useState(false);
   const [upstreamPlanningContextError, setUpstreamPlanningContextError] =
     useState<string | null>(null);
@@ -12595,7 +12762,7 @@ export function CoachAthletePlanningProfileView({
         setWorkloadAssessmentLoading(false);
 
         const upstreamAuthority = workspaceOwnsResolvedDownstreamDomain
-          ? lockedUpstreamContextAuthority(upstreamPlanningContext)
+          ? lockedUpstreamContextAuthority(upstreamPlanningContextRef.current)
           : { hasValidatedLevel: false, hasWorkload: false };
         const { levelValidation, latestWorkload } =
           await fetchMissingDownstreamContextFallbacks({
@@ -12650,33 +12817,19 @@ export function CoachAthletePlanningProfileView({
         setGeneratePlanRecoveryMessage(null);
       }
 
-      const readinessRequestKey = trainingPlanReadinessRequestKey({
-        athleteId: athleteIdTrimmed,
-        entityId,
+      const readinessRequest = fetchCoalescedReadiness({
         generationDomain: readinessGenerationDomain,
         seasonCycleId: selectedSeasonCycleId,
         sportCode: athleteSportCode,
       });
-      const readinessPromise = fetchCoachAthleteTrainingPlanReadiness(
-        entityId,
-        athleteIdTrimmed,
-        {
-          generationDomain: readinessGenerationDomain,
-          seasonCycleId: selectedSeasonCycleId,
-          sportCode: athleteSportCode,
-        },
-      );
       primaryReadinessRequestRef.current = {
-        key: readinessRequestKey,
-        promise: readinessPromise,
+        key: readinessRequest.key,
+        promise: readinessRequest.promise,
       };
 
       const results = await Promise.allSettled([
         fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed),
-        readinessPromise,
-        fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
-          sportCode: athleteSportCode,
-        }),
+        readinessRequest.promise,
       ]);
 
       if (cancelled) return;
@@ -12701,17 +12854,11 @@ export function CoachAthletePlanningProfileView({
           ? results[1].value
           : (pushError(results[1].reason, "Could not load planning readiness details."),
             null);
-      const completeness =
-        results[2].status === "fulfilled"
-          ? results[2].value
-          : (pushError(results[2].reason, "Could not load completeness details."),
-            null);
-
-      setReadinessSources({
+      setReadinessSources((current) => ({
+        ...current,
         levelValidation,
         readiness,
-        completeness,
-      });
+      }));
       setReadinessError(errors.length > 0 ? errors.join(" ") : null);
       setReadinessLoading(false);
     }
@@ -12726,15 +12873,57 @@ export function CoachAthletePlanningProfileView({
     athleteIdTrimmed,
     athleteSportCode,
     entityId,
+    fetchCoalescedReadiness,
     readinessGenerationDomain,
     selectedSeasonCycleId,
     shouldSkipPlanningOwnerReadinessCalls,
     planningContextBootstrapState,
-    upstreamPlanningContext,
     workspace,
     workspaceError,
     workspaceOwnsResolvedDownstreamDomain,
   ]);
+
+  useEffect(() => {
+    if (
+      !accessGateReady ||
+      entityId === "" ||
+      athleteIdTrimmed === "" ||
+      stableProfileSportCode === null ||
+      shouldSkipPlanningOwnerReadinessCalls ||
+      workspaceOwnsResolvedDownstreamDomain
+    ) {
+      setCompletenessError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCompletenessError(null);
+    void fetchCoalescedCompleteness(stableProfileSportCode)
+      .then((completeness) => {
+        if (cancelled) return;
+        setReadinessSources((current) => ({ ...current, completeness }));
+      })
+      .catch((e) => {
+        if (cancelled || isNotFoundError(e)) return;
+        setCompletenessError(formatApiError(e, "Could not load completeness details."));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessGateReady,
+    athleteIdTrimmed,
+    entityId,
+    fetchCoalescedCompleteness,
+    shouldSkipPlanningOwnerReadinessCalls,
+    stableProfileSportCode,
+    workspaceOwnsResolvedDownstreamDomain,
+  ]);
+
+  const readinessDisplayError = [readinessError, completenessError]
+    .filter((message): message is string => message !== null && message.trim() !== "")
+    .join(" ") || null;
 
   /** GET persisted workload snapshot only (`/latest`); run endpoint stays user-initiated. */
   useEffect(() => {
@@ -12877,16 +13066,18 @@ export function CoachAthletePlanningProfileView({
           || profile?.sportContext?.primarySport?.trim()
           || undefined;
 
-        const results = await Promise.allSettled([
-          fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed),
-          fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
+        const readinessRequest = fetchCoalescedReadiness(
+          {
             generationDomain: readinessGenerationDomain,
             seasonCycleId: selectedSeasonCycleId,
             sportCode: trainingSportCode,
-          }),
-          fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
-            sportCode: trainingSportCode,
-          }),
+          },
+          true,
+        );
+        const results = await Promise.allSettled([
+          fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed),
+          readinessRequest.promise,
+          fetchCoalescedCompleteness(trainingSportCode, true),
         ]);
 
         const levelValidation =
@@ -12912,11 +13103,12 @@ export function CoachAthletePlanningProfileView({
         const completeness =
           results[2].status === "fulfilled"
             ? results[2].value
-            : (pushError(
-                results[2].reason,
-                "Could not load completeness details.",
-              ),
-              null);
+            : null;
+        setCompletenessError(
+          results[2].status === "rejected"
+            ? formatApiError(results[2].reason, "Could not load completeness details.")
+            : null,
+        );
 
         setReadinessSources({
           levelValidation,
@@ -12931,6 +13123,8 @@ export function CoachAthletePlanningProfileView({
       accessGateReady,
       athleteIdTrimmed,
       entityId,
+      fetchCoalescedCompleteness,
+      fetchCoalescedReadiness,
       profile?.primarySport,
       profile?.sportCode,
       profile?.sportContext?.primarySport,
@@ -12954,15 +13148,17 @@ export function CoachAthletePlanningProfileView({
       || profile?.sportContext?.primarySport?.trim()
       || undefined;
     try {
-      const requests: Promise<unknown>[] = [
-        fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
+      const readinessRequest = fetchCoalescedReadiness(
+        {
           generationDomain: readinessGenerationDomain,
           seasonCycleId,
           sportCode: trainingSportCode,
-        }),
-        fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
-          sportCode: trainingSportCode,
-        }),
+        },
+        true,
+      );
+      const requests: Promise<unknown>[] = [
+        readinessRequest.promise,
+        fetchCoalescedCompleteness(trainingSportCode, true),
         fetchCoachAthleteUpstreamPlanningContext(entityId, athleteIdTrimmed),
       ];
       if (options?.refreshLevelValidation === true) {
@@ -12978,35 +13174,32 @@ export function CoachAthletePlanningProfileView({
       let index = 0;
       let levelValidation = readinessSources.levelValidation;
       if (options?.refreshLevelValidation === true) {
-        levelValidation =
-          results[index]?.status === "fulfilled"
-            ? (results[index]?.value as Awaited<
-                ReturnType<typeof fetchCoachAthleteLevelValidation>
-              >)
-            : null;
+        levelValidation = fulfilledSettledValue<
+          Awaited<ReturnType<typeof fetchCoachAthleteLevelValidation>>
+        >(results[index]);
         index += 1;
       }
 
-      const readiness =
-        results[index]?.status === "fulfilled"
-          ? (results[index]?.value as Awaited<
-              ReturnType<typeof fetchCoachAthleteTrainingPlanReadiness>
-            >)
-          : null;
+      const readiness = fulfilledSettledValue<
+        Awaited<ReturnType<typeof fetchCoachAthleteTrainingPlanReadiness>>
+      >(results[index]);
       index += 1;
-      const completeness =
-        results[index]?.status === "fulfilled"
-          ? (results[index]?.value as Awaited<
-              ReturnType<typeof fetchCoachAthleteTrainingPlanCompleteness>
-            >)
-          : null;
+      const completenessResult = results[index];
+      const completeness = fulfilledSettledValue<
+        Awaited<ReturnType<typeof fetchCoachAthleteTrainingPlanCompleteness>>
+      >(completenessResult);
+      setCompletenessError(
+        completenessResult?.status === "rejected"
+          ? formatApiError(
+              completenessResult.reason,
+              "Could not load completeness details.",
+            )
+          : null,
+      );
       index += 1;
-      const upstreamContext =
-        results[index]?.status === "fulfilled"
-          ? (results[index]?.value as Awaited<
-              ReturnType<typeof fetchCoachAthleteUpstreamPlanningContext>
-            >)
-          : null;
+      const upstreamContext = fulfilledSettledValue<
+        Awaited<ReturnType<typeof fetchCoachAthleteUpstreamPlanningContext>>
+      >(results[index]);
       index += 1;
 
       setReadinessSources((current) => ({
@@ -13022,12 +13215,11 @@ export function CoachAthletePlanningProfileView({
       setPlanningContextBootstrapState("loaded");
 
       if (options?.refreshWorkloadLatest === true) {
-        const workloadLatest =
-          results[index]?.status === "fulfilled"
-            ? (results[index]?.value as Awaited<
-                ReturnType<typeof fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest>
-              >)
-            : null;
+        const workloadLatest = fulfilledSettledValue<
+          Awaited<
+            ReturnType<typeof fetchCoachAthleteTrainingPlanWorkloadAssessmentLatest>
+          >
+        >(results[index]);
         if (workloadLatest?.workloadClassification) {
           setWorkloadAssessmentResult(workloadLatest);
           setWorkloadAssessmentCapturedForAthleteId(athleteIdTrimmed);
@@ -13048,6 +13240,8 @@ export function CoachAthletePlanningProfileView({
     accessGateReady,
     athleteIdTrimmed,
     entityId,
+    fetchCoalescedCompleteness,
+    fetchCoalescedReadiness,
     profile?.primarySport,
     profile?.sportCode,
     profile?.sportContext?.primarySport,
@@ -13112,7 +13306,10 @@ export function CoachAthletePlanningProfileView({
     ],
   );
 
-  const refreshGoalsSeasonSetup = useCallback(async (options?: { background?: boolean }) => {
+  const refreshGoalsSeasonSetup = useCallback(async (options?: {
+    background?: boolean;
+    forceGoalsRefresh?: boolean;
+  }) => {
     const background = options?.background === true;
     if (!accessGateReady) {
       if (!background) {
@@ -13157,7 +13354,7 @@ export function CoachAthletePlanningProfileView({
       if (background) {
         let goals: GoalSummary[] | null = null;
         try {
-          goals = await fetchGoalsForAthlete(athleteIdTrimmed);
+          goals = await fetchCoalescedGoals(options?.forceGoalsRefresh === true);
         } catch {
           goals = null;
         }
@@ -13181,7 +13378,7 @@ export function CoachAthletePlanningProfileView({
       }
 
       const [goalsResult, dashboardResult, academyCoachesResult] = await Promise.allSettled([
-        fetchGoalsForAthlete(athleteIdTrimmed),
+        fetchCoalescedGoals(options?.forceGoalsRefresh === true),
         fetchCoachMeDashboard(),
         fetchMyAcademyCoaches(),
       ]);
@@ -13235,7 +13432,13 @@ export function CoachAthletePlanningProfileView({
         setSetupLoading(false);
       }
     }
-  }, [accessGateReady, athleteIdTrimmed, currentCoachUserId, entityId]);
+  }, [
+    accessGateReady,
+    athleteIdTrimmed,
+    currentCoachUserId,
+    entityId,
+    fetchCoalescedGoals,
+  ]);
 
   useEffect(() => {
     void refreshGoalsSeasonSetup();
@@ -13301,15 +13504,11 @@ export function CoachAthletePlanningProfileView({
                 key: requestKey,
                 primaryRequest: primaryReadinessRequestRef.current,
                 fetchReadiness: () =>
-                  fetchCoachAthleteTrainingPlanReadiness(
-                    entityId,
-                    athleteIdTrimmed,
-                    {
+                  fetchCoalescedReadiness({
                       generationDomain: domain,
                       seasonCycleId: selectedSeasonCycleId,
                       sportCode: athleteSportCode,
-                    },
-                  ),
+                  }).promise,
               });
               return {
                 domain,
@@ -13351,6 +13550,7 @@ export function CoachAthletePlanningProfileView({
     athleteIdTrimmed,
     athleteSportCode,
     entityId,
+    fetchCoalescedReadiness,
     isHeadCoachPlanningContextOwner,
     selectedSeasonCycleId,
     workspace,
@@ -17516,6 +17716,7 @@ export function CoachAthletePlanningProfileView({
     retryOnNotFound = false,
     preserveCurrentOnFailure = false,
     skipDetailHydration = false,
+    forceRequest = false,
   ): Promise<CoachAthleteLatestDomainDraft | null> => {
     if (
       entityId === "" ||
@@ -17554,10 +17755,9 @@ export function CoachAthletePlanningProfileView({
         return null;
       }
       try {
-        const result = await fetchLatestCoachAthleteDomainDraft(
-          entityId,
-          athleteIdTrimmed,
+        const result = await fetchCoalescedLatestDraft(
           generationDomain,
+          forceRequest,
         );
         if (
           latestSkillsDraftRequestGenRef.current !== requestGeneration
@@ -17621,6 +17821,7 @@ export function CoachAthletePlanningProfileView({
   }, [
     athleteIdTrimmed,
     entityId,
+    fetchCoalescedLatestDraft,
     refreshAssistantGovernedDetailFromLatestDraft,
     shouldRenderAssistantDomainWorkspace,
   ]);
@@ -18202,7 +18403,7 @@ export function CoachAthletePlanningProfileView({
         if (isSinglePatch) {
           await runNutritionReviewDrawerOpenRefresh({
             loadLatestPlan: async () => {
-              if ((await loadLatestSkillsDraft("SKILLS", true, true)) === null) {
+              if ((await loadLatestSkillsDraft("SKILLS", true, true, false, true)) === null) {
                 throw new Error("Unable to reload the revised Skills plan.");
               }
             },
@@ -18212,7 +18413,7 @@ export function CoachAthletePlanningProfileView({
               }
             },
           });
-        } else if ((await loadLatestSkillsDraft("SKILLS", true, true)) === null) {
+        } else if ((await loadLatestSkillsDraft("SKILLS", true, true, false, true)) === null) {
           throw new Error("Unable to reload the revised Skills plan.");
         }
         if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
@@ -18238,7 +18439,7 @@ export function CoachAthletePlanningProfileView({
         }));
         void runNutritionReviewDrawerOpenRefresh({
           loadLatestPlan: async () => {
-            await loadLatestSkillsDraft("SKILLS", true, true);
+            await loadLatestSkillsDraft("SKILLS", true, true, false, true);
           },
           rebuildTargetOptions: async () => {
             await loadFynRevisionContext("SKILLS");
@@ -19110,16 +19311,18 @@ export function CoachAthletePlanningProfileView({
         });
       }
       if (!shouldSkipPlanningOwnerReadinessCalls) {
-        const [levelValidation, readiness, completeness] = await Promise.all([
-          fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed),
-          fetchCoachAthleteTrainingPlanReadiness(entityId, athleteIdTrimmed, {
+        const readinessRequest = fetchCoalescedReadiness(
+          {
             generationDomain: readinessGenerationDomain,
             seasonCycleId: selectedSeasonCycleId,
             sportCode: athleteSportCode,
-          }),
-          fetchCoachAthleteTrainingPlanCompleteness(entityId, athleteIdTrimmed, {
-            sportCode: athleteSportCode,
-          }),
+          },
+          true,
+        );
+        const [levelValidation, readiness, completeness] = await Promise.all([
+          fetchCoachAthleteLevelValidation(entityId, athleteIdTrimmed),
+          readinessRequest.promise,
+          fetchCoalescedCompleteness(athleteSportCode, true),
         ]);
         setReadinessSources({ levelValidation, readiness, completeness });
       }
@@ -20972,6 +21175,30 @@ export function CoachAthletePlanningProfileView({
         void handleReviseSandCPlan(sandCRevisionSubmission);
       }
     };
+    const drawerPlanDetailLoading =
+      domainState.loading ||
+      (step6WorkflowInternalLoading &&
+        resolvedWorkflowGenerationDomain === reviewDomain) ||
+      (persistedSkillsPlanLoading &&
+        (persistedPlanQueryDomain === reviewDomain ||
+          persistedVerifiedDomain === reviewDomain));
+    const drawerPlanDetailError =
+      domainState.error ??
+      (step6WorkflowInternalError !== null &&
+      resolvedWorkflowGenerationDomain === reviewDomain
+        ? step6WorkflowInternalError
+        : null) ??
+      (persistedSkillsPlanError !== null &&
+      (persistedPlanErrorDomain === reviewDomain ||
+        persistedPlanQueryDomain === reviewDomain)
+        ? persistedSkillsPlanError
+        : null);
+    const drawerPlanLoadMessage = resolveDomainReviewPlanLoadMessage({
+      domain: reviewDomain,
+      contentSource,
+      loading: drawerPlanDetailLoading,
+      error: drawerPlanDetailError,
+    });
     const planWindowLabel =
       resolveDomainCoachPlanWindowLabel({
         activeDetail,
@@ -21080,7 +21307,8 @@ export function CoachAthletePlanningProfileView({
                     ? renderDomainReviewDrawerFact("Training Days", displayValue(trainingDays))
                     : null}
                 </dl>
-                {domainState.loading ? (
+                {drawerPlanDetailLoading &&
+                !drawerPlanLoadMessage?.startsWith("Loading generated ") ? (
                   <DashboardStatusNotice type="loading" compact>
                     Loading submitted plan detail...
                   </DashboardStatusNotice>
@@ -21506,17 +21734,12 @@ export function CoachAthletePlanningProfileView({
                     reviewDomain,
                   )}
                 </div>
-              ) : shouldShowDomainReviewSubmittedPlanEmptyState({
-                  contentSource,
-                  loading: domainState.loading,
-                  error: domainState.error,
-                }) ? (
+              ) : drawerPlanLoadMessage !== null ? (
                 <div className="text-sm text-textSecondary">
-                  {reviewDomain === "SKILLS" &&
-                  (workflowStatus === "draft_generated" ||
-                    workflowStatus === "revision_requested")
-                    ? "Generated draft could not be loaded."
-                    : "No submitted plan data available for this domain."}
+                  {drawerPlanLoadMessage}
+                  {drawerPlanLoadMessage.startsWith("Loading generated ") ? (
+                    <span className="mt-1 block">This may take a few seconds.</span>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -24109,7 +24332,7 @@ export function CoachAthletePlanningProfileView({
         if (isSinglePatch) {
           await runNutritionReviewDrawerOpenRefresh({
             loadLatestPlan: async () => {
-              if ((await loadLatestSkillsDraft("NUTRITION", true, true)) === null) {
+              if ((await loadLatestSkillsDraft("NUTRITION", true, true, false, true)) === null) {
                 throw new Error("Unable to reload the revised Nutrition plan.");
               }
             },
@@ -24119,7 +24342,7 @@ export function CoachAthletePlanningProfileView({
               }
             },
           });
-        } else if ((await loadLatestSkillsDraft("NUTRITION", true, true)) === null) {
+        } else if ((await loadLatestSkillsDraft("NUTRITION", true, true, false, true)) === null) {
           throw new Error("Unable to reload the revised Nutrition plan.");
         }
         if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
@@ -24145,7 +24368,13 @@ export function CoachAthletePlanningProfileView({
       if (errorOutcome.reloadLatest) {
         // Drop the stale pin so the next revision derives its version from the reloaded latest plan.
         setNutritionActiveReviseIds(null);
-        const reloadedDraft = await loadLatestSkillsDraft("NUTRITION", true);
+        const reloadedDraft = await loadLatestSkillsDraft(
+          "NUTRITION",
+          true,
+          false,
+          false,
+          true,
+        );
         void refreshTrainingPlanWorkspace({ background: true });
         if (errorOutcome.clearSelection && isSinglePatch) {
           resetFynRevisionOptionsFlow("NUTRITION");
@@ -24248,7 +24477,7 @@ export function CoachAthletePlanningProfileView({
       },
       refresh: async (reviseResult) => {
         await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
-        if ((await loadLatestSkillsDraft("S_AND_C", true, true)) === null) {
+        if ((await loadLatestSkillsDraft("S_AND_C", true, true, false, true)) === null) {
           throw new Error("Unable to reload the revised S&C plan.");
         }
         if (isSinglePatch) {
@@ -24278,7 +24507,7 @@ export function CoachAthletePlanningProfileView({
         }));
         void runNutritionReviewDrawerOpenRefresh({
           loadLatestPlan: async () => {
-            await loadLatestSkillsDraft("S_AND_C", true, true);
+            await loadLatestSkillsDraft("S_AND_C", true, true, false, true);
           },
           rebuildTargetOptions: async () => {
             await loadFynRevisionContext("S_AND_C");
@@ -24386,7 +24615,10 @@ export function CoachAthletePlanningProfileView({
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
       // Background refresh: avoid setupLoading/coach-identity rebootstrap that leaves Context Builder.
-      await refreshGoalsSeasonSetup({ background: true });
+      await refreshGoalsSeasonSetup({
+        background: true,
+        forceGoalsRefresh: true,
+      });
       setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
       setSelectedSeasonCycleId(season.seasonCycleId);
       setSeasonCreateFormExplicit(false);
@@ -24427,7 +24659,7 @@ export function CoachAthletePlanningProfileView({
         startDate: toUtcDateTimeString(phaseDrafts[phase].startDate),
         endDate: toUtcDateTimeString(phaseDrafts[phase].endDate),
       });
-      await refreshGoalsSeasonSetup();
+      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
       setPhaseSuccess(`${toFieldLabel(phase)} created successfully.`);
     } catch (e) {
       setPhaseError(formatApiError(e, "Could not create season phase."));
@@ -24615,7 +24847,7 @@ export function CoachAthletePlanningProfileView({
         startDate: `${dateOnly(competitionSeasonPhase.startDate) ?? competitionDate}T00:00:00.000Z`,
         targetDate: `${competitionDate}T00:00:00.000Z`,
       });
-      await refreshGoalsSeasonSetup();
+      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
       setCompetitionSuccess(`Competition goal created (${competitionImportance}).`);
     } catch (e) {
       setCompetitionError(formatApiError(e, "Could not create competition goal."));
@@ -24738,7 +24970,7 @@ export function CoachAthletePlanningProfileView({
           goalSourceType: "CUSTOM",
         });
       }
-      await refreshGoalsSeasonSetup();
+      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
       setGoalSuccess(
         goalCreationMode === "LIBRARY"
           ? `${selectedLibraryGoals.length} Goal Library goal${selectedLibraryGoals.length === 1 ? "" : "s"} created successfully.`
@@ -25004,12 +25236,16 @@ export function CoachAthletePlanningProfileView({
         setGeneratePlanError(result.errorMessage || readSafeGenerationJobError(result.latestJob));
         return;
       }
-      await loadLatestSkillsDraft(domain, true);
-      const latestDomainDraft = await fetchLatestCoachAthleteDomainDraft(
-        entityId,
-        athleteIdTrimmed,
+      const latestDomainDraft = await loadLatestSkillsDraft(
         domain,
+        true,
+        false,
+        false,
+        true,
       );
+      if (latestDomainDraft === null) {
+        throw new Error(domainDraftLoadErrorMessage(domain));
+      }
       const persistedGenerateResult = persistDraftResultFromLatestDomainDraft(latestDomainDraft);
       setGeneratePlanSuccess(persistedGenerateResult);
       setGeneratePlanSuccessDomain(domain);
@@ -25155,9 +25391,9 @@ export function CoachAthletePlanningProfileView({
                       </DashboardStatusNotice>
                     ) : (
                       <div className="space-y-3">
-                        {readinessError ? (
+                        {readinessDisplayError ? (
                           <DashboardStatusNotice type="warning" compact>
-                            {readinessError}
+                            {readinessDisplayError}
                           </DashboardStatusNotice>
                         ) : null}
                         <dl className="divide-y divide-border/70 border-y border-border/70">
@@ -26410,9 +26646,9 @@ export function CoachAthletePlanningProfileView({
           </DashboardStatusNotice>
         ) : (
           <>
-            {readinessError ? (
+            {readinessDisplayError ? (
               <DashboardStatusNotice type="warning" compact>
-                {readinessError}
+                {readinessDisplayError}
               </DashboardStatusNotice>
             ) : null}
             {renderAppDrawerSection("APP Readiness", readinessRows)}
@@ -26484,7 +26720,7 @@ export function CoachAthletePlanningProfileView({
           readinessPanel.missingRequiredFields,
         )}`;
       }
-      if (readinessError) return readinessError;
+      if (readinessDisplayError) return readinessDisplayError;
       return "Confirm APP completeness and planning eligibility.";
     }
     if (step === "level-validation") return "Confirm the athlete's validated level.";

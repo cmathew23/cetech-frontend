@@ -146,6 +146,7 @@ import {
   countDomainReviewTrainingDays,
   countLatestDomainDraftTrainingDays,
   resolveDomainReviewDrawerContentSource,
+  resolveDomainReviewPlanLoadMessage,
   resolveDomainCoachPlanWindowLabel,
   shouldShowDomainReviewSubmittedPlanEmptyState,
   shouldHydrateDirectReleaseDomainDrawerDetail,
@@ -261,7 +262,11 @@ import {
   fetchReadinessForPlanOwnership,
   lockedUpstreamContextAuthority,
   resolveDomainCoachDrawerPlanContentRequest,
+  athleteGoalsRequestKey,
+  latestDomainDraftRequestKey,
+  runCoalescedPlanningRequest,
   runCoalescedTrainingPlanDetailRequest,
+  trainingPlanCompletenessRequestKey,
   trainingPlanDetailRequestKey,
   trainingPlanReadinessRequestKey,
   workspaceHasAuthoritativeDomainAssignment,
@@ -315,6 +320,7 @@ import type {
   CoachAthleteTrainingPlanReadiness,
   CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
+import type { GoalSummary } from "@/lib/api/coachAthleteGoalsSeasonSetup";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
 
 describe("NextCycleWorkspaceAction", () => {
@@ -473,6 +479,214 @@ describe("training plan request deduplication", () => {
     missingRequiredFields: [],
     sportCode: "GOLF",
     ...overrides,
+  });
+
+  it("coalesces five concurrent goals requests for the same athlete into one HTTP request", async () => {
+    const requests = new Map<string, Promise<GoalSummary[]>>();
+    let resolveGoals!: (goals: GoalSummary[]) => void;
+    const response = new Promise<GoalSummary[]>((resolve) => {
+      resolveGoals = resolve;
+    });
+    const fetchGoals = vi.fn(() => response);
+    const key = athleteGoalsRequestKey("athlete-1");
+
+    const calls = Array.from({ length: 5 }, () =>
+      runCoalescedPlanningRequest(requests, key, fetchGoals),
+    );
+
+    expect(fetchGoals).toHaveBeenCalledTimes(1);
+    expect(new Set(calls).size).toBe(1);
+    resolveGoals([]);
+    await Promise.all(calls);
+    expect(requests.size).toBe(0);
+  });
+
+  it("allows a mutation-driven goals refresh to bypass an older in-flight request", async () => {
+    const requests = new Map<string, Promise<GoalSummary[]>>();
+    let resolveInitial!: (goals: GoalSummary[]) => void;
+    let resolveRefresh!: (goals: GoalSummary[]) => void;
+    const fetchGoals = vi
+      .fn<() => Promise<GoalSummary[]>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<GoalSummary[]>((resolve) => {
+            resolveInitial = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<GoalSummary[]>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+    const key = athleteGoalsRequestKey("athlete-1");
+
+    const initial = runCoalescedPlanningRequest(requests, key, fetchGoals);
+    const mutationRefresh = runCoalescedPlanningRequest(
+      requests,
+      key,
+      fetchGoals,
+      { force: true },
+    );
+
+    expect(initial).not.toBe(mutationRefresh);
+    expect(fetchGoals).toHaveBeenCalledTimes(2);
+    resolveInitial([]);
+    resolveRefresh([]);
+    await Promise.all([initial, mutationRefresh]);
+    expect(requests.size).toBe(0);
+  });
+
+  it("coalesces identical completeness calls without retaining a response cache", async () => {
+    const requests = new Map<string, Promise<{ completenessStatus: string }>>();
+    let resolveCompleteness!: (value: { completenessStatus: string }) => void;
+    const response = new Promise<{ completenessStatus: string }>((resolve) => {
+      resolveCompleteness = resolve;
+    });
+    const fetchCompleteness = vi.fn(() => response);
+    const key = trainingPlanCompletenessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      sportCode: "GOLF",
+    });
+
+    const first = runCoalescedPlanningRequest(requests, key, fetchCompleteness);
+    const second = runCoalescedPlanningRequest(requests, key, fetchCompleteness);
+
+    expect(first).toBe(second);
+    expect(fetchCompleteness).toHaveBeenCalledTimes(1);
+    resolveCompleteness({ completenessStatus: "COMPLETE" });
+    await Promise.all([first, second]);
+
+    await runCoalescedPlanningRequest(requests, key, fetchCompleteness);
+    expect(fetchCompleteness).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps completeness identity independent of season and upstream state", () => {
+    const beforeSeasonChange = trainingPlanCompletenessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      sportCode: "GOLF",
+    });
+    const afterSeasonAndUpstreamChange = trainingPlanCompletenessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      sportCode: "GOLF",
+    });
+
+    expect(afterSeasonAndUpstreamChange).toBe(beforeSeasonChange);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const effectBody = source.slice(
+      source.indexOf("void fetchCoalescedCompleteness(stableProfileSportCode)"),
+      source.indexOf("  ]);", source.indexOf("void fetchCoalescedCompleteness(stableProfileSportCode)")),
+    );
+    expect(effectBody).not.toContain("selectedSeasonCycleId");
+    expect(effectBody).not.toContain("upstreamPlanningContext");
+    expect(effectBody).toContain("stableProfileSportCode");
+  });
+
+  it("keeps three domain readiness requests distinct and coalesces duplicate keys", async () => {
+    const requests = new Map<string, Promise<CoachAthleteTrainingPlanReadiness>>();
+    const fetchReadiness = vi.fn(async () => readiness());
+    const domains = ["SKILLS", "NUTRITION", "S_AND_C"] as const;
+
+    await Promise.all(
+      domains.map((generationDomain) =>
+        runCoalescedPlanningRequest(
+          requests,
+          trainingPlanReadinessRequestKey({
+            athleteId: "athlete-1",
+            entityId: "entity-1",
+            generationDomain,
+            seasonCycleId: "season-1",
+            sportCode: "GOLF",
+          }),
+          fetchReadiness,
+        ),
+      ),
+    );
+    expect(fetchReadiness).toHaveBeenCalledTimes(3);
+
+    let resolveDuplicate!: (value: CoachAthleteTrainingPlanReadiness) => void;
+    const duplicateResponse = new Promise<CoachAthleteTrainingPlanReadiness>((resolve) => {
+      resolveDuplicate = resolve;
+    });
+    const fetchDuplicate = vi.fn(() => duplicateResponse);
+    const duplicateKey = trainingPlanReadinessRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "SKILLS",
+      seasonCycleId: "season-1",
+      sportCode: "GOLF",
+    });
+    const duplicates = Array.from({ length: 3 }, () =>
+      runCoalescedPlanningRequest(requests, duplicateKey, fetchDuplicate),
+    );
+    expect(fetchDuplicate).toHaveBeenCalledTimes(1);
+    resolveDuplicate(readiness());
+    await Promise.all(duplicates);
+  });
+
+  it("does not subscribe readiness loading to upstream object identity", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const loadStart = source.indexOf("async function loadReadiness()");
+    const dependencyStart = source.indexOf("  }, [", loadStart);
+    const dependencyEnd = source.indexOf("  ]);", dependencyStart);
+    const dependencies = source.slice(dependencyStart, dependencyEnd);
+
+    expect(dependencies).not.toContain("upstreamPlanningContext");
+    expect(dependencies).toContain("fetchCoalescedReadiness");
+  });
+
+  it("coalesces concurrent Head Coach SKILLS latest bootstrap requests", async () => {
+    const requests = new Map<string, Promise<{ trainingPlanId: string }>>();
+    let resolveLatest!: (value: { trainingPlanId: string }) => void;
+    const response = new Promise<{ trainingPlanId: string }>((resolve) => {
+      resolveLatest = resolve;
+    });
+    const fetchLatest = vi.fn(() => response);
+    const key = latestDomainDraftRequestKey({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      generationDomain: "SKILLS",
+    });
+
+    const generalBootstrap = runCoalescedPlanningRequest(requests, key, fetchLatest);
+    const headCoachBootstrap = runCoalescedPlanningRequest(requests, key, fetchLatest);
+
+    expect(generalBootstrap).toBe(headCoachBootstrap);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    resolveLatest({ trainingPlanId: "plan-1" });
+    await Promise.all([generalBootstrap, headCoachBootstrap]);
+  });
+
+  it("uses one latest request after generation and forces goals refresh after mutations", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const generationStart = source.indexOf(
+      "const latestDomainDraft = await loadLatestSkillsDraft(",
+    );
+    const generationEnd = source.indexOf(
+      "const persistedGenerateResult",
+      generationStart,
+    );
+    const generationRefresh = source.slice(generationStart, generationEnd);
+    expect(generationStart).toBeGreaterThan(-1);
+    expect(generationRefresh).not.toContain("fetchLatestCoachAthleteDomainDraft");
+
+    const forcedGoalsRefreshes =
+      source.match(/refreshGoalsSeasonSetup\(\{[\s\S]*?forceGoalsRefresh: true[\s\S]*?\}\)/g)
+      ?? [];
+    expect(forcedGoalsRefreshes.length).toBeGreaterThanOrEqual(4);
   });
 
   it("coalesces concurrent detail requests only for the same scoped version", async () => {
@@ -12289,6 +12503,75 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(draftWithoutRevise.canShowReviseAction).toBe(false);
   });
 
+  it("shows a domain-specific loading message while each generated detail request is pending", () => {
+    const expected = {
+      SKILLS: "Loading generated Skills plan...",
+      NUTRITION: "Loading generated Nutrition plan...",
+      S_AND_C: "Loading generated S&C plan...",
+    } as const;
+
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      expect(
+        resolveDomainReviewPlanLoadMessage({
+          domain,
+          contentSource: "none",
+          loading: true,
+          error: null,
+        }),
+      ).toBe(expected[domain]);
+    }
+  });
+
+  it("renders successful generated plans as domain content without a loading message", () => {
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      const latestDraft = {
+        trainingPlanId: `${domain}-plan`,
+        trainingPlanVersionId: `${domain}-v1`,
+        versionNumber: 1,
+        status: "AI_GENERATED",
+        days: [{ dayIndex: 1, sessions: [{ title: `${domain} session`, items: [] }] }],
+      } as never;
+      const contentSource = resolveDomainReviewDrawerContentSource({
+        domain,
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft,
+      });
+
+      expect(contentSource).toBe("latest_domain_draft");
+      expect(
+        resolveDomainReviewPlanLoadMessage({
+          domain,
+          contentSource,
+          loading: false,
+          error: null,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("shows generated draft failure only after each domain request actually fails", () => {
+    for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
+      expect(
+        resolveDomainReviewPlanLoadMessage({
+          domain,
+          contentSource: "none",
+          loading: false,
+          error: "Request timed out.",
+        }),
+      ).toBe("Generated draft could not be loaded.");
+      expect(
+        resolveDomainReviewPlanLoadMessage({
+          domain,
+          contentSource: "none",
+          loading: true,
+          error: "An older error.",
+        }),
+      ).not.toBe("Generated draft could not be loaded.");
+    }
+  });
+
   it("loads latest generated drafts in the drawer before submit for every domain", () => {
     for (const domain of ["SKILLS", "NUTRITION", "S_AND_C"] as const) {
       const latestDraft = {
@@ -13964,7 +14247,9 @@ describe("season create display state", () => {
     expect(handlerEnd).toBeGreaterThan(handlerStart);
     expect(handler).toContain("await createSeasonCycle(payload)");
     expect(handler.match(/createSeasonCycle\(/g)?.length).toBe(1);
-    expect(handler).toContain("await refreshGoalsSeasonSetup({ background: true })");
+    expect(handler).toContain("await refreshGoalsSeasonSetup({");
+    expect(handler).toContain("background: true");
+    expect(handler).toContain("forceGoalsRefresh: true");
     expect(handler).not.toContain("router.push");
     expect(handler).not.toContain("router.replace");
     expect(handler).not.toContain("setSelectedWorkflowTab(");

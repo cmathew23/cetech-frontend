@@ -3,7 +3,10 @@
 import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
-import { coachSidebarNavItems } from "@/config/dashboardNav";
+import {
+  coachSidebarNavItems,
+  isCoachSidebarNavItemActive,
+} from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -33,10 +36,7 @@ export function CoachSidebar() {
       }
     >
       {coachSidebarNavItems.map((item) => {
-        const active =
-          item.href === "/coach/dashboard"
-            ? pathname === item.href
-            : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+        const active = isCoachSidebarNavItemActive(pathname, item.href);
         const Icon = item.icon;
         const linkClass = cn(link, "font-normal", active && linkActive, active && "!font-medium");
         return (

@@ -2099,6 +2099,7 @@ export function resolveHeadCoachReviewActiveDetailAfterRefresh(input: {
   previousActiveDetail: CoachPersistedTrainingPlanActiveDetail | null;
   summaryPlanId: string | null;
   preservePreviousDetail: boolean;
+  retainPreviousOnMissingDetail?: boolean;
 }): CoachPersistedTrainingPlanActiveDetail | null {
   if (input.refreshedActiveDetail !== null) {
     if (
@@ -2110,6 +2111,9 @@ export function resolveHeadCoachReviewActiveDetailAfterRefresh(input: {
       return input.previousActiveDetail;
     }
     return input.refreshedActiveDetail;
+  }
+  if (input.retainPreviousOnMissingDetail === true) {
+    return input.previousActiveDetail;
   }
   if (
     input.preservePreviousDetail &&
@@ -2141,6 +2145,20 @@ export function shouldUseCachedDomainPlanStateForWorkspace(input: {
     input.cachedActiveDetailPlanId,
     input.cachedLatestDraftPlanId,
   ].some((planId) => (planId?.trim() ?? "") === workspacePlanId);
+}
+
+export function shouldRetainOpenDomainReviewPlan(input: {
+  domain: TrainingPlanGenerationDomain;
+  drawerOpen: boolean;
+  drawerDomain: TrainingPlanGenerationDomain | null;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+  latestDraft: CoachAthleteLatestDomainDraft | null;
+}): boolean {
+  return (
+    input.drawerOpen &&
+    input.drawerDomain === input.domain &&
+    (input.activeDetail !== null || input.latestDraft !== null)
+  );
 }
 
 export function hasPlanningContextSnapshotChanged(
@@ -2323,6 +2341,35 @@ export function shouldRenderReleasedDomainPlanViewerSchedule(input: {
   return !isDomainCoachPlanViewerContextExpired(input);
 }
 
+/**
+ * SKILLS review drawer Version / versionId must track the same authoritative draft that
+ * renders the schedule after a local revise. Stale workspace/active-detail surfaceIdentity
+ * must not keep showing the prior versionNumber while the revised candidate is installed.
+ */
+export function resolveSkillsReviewDrawerDisplayedVersion(input: {
+  contentSource: DomainReviewDrawerContentSource;
+  latestDraft: CoachAthleteLatestDomainDraft | null;
+  fallbackVersionId: string;
+  fallbackVersionNumber: number | null;
+}): { versionId: string; versionNumber: number | null } {
+  if (input.contentSource !== "latest_domain_draft" || input.latestDraft === null) {
+    return {
+      versionId: input.fallbackVersionId,
+      versionNumber: input.fallbackVersionNumber,
+    };
+  }
+  const draftVersionId = input.latestDraft.trainingPlanVersionId?.trim() ?? "";
+  const draftVersionNumber =
+    typeof input.latestDraft.versionNumber === "number" &&
+    Number.isFinite(input.latestDraft.versionNumber)
+      ? input.latestDraft.versionNumber
+      : null;
+  return {
+    versionId: draftVersionId !== "" ? draftVersionId : input.fallbackVersionId,
+    versionNumber: draftVersionNumber ?? input.fallbackVersionNumber,
+  };
+}
+
 export function resolveDomainReviewDrawerContentSource(input: {
   domain: TrainingPlanGenerationDomain;
   workflowStatus: AssistantDomainWorkflowStatus;
@@ -2353,15 +2400,36 @@ export function resolveDomainReviewDrawerContentSource(input: {
     if (input.activeDetail !== null) return "active_detail";
     return "none";
   }
-  if (
-    input.workflowStatus === "approved" &&
-    input.directReleaseSkillsOwner &&
-    hasLatestDraft
-  ) {
-    return "latest_domain_draft";
+  if (hasLatestDraft) {
+    // SKILLS approve/release (and Workflow 3 direct-release owners after approve) keep
+    // rendering the already-loaded schedule. These mutations are status transitions only —
+    // never force contentSource "none" / "Loading generated …" while usable draft remains.
+    if (
+      input.domain === "SKILLS" &&
+      (input.workflowStatus === "approved" || input.workflowStatus === "released")
+    ) {
+      return "latest_domain_draft";
+    }
+    if (input.workflowStatus === "approved" && input.directReleaseSkillsOwner) {
+      return "latest_domain_draft";
+    }
   }
   if (input.activeDetail !== null) return "active_detail";
   return "none";
+}
+
+/**
+ * SKILLS domain-approve / domain-release only change workflow status/actions.
+ * Do not refetch detail/workspace/latest — that refresh chain clears the loaded plan.
+ */
+export function shouldSkipSkillsPostApprovalPlanRefresh(input: {
+  domain: TrainingPlanGenerationDomain;
+  action: GovernedTrainingPlanWorkflowAction;
+}): boolean {
+  return (
+    input.domain === "SKILLS" &&
+    (input.action === "HEAD_APPROVE" || input.action === "RELEASE")
+  );
 }
 
 export function resolveDomainCoachPlanWindowLabel(input: {
@@ -2394,7 +2462,10 @@ export function shouldShowDomainReviewSubmittedPlanEmptyState(input: {
   loading: boolean;
   error: string | null;
 }): boolean {
-  return input.contentSource === "none" && !input.loading && input.error === null;
+  // Generated-plan review drawers only open after a plan exists. Unresolved
+  // detail is pending or failed — never an empty "no submitted plan" state.
+  void input;
+  return false;
 }
 
 export function resolveDomainReviewPlanLoadMessage(input: {
@@ -2404,11 +2475,12 @@ export function resolveDomainReviewPlanLoadMessage(input: {
   error: string | null;
 }): string | null {
   if (input.contentSource !== "none") return null;
-  if (input.loading) {
-    return `Loading generated ${domainPlanHistoryDomainLabel(input.domain)} plan...`;
+  if (input.error !== null && !input.loading) {
+    return "Generated draft could not be loaded.";
   }
-  if (input.error !== null) return "Generated draft could not be loaded.";
-  return "No submitted plan data available for this domain.";
+  // Drawer opens only after generation. No rendered plan yet means detail is
+  // still pending — never show the empty submitted-plan message.
+  return `Loading generated ${domainPlanHistoryDomainLabel(input.domain)} plan...`;
 }
 
 export function shouldHydrateDirectReleaseDomainDrawerDetail(input: {
@@ -3821,6 +3893,92 @@ export function buildRestDayRevisionSummary(input: {
 
 export type SkillsReviseIds = { trainingPlanId: string; versionId: string };
 
+export type SkillsSelectedRevisionOption = {
+  identity: string;
+  option: CoachAthleteDomainDraftRevisionOption;
+};
+
+type SkillsRevisionCanonicalIdentity =
+  | { kind: "skill"; value: string }
+  | { kind: "catalog"; value: string };
+
+/**
+ * Single canonical Skills identity for BOTH selection and current-option-set membership.
+ * Prefer explicit skillCode/catalog fields; live ADD options often carry the drill skillCode
+ * only as `option.id` (never label/metadata, never a different option's id).
+ */
+export function skillsRevisionCanonicalIdentity(
+  option: CoachAthleteDomainDraftRevisionOption | null | undefined,
+): SkillsRevisionCanonicalIdentity | null {
+  const itemSkillCode = option?.item?.skillCode?.trim() ?? "";
+  if (itemSkillCode !== "") return { kind: "skill", value: itemSkillCode };
+  const itemCatalogId = option?.item?.catalogItemId?.trim() ?? "";
+  if (itemCatalogId !== "") return { kind: "catalog", value: itemCatalogId };
+  const skillCode = option?.skillCode?.trim() ?? "";
+  if (skillCode !== "") return { kind: "skill", value: skillCode };
+  const catalogItemId = option?.catalogItemId?.trim() ?? "";
+  if (catalogItemId !== "") return { kind: "catalog", value: catalogItemId };
+  const id = option?.id?.trim() ?? "";
+  return id === "" ? null : { kind: "skill", value: id };
+}
+
+export function skillsRevisionOptionIdentity(
+  option: CoachAthleteDomainDraftRevisionOption | null | undefined,
+): string | null {
+  const identity = skillsRevisionCanonicalIdentity(option);
+  return identity === null ? null : `${identity.kind}:${identity.value}`;
+}
+
+export function selectSkillsRevisionOption(
+  option: CoachAthleteDomainDraftRevisionOption,
+): SkillsSelectedRevisionOption | null {
+  const identity = skillsRevisionOptionIdentity(option);
+  return identity === null ? null : { identity, option };
+}
+
+export function skillsRevisionSelectionBelongsToOptions(
+  selection: SkillsSelectedRevisionOption | null,
+  options: CoachAthleteDomainDraftRevisionOption[],
+): boolean {
+  return (
+    selection !== null &&
+    options.some((option) => skillsRevisionOptionIdentity(option) === selection.identity)
+  );
+}
+
+/** Effective selected Skills option only when it still belongs to the currently loaded option set. */
+export function resolveSkillsSelectedRevisionOption(input: {
+  selection: SkillsSelectedRevisionOption | null;
+  options: CoachAthleteDomainDraftRevisionOption[];
+}): CoachAthleteDomainDraftRevisionOption | null {
+  return skillsRevisionSelectionBelongsToOptions(input.selection, input.options)
+    ? (input.selection?.option ?? null)
+    : null;
+}
+
+/** Returns the exact canonical item carried by the clicked Skills option. */
+export function skillsRevisionItemFromOption(
+  option: CoachAthleteDomainDraftRevisionOption | null | undefined,
+): TrainingPlanRevisionPatchItem | null {
+  if (option?.item?.skillCode?.trim() || option?.item?.catalogItemId?.trim()) {
+    return { ...option.item };
+  }
+  const identity = skillsRevisionCanonicalIdentity(option);
+  if (identity === null) return null;
+  if (identity.kind === "skill") {
+    const catalogItemId = option?.catalogItemId?.trim() ?? "";
+    return {
+      skillCode: identity.value,
+      ...(catalogItemId === "" ? {} : { catalogItemId }),
+      label: option?.label ?? null,
+    };
+  }
+  return {
+    catalogItemId: identity.value,
+    label: option?.label ?? null,
+  };
+}
+
 /** Builds one supported Skills item patch without constructing drill metadata. */
 export function buildSkillsRevisionPatch(input: {
   target: FynRevisionTargetOption;
@@ -3833,13 +3991,13 @@ export function buildSkillsRevisionPatch(input: {
   if (dayIndex === null || sessionIndex === null) return null;
 
   if (input.actionKey === "ADD_ITEM" && input.target.level === "SESSION") {
-    const skillCode = input.option?.id.trim() ?? "";
-    if (skillCode === "") return null;
+    const item = skillsRevisionItemFromOption(input.option);
+    if (item === null) return null;
     return {
       operation: "ADD_ITEM",
       dayIndex,
       sessionIndex,
-      item: { skillCode },
+      item,
     };
   }
 
@@ -3992,6 +4150,99 @@ export function nextSkillsRevisionVersionId(
 ): string | null {
   const version = result?.versionId?.trim();
   return version && version !== "" ? version : null;
+}
+
+export function skillsDraftFromRevisionResult(
+  result: TrainingPlanReviseResult,
+): CoachAthleteLatestDomainDraft | null {
+  const candidate = result.generatedPlannerCandidate;
+  const planId = result.planId?.trim() ?? "";
+  const versionId = result.versionId?.trim() ?? "";
+  if (candidate == null || planId === "" || versionId === "") return null;
+
+  // The POST response candidate is the complete authoritative plan. Replace
+  // with that graph verbatim; only stamp its authoritative persisted metadata.
+  return {
+    ...candidate,
+    trainingPlanId: planId,
+    trainingPlanVersionId: versionId,
+    versionNumber: result.versionNumber,
+  };
+}
+
+export function projectSkillsFynContextAfterRevision(
+  context: CoachAthleteDomainDraftRevisionContext | null,
+  result: TrainingPlanReviseResult,
+  draft: CoachAthleteLatestDomainDraft | null,
+): CoachAthleteDomainDraftRevisionContext | null {
+  const planId = result.planId?.trim() || draft?.trainingPlanId?.trim() || null;
+  const versionId =
+    nextSkillsRevisionVersionId(result) ?? draft?.trainingPlanVersionId?.trim() ?? null;
+  if (planId === null || versionId === null) return context;
+  const status = draft?.status ?? context?.status ?? null;
+  const baseContext: CoachAthleteDomainDraftRevisionContext = context ?? {
+    generationDomain: "SKILLS",
+    draft: null,
+    ref: null,
+    status: null,
+    version: null,
+    targetMap: null,
+    planningBriefSummary: null,
+    lockedPlanningContextSummary: null,
+    allowedChangeTypes: [],
+    changeOptions: [],
+    requiredInput: null,
+    raw: result.raw,
+  };
+
+  return {
+    ...baseContext,
+    generationDomain: "SKILLS",
+    draft,
+    ref: {
+      generationDomain: "SKILLS",
+      trainingPlanId: planId,
+      trainingPlanVersionId: versionId,
+      versionId,
+      versionNumber: result.versionNumber ?? draft?.versionNumber ?? null,
+      status,
+      raw: result.raw,
+    },
+    status,
+    version: baseContext.version,
+    // The old target map describes the pre-revision graph. Target helpers now
+    // derive from the returned revised draft/rendered schedule instead.
+    targetMap: null,
+  };
+}
+
+export function shouldSuppressHeadCoachSkillsDetailRefreshForLocalRevision(input: {
+  contextPlanId: string;
+  pinnedReviseIds: SkillsReviseIds | null;
+}): boolean {
+  return (
+    (input.pinnedReviseIds?.trainingPlanId.trim() ?? "") === input.contextPlanId.trim() &&
+    (input.pinnedReviseIds?.versionId.trim() ?? "") !== ""
+  );
+}
+
+export type SkillsRevisionLocalOutcome<T> =
+  | { kind: "mutation_failed"; error: unknown }
+  | { kind: "applied"; result: T };
+
+export async function runSkillsRevisionLocalLifecycle<T>(input: {
+  mutate: () => Promise<T>;
+  applyReturnedRevision: (result: T) => void;
+  showSuccess: (result: T) => void;
+}): Promise<SkillsRevisionLocalOutcome<T>> {
+  try {
+    const result = await input.mutate();
+    input.applyReturnedRevision(result);
+    input.showSuccess(result);
+    return { kind: "applied", result };
+  } catch (error) {
+    return { kind: "mutation_failed", error };
+  }
 }
 
 /** Keeps sequential Skills revisions pinned to the version returned by the previous revision. */
@@ -5032,7 +5283,7 @@ export type FynRevisionOptionsRequestIdentity = {
 export function fynRevisionOptionsUsesStaleResponseGuard(
   domain: TrainingPlanGenerationDomain,
 ): boolean {
-  return domain === "S_AND_C";
+  return domain === "SKILLS" || domain === "S_AND_C";
 }
 
 export function buildFynRevisionOptionsRequestSelectionKey(input: {
@@ -12111,6 +12362,14 @@ export function CoachAthletePlanningProfileView({
   const [domainReviewDrawerOpen, setDomainReviewDrawerOpen] = useState(false);
   const [domainReviewDrawerDomain, setDomainReviewDrawerDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
+  const domainReviewDrawerSelectionRef = useRef<{
+    open: boolean;
+    domain: TrainingPlanGenerationDomain | null;
+  }>({ open: false, domain: null });
+  domainReviewDrawerSelectionRef.current = {
+    open: domainReviewDrawerOpen,
+    domain: domainReviewDrawerDomain,
+  };
   const [domainReviewDrawerClosing, setDomainReviewDrawerClosing] = useState(false);
   const domainReviewDrawerCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -12191,6 +12450,8 @@ export function CoachAthletePlanningProfileView({
   const [fynRevisionSelectedOptions, setFynRevisionSelectedOptions] = useState<
     Partial<Record<TrainingPlanGenerationDomain, CoachAthleteDomainDraftRevisionOption | null>>
   >({});
+  const [skillsSelectedRevisionOption, setSkillsSelectedRevisionOption] =
+    useState<SkillsSelectedRevisionOption | null>(null);
   // Coach's current target quantity for a Nutrition UPDATE_ITEM serving adjustment (the stepper
   // value). Null means "not yet adjusted" — the display falls back to the item's parsed serving
   // quantity, which keeps Apply disabled until the coach steps the value. Reset whenever the
@@ -16669,53 +16930,46 @@ export function CoachAthletePlanningProfileView({
       );
 
       if (!cancelled) {
-        setHeadCoachDomainPlanStates((prev) => ({
-          SKILLS: {
-            ...nextStates.SKILLS,
-            latestDraft:
-              nextStates.SKILLS.summaryPlanId !== null &&
-              prev.SKILLS.latestDraft?.trainingPlanId?.trim() ===
-                nextStates.SKILLS.summaryPlanId
-                ? prev.SKILLS.latestDraft
-                : null,
-            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: null,
-              previousActiveDetail: prev.SKILLS.activeDetail,
-              summaryPlanId: nextStates.SKILLS.summaryPlanId,
-              preservePreviousDetail: true,
-            }),
-          },
-          NUTRITION: {
-            ...nextStates.NUTRITION,
-            latestDraft:
-              nextStates.NUTRITION.summaryPlanId !== null &&
-              prev.NUTRITION.latestDraft?.trainingPlanId?.trim() ===
-                nextStates.NUTRITION.summaryPlanId
-                ? prev.NUTRITION.latestDraft
-                : null,
-            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: null,
-              previousActiveDetail: prev.NUTRITION.activeDetail,
-              summaryPlanId: nextStates.NUTRITION.summaryPlanId,
-              preservePreviousDetail: true,
-            }),
-          },
-          S_AND_C: {
-            ...nextStates.S_AND_C,
-            latestDraft:
-              nextStates.S_AND_C.summaryPlanId !== null &&
-              prev.S_AND_C.latestDraft?.trainingPlanId?.trim() ===
-                nextStates.S_AND_C.summaryPlanId
-                ? prev.S_AND_C.latestDraft
-                : null,
-            activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
-              refreshedActiveDetail: null,
-              previousActiveDetail: prev.S_AND_C.activeDetail,
-              summaryPlanId: nextStates.S_AND_C.summaryPlanId,
-              preservePreviousDetail: true,
-            }),
-          },
-        }));
+        setHeadCoachDomainPlanStates((prev) => {
+          const drawerSelection = domainReviewDrawerSelectionRef.current;
+          const resolveNextState = (
+            domain: TrainingPlanGenerationDomain,
+          ): HeadCoachDomainPlanState => {
+            const previous = prev[domain];
+            const next = nextStates[domain];
+            const retainOpenReviewPlan = shouldRetainOpenDomainReviewPlan({
+              domain,
+              drawerOpen: drawerSelection.open,
+              drawerDomain: drawerSelection.domain,
+              activeDetail: previous.activeDetail,
+              latestDraft: previous.latestDraft,
+            });
+            return {
+              ...next,
+              latestDraft:
+                retainOpenReviewPlan ||
+                (
+                  next.summaryPlanId !== null &&
+                  previous.latestDraft?.trainingPlanId?.trim() === next.summaryPlanId
+                )
+                  ? previous.latestDraft
+                  : null,
+              activeDetail: resolveHeadCoachReviewActiveDetailAfterRefresh({
+                refreshedActiveDetail: null,
+                previousActiveDetail: previous.activeDetail,
+                summaryPlanId: next.summaryPlanId,
+                preservePreviousDetail: true,
+                retainPreviousOnMissingDetail: retainOpenReviewPlan,
+              }),
+            };
+          };
+
+          return {
+            SKILLS: resolveNextState("SKILLS"),
+            NUTRITION: resolveNextState("NUTRITION"),
+            S_AND_C: resolveNextState("S_AND_C"),
+          };
+        });
         setSubmittedDomainPlansBootstrapState("loaded");
       }
     })();
@@ -16860,10 +17114,34 @@ export function CoachAthletePlanningProfileView({
       revisionFeedback?: string | null;
     }) => {
       const status = postActionStatus(input.action);
-      setWorkspace((current) => projectWorkspaceAfterTrainingPlanMutation({
-        workspace: current,
-        ...input,
-      }));
+      const isSkillsStatusOnlyMutation =
+        input.domain === "SKILLS" &&
+        (input.action === "HEAD_APPROVE" || input.action === "RELEASE");
+      setWorkspace((current) => {
+        const projected = projectWorkspaceAfterTrainingPlanMutation({
+          workspace: current,
+          ...input,
+        });
+        if (projected === null || !isSkillsStatusOnlyMutation) {
+          return projected;
+        }
+        // Ensure Release remains available from local approve projection without a workspace refetch.
+        if (input.action === "HEAD_APPROVE") {
+          const skills = projected.domains.SKILLS;
+          if (skills.allowedActions.includes("RELEASE")) return projected;
+          return {
+            ...projected,
+            domains: {
+              ...projected.domains,
+              SKILLS: {
+                ...skills,
+                allowedActions: [...skills.allowedActions, "RELEASE"],
+              },
+            },
+          };
+        }
+        return projected;
+      });
       setHeadCoachDomainPlanStates((current) => {
         const domainState = current[input.domain];
         const activeDetail =
@@ -16874,12 +17152,19 @@ export function CoachAthletePlanningProfileView({
                 version: { ...domainState.activeDetail.version, status },
               }
             : domainState.activeDetail;
+        const latestDraft =
+          isSkillsStatusOnlyMutation &&
+          domainState.latestDraft !== null &&
+          (domainState.latestDraft.trainingPlanId?.trim() ?? "") === input.planId
+            ? { ...domainState.latestDraft, status }
+            : domainState.latestDraft;
         return {
           ...current,
           [input.domain]: {
             ...domainState,
             loading: false,
             error: null,
+            latestDraft,
             activeDetail,
             summaryStatus: status,
             summaryPlanId: input.planId,
@@ -16887,6 +17172,16 @@ export function CoachAthletePlanningProfileView({
           },
         };
       });
+      if (isSkillsStatusOnlyMutation) {
+        // Keep the installed Skills schedule; only stamp approve/release status onto it.
+        // Invalidate in-flight latest reads so a stale response cannot clear the plan.
+        latestSkillsDraftRequestGenRef.current += 1;
+        setLatestSkillsDraft((current) =>
+          current !== null && (current.trainingPlanId?.trim() ?? "") === input.planId
+            ? { ...current, status }
+            : current,
+        );
+      }
       setPersistedSkillsPlanDetail((current) =>
         current !== null &&
         persistedVerifiedDomain === input.domain &&
@@ -16939,6 +17234,14 @@ export function CoachAthletePlanningProfileView({
     if (selectedWorkflowTab !== "generate" || !generateTabPrecSatisfied) return;
     const context = headCoachSkillsViewPlanContext;
     if (context === null || context.planId.trim() === "") return;
+    if (
+      shouldSuppressHeadCoachSkillsDetailRefreshForLocalRevision({
+        contextPlanId: context.planId,
+        pinnedReviseIds: skillsActiveReviseIds,
+      })
+    ) {
+      return;
+    }
     const currentPlanId = headCoachOwnedSkillsActiveDetail?.plan.id?.trim() ?? "";
     const currentVersionId = headCoachOwnedSkillsActiveDetail?.version.id?.trim() ?? "";
     const contextVersionId = context.versionId.trim();
@@ -16969,6 +17272,7 @@ export function CoachAthletePlanningProfileView({
     headCoachSkillsViewPlanContext,
     refreshPersistedPlanDetail,
     selectedWorkflowTab,
+    skillsActiveReviseIds,
   ]);
 
   async function openReleasedDomainPlanViewer(
@@ -17192,10 +17496,14 @@ export function CoachAthletePlanningProfileView({
       }
 
       setHeadCoachDomainPlanStates((prev) => {
-        if (error !== null && options?.preserveOnFailure === true) {
+        if (error !== null) {
           return {
             ...prev,
-            [domain]: { ...prev[domain], loading: false, error: null },
+            [domain]: {
+              ...prev[domain],
+              loading: false,
+              error: options?.preserveOnFailure === true ? null : error,
+            },
           };
         }
         return {
@@ -17211,6 +17519,7 @@ export function CoachAthletePlanningProfileView({
               preservePreviousDetail:
                 workflow1HeadCoachReviewActionPanelMode &&
                 headCoachSubmittedReviewDomain === domain,
+              retainPreviousOnMissingDetail: true,
             }),
             summaryStatus,
             summaryPlanId,
@@ -18364,28 +18673,58 @@ export function CoachAthletePlanningProfileView({
       };
     }
 
-    const trainingPlanIdForReload = (payload.trainingPlanId || activeReviseIds.trainingPlanId).trim();
-
     setReviseSkillsLoading(true);
     setReviseSkillsError(null);
     setReviseSkillsSuccess(null);
     setGovernedPlanRefreshWarning(null);
-    const outcome = await runTrainingPlanPostActionRefresh({
+    const outcome = await runSkillsRevisionLocalLifecycle({
       mutate: () =>
         reviseCoachAthleteSkillsTrainingPlan(entityId, athleteIdTrimmed, payload),
-      applyMutationSuccess: (reviseResult) => {
+      applyReturnedRevision: (reviseResult) => {
         const nextVersionId =
           nextSkillsRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
         const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
+        const revisedDraft = skillsDraftFromRevisionResult(reviseResult);
+        if (revisedDraft === null) {
+          throw new Error("Skills revision response did not include a usable generatedPlannerCandidate.");
+        }
+
+        latestSkillsDraftRequestGenRef.current += 1;
         setSkillsActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
-        applyTrainingPlanMutationSuccessLocally({
-          domain: "SKILLS",
-          action: "REVISION_APPLY",
-          planId: nextPlanId,
-          versionId: nextVersionId,
-        });
+        knownDomainPlanIdsRef.current.SKILLS = nextPlanId;
+        setLatestSkillsDraft(revisedDraft);
+        setLatestDraftDomain("SKILLS");
+        setLatestSkillsDraftRequestState("success");
+        setLatestSkillsDraftMissing(false);
+        setLatestSkillsDraftError(null);
+        setLatestSkillsDraftErrorDomain(null);
+        setGeneratePlanError(null);
+        setHeadCoachDomainPlanStates((current) => ({
+          ...current,
+          SKILLS: {
+            ...current.SKILLS,
+            loading: false,
+            error: null,
+            latestDraft: revisedDraft,
+            summaryStatus: revisedDraft.status ?? "AI_GENERATED",
+            summaryPlanId: nextPlanId,
+            summaryVersionId: nextVersionId,
+          },
+        }));
+        setFynRevisionContexts((current) => ({
+          ...current,
+          SKILLS: {
+            context: projectSkillsFynContextAfterRevision(
+              current.SKILLS?.context ?? null,
+              reviseResult,
+              revisedDraft,
+            ),
+            loading: false,
+            error: null,
+          },
+        }));
       },
-      showMutationSuccess: () => {
+      showSuccess: () => {
         if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
         setReviseSkillsFeedback("");
         if (isSinglePatch) {
@@ -18397,33 +18736,6 @@ export function CoachAthletePlanningProfileView({
         } else {
           setReviseSkillsSuccess("Revised skills plan version generated.");
         }
-      },
-      refresh: async (reviseResult) => {
-        await reconcileRevisedDomainPlanDetail("SKILLS", reviseResult, trainingPlanIdForReload);
-        if (isSinglePatch) {
-          await runNutritionReviewDrawerOpenRefresh({
-            loadLatestPlan: async () => {
-              if ((await loadLatestSkillsDraft("SKILLS", true, true, false, true)) === null) {
-                throw new Error("Unable to reload the revised Skills plan.");
-              }
-            },
-            rebuildTargetOptions: async () => {
-              if (!(await loadFynRevisionContext("SKILLS"))) {
-                throw new Error("Unable to reload Skills revision guidance.");
-              }
-            },
-          });
-        } else if ((await loadLatestSkillsDraft("SKILLS", true, true, false, true)) === null) {
-          throw new Error("Unable to reload the revised Skills plan.");
-        }
-        if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
-          throw new Error("Could not refresh the latest training plan workspace.");
-        }
-      },
-      showRefreshWarning: (error) => {
-        setGovernedPlanRefreshWarning(
-          formatApiError(error, "Revision applied, but the latest Skills plan could not be refreshed."),
-        );
       },
     });
     if (outcome.kind === "mutation_failed") {
@@ -18533,7 +18845,7 @@ export function CoachAthletePlanningProfileView({
     key: string,
   ): void {
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
-      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+      delete fynRevisionOptionsRequestRef.current[domain];
     }
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: key }));
     // Available actions and any fetched options depend on the selected target, so reset them.
@@ -18548,6 +18860,7 @@ export function CoachAthletePlanningProfileView({
     }));
     // The chosen approved option (deterministic single-patch flows) is target-specific; clear it.
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    if (domain === "SKILLS") setSkillsSelectedRevisionOption(null);
     // The serving stepper re-seeds from the newly selected item's serving.
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
@@ -18567,7 +18880,7 @@ export function CoachAthletePlanningProfileView({
     target: FynRevisionTargetOption | null,
   ): void {
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
-      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+      delete fynRevisionOptionsRequestRef.current[domain];
     }
     if (
       domain === "S_AND_C" &&
@@ -18583,6 +18896,7 @@ export function CoachAthletePlanningProfileView({
     }));
     // Switching action invalidates any previously chosen deterministic option.
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    if (domain === "SKILLS") setSkillsSelectedRevisionOption(null);
     // The serving stepper only applies to UPDATE_ITEM; reset it when the action changes.
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
@@ -18628,7 +18942,7 @@ export function CoachAthletePlanningProfileView({
 
   function resetFynRevisionOptionsFlow(domain: TrainingPlanGenerationDomain): void {
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
-      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+      delete fynRevisionOptionsRequestRef.current[domain];
     }
     setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
@@ -18642,6 +18956,7 @@ export function CoachAthletePlanningProfileView({
       [domain]: defaultFynRevisionOptionsState(),
     }));
     setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: null }));
+    if (domain === "SKILLS") setSkillsSelectedRevisionOption(null);
     setNutritionServingDraftQuantity(null);
     setSkillsDurationMinutesDraft("");
     setSkillsRepsDraft("");
@@ -18662,6 +18977,10 @@ export function CoachAthletePlanningProfileView({
     targetOptions: FynRevisionTargetOption[],
   ): Promise<void> {
     if (fynRevisionOptionStates[domain]?.loading) return;
+    if (domain === "SKILLS") {
+      // Every options request defines a new approved set; a prior-set selection is never reusable.
+      setSkillsSelectedRevisionOption(null);
+    }
     const coachRequest = fynRevisionRequests[domain] ?? "";
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
     const actionKey = fynRevisionActionKeys[domain] ?? null;
@@ -18687,7 +19006,7 @@ export function CoachAthletePlanningProfileView({
           }
         : null;
     if (request !== null) {
-      fynRevisionOptionsRequestRef.current.S_AND_C = request;
+      fynRevisionOptionsRequestRef.current[domain] = request;
     }
     let target = selectedTargetOption?.target ?? null;
     // For ADD_ITEM, target the parent session/meal and label it with the session name so the
@@ -18721,13 +19040,13 @@ export function CoachAthletePlanningProfileView({
       request !== null &&
       !fynRevisionOptionsResponseIsCurrent(
         request,
-        fynRevisionOptionsRequestRef.current.S_AND_C,
+        fynRevisionOptionsRequestRef.current[domain],
       )
     ) {
       return;
     }
     if (request !== null) {
-      delete fynRevisionOptionsRequestRef.current.S_AND_C;
+      delete fynRevisionOptionsRequestRef.current[domain];
     }
     setFynRevisionOptionStates((current) => {
       if (outcome.status === "MISSING_REQUEST") {
@@ -18780,7 +19099,11 @@ export function CoachAthletePlanningProfileView({
   ): void {
     // Deterministic flows keep exactly one chosen approved option (no basket). The patch is
     // assembled from target + action + this option at Apply Revision time.
-    if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") {
+    if (domain === "SKILLS") {
+      setSkillsSelectedRevisionOption(selectSkillsRevisionOption(option));
+      return;
+    }
+    if (domain === "NUTRITION" || domain === "S_AND_C") {
       setFynRevisionSelectedOptions((current) => ({ ...current, [domain]: option }));
       if (domain === "S_AND_C") {
         setSandCAddItemValues({ ...EMPTY_SANDC_ADD_ITEM_VALUES });
@@ -19043,6 +19366,15 @@ export function CoachAthletePlanningProfileView({
         setGovernedPlanActionSuccess(governedPlanActionSuccessMessage(action));
       },
       refresh: async () => {
+        if (
+          shouldSkipSkillsPostApprovalPlanRefresh({
+            domain: actionDomain,
+            action,
+          })
+        ) {
+          // SKILLS approve/release are status-only; keep the already-loaded plan/version authoritative.
+          return;
+        }
         if (isHeadCoachPlanningContextOwner) {
           await refreshHeadCoachDomainPlanState(actionDomain, { preserveOnFailure: true });
         } else {
@@ -19646,24 +19978,37 @@ export function CoachAthletePlanningProfileView({
     const cachedState = headCoachDomainPlanStates[domain];
     const workspaceDomainEntry = workspace?.domains[domain] ?? null;
     const workspacePlanId = workspaceDomainEntry?.summary.trainingPlanId?.trim() ?? "";
-    const useCachedState = shouldUseCachedDomainPlanStateForWorkspace({
-      workspacePresent: workspace !== null,
-      workspacePlanId,
-      cachedSummaryPlanId: cachedState.summaryPlanId,
-      cachedActiveDetailPlanId: cachedState.activeDetail?.plan.id,
-      cachedLatestDraftPlanId: cachedState.latestDraft?.trainingPlanId,
+    const reviewDrawerOwnsDomain =
+      domainReviewDrawerOpen && domainReviewDrawerDomain === domain;
+    const retainOpenReviewPlan = shouldRetainOpenDomainReviewPlan({
+      domain,
+      drawerOpen: domainReviewDrawerOpen,
+      drawerDomain: domainReviewDrawerDomain,
+      activeDetail: cachedState.activeDetail,
+      latestDraft: cachedState.latestDraft,
     });
+    const useCachedState =
+      retainOpenReviewPlan ||
+      shouldUseCachedDomainPlanStateForWorkspace({
+        workspacePresent: workspace !== null,
+        workspacePlanId,
+        cachedSummaryPlanId: cachedState.summaryPlanId,
+        cachedActiveDetailPlanId: cachedState.activeDetail?.plan.id,
+        cachedLatestDraftPlanId: cachedState.latestDraft?.trainingPlanId,
+      });
     const state = useCachedState
       ? cachedState
       : createEmptyHeadCoachDomainPlanStates()[domain];
     const assignmentDomainContext = workspace?.assignmentContext?.domains[domain];
     const workspaceMatchedOwnedSkillsDraft =
       workspace === null ||
+      reviewDrawerOwnsDomain ||
       headCoachOwnedSkillsDraft?.trainingPlanId?.trim() === workspacePlanId
         ? headCoachOwnedSkillsDraft
         : null;
     const workspaceMatchedOwnedSkillsActiveDetail =
       workspace === null ||
+      reviewDrawerOwnsDomain ||
       headCoachOwnedSkillsActiveDetail?.plan.id?.trim() === workspacePlanId
         ? headCoachOwnedSkillsActiveDetail
         : null;
@@ -19682,6 +20027,7 @@ export function CoachAthletePlanningProfileView({
         : null;
     const workspaceMatchedLatestDraft =
       workspace === null ||
+      reviewDrawerOwnsDomain ||
       latestSkillsDraft?.trainingPlanId?.trim() === workspacePlanId
         ? latestSkillsDraft
         : null;
@@ -19990,6 +20336,33 @@ export function CoachAthletePlanningProfileView({
       fallbackSource: "domain review surface",
       preferCompleteFallback: true,
     });
+    const fallbackVersionNumber =
+      surfaceIdentity.versionNumber ??
+      (contentSource === "latest_domain_draft"
+        ? latestDraftForReview?.versionNumber ?? null
+        : null);
+    const skillsDisplayedVersion =
+      domain === "SKILLS"
+        ? resolveSkillsReviewDrawerDisplayedVersion({
+            contentSource,
+            latestDraft: latestDraftForReview,
+            fallbackVersionId: versionId,
+            fallbackVersionNumber,
+          })
+        : null;
+    const displayedVersionId = skillsDisplayedVersion?.versionId ?? versionId;
+    const displayedVersionNumber =
+      skillsDisplayedVersion?.versionNumber ?? fallbackVersionNumber;
+    const displayedActionContext =
+      skillsDisplayedVersion !== null &&
+      planId !== "" &&
+      displayedVersionId !== ""
+        ? {
+            planId,
+            versionId: displayedVersionId,
+            generationDomain: domain,
+          }
+        : planContext;
 
     return {
       domain,
@@ -20009,10 +20382,8 @@ export function CoachAthletePlanningProfileView({
       latestDraft: latestDraftForReview,
       contentSource,
       planId,
-      versionId,
-      versionNumber:
-        surfaceIdentity.versionNumber ??
-        (contentSource === "latest_domain_draft" ? latestDraftForReview?.versionNumber ?? null : null),
+      versionId: displayedVersionId,
+      versionNumber: displayedVersionNumber,
       trainingDays:
         contentSource === "latest_domain_draft"
           ? countLatestDomainDraftTrainingDays(latestDraftForReview)
@@ -20026,7 +20397,7 @@ export function CoachAthletePlanningProfileView({
       canShowApproveAction,
       canShowRequestRevisionAction,
       canShowReleaseAction,
-      actionContext: planContext,
+      actionContext: displayedActionContext,
       viewPlanContext,
     };
   }
@@ -21035,7 +21406,10 @@ export function CoachAthletePlanningProfileView({
       reviseLoading: drawerReviseLoading,
     });
     const skillsSelectedOption = skillsSinglePatchMode
-      ? (fynRevisionSelectedOptions.SKILLS ?? null)
+      ? resolveSkillsSelectedRevisionOption({
+          selection: skillsSelectedRevisionOption,
+          options: fynRevisionOptionsState.options,
+        })
       : null;
     const nutritionSelectedOption = nutritionSinglePatchMode
       ? (fynRevisionSelectedOptions.NUTRITION ?? null)

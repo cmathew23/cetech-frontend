@@ -2401,11 +2401,11 @@ export function resolveDomainReviewDrawerContentSource(input: {
     return "none";
   }
   if (hasLatestDraft) {
-    // SKILLS approve/release (and Workflow 3 direct-release owners after approve) keep
+    // SKILLS/S&C approve/release (and Workflow 3 direct-release owners after approve) keep
     // rendering the already-loaded schedule. These mutations are status transitions only —
     // never force contentSource "none" / "Loading generated …" while usable draft remains.
     if (
-      input.domain === "SKILLS" &&
+      (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
       (input.workflowStatus === "approved" || input.workflowStatus === "released")
     ) {
       return "latest_domain_draft";
@@ -2419,7 +2419,7 @@ export function resolveDomainReviewDrawerContentSource(input: {
 }
 
 /**
- * SKILLS domain-approve / domain-release only change workflow status/actions.
+ * SKILLS/S&C domain-approve / domain-release only change workflow status/actions.
  * Do not refetch detail/workspace/latest — that refresh chain clears the loaded plan.
  */
 export function shouldSkipSkillsPostApprovalPlanRefresh(input: {
@@ -2427,9 +2427,69 @@ export function shouldSkipSkillsPostApprovalPlanRefresh(input: {
   action: GovernedTrainingPlanWorkflowAction;
 }): boolean {
   return (
-    input.domain === "SKILLS" &&
+    (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
     (input.action === "HEAD_APPROVE" || input.action === "RELEASE")
   );
+}
+
+/** S&C post-generation: usable latest has plan/version ids and at least one training day. */
+export function isUsableGeneratedDomainDraft(
+  draft: CoachAthleteLatestDomainDraft | null | undefined,
+): boolean {
+  if (draft === null || draft === undefined) return false;
+  const planId = draft.trainingPlanId?.trim() ?? "";
+  const versionId = draft.trainingPlanVersionId?.trim() ?? "";
+  if (planId === "" || versionId === "") return false;
+  const trainingDays = countLatestDomainDraftTrainingDays(draft);
+  return trainingDays !== null && trainingDays > 0;
+}
+
+/** S&C-only: skip post-generation active/detail when latest already installed usable content. */
+export function shouldSkipSandCPostGenerationDetailRefresh(input: {
+  domain: TrainingPlanGenerationDomain;
+  latestDraft: CoachAthleteLatestDomainDraft | null;
+}): boolean {
+  return input.domain === "S_AND_C" && isUsableGeneratedDomainDraft(input.latestDraft);
+}
+
+/** S&C-only: retain installed draft when workspace resolves the same plan/version identity. */
+export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
+  domain: TrainingPlanGenerationDomain | null;
+  installedPlanId: string | null | undefined;
+  installedVersionId: string | null | undefined;
+  workspacePlanId: string | null | undefined;
+  workspaceVersionId: string | null | undefined;
+}): boolean {
+  if (input.domain !== "S_AND_C") return false;
+  const installedPlanId = input.installedPlanId?.trim() ?? "";
+  const installedVersionId = input.installedVersionId?.trim() ?? "";
+  const workspacePlanId = input.workspacePlanId?.trim() ?? "";
+  const workspaceVersionId = input.workspaceVersionId?.trim() ?? "";
+  return (
+    installedPlanId !== "" &&
+    installedVersionId !== "" &&
+    workspacePlanId !== "" &&
+    workspaceVersionId !== "" &&
+    installedPlanId === workspacePlanId &&
+    installedVersionId === workspaceVersionId
+  );
+}
+
+/** S&C-only: reject stale/null latest writes while a post-generation draft is installed. */
+export function shouldRejectStaleSandCLatestDraftWrite(input: {
+  domain: TrainingPlanGenerationDomain;
+  requestGeneration: number;
+  currentGeneration: number;
+  installedPlanId: string | null | undefined;
+  installedVersionId: string | null | undefined;
+  incoming: CoachAthleteLatestDomainDraft | null;
+}): boolean {
+  if (input.domain !== "S_AND_C") return false;
+  if (input.requestGeneration !== input.currentGeneration) return true;
+  const installedPlanId = input.installedPlanId?.trim() ?? "";
+  const installedVersionId = input.installedVersionId?.trim() ?? "";
+  if (installedPlanId === "" || installedVersionId === "") return false;
+  return input.incoming === null;
 }
 
 export function resolveDomainCoachPlanWindowLabel(input: {
@@ -4174,6 +4234,7 @@ export function projectSkillsFynContextAfterRevision(
   context: CoachAthleteDomainDraftRevisionContext | null,
   result: TrainingPlanReviseResult,
   draft: CoachAthleteLatestDomainDraft | null,
+  domain: TrainingPlanGenerationDomain = "SKILLS",
 ): CoachAthleteDomainDraftRevisionContext | null {
   const planId = result.planId?.trim() || draft?.trainingPlanId?.trim() || null;
   const versionId =
@@ -4181,7 +4242,7 @@ export function projectSkillsFynContextAfterRevision(
   if (planId === null || versionId === null) return context;
   const status = draft?.status ?? context?.status ?? null;
   const baseContext: CoachAthleteDomainDraftRevisionContext = context ?? {
-    generationDomain: "SKILLS",
+    generationDomain: domain,
     draft: null,
     ref: null,
     status: null,
@@ -4197,10 +4258,10 @@ export function projectSkillsFynContextAfterRevision(
 
   return {
     ...baseContext,
-    generationDomain: "SKILLS",
+    generationDomain: domain,
     draft,
     ref: {
-      generationDomain: "SKILLS",
+      generationDomain: domain,
       trainingPlanId: planId,
       trainingPlanVersionId: versionId,
       versionId,
@@ -4214,6 +4275,22 @@ export function projectSkillsFynContextAfterRevision(
     // derive from the returned revised draft/rendered schedule instead.
     targetMap: null,
   };
+}
+
+/** S&C reuses the Skills candidate→draft mapper (same revise response shape). */
+export function sandCDraftFromRevisionResult(
+  result: TrainingPlanReviseResult,
+): CoachAthleteLatestDomainDraft | null {
+  return skillsDraftFromRevisionResult(result);
+}
+
+/** S&C reuses the Skills Fyn context projection with domain stamped as S_AND_C. */
+export function projectSandCFynContextAfterRevision(
+  context: CoachAthleteDomainDraftRevisionContext | null,
+  result: TrainingPlanReviseResult,
+  draft: CoachAthleteLatestDomainDraft | null,
+): CoachAthleteDomainDraftRevisionContext | null {
+  return projectSkillsFynContextAfterRevision(context, result, draft, "S_AND_C");
 }
 
 export function shouldSuppressHeadCoachSkillsDetailRefreshForLocalRevision(input: {
@@ -4513,26 +4590,25 @@ export function resolveActiveSandCReviseIds(
   return resolveActiveSkillsReviseIds(baseReviseIds, activeReviseIds);
 }
 
-/** Runs one structured S&C revision and resets temporary state only after every refresh succeeds. */
+/**
+ * Runs one structured S&C revision via the same local-install lifecycle as Skills:
+ * mutate → apply returned candidate/version → show success / reset selection.
+ * No detail/latest/workspace/readiness sync refetch.
+ */
 export async function runSandCStructuredRevisionSequence(input: {
   submit: () => Promise<TrainingPlanReviseResult>;
-  pinReturnedVersion: (result: TrainingPlanReviseResult) => void;
-  reconcilePlan: (result: TrainingPlanReviseResult) => Promise<unknown>;
-  reloadLatestPlan: () => Promise<boolean>;
-  reloadRevisionContext: () => Promise<boolean>;
+  applyReturnedRevision: (result: TrainingPlanReviseResult) => void;
   resetTemporaryState: () => void;
 }): Promise<TrainingPlanReviseResult> {
-  const result = await input.submit();
-  input.pinReturnedVersion(result);
-  await input.reconcilePlan(result);
-  if (!(await input.reloadLatestPlan())) {
-    throw new Error("Unable to reload the revised S&C plan.");
+  const outcome = await runSkillsRevisionLocalLifecycle({
+    mutate: input.submit,
+    applyReturnedRevision: input.applyReturnedRevision,
+    showSuccess: () => input.resetTemporaryState(),
+  });
+  if (outcome.kind === "mutation_failed") {
+    throw outcome.error;
   }
-  if (!(await input.reloadRevisionContext())) {
-    throw new Error("Unable to reload S&C revision guidance.");
-  }
-  input.resetTemporaryState();
-  return result;
+  return outcome.result;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -6555,6 +6631,7 @@ function domainIntegrationStatusTone(kind: AssistantDomainWorkflowStatus): strin
 }
 
 export function domainIntegrationNextActionLabel(input: {
+  domain?: TrainingPlanGenerationDomain;
   workflowStatus: AssistantDomainWorkflowStatus;
   assignmentDomainContext: TrainingPlanWorkspaceAssignmentDomainContext | null | undefined;
   planningContextLocked: boolean;
@@ -6585,6 +6662,10 @@ export function domainIntegrationNextActionLabel(input: {
 
   if (input.workflowStatus === "draft_generated") {
     if (input.directReleaseSkillsDraftReview) {
+      // Never show Skills-specific copy for S&C (direct-release approve visibility is domain-generic).
+      if (input.domain === "S_AND_C") {
+        return "Review the generated draft and approve or revise.";
+      }
       return "Review the generated Skills draft, then approve or revise.";
     }
     if (input.headCoachOwnedSkillsDraftApprove) {
@@ -12153,6 +12234,11 @@ export function CoachAthletePlanningProfileView({
     new Map<string, Promise<CoachAthleteLatestDomainDraft>>(),
   );
   const latestSkillsDraftRequestGenRef = useRef(0);
+  /** S&C-only: pin post-generation latest draft identity so workspace bootstrap cannot clear it. */
+  const sandCInstalledGeneratedDraftIdentityRef = useRef<{
+    planId: string;
+    versionId: string;
+  } | null>(null);
   const detailRequestsInFlightRef = useRef(
     new Map<string, Promise<CoachPersistedTrainingPlanActiveDetail>>(),
   );
@@ -16547,6 +16633,7 @@ export function CoachAthletePlanningProfileView({
 
   useEffect(() => {
     latestSkillsDraftRequestGenRef.current += 1;
+    sandCInstalledGeneratedDraftIdentityRef.current = null;
     prevUrlPlanForPersistedSyncRef.current = undefined;
     coachDomainStateResetRef.current = null;
     step6WorkflowFetchGenRef.current += 1;
@@ -16693,6 +16780,7 @@ export function CoachAthletePlanningProfileView({
 
     coachDomainStateResetRef.current = scopedKey;
     latestSkillsDraftRequestGenRef.current += 1;
+    sandCInstalledGeneratedDraftIdentityRef.current = null;
     assistantDomainSummaryHydrationGenRef.current += 1;
     setAssistantDomainSummaryHydrationPending(false);
     step6WorkflowFetchGenRef.current += 1;
@@ -17114,28 +17202,28 @@ export function CoachAthletePlanningProfileView({
       revisionFeedback?: string | null;
     }) => {
       const status = postActionStatus(input.action);
-      const isSkillsStatusOnlyMutation =
-        input.domain === "SKILLS" &&
+      const isStatusOnlyPlanMutation =
+        (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
         (input.action === "HEAD_APPROVE" || input.action === "RELEASE");
       setWorkspace((current) => {
         const projected = projectWorkspaceAfterTrainingPlanMutation({
           workspace: current,
           ...input,
         });
-        if (projected === null || !isSkillsStatusOnlyMutation) {
+        if (projected === null || !isStatusOnlyPlanMutation) {
           return projected;
         }
         // Ensure Release remains available from local approve projection without a workspace refetch.
         if (input.action === "HEAD_APPROVE") {
-          const skills = projected.domains.SKILLS;
-          if (skills.allowedActions.includes("RELEASE")) return projected;
+          const domainEntry = projected.domains[input.domain];
+          if (domainEntry.allowedActions.includes("RELEASE")) return projected;
           return {
             ...projected,
             domains: {
               ...projected.domains,
-              SKILLS: {
-                ...skills,
-                allowedActions: [...skills.allowedActions, "RELEASE"],
+              [input.domain]: {
+                ...domainEntry,
+                allowedActions: [...domainEntry.allowedActions, "RELEASE"],
               },
             },
           };
@@ -17153,7 +17241,7 @@ export function CoachAthletePlanningProfileView({
               }
             : domainState.activeDetail;
         const latestDraft =
-          isSkillsStatusOnlyMutation &&
+          isStatusOnlyPlanMutation &&
           domainState.latestDraft !== null &&
           (domainState.latestDraft.trainingPlanId?.trim() ?? "") === input.planId
             ? { ...domainState.latestDraft, status }
@@ -17172,8 +17260,8 @@ export function CoachAthletePlanningProfileView({
           },
         };
       });
-      if (isSkillsStatusOnlyMutation) {
-        // Keep the installed Skills schedule; only stamp approve/release status onto it.
+      if (isStatusOnlyPlanMutation) {
+        // Keep the installed schedule; only stamp approve/release status onto it.
         // Invalidate in-flight latest reads so a stale response cannot clear the plan.
         latestSkillsDraftRequestGenRef.current += 1;
         setLatestSkillsDraft((current) =>
@@ -18049,6 +18137,19 @@ export function CoachAthletePlanningProfileView({
     latestSkillsDraftRequestGenRef.current += 1;
     const requestGeneration = latestSkillsDraftRequestGenRef.current;
     setLatestSkillsDraftRequestState("loading");
+    const shouldRejectSandCLatestWrite = (
+      incoming: CoachAthleteLatestDomainDraft | null,
+    ): boolean => {
+      const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
+      return shouldRejectStaleSandCLatestDraftWrite({
+        domain: generationDomain,
+        requestGeneration,
+        currentGeneration: latestSkillsDraftRequestGenRef.current,
+        installedPlanId: sandCInstall?.planId,
+        installedVersionId: sandCInstall?.versionId,
+        incoming,
+      });
+    };
 
     const retryDelaysMs = retryOnNotFound ? [0, 500, 1000] : [0];
     for (const [attemptIndex, retryDelayMs] of retryDelaysMs.entries()) {
@@ -18071,6 +18172,7 @@ export function CoachAthletePlanningProfileView({
         if (
           latestSkillsDraftRequestGenRef.current !== requestGeneration
           || !workloadTrainerScopeMatches(workflowTrainerScopeRef, requestScope)
+          || shouldRejectSandCLatestWrite(result)
         ) {
           return null;
         }
@@ -18109,6 +18211,7 @@ export function CoachAthletePlanningProfileView({
           if (attemptIndex < retryDelaysMs.length - 1) {
             continue;
           }
+          if (shouldRejectSandCLatestWrite(null)) return null;
           if (!preserveCurrentOnFailure) setLatestSkillsDraft(null);
           setLatestDraftDomain(generationDomain);
           setLatestSkillsDraftRequestState("missing");
@@ -18117,6 +18220,7 @@ export function CoachAthletePlanningProfileView({
           setLatestSkillsDraftErrorDomain(null);
           return null;
         }
+        if (shouldRejectSandCLatestWrite(null)) return null;
         if (!preserveCurrentOnFailure) setLatestSkillsDraft(null);
         setLatestDraftDomain(generationDomain);
         setLatestSkillsDraftRequestState("error");
@@ -18281,12 +18385,44 @@ export function CoachAthletePlanningProfileView({
     }
     if (shouldForceAssistantDomainWorkspace) {
       if (workspaceResolvesDownstreamDomainBootstrap) {
-        setLatestSkillsDraft(null);
-        setLatestDraftDomain(currentCoachGenerationDomain);
-        setLatestSkillsDraftRequestState("success");
-        setLatestSkillsDraftMissing(false);
-        setLatestSkillsDraftError(null);
-        setLatestSkillsDraftErrorDomain(null);
+        const workspaceSummary =
+          currentCoachGenerationDomain !== null
+            ? workspace?.domains[currentCoachGenerationDomain]?.summary ?? null
+            : null;
+        const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
+        const workspaceVersionId =
+          workspaceSummary !== null
+            ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
+            : "";
+        const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
+        if (
+          shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+            domain: currentCoachGenerationDomain,
+            installedPlanId: sandCInstall?.planId,
+            installedVersionId: sandCInstall?.versionId,
+            workspacePlanId,
+            workspaceVersionId,
+          })
+        ) {
+          // S&C post-generation: workspace same identity — keep installed latest authoritative.
+          return;
+        }
+        const clearResolvedBootstrapLatestDraft = () => {
+          setLatestSkillsDraft(null);
+          setLatestDraftDomain(currentCoachGenerationDomain);
+          setLatestSkillsDraftRequestState("success");
+          setLatestSkillsDraftMissing(false);
+          setLatestSkillsDraftError(null);
+          setLatestSkillsDraftErrorDomain(null);
+        };
+        if (currentCoachGenerationDomain === "S_AND_C" && sandCInstall !== null) {
+          // Workspace resolved a different plan/version than the pinned generated draft.
+          sandCInstalledGeneratedDraftIdentityRef.current = null;
+          clearResolvedBootstrapLatestDraft();
+          void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
+          return;
+        }
+        clearResolvedBootstrapLatestDraft();
         return;
       }
       void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
@@ -19372,7 +19508,7 @@ export function CoachAthletePlanningProfileView({
             action,
           })
         ) {
-          // SKILLS approve/release are status-only; keep the already-loaded plan/version authoritative.
+          // SKILLS/S&C approve/release are status-only; keep the already-loaded plan/version authoritative.
           return;
         }
         if (isHeadCoachPlanningContextOwner) {
@@ -20271,6 +20407,7 @@ export function CoachAthletePlanningProfileView({
       domainAuthorityLoading: planOwnershipLoading,
     });
     const rawNextActionLabel = domainIntegrationNextActionLabel({
+      domain,
       workflowStatus,
       assignmentDomainContext,
       planningContextLocked: domainGenerationContextLocked,
@@ -20342,7 +20479,7 @@ export function CoachAthletePlanningProfileView({
         ? latestDraftForReview?.versionNumber ?? null
         : null);
     const skillsDisplayedVersion =
-      domain === "SKILLS"
+      domain === "SKILLS" || domain === "S_AND_C"
         ? resolveSkillsReviewDrawerDisplayedVersion({
             contentSource,
             latestDraft: latestDraftForReview,
@@ -24815,28 +24952,68 @@ export function CoachAthletePlanningProfileView({
           versionId: activeReviseIds.versionId,
           coachFeedback,
         };
-    const trainingPlanIdForReload = activeReviseIds.trainingPlanId.trim();
 
     setReviseSandCLoading(true);
     setReviseSandCError(null);
     setReviseSandCSuccess(null);
     setGovernedPlanRefreshWarning(null);
-    const outcome = await runTrainingPlanPostActionRefresh({
+    const outcome = await runSkillsRevisionLocalLifecycle({
       mutate: () =>
         reviseCoachAthleteSandCTrainingPlan(entityId, athleteIdTrimmed, payload),
-      applyMutationSuccess: (reviseResult) => {
+      applyReturnedRevision: (reviseResult) => {
         const nextVersionId =
           nextSandCRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
         const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
+        const revisedDraft = sandCDraftFromRevisionResult(reviseResult);
+        if (revisedDraft === null) {
+          throw new Error(
+            "S&C revision response did not include a usable generatedPlannerCandidate.",
+          );
+        }
+
+        latestSkillsDraftRequestGenRef.current += 1;
         setSandCActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
-        applyTrainingPlanMutationSuccessLocally({
-          domain: "S_AND_C",
-          action: "REVISION_APPLY",
-          planId: nextPlanId,
-          versionId: nextVersionId,
-        });
+        knownDomainPlanIdsRef.current.S_AND_C = nextPlanId;
+        setLatestSkillsDraft(revisedDraft);
+        setLatestDraftDomain("S_AND_C");
+        setLatestSkillsDraftRequestState("success");
+        setLatestSkillsDraftMissing(false);
+        setLatestSkillsDraftError(null);
+        setLatestSkillsDraftErrorDomain(null);
+        setGeneratePlanError(null);
+        // Keep post-generation same-identity guard aligned with the returned revision version.
+        if (sandCInstalledGeneratedDraftIdentityRef.current !== null) {
+          sandCInstalledGeneratedDraftIdentityRef.current = {
+            planId: nextPlanId,
+            versionId: nextVersionId,
+          };
+        }
+        setHeadCoachDomainPlanStates((current) => ({
+          ...current,
+          S_AND_C: {
+            ...current.S_AND_C,
+            loading: false,
+            error: null,
+            latestDraft: revisedDraft,
+            summaryStatus: revisedDraft.status ?? "AI_GENERATED",
+            summaryPlanId: nextPlanId,
+            summaryVersionId: nextVersionId,
+          },
+        }));
+        setFynRevisionContexts((current) => ({
+          ...current,
+          S_AND_C: {
+            context: projectSandCFynContextAfterRevision(
+              current.S_AND_C?.context ?? null,
+              reviseResult,
+              revisedDraft,
+            ),
+            loading: false,
+            error: null,
+          },
+        }));
       },
-      showMutationSuccess: () => {
+      showSuccess: () => {
         if (isSinglePatch) {
           resetFynRevisionOptionsFlow("S_AND_C");
           setFynRevisionSelections((current) => ({
@@ -24848,24 +25025,6 @@ export function CoachAthletePlanningProfileView({
           setReviseSandCSuccess("Revised S&C plan version generated.");
         }
         setReviseSandCFeedback("");
-      },
-      refresh: async (reviseResult) => {
-        await reconcileRevisedDomainPlanDetail("S_AND_C", reviseResult, trainingPlanIdForReload);
-        if ((await loadLatestSkillsDraft("S_AND_C", true, true, false, true)) === null) {
-          throw new Error("Unable to reload the revised S&C plan.");
-        }
-        if (isSinglePatch) {
-          const contextLoaded = await loadFynRevisionContext("S_AND_C");
-          if (!contextLoaded) throw new Error("Unable to reload S&C revision guidance.");
-        }
-        if ((await refreshTrainingPlanWorkspace({ background: true })) === null) {
-          throw new Error("Could not refresh the latest training plan workspace.");
-        }
-      },
-      showRefreshWarning: (error) => {
-        setGovernedPlanRefreshWarning(
-          formatApiError(error, "Revision applied, but the latest S&C plan could not be refreshed."),
-        );
       },
     });
     if (outcome.kind === "mutation_failed") {
@@ -24892,6 +25051,8 @@ export function CoachAthletePlanningProfileView({
             ? e.message.trim()
             : NUTRITION_STALE_VERSION_MESSAGE,
         );
+      } else if (isAiGenerationValidationError(e)) {
+        setReviseSandCError(AI_GENERATION_VALIDATION_ERROR_MESSAGE);
       } else {
         const errorRecord =
           typeof e === "object" && e !== null ? (e as Record<string, unknown>) : null;
@@ -25610,11 +25771,12 @@ export function CoachAthletePlanningProfileView({
         setGeneratePlanError(result.errorMessage || readSafeGenerationJobError(result.latestJob));
         return;
       }
+      const skipSandCPostGenerationDetailHydration = domain === "S_AND_C";
       const latestDomainDraft = await loadLatestSkillsDraft(
         domain,
         true,
         false,
-        false,
+        skipSandCPostGenerationDetailHydration,
         true,
       );
       if (latestDomainDraft === null) {
@@ -25625,14 +25787,15 @@ export function CoachAthletePlanningProfileView({
       setGeneratePlanSuccessDomain(domain);
       let generatedPlanId = persistedGenerateResult.trainingPlanId?.trim() ?? "";
       let generatedVersionId = persistedGenerateResult.trainingPlanVersionId?.trim() ?? "";
+      const skipSandCDetailRefresh = shouldSkipSandCPostGenerationDetailRefresh({
+        domain,
+        latestDraft: latestDomainDraft,
+      });
       let refreshedWorkspace: TrainingPlanWorkspace | null = null;
       let workspaceRefreshStatus = "not_started";
       try {
         workspaceRefreshStatus = "started";
         refreshedWorkspace = await getTrainingPlanWorkspace(entityId, athleteIdTrimmed);
-        setWorkspace(refreshedWorkspace);
-        workspaceHasLoadedRef.current = true;
-        setWorkspaceError(null);
         workspaceRefreshStatus = "completed";
       } catch (e) {
         workspaceRefreshStatus = "failed";
@@ -25652,12 +25815,27 @@ export function CoachAthletePlanningProfileView({
       if (generatedVersionId === "" && workspaceVersionId !== "") {
         generatedVersionId = workspaceVersionId;
       }
+      // Pin once with final ids before setWorkspace so bootstrap effects cannot clear the draft.
+      if (skipSandCDetailRefresh && generatedPlanId !== "" && generatedVersionId !== "") {
+        sandCInstalledGeneratedDraftIdentityRef.current = {
+          planId: generatedPlanId,
+          versionId: generatedVersionId,
+        };
+        latestSkillsDraftRequestGenRef.current += 1;
+      } else if (domain === "S_AND_C") {
+        sandCInstalledGeneratedDraftIdentityRef.current = null;
+      }
+      if (refreshedWorkspace !== null) {
+        setWorkspace(refreshedWorkspace);
+        workspaceHasLoadedRef.current = true;
+        setWorkspaceError(null);
+      }
       const detailFetchUrl =
         generatedPlanId !== ""
           ? `/training-plan-management/${encodeURIComponent(generatedPlanId)}/active/detail?generationDomain=${encodeURIComponent(domain)}`
           : null;
       let detailFetchStatus: string | number | null = null;
-      if (generatedPlanId !== "") {
+      if (generatedPlanId !== "" && !skipSandCDetailRefresh) {
         try {
           await refreshPersistedPlanDetail(generatedPlanId, domain, {
             updateWorkflowRequestedPlanId: true,
@@ -25670,8 +25848,10 @@ export function CoachAthletePlanningProfileView({
           );
           setPersistedPlanErrorDomain(domain);
         }
-      } else {
+      } else if (generatedPlanId === "") {
         detailFetchStatus = "missing_plan_id";
+      } else {
+        detailFetchStatus = "skipped_usable_latest";
       }
       logTrainingPlanGenerationAutoLoadDiagnostic({
         generatedDomain: domain,

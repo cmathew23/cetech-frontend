@@ -149,6 +149,10 @@ import {
   resolveDomainReviewDrawerContentSource,
   resolveSkillsReviewDrawerDisplayedVersion,
   shouldSkipSkillsPostApprovalPlanRefresh,
+  isUsableGeneratedDomainDraft,
+  shouldSkipSandCPostGenerationDetailRefresh,
+  shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve,
+  shouldRejectStaleSandCLatestDraftWrite,
   resolveDomainReviewPlanLoadMessage,
   resolveDomainCoachPlanWindowLabel,
   shouldShowDomainReviewSubmittedPlanEmptyState,
@@ -222,7 +226,9 @@ import {
   skillsRevisionSelectionBelongsToOptions,
   resolveSkillsSelectedRevisionOption,
   skillsDraftFromRevisionResult,
+  sandCDraftFromRevisionResult,
   projectSkillsFynContextAfterRevision,
+  projectSandCFynContextAfterRevision,
   runSkillsRevisionLocalLifecycle,
   shouldSuppressHeadCoachSkillsDetailRefreshForLocalRevision,
   resolveActiveSkillsReviseIds,
@@ -6799,15 +6805,20 @@ describe("Training Plan Workspace lifecycle display", () => {
         versionId: "sandc-v3",
         versionNumber: 3,
         generationDomain: "S_AND_C" as const,
+        generatedPlannerCandidate: {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v3",
+          versionNumber: 3,
+          status: "AI_GENERATED",
+          days: [],
+          raw: {},
+        },
         detail: null,
         raw: submitted.revisionPatch,
       }));
       await runSandCStructuredRevisionSequence({
         submit: () => revise(submission!),
-        pinReturnedVersion: vi.fn(),
-        reconcilePlan: vi.fn(async () => undefined),
-        reloadLatestPlan: vi.fn(async () => true),
-        reloadRevisionContext: vi.fn(async () => true),
+        applyReturnedRevision: vi.fn(),
         resetTemporaryState: vi.fn(),
       });
       expect(revise).toHaveBeenCalledWith(submission);
@@ -6924,14 +6935,20 @@ describe("Training Plan Workspace lifecycle display", () => {
       const sandCMutationStart = source.indexOf(
         "mutate: () =>\n        reviseCoachAthleteSandCTrainingPlan",
       );
-      const pinStart = source.indexOf("setSandCActiveReviseIds(", sandCMutationStart);
-      const pinEnd = source.indexOf("applyTrainingPlanMutationSuccessLocally", pinStart);
-      const pinCallback = source.slice(pinStart, pinEnd);
+      const applyStart = source.indexOf("applyReturnedRevision: (reviseResult) => {", sandCMutationStart);
+      const applyEnd = source.indexOf("showSuccess: () => {", applyStart);
+      const applyCallback = source.slice(applyStart, applyEnd);
 
-      expect(pinStart).toBeGreaterThan(-1);
-      expect(pinEnd).toBeGreaterThan(pinStart);
-      expect(pinCallback).not.toContain("fynRevisionOptionsRequestRef");
-      expect(pinCallback).not.toContain("setFynRevisionOptionStates");
+      expect(sandCMutationStart).toBeGreaterThan(-1);
+      expect(applyStart).toBeGreaterThan(sandCMutationStart);
+      expect(applyEnd).toBeGreaterThan(applyStart);
+      expect(applyCallback).toContain("setSandCActiveReviseIds(");
+      expect(applyCallback).toContain("sandCDraftFromRevisionResult");
+      expect(applyCallback).not.toContain("fynRevisionOptionsRequestRef");
+      expect(applyCallback).not.toContain("setFynRevisionOptionStates");
+      expect(applyCallback).not.toContain("loadLatestSkillsDraft");
+      expect(applyCallback).not.toContain("refreshTrainingPlanWorkspace");
+      expect(applyCallback).not.toContain("reconcileRevisedDomainPlanDetail");
       expect(source).toContain(
         "sandCActiveReviseIds?.versionId,\n    sandCReviseIds?.trainingPlanId,\n    sandCReviseIds?.versionId,",
       );
@@ -7001,12 +7018,22 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(html).not.toContain("add it to plan changes");
     });
 
-    it("pins each returned version and resets only after plan and context refresh", async () => {
+    it("pins each returned version locally and resets selection without sync refetches", async () => {
       const base = { trainingPlanId: "sandc-plan-1", versionId: "sandc-v1" };
       let pin: typeof base | null = null;
+      let displayedDraft = null as ReturnType<typeof sandCDraftFromRevisionResult>;
       const events: string[] = [];
       const submittedVersions: string[] = [];
-      const runRevision = async (returnedVersionId: string) => {
+      const forbiddenReads = {
+        workspace: vi.fn(),
+        readiness: vi.fn(),
+        completeness: vi.fn(),
+        upstreamPlanningContext: vi.fn(),
+        levelValidation: vi.fn(),
+        latest: vi.fn(),
+        detail: vi.fn(),
+      };
+      const runRevision = async (returnedVersionId: string, versionNumber: number) => {
         const reviseIds = resolveActiveSandCReviseIds(base, pin);
         const submission = buildSandCRevisionSubmission({
           reviseIds,
@@ -7020,29 +7047,32 @@ describe("Training Plan Workspace lifecycle display", () => {
             return {
               planId: base.trainingPlanId,
               versionId: returnedVersionId,
-              versionNumber: null,
+              versionNumber,
               generationDomain: "S_AND_C",
+              generatedPlannerCandidate: {
+                trainingPlanId: base.trainingPlanId,
+                trainingPlanVersionId: returnedVersionId,
+                versionNumber,
+                status: "AI_GENERATED",
+                days: [
+                  {
+                    dayIndex: 2,
+                    sessions: [{ sessionIndex: 1, title: "Strength", items: [] }],
+                  },
+                ],
+                raw: {},
+              },
               detail: null,
               raw: null,
             };
           },
-          pinReturnedVersion: (result) => {
-            events.push("pin");
+          applyReturnedRevision: (result) => {
+            events.push("apply");
             pin = {
               trainingPlanId: base.trainingPlanId,
               versionId: nextSandCRevisionVersionId(result)!,
             };
-          },
-          reconcilePlan: async () => {
-            events.push("reconcile-plan");
-          },
-          reloadLatestPlan: async () => {
-            events.push("reload-plan");
-            return true;
-          },
-          reloadRevisionContext: async () => {
-            events.push("reload-context-and-rebuild-targets");
-            return true;
+            displayedDraft = sandCDraftFromRevisionResult(result);
           },
           resetTemporaryState: () => {
             events.push("reset");
@@ -7050,65 +7080,166 @@ describe("Training Plan Workspace lifecycle display", () => {
         });
       };
 
-      await runRevision("sandc-v2");
-      expect(events).toEqual([
-        "submit",
-        "pin",
-        "reconcile-plan",
-        "reload-plan",
-        "reload-context-and-rebuild-targets",
-        "reset",
-      ]);
+      await runRevision("sandc-v2", 2);
+      expect(events).toEqual(["submit", "apply", "reset"]);
+      expect(displayedDraft?.trainingPlanVersionId).toBe("sandc-v2");
+      expect(displayedDraft?.versionNumber).toBe(2);
 
       events.length = 0;
-      await runRevision("sandc-v3");
+      await runRevision("sandc-v3", 3);
       expect(submittedVersions).toEqual(["sandc-v1", "sandc-v2"]);
       expect(pin?.versionId).toBe("sandc-v3");
+      expect(displayedDraft?.versionNumber).toBe(3);
+      for (const read of Object.values(forbiddenReads)) {
+        expect(read).not.toHaveBeenCalled();
+      }
     });
 
-    it("preserves the Add Exercise selection when post-submit refresh fails", async () => {
+    it("installs REMOVE_EXERCISE candidate locally and ignores stale later overwrites", async () => {
+      const reviseResult = {
+        planId: "sandc-plan-1",
+        versionId: "sandc-v2",
+        versionNumber: 2,
+        generationDomain: "S_AND_C" as const,
+        generatedPlannerCandidate: {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v2",
+          versionNumber: 2,
+          status: "AI_GENERATED",
+          days: [
+            {
+              dayIndex: 2,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  title: "Strength",
+                  items: [{ exerciseId: "KEEP_001", label: "Romanian deadlift" }],
+                },
+              ],
+            },
+          ],
+          raw: { source: "generatedPlannerCandidate" },
+        },
+        detail: null,
+        raw: null,
+      };
+      let displayedDraft = {
+        trainingPlanId: "sandc-plan-1",
+        trainingPlanVersionId: "sandc-v1",
+        versionNumber: 1,
+        days: sandCSchedule,
+      } as ReturnType<typeof sandCDraftFromRevisionResult>;
+      let projectedContext: CoachAthleteDomainDraftRevisionContext | null = null;
+      const forbiddenReads = {
+        workspace: vi.fn(),
+        readiness: vi.fn(),
+        completeness: vi.fn(),
+        upstreamPlanningContext: vi.fn(),
+        levelValidation: vi.fn(),
+        latest: vi.fn(),
+        detail: vi.fn(),
+      };
+
+      const outcome = await runSkillsRevisionLocalLifecycle({
+        mutate: async () => reviseResult,
+        applyReturnedRevision: (result) => {
+          displayedDraft = sandCDraftFromRevisionResult(result);
+          projectedContext = projectSandCFynContextAfterRevision(
+            makeRevisionContext({ generationDomain: "S_AND_C" }),
+            result,
+            displayedDraft,
+          );
+        },
+        showSuccess: () => {
+          expect(displayedDraft?.versionNumber).toBe(2);
+        },
+      });
+
+      expect(outcome.kind).toBe("applied");
+      expect(displayedDraft).toMatchObject({
+        trainingPlanId: "sandc-plan-1",
+        trainingPlanVersionId: "sandc-v2",
+        versionNumber: 2,
+      });
+      expect(displayedDraft?.days?.[0]?.sessions?.[0]?.items).toEqual([
+        { exerciseId: "KEEP_001", label: "Romanian deadlift" },
+      ]);
+      expect(projectedContext).toMatchObject({
+        generationDomain: "S_AND_C",
+        ref: {
+          trainingPlanVersionId: "sandc-v2",
+          versionId: "sandc-v2",
+          versionNumber: 2,
+        },
+        targetMap: null,
+      });
+      expect(
+        resolveActiveSandCReviseIds(
+          { trainingPlanId: "sandc-plan-1", versionId: "sandc-v1" },
+          { trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" },
+        ),
+      ).toEqual({ trainingPlanId: "sandc-plan-1", versionId: "sandc-v2" });
+      expect(
+        resolveSkillsReviewDrawerDisplayedVersion({
+          contentSource: "latest_domain_draft",
+          latestDraft: displayedDraft,
+          fallbackVersionId: "sandc-v1",
+          fallbackVersionNumber: 1,
+        }),
+      ).toEqual({ versionId: "sandc-v2", versionNumber: 2 });
+      // Stale older candidate must not win over installed Version 2.
+      expect(
+        resolveNewerDomainReviewDraft(displayedDraft, {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v1",
+          versionNumber: 1,
+          days: [],
+        } as never)?.versionNumber,
+      ).toBe(2);
+      for (const read of Object.values(forbiddenReads)) {
+        expect(read).not.toHaveBeenCalled();
+      }
+    });
+
+    it("preserves the Add Exercise selection when the S&C revision request fails", async () => {
       const currentPlan = { versionId: "sandc-v1", days: sandCSchedule };
-      const renderedPlan = currentPlan;
+      let renderedPlan = currentPlan;
       let actionKey: string | null = "ADD_ITEM";
       let targetKey: string | null = "session|2|1";
       let selectedExerciseId: string | null = "exercise-approved";
       let values = { durationMinutes: 12, sets: 3, reps: 8 };
-      const submit = vi.fn(async () => ({
-        planId: "sandc-plan-1",
-        versionId: "sandc-v2",
-        versionNumber: null,
-        generationDomain: "S_AND_C" as const,
-        detail: null,
-        raw: null,
-      }));
+      const submit = vi.fn(async () => {
+        throw new Error("Revision rejected");
+      });
       const reset = vi.fn(() => {
         actionKey = null;
         targetKey = null;
         selectedExerciseId = null;
         values = { durationMinutes: 0, sets: 0, reps: 0 };
       });
+      const apply = vi.fn(() => {
+        renderedPlan = { versionId: "sandc-v2", days: [] };
+      });
 
       await expect(
         runSandCStructuredRevisionSequence({
           submit,
-          pinReturnedVersion: () => {},
-          reconcilePlan: async () => {},
-          reloadLatestPlan: async () => true,
-          reloadRevisionContext: async () => false,
+          applyReturnedRevision: apply,
           resetTemporaryState: reset,
         }),
-      ).rejects.toThrow("Unable to reload S&C revision guidance.");
+      ).rejects.toThrow("Revision rejected");
 
       expect(renderedPlan).toBe(currentPlan);
       expect(actionKey).toBe("ADD_ITEM");
       expect(targetKey).toBe("session|2|1");
       expect(selectedExerciseId).toBe("exercise-approved");
       expect(values).toEqual({ durationMinutes: 12, sets: 3, reps: 8 });
+      expect(apply).not.toHaveBeenCalled();
       expect(reset).not.toHaveBeenCalled();
       expect(submit).toHaveBeenCalledTimes(1);
     });
 
-    it("preserves the Remove Exercise target when post-submit refresh fails", async () => {
+    it("preserves the Remove Exercise target when the S&C revision request fails", async () => {
       let targetKey: string | null = "item|2|1|1";
       const reset = vi.fn(() => {
         targetKey = null;
@@ -7116,27 +7247,19 @@ describe("Training Plan Workspace lifecycle display", () => {
 
       await expect(
         runSandCStructuredRevisionSequence({
-          submit: async () => ({
-            planId: "sandc-plan-1",
-            versionId: "sandc-v2",
-            versionNumber: null,
-            generationDomain: "S_AND_C",
-            detail: null,
-            raw: null,
-          }),
-          pinReturnedVersion: () => {},
-          reconcilePlan: async () => {},
-          reloadLatestPlan: async () => false,
-          reloadRevisionContext: async () => true,
+          submit: async () => {
+            throw new Error("Revision rejected");
+          },
+          applyReturnedRevision: () => {},
           resetTemporaryState: reset,
         }),
-      ).rejects.toThrow("Unable to reload the revised S&C plan.");
+      ).rejects.toThrow("Revision rejected");
 
       expect(targetKey).toBe("item|2|1|1");
       expect(reset).not.toHaveBeenCalled();
     });
 
-    it("preserves the UPDATE_ITEM target and edited values when refresh fails", async () => {
+    it("preserves the UPDATE_ITEM target and edited values when the revision request fails", async () => {
       let targetKey: string | null = "item|2|1|1";
       let values = { durationMinutes: 25, sets: 4, reps: 9 };
       const reset = vi.fn(() => {
@@ -7146,21 +7269,13 @@ describe("Training Plan Workspace lifecycle display", () => {
 
       await expect(
         runSandCStructuredRevisionSequence({
-          submit: async () => ({
-            planId: "sandc-plan-1",
-            versionId: "sandc-v2",
-            versionNumber: null,
-            generationDomain: "S_AND_C",
-            detail: null,
-            raw: null,
-          }),
-          pinReturnedVersion: () => {},
-          reconcilePlan: async () => {},
-          reloadLatestPlan: async () => true,
-          reloadRevisionContext: async () => false,
+          submit: async () => {
+            throw new Error("Revision rejected");
+          },
+          applyReturnedRevision: () => {},
           resetTemporaryState: reset,
         }),
-      ).rejects.toThrow("Unable to reload S&C revision guidance.");
+      ).rejects.toThrow("Revision rejected");
 
       expect(targetKey).toBe("item|2|1|1");
       expect(values).toEqual({ durationMinutes: 25, sets: 4, reps: 9 });
@@ -7732,15 +7847,20 @@ describe("Training Plan Workspace lifecycle display", () => {
         submit: async () => ({
           planId: "plan-rest-1",
           versionId: "ver-rest-2",
-          versionNumber: null,
+          versionNumber: 2,
           generationDomain: "S_AND_C",
+          generatedPlannerCandidate: {
+            trainingPlanId: "plan-rest-1",
+            trainingPlanVersionId: "ver-rest-2",
+            versionNumber: 2,
+            status: "AI_GENERATED",
+            days: [],
+            raw: {},
+          },
           detail: null,
           raw: null,
         }),
-        pinReturnedVersion: () => {},
-        reconcilePlan: async () => {},
-        reloadLatestPlan: async () => true,
-        reloadRevisionContext: async () => true,
+        applyReturnedRevision: () => {},
         resetTemporaryState: clearSelection,
       });
       expect(selection).toEqual(EMPTY_FYN_REST_DAY_SELECTION);
@@ -13562,6 +13682,18 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe(true);
     expect(
       shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "S_AND_C",
+        action: "HEAD_APPROVE",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "S_AND_C",
+        action: "RELEASE",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
         domain: "NUTRITION",
         action: "HEAD_APPROVE",
       }),
@@ -13708,6 +13840,426 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         latestDraft: releasedPlan,
       }),
     ).toBe("latest_domain_draft");
+  });
+
+  it("keeps loaded S&C plan visible after approve and release with no loading message", () => {
+    const loadedPlan = {
+      trainingPlanId: "sandc-plan",
+      trainingPlanVersionId: "sandc-v4",
+      versionNumber: 4,
+      status: "AI_GENERATED",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              title: "Strength",
+              items: [{ exerciseId: "SQ_001", label: "Back Squat" }],
+            },
+          ],
+        },
+      ],
+    } as never;
+    const approvedPlan = { ...loadedPlan, status: "HEAD_COACH_APPROVED" };
+    const releasedPlan = { ...loadedPlan, status: "ACTIVE" };
+
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "S_AND_C",
+        action: "HEAD_APPROVE",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "S_AND_C",
+        action: "RELEASE",
+      }),
+    ).toBe(true);
+
+    const beforeApprove = resolveDomainReviewDrawerContentSource({
+      domain: "S_AND_C",
+      workflowStatus: "draft_generated",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: loadedPlan,
+    });
+    expect(beforeApprove).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "S_AND_C",
+        contentSource: beforeApprove,
+        loading: false,
+        error: null,
+      }),
+    ).toBeNull();
+
+    const afterApprove = resolveDomainReviewDrawerContentSource({
+      domain: "S_AND_C",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: approvedPlan,
+    });
+    expect(afterApprove).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "S_AND_C",
+        contentSource: afterApprove,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+    expect(countLatestDomainDraftTrainingDays(approvedPlan)).toBe(1);
+    expect(approvedPlan.versionNumber).toBe(4);
+
+    const approveLabels = resolveDomainReviewDisplayLabels({
+      domain: "S_AND_C",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+    expect(approveLabels.planStatusLabel).toBe("Strength & Conditioning Coach Approved");
+    expect(approveLabels.workflowStatusLabel).toBe(
+      "Approved by Strength & Conditioning Coach",
+    );
+
+    const approveActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "approved",
+      canShowViewPlan: false,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: true,
+      hasViewPlanContext: false,
+    });
+    expect(approveActions.canShowReleaseAction).toBe(true);
+    expect(
+      resolveDomainReviewDrawerVisibleActionLabels({
+        drawerWorkflowActions: approveActions,
+        actionContextAvailable: true,
+        viewPlanContextAvailable: false,
+        renderApproveBeforeRevise: true,
+        drawerRevisionComposerOpen: false,
+      }),
+    ).toContain("Release Plan to Athlete");
+
+    const afterRelease = resolveDomainReviewDrawerContentSource({
+      domain: "S_AND_C",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: releasedPlan,
+    });
+    expect(afterRelease).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "S_AND_C",
+        contentSource: afterRelease,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+    expect(countLatestDomainDraftTrainingDays(releasedPlan)).toBe(1);
+    expect(releasedPlan.versionNumber).toBe(4);
+
+    const releaseLabels = resolveDomainReviewDisplayLabels({
+      domain: "S_AND_C",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "ACTIVE",
+    });
+    expect(releaseLabels.statusLabel).toBe("Domain Released to Athlete");
+    expect(releaseLabels.planStatusLabel).toBe("Active");
+    expect(releaseLabels.workflowStatusLabel).toBe("Domain Released to Athlete");
+
+    const releaseActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "released",
+      canShowViewPlan: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: false,
+      hasViewPlanContext: true,
+    });
+    expect(releaseActions.canShowViewPlan).toBe(true);
+    expect(
+      resolveDomainReviewDrawerVisibleActionLabels({
+        drawerWorkflowActions: releaseActions,
+        actionContextAvailable: true,
+        viewPlanContextAvailable: true,
+        renderApproveBeforeRevise: true,
+        drawerRevisionComposerOpen: false,
+      }),
+    ).toContain("View in Plan Viewer");
+
+    // Stale cleared detail after approve/release must not invent a loading empty state when
+    // the installed S&C schedule remains the content source.
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "S_AND_C",
+        workflowStatus: "approved",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft: approvedPlan,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "S_AND_C",
+        workflowStatus: "released",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft: releasedPlan,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "S_AND_C",
+        requestGeneration: 1,
+        currentGeneration: 2,
+        installedPlanId: "sandc-plan",
+        installedVersionId: "sandc-v4",
+        incoming: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("installs usable S&C latest draft after generation without detail hydration", () => {
+    const sandCDraft = {
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-v1",
+      versionNumber: 1,
+      status: "AI_GENERATED",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              title: "Strength",
+              items: [{ exerciseId: "SQ_001", label: "Back Squat" }],
+            },
+          ],
+        },
+      ],
+    } as never;
+
+    expect(isUsableGeneratedDomainDraft(sandCDraft)).toBe(true);
+    expect(
+      shouldSkipSandCPostGenerationDetailRefresh({
+        domain: "S_AND_C",
+        latestDraft: sandCDraft,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSandCPostGenerationDetailRefresh({
+        domain: "SKILLS",
+        latestDraft: sandCDraft,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipSandCPostGenerationDetailRefresh({
+        domain: "NUTRITION",
+        latestDraft: sandCDraft,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipSandCPostGenerationDetailRefresh({
+        domain: "S_AND_C",
+        latestDraft: {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v1",
+          days: [],
+        } as never,
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const generateStart = source.indexOf("async function handleGenerateTrainingPlan(");
+    expect(generateStart).toBeGreaterThan(-1);
+    const generateSlice = source.slice(generateStart, generateStart + 16000);
+    expect(generateSlice).toContain(
+      'const skipSandCPostGenerationDetailHydration = domain === "S_AND_C"',
+    );
+    expect(generateSlice).toContain("skipSandCPostGenerationDetailHydration");
+    expect(generateSlice).toContain("shouldSkipSandCPostGenerationDetailRefresh");
+    expect(generateSlice).toContain("skipped_usable_latest");
+  });
+
+  it("retains installed S&C draft when workspace resolves the same identity", () => {
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "S_AND_C",
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        workspacePlanId: "sandc-plan-1",
+        workspaceVersionId: "sandc-v1",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        workspacePlanId: "sandc-plan-1",
+        workspaceVersionId: "sandc-v1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "NUTRITION",
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        workspacePlanId: "sandc-plan-1",
+        workspaceVersionId: "sandc-v1",
+      }),
+    ).toBe(false);
+  });
+
+  it("refreshes S&C latest when workspace resolves a different plan/version identity", () => {
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "S_AND_C",
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        workspacePlanId: "sandc-plan-2",
+        workspaceVersionId: "sandc-v1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "S_AND_C",
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        workspacePlanId: "sandc-plan-1",
+        workspaceVersionId: "sandc-v2",
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const retainCall = source.indexOf("shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve");
+    const differentIdentityReload = source.indexOf(
+      "void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);",
+      retainCall,
+    );
+    expect(retainCall).toBeGreaterThan(-1);
+    expect(differentIdentityReload).toBeGreaterThan(retainCall);
+    expect(
+      source.slice(retainCall, differentIdentityReload),
+    ).toContain('currentCoachGenerationDomain === "S_AND_C"');
+  });
+
+  it("rejects stale S&C latest writes that would clear an installed draft", () => {
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "S_AND_C",
+        requestGeneration: 1,
+        currentGeneration: 2,
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        incoming: {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v1",
+          days: [{ dayIndex: 1, sessions: [{ title: "A", items: [] }] }],
+        } as never,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "S_AND_C",
+        requestGeneration: 2,
+        currentGeneration: 2,
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        incoming: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "S_AND_C",
+        requestGeneration: 2,
+        currentGeneration: 2,
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        incoming: {
+          trainingPlanId: "sandc-plan-1",
+          trainingPlanVersionId: "sandc-v1",
+          days: [{ dayIndex: 1, sessions: [{ title: "A", items: [] }] }],
+        } as never,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "SKILLS",
+        requestGeneration: 1,
+        currentGeneration: 2,
+        installedPlanId: "sandc-plan-1",
+        installedVersionId: "sandc-v1",
+        incoming: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("uses S&C draft review copy instead of Skills draft wording", () => {
+    const sandCNextAction = domainIntegrationNextActionLabel({
+      domain: "S_AND_C",
+      workflowStatus: "draft_generated",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canOpen: true,
+        canApprove: true,
+        canRevise: true,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+      planningContextLocked: true,
+      loading: false,
+      hasError: false,
+      canGenerate: false,
+      canSubmitForReview: false,
+      canViewPlan: true,
+      canReview: true,
+      canRelease: false,
+      isCurrentReviewPlan: false,
+      directReleaseSkillsDraftReview: true,
+      directReleaseSkillsOwner: true,
+    });
+    expect(sandCNextAction).toBe("Review the generated draft and approve or revise.");
+    expect(sandCNextAction).not.toContain("Skills");
+
+    const skillsNextAction = domainIntegrationNextActionLabel({
+      domain: "SKILLS",
+      workflowStatus: "draft_generated",
+      assignmentDomainContext: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canOpen: true,
+        canApprove: true,
+        canRevise: true,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+      planningContextLocked: true,
+      loading: false,
+      hasError: false,
+      canGenerate: false,
+      canSubmitForReview: false,
+      canViewPlan: true,
+      canReview: true,
+      canRelease: false,
+      isCurrentReviewPlan: false,
+      directReleaseSkillsDraftReview: true,
+      directReleaseSkillsOwner: true,
+    });
+    expect(skillsNextAction).toBe(
+      "Review the generated Skills draft, then approve or revise.",
+    );
   });
 
   it("keeps Workflow 3 approved Skills drawer on generated schedule content", () => {

@@ -2401,11 +2401,13 @@ export function resolveDomainReviewDrawerContentSource(input: {
     return "none";
   }
   if (hasLatestDraft) {
-    // SKILLS/S&C approve/release (and Workflow 3 direct-release owners after approve) keep
+    // Domain approve/release (and Workflow 3 direct-release owners after approve) keep
     // rendering the already-loaded schedule. These mutations are status transitions only —
     // never force contentSource "none" / "Loading generated …" while usable draft remains.
     if (
-      (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
+      (input.domain === "SKILLS" ||
+        input.domain === "S_AND_C" ||
+        input.domain === "NUTRITION") &&
       (input.workflowStatus === "approved" || input.workflowStatus === "released")
     ) {
       return "latest_domain_draft";
@@ -2419,7 +2421,7 @@ export function resolveDomainReviewDrawerContentSource(input: {
 }
 
 /**
- * SKILLS/S&C domain-approve / domain-release only change workflow status/actions.
+ * Domain-approve / domain-release only change workflow status/actions.
  * Do not refetch detail/workspace/latest — that refresh chain clears the loaded plan.
  */
 export function shouldSkipSkillsPostApprovalPlanRefresh(input: {
@@ -2427,7 +2429,9 @@ export function shouldSkipSkillsPostApprovalPlanRefresh(input: {
   action: GovernedTrainingPlanWorkflowAction;
 }): boolean {
   return (
-    (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
+    (input.domain === "SKILLS" ||
+      input.domain === "S_AND_C" ||
+      input.domain === "NUTRITION") &&
     (input.action === "HEAD_APPROVE" || input.action === "RELEASE")
   );
 }
@@ -2452,7 +2456,10 @@ export function shouldSkipSandCPostGenerationDetailRefresh(input: {
   return input.domain === "S_AND_C" && isUsableGeneratedDomainDraft(input.latestDraft);
 }
 
-/** S&C-only: retain installed draft when workspace resolves the same plan/version identity. */
+/**
+ * S&C post-generation / Nutrition post-approve-release: retain installed draft when workspace
+ * resolves the same plan/version identity (prevents bootstrap from clearing the rendered plan).
+ */
 export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
   domain: TrainingPlanGenerationDomain | null;
   installedPlanId: string | null | undefined;
@@ -2460,7 +2467,7 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
   workspacePlanId: string | null | undefined;
   workspaceVersionId: string | null | undefined;
 }): boolean {
-  if (input.domain !== "S_AND_C") return false;
+  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
   const workspacePlanId = input.workspacePlanId?.trim() ?? "";
@@ -2475,7 +2482,10 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
   );
 }
 
-/** S&C-only: reject stale/null latest writes while a post-generation draft is installed. */
+/**
+ * S&C post-generation / Nutrition post-approve-release: reject stale/null latest writes while an
+ * installed draft identity is pinned (Nutrition latest may 404 after approve/release).
+ */
 export function shouldRejectStaleSandCLatestDraftWrite(input: {
   domain: TrainingPlanGenerationDomain;
   requestGeneration: number;
@@ -2484,7 +2494,7 @@ export function shouldRejectStaleSandCLatestDraftWrite(input: {
   installedVersionId: string | null | undefined;
   incoming: CoachAthleteLatestDomainDraft | null;
 }): boolean {
-  if (input.domain !== "S_AND_C") return false;
+  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
   if (input.requestGeneration !== input.currentGeneration) return true;
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
@@ -12239,6 +12249,14 @@ export function CoachAthletePlanningProfileView({
     planId: string;
     versionId: string;
   } | null>(null);
+  /**
+   * Nutrition approve/release: pin the retained plan/version so workspace bootstrap / latest 404
+   * cannot clear the already-rendered schedule (same guard pattern as S&C install pin).
+   */
+  const nutritionRetainedDraftIdentityRef = useRef<{
+    planId: string;
+    versionId: string;
+  } | null>(null);
   const detailRequestsInFlightRef = useRef(
     new Map<string, Promise<CoachPersistedTrainingPlanActiveDetail>>(),
   );
@@ -16634,6 +16652,7 @@ export function CoachAthletePlanningProfileView({
   useEffect(() => {
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
+    nutritionRetainedDraftIdentityRef.current = null;
     prevUrlPlanForPersistedSyncRef.current = undefined;
     coachDomainStateResetRef.current = null;
     step6WorkflowFetchGenRef.current += 1;
@@ -16781,6 +16800,7 @@ export function CoachAthletePlanningProfileView({
     coachDomainStateResetRef.current = scopedKey;
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
+    nutritionRetainedDraftIdentityRef.current = null;
     assistantDomainSummaryHydrationGenRef.current += 1;
     setAssistantDomainSummaryHydrationPending(false);
     step6WorkflowFetchGenRef.current += 1;
@@ -17203,7 +17223,9 @@ export function CoachAthletePlanningProfileView({
     }) => {
       const status = postActionStatus(input.action);
       const isStatusOnlyPlanMutation =
-        (input.domain === "SKILLS" || input.domain === "S_AND_C") &&
+        (input.domain === "SKILLS" ||
+          input.domain === "S_AND_C" ||
+          input.domain === "NUTRITION") &&
         (input.action === "HEAD_APPROVE" || input.action === "RELEASE");
       setWorkspace((current) => {
         const projected = projectWorkspaceAfterTrainingPlanMutation({
@@ -17264,6 +17286,12 @@ export function CoachAthletePlanningProfileView({
         // Keep the installed schedule; only stamp approve/release status onto it.
         // Invalidate in-flight latest reads so a stale response cannot clear the plan.
         latestSkillsDraftRequestGenRef.current += 1;
+        if (input.domain === "NUTRITION") {
+          nutritionRetainedDraftIdentityRef.current = {
+            planId: input.planId,
+            versionId: input.versionId,
+          };
+        }
         setLatestSkillsDraft((current) =>
           current !== null && (current.trainingPlanId?.trim() ?? "") === input.planId
             ? { ...current, status }
@@ -18140,13 +18168,18 @@ export function CoachAthletePlanningProfileView({
     const shouldRejectSandCLatestWrite = (
       incoming: CoachAthleteLatestDomainDraft | null,
     ): boolean => {
-      const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
+      const installedIdentity =
+        generationDomain === "S_AND_C"
+          ? sandCInstalledGeneratedDraftIdentityRef.current
+          : generationDomain === "NUTRITION"
+            ? nutritionRetainedDraftIdentityRef.current
+            : null;
       return shouldRejectStaleSandCLatestDraftWrite({
         domain: generationDomain,
         requestGeneration,
         currentGeneration: latestSkillsDraftRequestGenRef.current,
-        installedPlanId: sandCInstall?.planId,
-        installedVersionId: sandCInstall?.versionId,
+        installedPlanId: installedIdentity?.planId,
+        installedVersionId: installedIdentity?.versionId,
         incoming,
       });
     };
@@ -18395,16 +18428,24 @@ export function CoachAthletePlanningProfileView({
             ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
             : "";
         const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
+        const nutritionInstall = nutritionRetainedDraftIdentityRef.current;
+        const installedIdentity =
+          currentCoachGenerationDomain === "S_AND_C"
+            ? sandCInstall
+            : currentCoachGenerationDomain === "NUTRITION"
+              ? nutritionInstall
+              : null;
         if (
           shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
             domain: currentCoachGenerationDomain,
-            installedPlanId: sandCInstall?.planId,
-            installedVersionId: sandCInstall?.versionId,
+            installedPlanId: installedIdentity?.planId,
+            installedVersionId: installedIdentity?.versionId,
             workspacePlanId,
             workspaceVersionId,
           })
         ) {
-          // S&C post-generation: workspace same identity — keep installed latest authoritative.
+          // S&C post-generation / Nutrition post-approve-release: workspace same identity —
+          // keep installed latest authoritative.
           return;
         }
         const clearResolvedBootstrapLatestDraft = () => {
@@ -18418,6 +18459,13 @@ export function CoachAthletePlanningProfileView({
         if (currentCoachGenerationDomain === "S_AND_C" && sandCInstall !== null) {
           // Workspace resolved a different plan/version than the pinned generated draft.
           sandCInstalledGeneratedDraftIdentityRef.current = null;
+          clearResolvedBootstrapLatestDraft();
+          void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
+          return;
+        }
+        if (currentCoachGenerationDomain === "NUTRITION" && nutritionInstall !== null) {
+          // Workspace resolved a different plan/version than the approve/release retained draft.
+          nutritionRetainedDraftIdentityRef.current = null;
           clearResolvedBootstrapLatestDraft();
           void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
           return;
@@ -19508,7 +19556,7 @@ export function CoachAthletePlanningProfileView({
             action,
           })
         ) {
-          // SKILLS/S&C approve/release are status-only; keep the already-loaded plan/version authoritative.
+          // Domain approve/release are status-only; keep the already-loaded plan/version authoritative.
           return;
         }
         if (isHeadCoachPlanningContextOwner) {

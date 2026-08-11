@@ -13697,13 +13697,13 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         domain: "NUTRITION",
         action: "HEAD_APPROVE",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldSkipSkillsPostApprovalPlanRefresh({
         domain: "NUTRITION",
         action: "RELEASE",
       }),
-    ).toBe(false);
+    ).toBe(true);
 
     const beforeApprove = resolveDomainReviewDrawerContentSource({
       domain: "SKILLS",
@@ -14026,6 +14026,262 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe(true);
   });
 
+  it("keeps loaded Nutrition plan visible after approve and release with no loading message", () => {
+    const loadedPlan = {
+      trainingPlanId: "nutrition-plan",
+      trainingPlanVersionId: "nutrition-v7",
+      versionNumber: 7,
+      status: "AI_GENERATED",
+      days: [
+        {
+          dayIndex: 1,
+          meals: [
+            {
+              title: "Breakfast",
+              items: [{ foodId: "OAT_001", label: "Oatmeal bowl" }],
+            },
+          ],
+        },
+      ],
+    } as never;
+    const approvedPlan = { ...loadedPlan, status: "HEAD_COACH_APPROVED" };
+    const releasedPlan = { ...loadedPlan, status: "ACTIVE" };
+    const loadedActiveDetail = {
+      plan: { id: "nutrition-plan", status: "AI_GENERATED" },
+      version: { id: "nutrition-v7", status: "AI_GENERATED", versionNumber: 7 },
+    } as never;
+    const approvedActiveDetail = {
+      plan: { id: "nutrition-plan", status: "HEAD_COACH_APPROVED" },
+      version: { id: "nutrition-v7", status: "HEAD_COACH_APPROVED", versionNumber: 7 },
+    } as never;
+    const releasedActiveDetail = {
+      plan: { id: "nutrition-plan", status: "ACTIVE" },
+      version: { id: "nutrition-v7", status: "ACTIVE", versionNumber: 7 },
+    } as never;
+
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "NUTRITION",
+        action: "HEAD_APPROVE",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "NUTRITION",
+        action: "RELEASE",
+      }),
+    ).toBe(true);
+
+    const beforeApprove = resolveDomainReviewDrawerContentSource({
+      domain: "NUTRITION",
+      workflowStatus: "draft_generated",
+      directReleaseSkillsOwner: true,
+      activeDetail: loadedActiveDetail,
+      latestDraft: loadedPlan,
+    });
+    expect(beforeApprove).toBe("active_detail");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "NUTRITION",
+        contentSource: beforeApprove,
+        loading: false,
+        error: null,
+      }),
+    ).toBeNull();
+
+    const afterApprove = resolveDomainReviewDrawerContentSource({
+      domain: "NUTRITION",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: approvedActiveDetail,
+      latestDraft: approvedPlan,
+    });
+    expect(afterApprove).toBe("active_detail");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "NUTRITION",
+        contentSource: afterApprove,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+    expect(approvedActiveDetail.version.versionNumber).toBe(7);
+    expect(approvedActiveDetail.version.id).toBe("nutrition-v7");
+
+    const approveLabels = resolveDomainReviewDisplayLabels({
+      domain: "NUTRITION",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+    expect(approveLabels.planStatusLabel).toBe("Nutrition Coach Approved");
+
+    const approveActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "approved",
+      canShowViewPlan: false,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: true,
+      hasViewPlanContext: false,
+    });
+    expect(approveActions.canShowReleaseAction).toBe(true);
+    expect(
+      resolveDomainReviewDrawerVisibleActionLabels({
+        drawerWorkflowActions: approveActions,
+        actionContextAvailable: true,
+        viewPlanContextAvailable: false,
+        renderApproveBeforeRevise: true,
+        drawerRevisionComposerOpen: false,
+      }),
+    ).toContain("Release Plan to Athlete");
+
+    const afterRelease = resolveDomainReviewDrawerContentSource({
+      domain: "NUTRITION",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      activeDetail: releasedActiveDetail,
+      latestDraft: releasedPlan,
+    });
+    expect(afterRelease).toBe("active_detail");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "NUTRITION",
+        contentSource: afterRelease,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+    expect(releasedActiveDetail.version.versionNumber).toBe(7);
+    expect(releasedActiveDetail.version.id).toBe("nutrition-v7");
+
+    const releaseLabels = resolveDomainReviewDisplayLabels({
+      domain: "NUTRITION",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "ACTIVE",
+    });
+    expect(releaseLabels.statusLabel).toBe("Domain Released to Athlete");
+    expect(releaseLabels.planStatusLabel).toBe("Active");
+    expect(releaseLabels.workflowStatusLabel).toBe("Domain Released to Athlete");
+
+    const releaseActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "released",
+      canShowViewPlan: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: false,
+      hasViewPlanContext: true,
+    });
+    expect(releaseActions.canShowViewPlan).toBe(true);
+    expect(
+      resolveDomainReviewDrawerVisibleActionLabels({
+        drawerWorkflowActions: releaseActions,
+        actionContextAvailable: true,
+        viewPlanContextAvailable: true,
+        renderApproveBeforeRevise: true,
+        drawerRevisionComposerOpen: false,
+      }),
+    ).toContain("View in Plan Viewer");
+
+    // Stale cleared active detail after approve/release must not invent a loading empty
+    // state when the installed Nutrition schedule remains available as latest draft.
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "NUTRITION",
+        workflowStatus: "approved",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft: approvedPlan,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "NUTRITION",
+        workflowStatus: "released",
+        directReleaseSkillsOwner: false,
+        activeDetail: null,
+        latestDraft: releasedPlan,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "NUTRITION",
+        contentSource: "latest_domain_draft",
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+
+    // Stale/404 latest must not clear a successfully retained Nutrition plan after approve/release.
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "NUTRITION",
+        requestGeneration: 1,
+        currentGeneration: 2,
+        installedPlanId: "nutrition-plan",
+        installedVersionId: "nutrition-v7",
+        incoming: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "NUTRITION",
+        requestGeneration: 2,
+        currentGeneration: 2,
+        installedPlanId: "nutrition-plan",
+        installedVersionId: "nutrition-v7",
+        incoming: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "NUTRITION",
+        installedPlanId: "nutrition-plan",
+        installedVersionId: "nutrition-v7",
+        workspacePlanId: "nutrition-plan",
+        workspaceVersionId: "nutrition-v7",
+      }),
+    ).toBe(true);
+
+    const approveProjected = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: {
+        domains: {
+          NUTRITION: {
+            allowedActions: ["HEAD_APPROVE"],
+            submittedForReview: false,
+            pendingRevisionRequest: null,
+            summary: {
+              trainingPlanId: "nutrition-plan",
+              versionId: "nutrition-v7",
+              latestVersionId: "nutrition-v7",
+              status: "AI_GENERATED",
+            },
+          },
+        },
+      } as never,
+      domain: "NUTRITION",
+      action: "HEAD_APPROVE",
+      planId: "nutrition-plan",
+      versionId: "nutrition-v7",
+    });
+    expect(approveProjected?.domains.NUTRITION.summary.status).toBe("HEAD_COACH_APPROVED");
+    expect(approveProjected?.domains.NUTRITION.summary.versionId).toBe("nutrition-v7");
+
+    const releaseProjected = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: approveProjected,
+      domain: "NUTRITION",
+      action: "RELEASE",
+      planId: "nutrition-plan",
+      versionId: "nutrition-v7",
+    });
+    expect(releaseProjected?.domains.NUTRITION.summary.status).toBe("ACTIVE");
+    expect(releaseProjected?.domains.NUTRITION.summary.versionId).toBe("nutrition-v7");
+  });
+
   it("installs usable S&C latest draft after generation without detail hydration", () => {
     const sandCDraft = {
       trainingPlanId: "sandc-plan-1",
@@ -14112,12 +14368,12 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(
       shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
         domain: "NUTRITION",
-        installedPlanId: "sandc-plan-1",
-        installedVersionId: "sandc-v1",
-        workspacePlanId: "sandc-plan-1",
-        workspaceVersionId: "sandc-v1",
+        installedPlanId: "nutrition-plan-1",
+        installedVersionId: "nutrition-v1",
+        workspacePlanId: "nutrition-plan-1",
+        workspaceVersionId: "nutrition-v1",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("refreshes S&C latest when workspace resolves a different plan/version identity", () => {

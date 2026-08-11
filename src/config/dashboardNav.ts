@@ -61,6 +61,48 @@ function normalizePathname(pathname: string): string {
   return path;
 }
 
+/** Athlete-scoped training-plan workflow routes hosted under `/coach/athletes/...`. */
+const COACH_ATHLETE_TRAINING_PLAN_ROUTE =
+  /^\/coach\/athletes\/[^/]+\/(?:planning-profile|level-validation)(?:\/|$)/;
+
+export function isCoachTrainingPlanRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  const path = normalizePathname(pathname);
+  if (path === "/coach/training-plans" || path.startsWith("/coach/training-plans/")) {
+    return true;
+  }
+  return COACH_ATHLETE_TRAINING_PLAN_ROUTE.test(path);
+}
+
+/**
+ * Sidebar active-state resolution for coach nav items.
+ * Training Plan owns all training-plan workflow routes, including athlete-specific
+ * planning/detail/review pages under `/coach/athletes/...`.
+ */
+export function isCoachSidebarNavItemActive(
+  pathname: string | null | undefined,
+  href: string,
+): boolean {
+  if (!pathname) return false;
+  const path = normalizePathname(pathname);
+  const itemHref = normalizePathname(href);
+
+  if (itemHref === "/coach/dashboard") {
+    return path === itemHref;
+  }
+
+  if (itemHref === "/coach/training-plans") {
+    return isCoachTrainingPlanRoute(path);
+  }
+
+  if (itemHref === "/coach/athletes") {
+    if (isCoachTrainingPlanRoute(path)) return false;
+    return path === itemHref || path.startsWith(`${itemHref}/`);
+  }
+
+  return path === itemHref || path.startsWith(`${itemHref}/`);
+}
+
 export function resolveDashboardHeaderIcon(pathname: string | null | undefined): LucideIcon | null {
   if (!pathname) return null;
   const normalized = normalizePathname(pathname);

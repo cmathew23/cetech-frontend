@@ -416,6 +416,7 @@ export type CoachAthleteTrainingPlanPersistDraftResult = {
 export type CoachAthleteGeneratedDraftItem = {
   order: number | null;
   itemType: string | null;
+  skillCode?: string | null;
   exerciseCatalogItemId: string | null;
   nutritionCatalogItemId: string | null;
   primaryGoalId: string | null;
@@ -575,6 +576,10 @@ export type CoachAthleteDomainDraftRevisionOption = {
   targetTags: string[];
   safetyTags: string[];
   levelTags: string[];
+  /** Explicit Skills drill identity supplied by the backend. */
+  skillCode?: string;
+  /** Explicit Skills catalog identity supplied by the backend. */
+  catalogItemId?: string;
   /**
    * Authoritative catalog reference for Nutrition options, taken from the backend's explicit
    * top-level `nutritionCatalogItemId` field. Never inferred from `metadata`, `label`, or `id`.
@@ -807,6 +812,7 @@ export type AthleteTodayPlan = {
 export type TrainingPlanRevisionPatchItem = {
   /** Skills item operations identify the DB-backed drill; canonical metadata remains backend-owned. */
   skillCode?: string;
+  catalogItemId?: string;
   exerciseCatalogItemId?: string;
   durationMinutes?: number;
   sets?: number;
@@ -934,6 +940,7 @@ export type TrainingPlanReviseResult = {
   versionId: string | null;
   versionNumber: number | null;
   generationDomain: TrainingPlanGenerationDomain | null;
+  generatedPlannerCandidate?: CoachAthleteLatestDomainDraft | null;
   detail: CoachPersistedTrainingPlanActiveDetail | null;
   raw: unknown;
 };
@@ -1012,6 +1019,7 @@ export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDr
   const item: CoachAthleteGeneratedDraftItem = {
     order: readNumberKey([record], ["order", "itemOrder", "orderIndex", "index"]),
     itemType: readStringKey([record], ["itemType"]),
+    skillCode: readStringKey([record], ["skillCode"]),
     exerciseCatalogItemId: readStringKey([record], ["exerciseCatalogItemId"]),
     nutritionCatalogItemId: readStringKey([record], ["nutritionCatalogItemId"]),
     primaryGoalId: readStringKey([record], ["primaryGoalId"]),
@@ -1036,6 +1044,7 @@ export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDr
   return (
     item.order !== null ||
     item.itemType ||
+    item.skillCode ||
     item.exerciseCatalogItemId ||
     item.nutritionCatalogItemId ||
     item.primaryGoalId ||
@@ -1335,6 +1344,8 @@ function parseNutritionRevisionOptionItem(
   if (!record) return null;
   const records = [record];
   return {
+    skillCode: readStringKey(records, ["skillCode"]) ?? undefined,
+    catalogItemId: readStringKey(records, ["catalogItemId"]) ?? undefined,
     nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]),
     itemType: readStringKey(records, ["itemType"]),
     label: readStringKey(records, ["label"]),
@@ -1390,6 +1401,8 @@ function parseDomainDraftRevisionOption(
     targetTags: readStringListKey(records, ["targetTags"]),
     safetyTags: readStringListKey(records, ["safetyTags"]),
     levelTags: readStringListKey(records, ["levelTags"]),
+    skillCode: readStringKey(records, ["skillCode"]) ?? undefined,
+    catalogItemId: readStringKey(records, ["catalogItemId"]) ?? undefined,
     // Preserve the backend's explicit catalog reference verbatim (no metadata/label/id inference).
     nutritionCatalogItemId: readStringKey(records, ["nutritionCatalogItemId"]) ?? undefined,
     // S&C catalog ADD_ITEM options use their top-level option id as the authoritative exercise id.
@@ -1854,25 +1867,53 @@ function parseTrainingPlanReviseResult(
   }
 
   const records = collectRecords(adapted);
+  const planId =
+    detail?.plan.id ??
+    readStringKey(records, ["trainingPlanId", "planId"]) ??
+    fallbackPayload.trainingPlanId;
+  const versionId =
+    detail?.version.id ??
+    readStringKey(records, [
+      "trainingPlanVersionId",
+      "versionId",
+      "latestVersionId",
+      "selectedVersionId",
+    ]) ??
+    fallbackPayload.versionId;
+  const versionNumber =
+    detail?.version.versionNumber ?? readNumberKey(records, ["versionNumber"]);
+  const candidateValue =
+    records.find((record) => "generatedPlannerCandidate" in record)
+      ?.generatedPlannerCandidate ?? null;
+  const candidateRecord = asRecord(candidateValue);
+  const revisionValue =
+    records.find((record) => "revision" in record)?.revision ??
+    candidateRecord?.revision ??
+    null;
+  const generatedPlannerCandidate =
+    candidateRecord !== null
+      ? parseLatestDomainDraftPayload({
+          ...candidateRecord,
+          trainingPlanId: planId,
+          trainingPlanVersionId: versionId,
+          versionNumber,
+          status:
+            readStringKey(records, ["status"]) ??
+            readStringKey([candidateRecord], ["status"]) ??
+            "AI_GENERATED",
+          revision: revisionValue,
+        })
+      : null;
+
   return {
-    planId:
-      detail?.plan.id ??
-      readStringKey(records, ["trainingPlanId", "planId"]) ??
-      fallbackPayload.trainingPlanId,
-    versionId:
-      detail?.version.id ??
-      readStringKey(records, [
-        "trainingPlanVersionId",
-        "versionId",
-        "latestVersionId",
-        "selectedVersionId",
-      ]) ??
-      fallbackPayload.versionId,
-    versionNumber: detail?.version.versionNumber ?? readNumberKey(records, ["versionNumber"]),
+    planId,
+    versionId,
+    versionNumber,
     generationDomain:
       readTrainingPlanGenerationDomain(detail?.generationDomain) ??
       readTrainingPlanGenerationDomain(readStringKey(records, ["generationDomain"])) ??
       fallbackDomain,
+    generatedPlannerCandidate,
     detail,
     raw: data,
   };

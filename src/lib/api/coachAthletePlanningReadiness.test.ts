@@ -1077,6 +1077,30 @@ describe("parseReadinessPayload", () => {
     apiRequestMock.mockResolvedValue({
       trainingPlanId: "skills-plan-1",
       trainingPlanVersionId: "skills-version-2",
+      versionNumber: 2,
+      generatedPlannerCandidate: {
+        days: [
+          {
+            dayIndex: 6,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Putting",
+                items: [
+                  {
+                    itemType: "SKILL",
+                    skillCode: "GOLF_PUTT_005",
+                    label: "3-6-9 Circle Pressure Drill",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      revision: {
+        changeSummary: ["Added GOLF_PUTT_005 to Day 6 / session 1"],
+      },
     });
     const revisionPatch = {
       operation: "ADD_ITEM",
@@ -1085,7 +1109,7 @@ describe("parseReadinessPayload", () => {
       item: { skillCode: "PACE_CONTROL_01" },
     } as const;
 
-    await reviseSkillsPlan("entity-1", "athlete-1", {
+    const result = await reviseSkillsPlan("entity-1", "athlete-1", {
       trainingPlanId: "skills-plan-1",
       versionId: "skills-version-1",
       coachFeedback: "Add drill Pace control ladder to Short game.",
@@ -1105,6 +1129,35 @@ describe("parseReadinessPayload", () => {
         }),
       },
     );
+    expect(result).toMatchObject({
+      planId: "skills-plan-1",
+      versionId: "skills-version-2",
+      versionNumber: 2,
+      generatedPlannerCandidate: {
+        trainingPlanId: "skills-plan-1",
+        trainingPlanVersionId: "skills-version-2",
+        versionNumber: 2,
+        revision: {
+          changeSummary: ["Added GOLF_PUTT_005 to Day 6 / session 1"],
+        },
+        days: [
+          {
+            dayIndex: 6,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    skillCode: "GOLF_PUTT_005",
+                    label: "3-6-9 Circle Pressure Drill",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
   });
 
   it("passes the exact Skills Remove Drill revisionPatch through to the revise endpoint", async () => {
@@ -2022,6 +2075,13 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
             domain: "SKILLS",
             optionKind: "REPLACEMENT",
             source: "DB",
+            skillCode: "GOLF_SERVE_001",
+            catalogItemId: "skill-catalog-1",
+            item: {
+              skillCode: "GOLF_SERVE_001",
+              catalogItemId: "skill-catalog-1",
+              label: "Target serve drill",
+            },
             score: 0.9,
             reason: "Best fit",
             goalIds: [],
@@ -2050,6 +2110,13 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
       score: 0.9,
       reason: "Best fit",
       safetyTags: ["shoulder"],
+      skillCode: "GOLF_SERVE_001",
+      catalogItemId: "skill-catalog-1",
+      item: {
+        skillCode: "GOLF_SERVE_001",
+        catalogItemId: "skill-catalog-1",
+        label: "Target serve drill",
+      },
     });
     expect(result.options[1]).toMatchObject({
       id: "opt-2",

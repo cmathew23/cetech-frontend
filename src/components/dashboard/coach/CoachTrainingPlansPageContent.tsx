@@ -15,16 +15,15 @@ import {
   derivePrimaryCoachPlanDomain,
   type CoachPlanCreationDomain,
 } from "@/lib/coachAuthority";
-import { resolveTrainingPlanAction } from "@/lib/coachTrainingPlanActions";
+import {
+  fetchRequiredPlanningContextLocks,
+  resolveAssignedAthleteTrainingPlanAction,
+} from "@/lib/coachTrainingPlanListPlanningContext";
 import {
   fetchCoachAssignedAthletes,
   fetchCoachMeDashboard,
   type CoachAssignedAthleteRow,
 } from "@/lib/api/coachMe";
-import {
-  fetchCoachAthleteUpstreamPlanningContext,
-  isUpstreamPlanningContextLocked,
-} from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -85,22 +84,15 @@ function TrainingPlanAthleteRow({
     row.displayName.trim() !== ""
       ? formatPersonNameForDisplay(row.displayName)
       : "—";
-  const action = resolveTrainingPlanAction({
-    athleteId: row.athleteId,
-    assignedFunctions: row.assignedFunctions,
-    athletePlanGenerationDomain: row.currentGenerationDomain,
-    currentPlanId: row.currentPlanId,
-    currentPlanStatus: row.currentPlanStatus,
-    displayPlanStatus: row.displayPlanStatus,
-    planStatus: row.planStatus,
-    fallbackDomain: domain,
-    hasPlanningProfile: row.hasPlanningProfile,
-    hasHeadCoachConfigured,
-    isHeadCoachPlanningContextOwner,
+  const action = resolveAssignedAthleteTrainingPlanAction(
+    row,
+    {
+      domain,
+      hasHeadCoachConfigured,
+      isHeadCoachPlanningContextOwner,
+    },
     planningContextLocked,
-    canGeneratePlan: row.canGeneratePlan,
-    canGenerateCurrentDomainPlan: row.canGenerateCurrentDomainPlan,
-  });
+  );
 
   return (
     <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
@@ -204,28 +196,24 @@ export function CoachTrainingPlansPageContent() {
           dash !== null &&
           headCoachConfigured &&
           currentCoachIsHeadCoach(dash.academyCoachRole);
-        const lockMap: Record<string, boolean | null> = {};
+        const domain = dash
+          ? derivePrimaryCoachPlanDomain(dash.functions ?? [])
+          : null;
+        let lockMap: Record<string, boolean | null> = {};
         if (!headCoachUser && entityId !== "") {
-          const contextResults = await Promise.allSettled(
-            rows.map(async (row) => {
-              const context = await fetchCoachAthleteUpstreamPlanningContext(
-                entityId,
-                row.athleteId,
-              );
-              return [row.athleteId, isUpstreamPlanningContextLocked(context)] as const;
-            }),
+          lockMap = await fetchRequiredPlanningContextLocks(
+            entityId,
+            rows,
+            {
+              domain,
+              hasHeadCoachConfigured: headCoachConfigured,
+              isHeadCoachPlanningContextOwner: headCoachUser,
+            },
           );
-          for (const result of contextResults) {
-            if (result.status === "fulfilled") {
-              lockMap[result.value[0]] = result.value[1];
-            }
-          }
         }
         if (cancelled) return;
         setAthletes(rows);
-        setPlanDomain(
-          dash ? derivePrimaryCoachPlanDomain(dash.functions ?? []) : null,
-        );
+        setPlanDomain(domain);
         setHasHeadCoachConfigured(headCoachConfigured);
         setIsHeadCoachPlanningContextOwner(headCoachUser);
         setPlanningContextLockedByAthleteId(lockMap);

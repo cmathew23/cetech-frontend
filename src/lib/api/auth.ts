@@ -1,5 +1,6 @@
 import { paths } from "@/config/endpoints";
 import { apiRequest } from "@/lib/apiClient";
+import type { CreateAcademyAdminRequest } from "@/types/auth.types";
 
 type BackendMessageResponse = {
   success?: boolean;
@@ -31,5 +32,21 @@ export async function resetPasswordWithToken(
     omitAuth: true,
   });
   return toMessage(payload, "Password has been reset successfully");
+}
+
+export async function createAcademyAdmin(
+  payload: CreateAcademyAdminRequest,
+): Promise<void> {
+  await apiRequest(paths.auth.createAcademyAdmin, {
+    method: "POST",
+    body: JSON.stringify({
+      setupToken: payload.setupToken,
+      email: payload.email,
+      password: payload.password,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+    }),
+    omitAuth: true,
+  });
 }
 

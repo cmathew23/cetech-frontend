@@ -28,6 +28,7 @@ export const paths = {
     login: "/auth/login",
     logout: "/auth/logout",
     register: "/auth/register",
+    createAcademyAdmin: "/auth/create/academy-admin",
     me: "/auth/me",
     forgotPassword: "/auth/forgot-password",
     resetPassword: "/auth/reset-password",

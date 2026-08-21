@@ -23,6 +23,15 @@ export interface RegisterRequest {
   role: RegistrationRole;
 }
 
+/** POST /auth/create/academy-admin — role is fixed server-side; do not send `role`. */
+export interface CreateAcademyAdminRequest {
+  setupToken: string;
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+}
+
 // --- Responses ---
 
 /**

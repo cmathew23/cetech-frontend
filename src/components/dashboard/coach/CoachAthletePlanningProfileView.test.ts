@@ -189,7 +189,9 @@ import {
   domainPlanHistoryWeekLabel,
   handleDomainCoachPlanViewerHistoryClick,
   handleDomainCoachWorkspaceTabSelect,
+  historicalPlanDetailMatchesSelection,
   isDomainCoachPlanViewerContextExpired,
+  shouldEmbedDomainPlanHistoryInSkillsCoachIntegration,
   shouldRenderReleasedDomainPlanViewerSchedule,
   FynRevisionContextPanel,
   buildFynRevisionCoachFeedback,
@@ -12865,6 +12867,106 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         releasedPlanViewerIntentPresent: false,
         requestedPlanIdPresent: false,
         releasedWorkflowStatus: "not_created",
+      }),
+    ).toBe(false);
+  });
+
+  it("embeds Plan History in Workflow 3 Skills Domain Integration without changing specialist shells", () => {
+    expect(shouldEmbedDomainPlanHistoryInSkillsCoachIntegration("skills_coach_planning")).toBe(
+      true,
+    );
+    expect(shouldEmbedDomainPlanHistoryInSkillsCoachIntegration("specialist_domain")).toBe(
+      false,
+    );
+    expect(shouldEmbedDomainPlanHistoryInSkillsCoachIntegration("head_coach_function_aware")).toBe(
+      false,
+    );
+    expect(
+      shouldShowReleasedPlanViewerCanvas({
+        selectedWorkflowTab: "generate",
+        selectedDomain: "SKILLS",
+        releasedPlanViewerIntentPresent: false,
+        requestedPlanIdPresent: false,
+        releasedWorkflowStatus: "released",
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts a matching historical Skills plan and rejects the wrong athlete or version", () => {
+    const row = {
+      planId: "skills-plan-hist",
+      domainPlanId: "skills-domain-plan-hist",
+      versionId: "skills-version-hist",
+      versionNumber: 2,
+      domain: "SKILLS" as const,
+      weekStartDate: "2026-07-06",
+      weekEndDate: "2026-07-12",
+      status: "COMPLETED",
+      releasedAt: "2026-07-13T08:00:00.000Z",
+      releasedBy: "Skills Coach",
+      viewOnly: true,
+      raw: {},
+    };
+    const detail = {
+      ...row,
+      planContent: {
+        selectedVersionRule: null,
+        generationDomain: "SKILLS",
+        allowedActions: [],
+        releaseMode: null,
+        constraintComplianceSummary: null,
+        plan: {
+          id: "skills-plan-hist",
+          athleteId: "athlete-2002",
+          entityId: "entity-1",
+          seasonCycleId: null,
+          name: null,
+          description: null,
+          status: "COMPLETED",
+          planSource: null,
+          createdAt: null,
+          updatedAt: null,
+          goals: [],
+          raw: {},
+        },
+        version: {
+          id: "skills-version-hist",
+          trainingPlanId: "skills-plan-hist",
+          versionNumber: 2,
+          startDate: "2026-07-06",
+          endDate: "2026-07-12",
+          source: null,
+          status: "COMPLETED",
+          isActiveVersion: false,
+          isApproved: true,
+          createdAt: null,
+          updatedAt: null,
+          raw: {},
+        },
+        days: [],
+        raw: {},
+      },
+    };
+
+    expect(
+      historicalPlanDetailMatchesSelection({
+        detail,
+        athleteId: "athlete-2002",
+        row,
+      }),
+    ).toBe(true);
+    expect(
+      historicalPlanDetailMatchesSelection({
+        detail,
+        athleteId: "athlete-other",
+        row,
+      }),
+    ).toBe(false);
+    expect(
+      historicalPlanDetailMatchesSelection({
+        detail,
+        athleteId: "athlete-2002",
+        row: { ...row, versionId: "skills-version-current" },
       }),
     ).toBe(false);
   });

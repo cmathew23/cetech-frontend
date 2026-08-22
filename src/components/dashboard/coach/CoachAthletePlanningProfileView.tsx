@@ -2714,6 +2714,34 @@ export function DomainPlanHistoryTable({
   );
 }
 
+export function historicalPlanDetailMatchesSelection(input: {
+  detail: CoachTrainingPlanDomainHistoryDetail;
+  athleteId: string;
+  row: CoachTrainingPlanDomainHistoryRow;
+}): boolean {
+  const owner = input.detail.planContent.plan.athleteId?.trim() ?? "";
+  const athleteId = input.athleteId.trim();
+  if (owner !== "" && athleteId !== "" && owner !== athleteId) return false;
+
+  const expectedPlanId = input.row.planId?.trim() ?? "";
+  const actualPlanId = input.detail.planContent.plan.id.trim();
+  if (expectedPlanId !== "" && actualPlanId !== "" && expectedPlanId !== actualPlanId) {
+    return false;
+  }
+
+  const expectedVersionId = input.row.versionId?.trim() ?? "";
+  const actualVersionId = input.detail.planContent.version.id.trim();
+  if (
+    expectedVersionId !== "" &&
+    actualVersionId !== "" &&
+    expectedVersionId !== actualVersionId
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function DomainPlanHistoryTabPanel({
   rows,
   loading,
@@ -9910,6 +9938,13 @@ export function shouldRenderEmbeddedPlanViewerInDomainIntegration(
   shell: TrainingPlanPageShell,
 ): boolean {
   return shell !== "skills_coach_planning" && shell !== "specialist_domain";
+}
+
+/** W3 Skills uses Domain Integration, not specialist tabs; embed the same Plan History surface. */
+export function shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(
+  shell: TrainingPlanPageShell,
+): boolean {
+  return shell === "skills_coach_planning";
 }
 
 export function resolveDomainIntegrationSkillsCreateVisible(input: {
@@ -23181,6 +23216,16 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  useEffect(() => {
+    if (
+      !shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(trainingPlanShellModel.shell)
+    ) {
+      return;
+    }
+    if (selectedWorkflowTab !== "generate") return;
+    void loadDomainPlanHistory("SKILLS");
+  }, [athleteIdTrimmed, entityId, selectedWorkflowTab, trainingPlanShellModel.shell]);
+
   async function openDomainPlanHistoryDetail(
     row: CoachTrainingPlanDomainHistoryRow,
     fallbackDomain: TrainingPlanGenerationDomain,
@@ -23200,6 +23245,25 @@ export function CoachAthletePlanningProfileView({
         domain,
         domainPlanId,
       );
+      if (
+        !historicalPlanDetailMatchesSelection({
+          detail,
+          athleteId: athleteIdTrimmed,
+          row,
+        })
+      ) {
+        setDomainPlanHistoryDrawer((current) =>
+          current?.row.domainPlanId === row.domainPlanId
+            ? {
+                ...current,
+                detail: null,
+                loading: false,
+                error: "Could not open historical plan because it does not match this athlete.",
+              }
+            : current,
+        );
+        return;
+      }
       setDomainPlanHistoryDrawer((current) =>
         current?.row.domainPlanId === row.domainPlanId
           ? {
@@ -29081,6 +29145,14 @@ export function CoachAthletePlanningProfileView({
                           {renderLockedPlanningContextSummaryForDomainIntegration()}
                           {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
                           {renderHeadCoachSubmittedDomainPlansSection()}
+                          {shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(
+                            trainingPlanShellModel.shell,
+                          ) ? (
+                            <>
+                              {renderDomainCoachPlanHistoryTab("SKILLS")}
+                              {renderDomainPlanHistoryDrawer()}
+                            </>
+                          ) : null}
                         </div>
                       ) : (
                         renderHeadCoachReviewWorkspace()

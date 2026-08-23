@@ -102,6 +102,7 @@ function state(): AthleteWeeklyAdherenceState {
       domains: {},
       overall: null,
       visibleDomains: [],
+      trainingLoadComparison: null,
     },
     error: null,
     weekStart: "2026-07-13",
@@ -157,6 +158,7 @@ function comparisonData({
       completedItems: 8,
     },
     visibleDomains: [],
+    trainingLoadComparison: null,
   });
   return {
     athleteId: "athlete-1",
@@ -1266,5 +1268,107 @@ describe("AthleteWeeklyAdherenceSection daily comparison", () => {
     expect(markup).toContain("Daily Comparison");
     expect(markup).toContain("Daily breakdown unavailable");
     expect(markup).not.toContain("<details");
+  });
+});
+
+describe("AthleteWeeklyAdherenceSection training load card", () => {
+  it("renders the shared weekly training load card from summary data", () => {
+    contextState.current = {
+      ...state(),
+      summary: {
+        ...state().summary!,
+        visibleDomains: ["SKILL", "STRENGTH_CONDITIONING"],
+        trainingLoadComparison: {
+          reportedBaselineHours: 8.5,
+          aiPlanned: {
+            skillsMinutes: 240,
+            skillsHours: 4,
+            sandCMinutes: 192,
+            sandCHours: 3.2,
+            totalMinutes: 432,
+            totalHours: 7.2,
+          },
+          actualCompleted: {
+            skillsMinutes: 180,
+            skillsHours: 3,
+            sandCMinutes: 180,
+            sandCHours: 3,
+            totalMinutes: 360,
+            totalHours: 6,
+          },
+          plannedVsBaselineHours: 1.2,
+          plannedVsBaselinePercent: 14.1,
+          plannedVsBaselineStatus: "HIGHER",
+          actualVsPlannedHours: null,
+          actualVsPlannedPercent: null,
+          actualVsPlannedStatus: null,
+          baselineAvailable: true,
+          skillsPlanAvailable: true,
+          sandCPlanAvailable: true,
+          plannedComplete: true,
+          completionDataAvailable: true,
+          isCurrentWeek: false,
+          completedToDate: false,
+        },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection),
+    );
+
+    expect(markup).toContain("Weekly Training Load");
+    expect(markup).toContain("13 Jul – 19 Jul 2026");
+    expect(markup).toContain("Reported weekly training");
+    expect(markup).toContain("8.5 h");
+    expect(markup).toContain("1.2 h higher");
+  });
+
+  it("does not render the training load card in comparison-only mode", () => {
+    contextState.current = {
+      ...state(),
+      summary: {
+        ...state().summary!,
+        visibleDomains: ["SKILL"],
+        trainingLoadComparison: {
+          reportedBaselineHours: 8.5,
+          aiPlanned: {
+            skillsMinutes: 240,
+            skillsHours: 4,
+            sandCMinutes: 192,
+            sandCHours: 3.2,
+            totalMinutes: 432,
+            totalHours: 7.2,
+          },
+          actualCompleted: {
+            skillsMinutes: 180,
+            skillsHours: 3,
+            sandCMinutes: 180,
+            sandCHours: 3,
+            totalMinutes: 360,
+            totalHours: 6,
+          },
+          plannedVsBaselineHours: null,
+          plannedVsBaselinePercent: null,
+          plannedVsBaselineStatus: null,
+          actualVsPlannedHours: null,
+          actualVsPlannedPercent: null,
+          actualVsPlannedStatus: null,
+          baselineAvailable: true,
+          skillsPlanAvailable: true,
+          sandCPlanAvailable: false,
+          plannedComplete: true,
+          completionDataAvailable: true,
+          isCurrentWeek: false,
+          completedToDate: false,
+        },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AthleteWeeklyAdherenceSection, { comparisonOnly: true }),
+    );
+
+    expect(markup).not.toContain("Weekly Training Load");
   });
 });

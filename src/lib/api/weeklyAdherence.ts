@@ -121,6 +121,47 @@ export type WeeklyAdherenceSummary = {
   domains: Partial<Record<WeeklyAdherenceDomainKey, WeeklyAdherenceDomainSummary>>;
   overall: WeeklyAdherenceOverallSummary | null;
   visibleDomains: WeeklyAdherenceDomainKey[];
+  trainingLoadComparison: TrainingLoadComparison | null;
+};
+
+export type TrainingLoadHoursDirection = "LOWER" | "ABOUT_SAME" | "HIGHER";
+
+export type TrainingLoadDomainKey = "SKILL" | "STRENGTH_CONDITIONING";
+
+export type WeeklyTrainingLoadViewerContext =
+  | "ATHLETE"
+  | "HEAD_COACH"
+  | "SKILLS"
+  | "NUTRITION"
+  | "S_AND_C"
+  | "DEFAULT";
+
+export type TrainingLoadHoursBreakdown = {
+  skillsMinutes: number;
+  skillsHours: number;
+  sandCMinutes: number;
+  sandCHours: number;
+  totalMinutes: number;
+  totalHours: number;
+};
+
+export type TrainingLoadComparison = {
+  reportedBaselineHours: number | null;
+  aiPlanned: TrainingLoadHoursBreakdown;
+  actualCompleted: TrainingLoadHoursBreakdown;
+  plannedVsBaselineHours: number | null;
+  plannedVsBaselinePercent: number | null;
+  plannedVsBaselineStatus: TrainingLoadHoursDirection | null;
+  actualVsPlannedHours: number | null;
+  actualVsPlannedPercent: number | null;
+  actualVsPlannedStatus: TrainingLoadHoursDirection | null;
+  baselineAvailable: boolean;
+  skillsPlanAvailable: boolean;
+  sandCPlanAvailable: boolean;
+  plannedComplete: boolean;
+  completionDataAvailable: boolean;
+  isCurrentWeek: boolean;
+  completedToDate: boolean;
 };
 
 export type WeeklyAdherenceComparisonAvailability =
@@ -697,6 +738,98 @@ function normalizeDomainKey(rawKey: string): WeeklyAdherenceDomainKey | null {
   return DOMAIN_KEY_ALIASES[rawKey.trim().toUpperCase()] ?? null;
 }
 
+function readContractBoolean(value: unknown): boolean {
+  return typeof value === "boolean" ? value : false;
+}
+
+function readContractNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHoursDirection(value: unknown): TrainingLoadHoursDirection | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "LOWER" || normalized === "HIGHER" || normalized === "ABOUT_SAME") {
+    return normalized;
+  }
+  return null;
+}
+
+function parseTrainingLoadHoursBreakdown(raw: unknown): TrainingLoadHoursBreakdown {
+  const record = asRecord(raw) ?? {};
+  return {
+    skillsMinutes: readFiniteNumber(record.skillsMinutes),
+    skillsHours: readFiniteNumber(record.skillsHours),
+    sandCMinutes: readFiniteNumber(record.sandCMinutes),
+    sandCHours: readFiniteNumber(record.sandCHours),
+    totalMinutes: readFiniteNumber(record.totalMinutes),
+    totalHours: readFiniteNumber(record.totalHours),
+  };
+}
+
+export function parseTrainingLoadComparison(
+  raw: unknown,
+): TrainingLoadComparison | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+
+  return {
+    reportedBaselineHours: readContractNullableNumber(record.reportedBaselineHours),
+    aiPlanned: parseTrainingLoadHoursBreakdown(record.aiPlanned),
+    actualCompleted: parseTrainingLoadHoursBreakdown(record.actualCompleted),
+    plannedVsBaselineHours: readContractNullableNumber(record.plannedVsBaselineHours),
+    plannedVsBaselinePercent: readContractNullableNumber(
+      record.plannedVsBaselinePercent,
+    ),
+    plannedVsBaselineStatus: readHoursDirection(record.plannedVsBaselineStatus),
+    actualVsPlannedHours: readContractNullableNumber(record.actualVsPlannedHours),
+    actualVsPlannedPercent: readContractNullableNumber(
+      record.actualVsPlannedPercent,
+    ),
+    actualVsPlannedStatus: readHoursDirection(record.actualVsPlannedStatus),
+    baselineAvailable: readContractBoolean(record.baselineAvailable),
+    skillsPlanAvailable: readContractBoolean(record.skillsPlanAvailable),
+    sandCPlanAvailable: readContractBoolean(record.sandCPlanAvailable),
+    plannedComplete: readContractBoolean(record.plannedComplete),
+    completionDataAvailable: readContractBoolean(record.completionDataAvailable),
+    isCurrentWeek: readContractBoolean(record.isCurrentWeek),
+    completedToDate: readContractBoolean(record.completedToDate),
+  };
+}
+
+export function shouldShowWeeklyTrainingLoadCard(input: {
+  comparison: TrainingLoadComparison | null | undefined;
+  visibleDomains?: WeeklyAdherenceDomainKey[];
+  viewerContext?: WeeklyTrainingLoadViewerContext;
+}): boolean {
+  if (input.viewerContext === "NUTRITION") return false;
+  return input.comparison != null;
+}
+
+export function visibleTrainingLoadDomains(
+  comparison: TrainingLoadComparison,
+  viewerContext: WeeklyTrainingLoadViewerContext = "DEFAULT",
+): TrainingLoadDomainKey[] {
+  if (viewerContext === "NUTRITION") return [];
+  const keys: TrainingLoadDomainKey[] = [];
+  const showSkills = viewerContext !== "S_AND_C";
+  const showSandC = viewerContext !== "SKILLS";
+  if (showSkills && comparison.skillsPlanAvailable) keys.push("SKILL");
+  if (showSandC && comparison.sandCPlanAvailable) {
+    keys.push("STRENGTH_CONDITIONING");
+  }
+  return keys;
+}
+
+export function trainingLoadHoursForViewer(
+  breakdown: TrainingLoadHoursBreakdown,
+  viewerContext: WeeklyTrainingLoadViewerContext = "DEFAULT",
+): number {
+  if (viewerContext === "SKILLS") return breakdown.skillsHours;
+  if (viewerContext === "S_AND_C") return breakdown.sandCHours;
+  return breakdown.totalHours;
+}
+
 export function parseWeeklyAdherenceSummaryPayload(
   payload: unknown,
 ): WeeklyAdherenceSummary {
@@ -726,6 +859,9 @@ export function parseWeeklyAdherenceSummaryPayload(
     domains,
     overall: parseOverallSummaryFromRecord(record),
     visibleDomains: parseVisibleDomains(record.visibleDomains),
+    trainingLoadComparison: parseTrainingLoadComparison(
+      record.trainingLoadComparison,
+    ),
   };
 }
 

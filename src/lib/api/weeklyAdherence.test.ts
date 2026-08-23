@@ -1,8 +1,44 @@
 import { describe, expect, it } from "vitest";
 import {
   hasNutritionAdherenceDomain,
+  parseTrainingLoadComparison,
   parseWeeklyAdherenceSummaryPayload,
+  shouldShowWeeklyTrainingLoadCard,
+  visibleTrainingLoadDomains,
 } from "@/lib/api/weeklyAdherence";
+
+const TRAINING_LOAD_CONTRACT = {
+  reportedBaselineHours: 8.5,
+  aiPlanned: {
+    skillsMinutes: 240,
+    skillsHours: 4,
+    sandCMinutes: 192,
+    sandCHours: 3.2,
+    totalMinutes: 432,
+    totalHours: 7.2,
+  },
+  actualCompleted: {
+    skillsMinutes: 120,
+    skillsHours: 2,
+    sandCMinutes: 66,
+    sandCHours: 1.1,
+    totalMinutes: 186,
+    totalHours: 3.1,
+  },
+  plannedVsBaselineHours: -1.3,
+  plannedVsBaselinePercent: -15.3,
+  plannedVsBaselineStatus: "LOWER",
+  actualVsPlannedHours: -4.1,
+  actualVsPlannedPercent: -56.9,
+  actualVsPlannedStatus: "LOWER",
+  baselineAvailable: true,
+  skillsPlanAvailable: true,
+  sandCPlanAvailable: true,
+  plannedComplete: true,
+  completionDataAvailable: true,
+  isCurrentWeek: true,
+  completedToDate: true,
+};
 
 describe("parseWeeklyAdherenceSummaryPayload", () => {
   it("unwraps { message, data } envelope", () => {
@@ -297,5 +333,147 @@ describe("parseWeeklyAdherenceSummaryPayload", () => {
       completionCredit: 13,
       totalItems: 31,
     });
+  });
+
+  it("parses trainingLoadComparison from the exact backend contract", () => {
+    const parsed = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-08-17",
+      weekEnd: "2026-08-23",
+      domains: {
+        SKILL: { plannedSessions: 2, loggedSessions: 1, adherencePercent: 50 },
+      },
+      overall: null,
+      visibleDomains: ["SKILL", "STRENGTH_CONDITIONING"],
+      trainingLoadComparison: TRAINING_LOAD_CONTRACT,
+    });
+
+    expect(parsed.trainingLoadComparison).toEqual(TRAINING_LOAD_CONTRACT);
+  });
+
+  it("ignores guessed aliases and does not invent classifications", () => {
+    const parsed = parseTrainingLoadComparison({
+      baselineHoursPerWeek: 9,
+      reportedBaselineHoursPerWeek: 9,
+      baselineHours: 9,
+      plannedHours: 9,
+      aiPlannedHours: 9,
+      actualHours: 9,
+      planVsBaseline: { classification: "HIGHER", differenceHours: 2 },
+      actualVsPlan: { classification: "LOWER", differenceHours: -2 },
+      domains: { SKILL: { plannedHours: 4, actualHours: 2 } },
+      isPartialPlan: true,
+      planCompleteness: "PARTIAL",
+      hasAdherence: true,
+      reportedBaselineHours: 8.5,
+      aiPlanned: TRAINING_LOAD_CONTRACT.aiPlanned,
+      actualCompleted: TRAINING_LOAD_CONTRACT.actualCompleted,
+      plannedVsBaselineStatus: "LOWER",
+      plannedVsBaselineHours: -1.3,
+      actualVsPlannedStatus: null,
+    });
+
+    expect(parsed?.reportedBaselineHours).toBe(8.5);
+    expect(parsed?.aiPlanned.totalHours).toBe(7.2);
+    expect(parsed?.actualCompleted.totalHours).toBe(3.1);
+    expect(parsed?.plannedVsBaselineStatus).toBe("LOWER");
+    expect(parsed?.plannedVsBaselineHours).toBe(-1.3);
+    expect(parsed?.actualVsPlannedStatus).toBeNull();
+    expect(parsed).not.toHaveProperty("baselineHoursPerWeek");
+    expect(parsed).not.toHaveProperty("plannedHours");
+    expect(parsed).not.toHaveProperty("actualHours");
+    expect(parsed).not.toHaveProperty("domains");
+    expect(parsed).not.toHaveProperty("planVsBaseline");
+    expect(parsed).not.toHaveProperty("isPartialPlan");
+    expect(parsed).not.toHaveProperty("hasAdherence");
+  });
+
+  it("does not map alias-only payloads onto contract fields", () => {
+    const parsed = parseTrainingLoadComparison({
+      baselineHoursPerWeek: 8.5,
+      plannedHours: 7.2,
+      actualHours: 3.1,
+      planVsBaseline: { classification: "LOWER", differenceHours: -1.3 },
+    });
+
+    expect(parsed?.reportedBaselineHours).toBeNull();
+    expect(parsed?.aiPlanned.totalHours).toBe(0);
+    expect(parsed?.actualCompleted.totalHours).toBe(0);
+    expect(parsed?.plannedVsBaselineStatus).toBeNull();
+    expect(parsed?.plannedVsBaselineHours).toBeNull();
+  });
+});
+
+describe("shouldShowWeeklyTrainingLoadCard", () => {
+  const comparison = parseTrainingLoadComparison(TRAINING_LOAD_CONTRACT);
+
+  it("shows the card for athlete and head coach when backend data is present", () => {
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison,
+        viewerContext: "ATHLETE",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison,
+        viewerContext: "HEAD_COACH",
+      }),
+    ).toBe(true);
+  });
+
+  it("shows Skills and S&C coaches and hides nutrition", () => {
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison,
+        viewerContext: "SKILLS",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison,
+        viewerContext: "S_AND_C",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison,
+        viewerContext: "NUTRITION",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the card when the payload is missing", () => {
+    expect(
+      shouldShowWeeklyTrainingLoadCard({
+        comparison: null,
+        viewerContext: "ATHLETE",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not expose unauthorized domain rows to a Skills or S&C coach", () => {
+    const both = parseTrainingLoadComparison(TRAINING_LOAD_CONTRACT)!;
+    expect(visibleTrainingLoadDomains(both, "SKILLS")).toEqual(["SKILL"]);
+    expect(visibleTrainingLoadDomains(both, "S_AND_C")).toEqual([
+      "STRENGTH_CONDITIONING",
+    ]);
+    expect(visibleTrainingLoadDomains(both, "ATHLETE")).toEqual([
+      "SKILL",
+      "STRENGTH_CONDITIONING",
+    ]);
+    expect(visibleTrainingLoadDomains(both, "HEAD_COACH")).toEqual([
+      "SKILL",
+      "STRENGTH_CONDITIONING",
+    ]);
+    expect(
+      visibleTrainingLoadDomains(
+        parseTrainingLoadComparison({
+          ...TRAINING_LOAD_CONTRACT,
+          sandCPlanAvailable: false,
+        })!,
+        "ATHLETE",
+      ),
+    ).toEqual(["SKILL"]);
   });
 });

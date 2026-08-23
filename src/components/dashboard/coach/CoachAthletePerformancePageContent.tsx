@@ -3,6 +3,7 @@
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
+import { WeeklyTrainingLoadCard } from "@/components/dashboard/WeeklyTrainingLoadCard";
 import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -222,13 +223,24 @@ export function CoachAthletePerformancePageContent() {
           />
 
           {summary ? (
-            <WeeklyAdherenceCards
-              summary={summary}
-              athleteHeading={athleteHeading ?? undefined}
-              showSectionHeader={true}
-              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
-              cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
-            />
+            <>
+              <WeeklyAdherenceCards
+                summary={summary}
+                athleteHeading={athleteHeading ?? undefined}
+                showSectionHeader={true}
+                cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+                cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              />
+              <WeeklyTrainingLoadCard
+                comparison={summary.trainingLoadComparison}
+                visibleDomains={summary.visibleDomains}
+                viewerContext={wearableViewerContext}
+                weekStart={summary.weekStart}
+                weekEnd={summary.weekEnd}
+                cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              />
+            </>
           ) : null}
 
           {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (

@@ -4,6 +4,7 @@ import {
   buildWeeklyAdherenceMetricTiles,
   WeeklyAdherenceCards,
 } from "@/components/dashboard/WeeklyAdherenceCards";
+import { WeeklyTrainingLoadCard } from "@/components/dashboard/WeeklyTrainingLoadCard";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Card } from "@/components/ui/Card";
@@ -855,6 +856,17 @@ export function AthleteWeeklyAdherenceSection({
 
   if (phase === "loaded" && summary) {
     const tiles = buildWeeklyAdherenceMetricTiles(summary);
+    const trainingLoadCard = (
+      <WeeklyTrainingLoadCard
+        comparison={summary.trainingLoadComparison}
+        visibleDomains={summary.visibleDomains}
+        viewerContext="ATHLETE"
+        weekStart={summary.weekStart}
+        weekEnd={summary.weekEnd}
+        cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+        titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      />
+    );
     if (tiles.length > 0) {
       return (
         <>
@@ -865,6 +877,7 @@ export function AthleteWeeklyAdherenceSection({
             cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
             softTileTypography
           />
+          {trainingLoadCard}
         </>
       );
     }
@@ -876,6 +889,7 @@ export function AthleteWeeklyAdherenceSection({
             No adherence metrics returned for this week.
           </p>
         </WeeklyAdherenceSectionCard>
+        {trainingLoadCard}
       </>
     );
   }

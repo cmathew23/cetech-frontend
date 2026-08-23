@@ -1,4 +1,12 @@
 import type { ReactNode } from "react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Info,
+  Loader2,
+  Minus,
+  TriangleAlert,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -12,20 +20,23 @@ export type DashboardStatusNoticeType =
   | "empty";
 
 const NOTICE_STYLES: Record<DashboardStatusNoticeType, string> = {
-  info: "border-slate-300 bg-slate-50/70 text-slate-700",
-  success: "border-emerald-300 bg-emerald-50/70 text-emerald-900",
-  warning: "border-amber-300 bg-amber-50/70 text-amber-950",
-  blocker: "border-orange-400 bg-orange-50/70 text-orange-950",
-  error: "border-red-400 bg-red-50/70 text-red-950",
-  loading: "border-primary/40 bg-primary/10 text-textPrimary",
-  empty: "border-slate-200 bg-slate-50/50 text-textSecondary",
+  info: "border-sky-200/80 border-l-sky-600 bg-sky-50 text-slate-800",
+  success: "border-emerald-200/80 border-l-emerald-600 bg-emerald-50 text-emerald-950",
+  warning: "border-amber-200/80 border-l-amber-500 bg-amber-50 text-amber-950",
+  blocker: "border-orange-200/80 border-l-orange-500 bg-orange-50 text-orange-950",
+  error: "border-red-200/80 border-l-red-600 bg-red-50 text-red-950",
+  loading: "border-sky-200/80 border-l-primary bg-primary/5 text-textPrimary",
+  empty: "border-slate-200/80 border-l-slate-400 bg-slate-50 text-textSecondary",
 };
 
-const DEFAULT_PREFIX: Partial<Record<DashboardStatusNoticeType, string>> = {
-  success: "+",
-  warning: "!",
-  blocker: "!",
-  error: "!",
+const DEFAULT_ICONS: Record<DashboardStatusNoticeType, ReactNode> = {
+  info: <Info className="h-4 w-4" />,
+  success: <CircleCheck className="h-4 w-4" />,
+  warning: <TriangleAlert className="h-4 w-4" />,
+  blocker: <TriangleAlert className="h-4 w-4" />,
+  error: <CircleAlert className="h-4 w-4" />,
+  loading: <Loader2 className="h-4 w-4 animate-spin" />,
+  empty: <Minus className="h-4 w-4" />,
 };
 
 export function DashboardStatusNotice({
@@ -54,27 +65,24 @@ export function DashboardStatusNotice({
   className?: string;
 }) {
   const content = children ?? message;
-  const prefix = icon ?? (showPrefix ? DEFAULT_PREFIX[type] : null);
+  const prefix = icon ?? (showPrefix ? DEFAULT_ICONS[type] : null);
   const role = type === "error" || type === "blocker" ? "alert" : "status";
 
   return (
     <div
       className={cn(
-        "min-w-0 border-l-2 px-3 text-sm",
-        compact ? "py-2" : "py-3",
+        "min-w-0 rounded-md border border-l-[3px] px-3 text-sm leading-5 shadow-sm",
+        compact ? "py-2" : "py-2.5",
         NOTICE_STYLES[type],
         className,
       )}
       role={role}
       aria-live={type === "loading" ? "polite" : undefined}
     >
-      <div className="flex min-w-0 items-start gap-2">
+      <div className="flex min-w-0 items-start gap-2.5">
         {prefix ? (
           <span
-            className={cn(
-              "mt-0.5 shrink-0 text-xs font-medium leading-none",
-              type === "loading" ? "h-2 w-2 animate-pulse rounded-full bg-current text-transparent" : "",
-            )}
+            className="mt-0.5 shrink-0 leading-none text-current"
             aria-hidden="true"
           >
             {prefix}

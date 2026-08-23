@@ -174,9 +174,15 @@ export const designSystem = {
   },
 
   alert: {
-    base: "rounded-lg border px-4 py-3 text-sm",
-    success: "border-success/30 bg-successLight text-successDark",
-    warning: "border-warning/30 bg-warning/15 text-warning",
-    danger: "border-danger/30 bg-danger/15 text-danger",
+    base:
+      "flex items-start gap-2.5 rounded-md border border-l-[3px] px-3 py-2.5 text-sm leading-5 shadow-sm",
+    success:
+      "border-success/25 border-l-success bg-successLight text-successDark",
+    warning:
+      "border-warning/30 border-l-warning bg-warning/15 text-[#9A6700]",
+    danger:
+      "border-danger/30 border-l-danger bg-danger/10 text-[#B91C1C]",
+    info:
+      "border-sky-200/80 border-l-sky-600 bg-sky-50 text-slate-800",
   },
 };

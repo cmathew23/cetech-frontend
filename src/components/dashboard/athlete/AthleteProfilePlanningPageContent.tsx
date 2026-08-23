@@ -1574,7 +1574,7 @@ export function AthleteProfilePlanningPageContent() {
           </Alert>
         ) : null}
         {saveSuccess ? (
-          <Alert variant="success" role="status">
+          <Alert variant="success" role="status" dismissible>
             {saveSuccess}
           </Alert>
         ) : null}

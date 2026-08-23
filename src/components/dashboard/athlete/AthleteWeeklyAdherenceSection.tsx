@@ -490,7 +490,9 @@ export function AthleteWeeklyAdherenceSection({
       {!snapshotsLoading &&
       !snapshotsError &&
       insufficientHistory ? (
-        <Alert variant="warning">No historical weeks available.</Alert>
+        <Alert variant="info" role="status">
+          No historical weeks available.
+        </Alert>
       ) : null}
       <div
         className={`grid gap-4 sm:grid-cols-2 ${

@@ -1926,16 +1926,13 @@ function NutritionSessionAdherencePanel({
       </fieldset>
 
       {submitMessage ? (
-        <p
-          className={cn(
-            "mt-2 text-xs",
-            submitMessage.variant === "success"
-              ? "text-emerald-700"
-              : "text-red-700",
-          )}
+        <Alert
+          variant={submitMessage.variant === "success" ? "success" : "danger"}
+          className="mt-2"
+          dismissible={submitMessage.variant === "success"}
         >
           {submitMessage.text}
-        </p>
+        </Alert>
       ) : null}
     </div>
   );
@@ -2269,16 +2266,13 @@ function SessionAdherencePanel({
       </fieldset>
 
       {submitMessage ? (
-        <p
-          className={cn(
-            "mt-2 text-xs",
-            submitMessage.variant === "success"
-              ? "text-emerald-700"
-              : "text-red-700",
-          )}
+        <Alert
+          variant={submitMessage.variant === "success" ? "success" : "danger"}
+          className="mt-2"
+          dismissible={submitMessage.variant === "success"}
         >
           {submitMessage.text}
-        </p>
+        </Alert>
       ) : null}
     </div>
   );

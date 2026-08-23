@@ -1337,7 +1337,7 @@ export function AcademyAdminWorkspacePage({
         {section === "members" ? (
           <div>
             {membersSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {membersSuccess}
               </Alert>
             ) : null}
@@ -1517,7 +1517,7 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {inviteSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {inviteSuccess}
               </Alert>
             ) : null}
@@ -1787,7 +1787,7 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {assignmentSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {assignmentSuccess}
               </Alert>
             ) : null}
@@ -1796,6 +1796,7 @@ export function AcademyAdminWorkspacePage({
                 variant={canGeneratePlanNotice.variant}
                 className="mb-4"
                 role="status"
+                dismissible={canGeneratePlanNotice.variant === "success"}
               >
                 {canGeneratePlanNotice.message}
               </Alert>

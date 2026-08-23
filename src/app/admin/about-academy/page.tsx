@@ -244,7 +244,7 @@ export default function AdminAboutAcademyPage() {
       />
 
       {saveSuccess ? (
-        <Alert variant="success" role="status">
+        <Alert variant="success" role="status" dismissible>
           {saveSuccess}
         </Alert>
       ) : null}

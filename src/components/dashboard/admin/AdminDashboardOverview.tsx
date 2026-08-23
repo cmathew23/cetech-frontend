@@ -2,6 +2,7 @@
 
 import { AdminTableSearchInput } from "@/components/dashboard/admin/AdminTableSearchInput";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { Alert } from "@/components/ui/Alert";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { adminTableSearchMatches } from "@/lib/adminTableSearch";
 import {
@@ -121,9 +122,7 @@ export function AdminDashboardOverview({
             </p>
           </div>
         </div>
-        {kpiError ? (
-          <p className="text-sm text-danger">{kpiError}</p>
-        ) : null}
+        {kpiError ? <Alert variant="danger">{kpiError}</Alert> : null}
       </section>
 
       <section className="space-y-3">

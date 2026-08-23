@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardGate } from "@/components/layout/DashboardGate";
+import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Heading } from "@/components/ui/Heading";
@@ -107,11 +108,11 @@ export default function ExerciseCatalogDetailPage() {
 
             {loading ? <p className="text-sm text-textSecondary">Loading...</p> : null}
             {!loading && error ? (
-              <p className={error.status === 401 ? "text-warning" : "text-danger"}>
+              <Alert variant={error.status === 401 ? "warning" : "danger"}>
                 {error.status === 401
                   ? "Unauthorized. Redirecting to login..."
                   : error.message}
-              </p>
+              </Alert>
             ) : null}
 
             {!loading && !error && detail ? (

@@ -212,7 +212,7 @@ export function AthleteInvitationsPageContent() {
   return (
     <div className="space-y-3">
       {actionSuccess ? (
-        <Alert variant="success" role="status">
+        <Alert variant="success" role="status" dismissible>
           {actionSuccess}
         </Alert>
       ) : null}

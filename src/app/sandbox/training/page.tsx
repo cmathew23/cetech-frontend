@@ -3,6 +3,7 @@
 /** TEMP SANDBOX / NOT FINAL UI: coach-side exercise retrieval + local selection. */
 
 import { DashboardGate } from "@/components/layout/DashboardGate";
+import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Heading } from "@/components/ui/Heading";
@@ -170,7 +171,7 @@ export default function TrainingSandboxPage() {
                 <p className="text-sm text-textSecondary">Loading exercises...</p>
               ) : null}
               {!loading && error ? (
-                <p className="text-sm text-danger">{error}</p>
+                <Alert variant="danger">{error}</Alert>
               ) : null}
               {!loading && !error && hasFetched && results.length === 0 ? (
                 <p className="text-sm text-textSecondary">No exercises found.</p>

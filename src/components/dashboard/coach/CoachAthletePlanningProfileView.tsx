@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { GoalDisplayBlock } from "@/components/goals/GoalDisplayBlock";
 import { CoachAthleteLevelValidationModal } from "@/components/dashboard/coach/CoachAthleteLevelValidationModal";
 import { Alert } from "@/components/ui/Alert";
+import { designSystem } from "@/config/design-system";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -20,8 +21,10 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  Info,
   Loader2,
   LockKeyhole,
+  X,
 } from "lucide-react";
 import { fetchMyAcademyCoaches } from "@/lib/api/academyMeCoaches";
 import {
@@ -8376,14 +8379,43 @@ function WorkflowTabNextButton({
   );
 }
 
-/** Inline status (replaces green Alert success) — orange/neutral workflow only. */
-function WorkflowNeutralNotice({ children }: { children: ReactNode }) {
+/** Inline workflow/status card — PeakFlow info/slate language, not action-success green. */
+function WorkflowNeutralNotice({
+  children,
+  dismissible = false,
+}: {
+  children: ReactNode;
+  dismissible?: boolean;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  const [contentStamp, setContentStamp] = useState(children);
+
+  if (children !== contentStamp) {
+    setContentStamp(children);
+    setDismissed(false);
+  }
+
+  if (dismissed) {
+    return null;
+  }
+
   return (
     <div
-      className="rounded-lg border border-border bg-bg px-4 py-3 text-sm text-textPrimary"
+      className={cn(designSystem.alert.base, designSystem.alert.info)}
       role="status"
     >
-      {children}
+      <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0 flex-1">{children}</div>
+      {dismissible ? (
+        <button
+          type="button"
+          className="-mr-0.5 mt-0.5 shrink-0 rounded p-0.5 text-current/70 transition hover:bg-black/5 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-current/30"
+          aria-label="Dismiss"
+          onClick={() => setDismissed(true)}
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -20852,7 +20884,9 @@ export function CoachAthletePlanningProfileView({
 
         {shouldShowSelectedDomainInspectorActionSuccess(governedPlanActionSuccess) &&
         !workflow1HeadCoachReviewActionPanelMode ? (
-          <Alert variant="success">{governedPlanActionSuccess}</Alert>
+          <Alert variant="success" dismissible>
+            {governedPlanActionSuccess}
+          </Alert>
         ) : null}
 
         {!state.loading && !state.error ? (
@@ -21921,7 +21955,7 @@ export function CoachAthletePlanningProfileView({
                   <Alert variant="danger">{governedPlanActionError}</Alert>
                 ) : null}
                 {governedPlanActionSuccess ? (
-                  <WorkflowNeutralNotice>
+                  <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
                     <div className="space-y-2">
                       <div>{governedPlanActionSuccess}</div>
                       {governedPlanActionSuccessFeedback ? (
@@ -22036,7 +22070,9 @@ export function CoachAthletePlanningProfileView({
                   </div>
                   {drawerReviseError ? <Alert variant="danger">{drawerReviseError}</Alert> : null}
                   {drawerReviseSuccess ? (
-                    <WorkflowNeutralNotice>{drawerReviseSuccess}</WorkflowNeutralNotice>
+                    <WorkflowNeutralNotice dismissible>
+                      {drawerReviseSuccess}
+                    </WorkflowNeutralNotice>
                   ) : null}
                   <FynRevisionContextPanel
                     domain={reviewDomain}
@@ -22681,7 +22717,9 @@ export function CoachAthletePlanningProfileView({
             <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
             {reviseSkillsError ? <Alert variant="danger">{reviseSkillsError}</Alert> : null}
             {reviseSkillsSuccess ? (
-              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
             ) : null}
             <label className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Coach Feedback</span>
@@ -22806,7 +22844,9 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="danger">{persistedSkillsErrorForSkillsPanel}</Alert>
         ) : null}
         {reviseSkillsSuccess ? (
-          <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+          <WorkflowNeutralNotice dismissible>
+            {reviseSkillsSuccess}
+          </WorkflowNeutralNotice>
         ) : null}
         <div className="flex flex-wrap gap-2">
           {headCoachSkillsViewPlanContext !== null ? (
@@ -23907,7 +23947,7 @@ export function CoachAthletePlanningProfileView({
             ) : null}
             {governedPlanActionError ? <Alert variant="danger">{governedPlanActionError}</Alert> : null}
             {governedPlanActionSuccess ? (
-              <WorkflowNeutralNotice>
+              <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
                 <div className="space-y-1">
                   <div>{governedPlanActionSuccess}</div>
                   {governedPlanActionSuccessFeedback ? (
@@ -24017,7 +24057,9 @@ export function CoachAthletePlanningProfileView({
                 </h4>
                 {assistantReviseError ? <Alert variant="danger">{assistantReviseError}</Alert> : null}
                 {assistantReviseSuccess ? (
-                  <WorkflowNeutralNotice>{assistantReviseSuccess}</WorkflowNeutralNotice>
+                  <WorkflowNeutralNotice dismissible>
+                    {assistantReviseSuccess}
+                  </WorkflowNeutralNotice>
                 ) : null}
                 <label className="space-y-1 text-sm text-textPrimary">
                   <span className="font-medium">Coach Feedback</span>
@@ -24569,7 +24611,7 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
         {governedPlanActionSuccess ? (
-          <WorkflowNeutralNotice>
+          <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
             <div className="space-y-2">
               <div>{governedPlanActionSuccess}</div>
               {governedPlanActionSuccessFeedback ? (
@@ -28585,7 +28627,9 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSkillsError}</Alert>
                             ) : null}
                             {reviseSkillsSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
                             ) : null}
                             <label className="space-y-1 text-sm text-textPrimary">
                               <span className="font-medium">Coach Feedback</span>
@@ -28617,7 +28661,9 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseNutritionError}</Alert>
                             ) : null}
                             {reviseNutritionSuccess ? (
-                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseNutritionSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
                             <label className="space-y-1 text-sm text-textPrimary">
                               <span className="font-medium">Coach Feedback</span>
@@ -28869,7 +28915,9 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSkillsError}</Alert>
                             ) : null}
                             {reviseSkillsSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
                             ) : null}
                             <label className="space-y-1 text-sm text-textPrimary">
                               <span className="font-medium">Coach Feedback</span>
@@ -28901,7 +28949,9 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseNutritionError}</Alert>
                             ) : null}
                             {reviseNutritionSuccess ? (
-                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseNutritionSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
                             <label className="space-y-1 text-sm text-textPrimary">
                               <span className="font-medium">Coach Feedback</span>
@@ -28933,7 +28983,9 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSandCError}</Alert>
                             ) : null}
                             {reviseSandCSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSandCSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseSandCSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
                             <label className="space-y-1 text-sm text-textPrimary">
                               <span className="font-medium">Coach Feedback</span>

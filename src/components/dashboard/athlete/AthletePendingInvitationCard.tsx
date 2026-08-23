@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import type { MyEntityInvitationRow } from "@/lib/api/entityInvitationsMe";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -28,11 +29,7 @@ export function AthletePendingInvitationCard({
   return (
     <DashboardCardShell title="Pending Invitation">
       <div className="space-y-2">
-        {error ? (
-          <p className="text-sm text-danger" role="alert">
-            {error}
-          </p>
-        ) : null}
+        {error ? <Alert variant="danger">{error}</Alert> : null}
         <p className="text-sm text-textSecondary">
           Organization:{" "}
           <span className="font-medium text-textPrimary">

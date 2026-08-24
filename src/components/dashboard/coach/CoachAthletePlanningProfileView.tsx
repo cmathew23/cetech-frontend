@@ -6806,6 +6806,31 @@ export type DomainReviewDrawerWorkflowActions = {
   hasAuthorizedWorkflowAction: boolean;
 };
 
+export function resolveContextBuilderDrawerLayoutClasses(input: {
+  closing: boolean;
+}): {
+  rootClassName: string;
+  backdropClassName: string;
+  panelClassName: string;
+} {
+  return {
+    rootClassName: "absolute inset-0 z-50",
+    backdropClassName: cn(
+      "absolute inset-0 cursor-default bg-slate-950/25",
+      input.closing
+        ? "motion-safe:animate-[contextBuilderBackdropFadeOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
+    ),
+    panelClassName: cn(
+      "absolute inset-y-0 right-0 flex h-full min-h-0 w-full max-w-3xl flex-col overflow-hidden",
+      "rounded-l-xl border-l border-border bg-bg shadow-2xl",
+      input.closing
+        ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
+    ),
+  };
+}
+
 export function resolveDomainReviewDrawerLayoutClasses(input: {
   closing: boolean;
 }): {
@@ -27926,8 +27951,11 @@ export function CoachAthletePlanningProfileView({
     const step = contextBuilderDrawerStep;
     const drawerTitle = contextBuilderProgressStepLabel(step);
     const drawerDescription = contextBuilderStepPurpose(step);
+    const drawerLayoutClasses = resolveContextBuilderDrawerLayoutClasses({
+      closing: contextBuilderDrawerClosing,
+    });
     return (
-      <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="context-step-drawer-title">
+      <div className={drawerLayoutClasses.rootClassName} role="dialog" aria-modal="true" aria-labelledby="context-step-drawer-title">
         <style>
           {`
             @keyframes contextBuilderDrawerSlideIn {
@@ -27950,24 +27978,12 @@ export function CoachAthletePlanningProfileView({
         </style>
         <button
           type="button"
-          className={cn(
-            "absolute inset-0 cursor-default bg-slate-950/25",
-            contextBuilderDrawerClosing
-              ? "motion-safe:animate-[contextBuilderBackdropFadeOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
-          )}
+          className={drawerLayoutClasses.backdropClassName}
           aria-label="Close Context Builder drawer"
           onClick={handleCloseContextBuilderDrawer}
         />
-        <aside
-          className={cn(
-            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
-            contextBuilderDrawerClosing
-              ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
-          )}
-        >
-          <header className="space-y-2 border-b border-border px-5 py-4">
+        <aside className={drawerLayoutClasses.panelClassName}>
+          <header className="shrink-0 space-y-2 border-b border-border px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <h3 id="context-step-drawer-title" className="text-lg font-medium text-textPrimary">
@@ -27989,7 +28005,7 @@ export function CoachAthletePlanningProfileView({
               {renderContextBuilderDrawerStepContent(step)}
             </div>
           </div>
-          <footer className="flex justify-end border-t border-border px-5 py-4">
+          <footer className="flex shrink-0 justify-end border-t border-border px-5 py-4">
             <Button
               type="button"
               variant="secondary"

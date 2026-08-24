@@ -98,6 +98,7 @@ import {
   resolveDomainReleaseVisible,
   resolveDomainReviewDrawerWorkflowActions,
   resolveDomainReviewDrawerLayoutClasses,
+  resolveContextBuilderDrawerLayoutClasses,
   resolveDomainReviewDrawerRequestChangesVisible,
   resolveDomainReviewActionPlanIds,
   resolveDomainReviewWorkflowStatus,
@@ -12089,6 +12090,20 @@ describe("resolveDomainReviewDrawerWorkflowActions", () => {
     expect(layout.panelClassName).toContain("[max-height:calc");
     expect(layout.panelClassName).not.toContain("top-0");
     expect(layout.panelClassName).not.toContain("h-full");
+  });
+
+  it("contains the Context Builder drawer in the workspace card instead of the viewport", () => {
+    const layout = resolveContextBuilderDrawerLayoutClasses({ closing: false });
+
+    expect(layout.rootClassName).toContain("absolute");
+    expect(layout.rootClassName).toContain("inset-0");
+    expect(layout.rootClassName).not.toContain("fixed");
+    expect(layout.panelClassName).toContain("h-full");
+    expect(layout.panelClassName).toContain("min-h-0");
+    expect(layout.panelClassName).toContain("overflow-hidden");
+    expect(layout.panelClassName).not.toContain("100dvh");
+    expect(layout.panelClassName).not.toContain("100vh");
+    expect(layout.panelClassName).not.toContain("fixed");
   });
 
   it("shows Workflow 2A Head Coach-owned Skills draft approve/revise and hides submit", () => {

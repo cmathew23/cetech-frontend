@@ -11,6 +11,7 @@ const DASHBOARD = "/coach/dashboard";
 const CHAT = "/coach/chat";
 const FYN = "/coach/fyn";
 const INVITATIONS = "/coach/dashboard/invitations";
+const SETTINGS = "/coach/settings";
 
 describe("isCoachSidebarNavItemActive", () => {
   it("marks Training Plan active on the training plan list", () => {
@@ -90,5 +91,11 @@ describe("isCoachSidebarNavItemActive", () => {
     expect(
       isCoachSidebarNavItemActive("/coach/athletes/athlete-1/planning-profile", CHAT),
     ).toBe(false);
+  });
+
+  it("marks Settings active only on /coach/settings", () => {
+    expect(isCoachSidebarNavItemActive("/coach/settings", SETTINGS)).toBe(true);
+    expect(isCoachSidebarNavItemActive("/coach/settings", DASHBOARD)).toBe(false);
+    expect(isCoachSidebarNavItemActive("/coach/dashboard", SETTINGS)).toBe(false);
   });
 });

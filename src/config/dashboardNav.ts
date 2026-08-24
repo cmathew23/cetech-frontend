@@ -42,6 +42,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/coach/training-plans", label: "Training Plan", icon: Calendar },
   { href: "/coach/dashboard/invitations", label: "Invitations", icon: Mail },
+  { href: "/coach/settings", label: "Settings", icon: Settings },
 ];
 
 export const athleteSidebarNavItems: DashboardNavItem[] = [

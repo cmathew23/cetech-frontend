@@ -29,6 +29,13 @@ function coachSecondaryLine(c: AppContextAssignedCoach): string {
   return "—";
 }
 
+/** Assigned-coach phone from GET /me/app-context (`assignedCoaches[].phone`). */
+export function assignedCoachPhoneDisplay(phone: string | null): string {
+  if (phone == null) return "—";
+  const trimmed = phone.trim();
+  return trimmed !== "" ? trimmed : "—";
+}
+
 export function AthleteCoachesPageContent() {
   const { accessGateReady, accessContext } = useAuth();
 
@@ -115,7 +122,7 @@ export function AthleteCoachesPageContent() {
                     </td>
                     <td className="border-y border-slate-100 bg-white px-4 py-5 group-hover:bg-slate-50/70">
                       <p className="text-sm text-slate-600">
-                        {c.phone ?? "Unavailable"}
+                        {assignedCoachPhoneDisplay(c.phone)}
                       </p>
                     </td>
                     <td className="rounded-r-xl border-y border-r border-slate-100 bg-white px-5 py-5 group-hover:bg-slate-50/70">

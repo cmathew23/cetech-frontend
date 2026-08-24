@@ -2470,7 +2470,13 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
   workspacePlanId: string | null | undefined;
   workspaceVersionId: string | null | undefined;
 }): boolean {
-  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
+  if (
+    input.domain !== "S_AND_C" &&
+    input.domain !== "NUTRITION" &&
+    input.domain !== "SKILLS"
+  ) {
+    return false;
+  }
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
   const workspacePlanId = input.workspacePlanId?.trim() ?? "";
@@ -2486,6 +2492,16 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
 }
 
 /**
+ * Skills approve/release: local projection writes `summary.versionId`. Do not retain against
+ * selectedVersionId/latest/approved/active — those fields can stay stale and false-mismatch.
+ */
+export function resolveSkillsApproveReleaseWorkspaceRetainVersionId(
+  summary: { versionId?: string | null } | null | undefined,
+): string {
+  return summary?.versionId?.trim() ?? "";
+}
+
+/**
  * S&C post-generation / Nutrition post-approve-release: reject stale/null latest writes while an
  * installed draft identity is pinned (Nutrition latest may 404 after approve/release).
  */
@@ -2497,7 +2513,13 @@ export function shouldRejectStaleSandCLatestDraftWrite(input: {
   installedVersionId: string | null | undefined;
   incoming: CoachAthleteLatestDomainDraft | null;
 }): boolean {
-  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
+  if (
+    input.domain !== "S_AND_C" &&
+    input.domain !== "NUTRITION" &&
+    input.domain !== "SKILLS"
+  ) {
+    return false;
+  }
   if (input.requestGeneration !== input.currentGeneration) return true;
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
@@ -12349,6 +12371,14 @@ export function CoachAthletePlanningProfileView({
     planId: string;
     versionId: string;
   } | null>(null);
+  /**
+   * Skills approve/release: pin the retained plan/version so workspace bootstrap / latest 404
+   * cannot clear the already-rendered schedule (same guard as Nutrition retain pin).
+   */
+  const skillsRetainedDraftIdentityRef = useRef<{
+    planId: string;
+    versionId: string;
+  } | null>(null);
   const detailRequestsInFlightRef = useRef(
     new Map<string, Promise<CoachPersistedTrainingPlanActiveDetail>>(),
   );
@@ -16745,6 +16775,7 @@ export function CoachAthletePlanningProfileView({
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
     nutritionRetainedDraftIdentityRef.current = null;
+    skillsRetainedDraftIdentityRef.current = null;
     prevUrlPlanForPersistedSyncRef.current = undefined;
     coachDomainStateResetRef.current = null;
     step6WorkflowFetchGenRef.current += 1;
@@ -16893,6 +16924,7 @@ export function CoachAthletePlanningProfileView({
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
     nutritionRetainedDraftIdentityRef.current = null;
+    skillsRetainedDraftIdentityRef.current = null;
     assistantDomainSummaryHydrationGenRef.current += 1;
     setAssistantDomainSummaryHydrationPending(false);
     step6WorkflowFetchGenRef.current += 1;
@@ -17380,6 +17412,12 @@ export function CoachAthletePlanningProfileView({
         latestSkillsDraftRequestGenRef.current += 1;
         if (input.domain === "NUTRITION") {
           nutritionRetainedDraftIdentityRef.current = {
+            planId: input.planId,
+            versionId: input.versionId,
+          };
+        }
+        if (input.domain === "SKILLS") {
+          skillsRetainedDraftIdentityRef.current = {
             planId: input.planId,
             versionId: input.versionId,
           };
@@ -18265,7 +18303,9 @@ export function CoachAthletePlanningProfileView({
           ? sandCInstalledGeneratedDraftIdentityRef.current
           : generationDomain === "NUTRITION"
             ? nutritionRetainedDraftIdentityRef.current
-            : null;
+            : generationDomain === "SKILLS"
+              ? skillsRetainedDraftIdentityRef.current
+              : null;
       return shouldRejectStaleSandCLatestDraftWrite({
         domain: generationDomain,
         requestGeneration,
@@ -18516,17 +18556,22 @@ export function CoachAthletePlanningProfileView({
             : null;
         const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
         const workspaceVersionId =
-          workspaceSummary !== null
-            ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
-            : "";
+          currentCoachGenerationDomain === "SKILLS"
+            ? resolveSkillsApproveReleaseWorkspaceRetainVersionId(workspaceSummary)
+            : workspaceSummary !== null
+              ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
+              : "";
         const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
         const nutritionInstall = nutritionRetainedDraftIdentityRef.current;
+        const skillsInstall = skillsRetainedDraftIdentityRef.current;
         const installedIdentity =
           currentCoachGenerationDomain === "S_AND_C"
             ? sandCInstall
             : currentCoachGenerationDomain === "NUTRITION"
               ? nutritionInstall
-              : null;
+              : currentCoachGenerationDomain === "SKILLS"
+                ? skillsInstall
+                : null;
         if (
           shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
             domain: currentCoachGenerationDomain,
@@ -18536,7 +18581,7 @@ export function CoachAthletePlanningProfileView({
             workspaceVersionId,
           })
         ) {
-          // S&C post-generation / Nutrition post-approve-release: workspace same identity —
+          // S&C post-generation / Nutrition+Skills post-approve-release: workspace same identity —
           // keep installed latest authoritative.
           return;
         }
@@ -18558,6 +18603,13 @@ export function CoachAthletePlanningProfileView({
         if (currentCoachGenerationDomain === "NUTRITION" && nutritionInstall !== null) {
           // Workspace resolved a different plan/version than the approve/release retained draft.
           nutritionRetainedDraftIdentityRef.current = null;
+          clearResolvedBootstrapLatestDraft();
+          void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
+          return;
+        }
+        if (currentCoachGenerationDomain === "SKILLS" && skillsInstall !== null) {
+          // Workspace resolved a different plan/version than the approve/release retained draft.
+          skillsRetainedDraftIdentityRef.current = null;
           clearResolvedBootstrapLatestDraft();
           void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
           return;

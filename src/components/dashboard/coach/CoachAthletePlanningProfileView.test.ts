@@ -153,6 +153,7 @@ import {
   isUsableGeneratedDomainDraft,
   shouldSkipSandCPostGenerationDetailRefresh,
   shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve,
+  resolveSkillsApproveReleaseWorkspaceRetainVersionId,
   shouldRejectStaleSandCLatestDraftWrite,
   resolveDomainReviewPlanLoadMessage,
   resolveDomainCoachPlanWindowLabel,
@@ -13959,6 +13960,256 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe("latest_domain_draft");
   });
 
+  it("retains Skills latest draft identity after approve/release while revise still refreshes", () => {
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        workspacePlanId: "skills-plan",
+        workspaceVersionId: "skills-v20",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        workspacePlanId: "skills-plan",
+        workspaceVersionId: "skills-v21",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "SKILLS",
+        requestGeneration: 4,
+        currentGeneration: 4,
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        incoming: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "SKILLS",
+        action: "REQUEST_REVISION",
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "SKILLS",
+        action: "SUBMIT_REVIEW",
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("skillsRetainedDraftIdentityRef");
+    const approvePin = source.indexOf("if (input.domain === \"SKILLS\") {");
+    expect(approvePin).toBeGreaterThan(-1);
+    expect(source.slice(approvePin, approvePin + 280)).toContain(
+      "skillsRetainedDraftIdentityRef.current",
+    );
+  });
+
+  it("retains Skills plan after RELEASE when selectedVersionId is stale but summary.versionId matches", () => {
+    const mutationVersionId = "skills-v20";
+    const staleSelectedVersionId = "skills-selected-stale";
+    const projected = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: {
+        domains: {
+          SKILLS: {
+            allowedActions: ["RELEASE"],
+            submittedForReview: false,
+            pendingRevisionRequest: null,
+            summary: {
+              trainingPlanId: "skills-plan",
+              versionId: mutationVersionId,
+              selectedVersionId: staleSelectedVersionId,
+              latestVersionId: "skills-latest-stale",
+              approvedVersionId: "skills-approved-stale",
+              activeVersionId: "skills-active-stale",
+              status: "HEAD_COACH_APPROVED",
+            },
+          },
+        },
+      } as never,
+      domain: "SKILLS",
+      action: "RELEASE",
+      planId: "skills-plan",
+      versionId: mutationVersionId,
+    });
+    const summary = projected?.domains.SKILLS.summary;
+    expect(summary?.status).toBe("ACTIVE");
+    expect(summary?.versionId).toBe(mutationVersionId);
+    expect(summary?.selectedVersionId).toBe(staleSelectedVersionId);
+    expect(resolveSkillsApproveReleaseWorkspaceRetainVersionId(summary)).toBe(
+      mutationVersionId,
+    );
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "skills-plan",
+        installedVersionId: mutationVersionId,
+        workspacePlanId: summary?.trainingPlanId,
+        workspaceVersionId: resolveSkillsApproveReleaseWorkspaceRetainVersionId(summary),
+      }),
+    ).toBe(true);
+
+    const releasedPlan = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: mutationVersionId,
+      versionNumber: 20,
+      status: "ACTIVE",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [{ title: "Technical", items: [{ skillCode: "GOLF_PUTT_005" }] }],
+        },
+      ],
+    } as never;
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: releasedPlan,
+    });
+    expect(contentSource).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "SKILLS",
+        contentSource,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("resolveSkillsApproveReleaseWorkspaceRetainVersionId(workspaceSummary)");
+    expect(source).not.toContain(
+      'currentCoachGenerationDomain === "SKILLS"\n            ? resolveHeadCoachDomainSummaryVersionId',
+    );
+  });
+
+  it("keeps installed Skills plan visible when latest-draft 404s after RELEASE", () => {
+    expect(
+      shouldRejectStaleSandCLatestDraftWrite({
+        domain: "SKILLS",
+        requestGeneration: 8,
+        currentGeneration: 8,
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        incoming: null,
+      }),
+    ).toBe(true);
+
+    const installedPlan = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-v20",
+      versionNumber: 20,
+      status: "ACTIVE",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [{ title: "Technical", items: [{ skillCode: "GOLF_PUTT_005" }] }],
+        },
+      ],
+    } as never;
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "released",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: installedPlan,
+    });
+    expect(contentSource).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "SKILLS",
+        contentSource,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("retains Skills plan after APPROVE without loading flash and still refreshes a new version", () => {
+    const approvedPlan = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-v20",
+      versionNumber: 20,
+      status: "HEAD_COACH_APPROVED",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [{ title: "Technical", items: [{ skillCode: "GOLF_PUTT_005" }] }],
+        },
+      ],
+    } as never;
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        workspacePlanId: "skills-plan",
+        workspaceVersionId: resolveSkillsApproveReleaseWorkspaceRetainVersionId({
+          versionId: "skills-v20",
+        }),
+      }),
+    ).toBe(true);
+    const afterApprove = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: approvedPlan,
+    });
+    expect(afterApprove).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "SKILLS",
+        contentSource: afterApprove,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+    expect(
+      shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
+        domain: "SKILLS",
+        installedPlanId: "skills-plan",
+        installedVersionId: "skills-v20",
+        workspacePlanId: "skills-plan",
+        workspaceVersionId: resolveSkillsApproveReleaseWorkspaceRetainVersionId({
+          versionId: "skills-v21",
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({
+        domain: "SKILLS",
+        action: "REQUEST_REVISION",
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const skillsMismatch = source.indexOf(
+      'if (currentCoachGenerationDomain === "SKILLS" && skillsInstall !== null)',
+    );
+    expect(skillsMismatch).toBeGreaterThan(-1);
+    expect(source.slice(skillsMismatch, skillsMismatch + 420)).toContain(
+      "void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);",
+    );
+  });
+
   it("keeps loaded S&C plan visible after approve and release with no loading message", () => {
     const loadedPlan = {
       trainingPlanId: "sandc-plan",
@@ -14481,7 +14732,7 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         workspacePlanId: "sandc-plan-1",
         workspaceVersionId: "sandc-v1",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
         domain: "NUTRITION",
@@ -14577,7 +14828,7 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         installedVersionId: "sandc-v1",
         incoming: null,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("uses S&C draft review copy instead of Skills draft wording", () => {

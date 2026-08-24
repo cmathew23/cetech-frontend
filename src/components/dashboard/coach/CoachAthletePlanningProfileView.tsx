@@ -25373,7 +25373,10 @@ export function CoachAthletePlanningProfileView({
         startDate: toUtcDateTimeString(phaseDrafts[phase].startDate),
         endDate: toUtcDateTimeString(phaseDrafts[phase].endDate),
       });
-      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
+      await refreshGoalsSeasonSetup({
+        background: true,
+        forceGoalsRefresh: true,
+      });
       setPhaseSuccess(`${toFieldLabel(phase)} created successfully.`);
     } catch (e) {
       setPhaseError(formatApiError(e, "Could not create season phase."));

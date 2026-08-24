@@ -16050,6 +16050,28 @@ describe("season create display state", () => {
     expect(handler).toContain('setSeasonSuccess("Season created and selected.")');
     expect(handler).toContain("resolveSetupStateAfterSeasonCreate");
   });
+
+  it("keeps Create Phase success inside Planning Context without setupLoading rebootstrap", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const handlerStart = source.indexOf("async function handleCreatePhase(");
+    const handlerEnd = source.indexOf("function handleEditPhase(", handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handler).toContain("await createSeasonCyclePhase({");
+    expect(handler.match(/createSeasonCyclePhase\(/g)?.length).toBe(1);
+    expect(handler).toContain("await refreshGoalsSeasonSetup({");
+    expect(handler).toContain("background: true");
+    expect(handler).toContain("forceGoalsRefresh: true");
+    expect(handler).not.toContain("router.push");
+    expect(handler).not.toContain("router.replace");
+    expect(handler).toContain("setPhaseCreateLoading(phase)");
+    expect(handler).toContain("setPhaseCreateLoading(null)");
+  });
 });
 
 describe("detectCurrentPhase", () => {

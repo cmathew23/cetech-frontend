@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiRequestMock } = vi.hoisted(() => ({
@@ -516,10 +517,12 @@ describe("parseReadinessPayload", () => {
       },
     });
 
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
     expect(apiRequestMock).toHaveBeenCalledWith(
       "/entities/entity-1/athletes/athlete-1/training-plan-generation/planning-context/lock",
       {
         method: "POST",
+        timeoutMs: 30_000,
         body: JSON.stringify({
           planWindow: {
             startDate: "2026-05-11",
@@ -1612,6 +1615,15 @@ describe("parseReadinessPayload", () => {
 describe("training plan generation timeouts and helpers", () => {
   beforeEach(() => {
     apiRequestMock.mockReset();
+  });
+
+  it("planning context lock uses a 30s timeout and leaves the global default unchanged", () => {
+    const apiClientSource = readFileSync(
+      new URL("../apiClient.ts", import.meta.url),
+      "utf8",
+    );
+    expect(apiClientSource).toContain("const DEFAULT_TIMEOUT_MS = 10_000");
+    expect(apiClientSource).not.toContain("const DEFAULT_TIMEOUT_MS = 30_000");
   });
 
   it("persist-draft uses extended client timeout", async () => {

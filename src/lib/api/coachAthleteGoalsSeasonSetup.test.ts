@@ -9,6 +9,7 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import {
+  createGoal,
   createPhaseAwareGoal,
   fetchGoalLibrary,
 } from "@/lib/api/coachAthleteGoalsSeasonSetup";
@@ -173,5 +174,81 @@ describe("createPhaseAwareGoal", () => {
       goalSourceType: "CUSTOM",
     });
     expect(JSON.parse(String(options.body))).not.toHaveProperty("libraryGoalId");
+  });
+
+  it("uses a 30s timeout on Goal CREATE POST and does not retry", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        goalId: "goal-timeout",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        seasonCycleId: "season-1",
+        seasonPhaseId: "phase-1",
+        domain: "SKILLS",
+        status: "ACTIVE",
+        goalType: "PERFORMANCE",
+        goalName: "Improve putting setup and alignment",
+        goalCategory: "TRAINING",
+      },
+    });
+
+    await createPhaseAwareGoal({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      seasonCycleId: "season-1",
+      seasonPhaseId: "phase-1",
+      goalType: "PERFORMANCE",
+      domain: "SKILLS",
+      goalName: "Improve putting setup and alignment",
+      goalCategory: "TRAINING",
+      createdByCoachId: "coach-1",
+      goalSourceType: "LIBRARY",
+      libraryGoalId: "golf_putting_beginner_xxx_v1",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/goals",
+      expect.objectContaining({
+        method: "POST",
+        timeoutMs: 30_000,
+      }),
+    );
+  });
+});
+
+describe("createGoal", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("does not pass an endpoint timeout on competition goal POST (global default)", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        goalId: "goal-comp",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        seasonCycleId: "season-1",
+        status: "ACTIVE",
+        goalType: "COMPETITION",
+      },
+    });
+
+    await createGoal({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      seasonCycleId: "season-1",
+      createdByCoachId: "coach-1",
+      goalType: "COMPETITION",
+      competitionEventId: "event-1",
+      startDate: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    const options = apiRequestMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(options.method).toBe("POST");
+    expect(options).not.toHaveProperty("timeoutMs");
   });
 });

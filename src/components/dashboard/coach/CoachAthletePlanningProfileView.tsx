@@ -25687,7 +25687,10 @@ export function CoachAthletePlanningProfileView({
           goalSourceType: "CUSTOM",
         });
       }
-      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
+      await refreshGoalsSeasonSetup({
+        background: true,
+        forceGoalsRefresh: true,
+      });
       setGoalSuccess(
         goalCreationMode === "LIBRARY"
           ? `${selectedLibraryGoals.length} Goal Library goal${selectedLibraryGoals.length === 1 ? "" : "s"} created successfully.`

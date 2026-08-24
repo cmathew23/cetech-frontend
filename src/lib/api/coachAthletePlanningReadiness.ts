@@ -2797,6 +2797,7 @@ export async function lockCoachAthletePlanningContext(
     ),
     {
       method: "POST",
+      timeoutMs: 30_000,
       body: JSON.stringify({
         planWindow: { startDate, endDate },
       }),

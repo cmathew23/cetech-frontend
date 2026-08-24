@@ -16072,6 +16072,27 @@ describe("season create display state", () => {
     expect(handler).toContain("setPhaseCreateLoading(phase)");
     expect(handler).toContain("setPhaseCreateLoading(null)");
   });
+
+  it("keeps Create Goal success inside Planning Context without setupLoading rebootstrap", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const handlerStart = source.indexOf("async function handleCreateCurrentPhaseGoal()");
+    const handlerEnd = source.indexOf("async function handleRunWorkloadAssessment()", handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handler).toContain("await createPhaseAwareGoal({");
+    expect(handler).toContain("await refreshGoalsSeasonSetup({");
+    expect(handler).toContain("background: true");
+    expect(handler).toContain("forceGoalsRefresh: true");
+    expect(handler).not.toContain("router.push");
+    expect(handler).not.toContain("router.replace");
+    expect(handler).toContain("setGoalCreateLoading(true)");
+    expect(handler).toContain("setGoalCreateLoading(false)");
+  });
 });
 
 describe("detectCurrentPhase", () => {

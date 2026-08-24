@@ -649,6 +649,7 @@ export async function createPhaseAwareGoal(input: {
   const raw = await apiRequest(paths.goals.root, {
     method: "POST",
     body: JSON.stringify(body),
+    timeoutMs: 30_000,
   });
   const parsed = parseGoal(adaptBackendSuccess(raw));
   if (!parsed) {

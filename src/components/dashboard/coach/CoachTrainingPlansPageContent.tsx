@@ -95,7 +95,7 @@ function TrainingPlanAthleteRow({
   );
 
   return (
-    <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
+    <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:gap-4">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-normal text-slate-900">{displayName}</span>
@@ -112,6 +112,13 @@ function TrainingPlanAthleteRow({
         >
           {row.email}
         </span>
+      </div>
+      <div className="flex min-w-0 flex-1 items-center justify-start sm:justify-center">
+        {action.planStatusLabel ? (
+          <p className="max-w-[16rem] text-left text-[11px] leading-snug text-slate-400 sm:text-center">
+            {action.planStatusLabel}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 flex-col items-stretch gap-0 sm:items-end">
         {action.href && !action.disabled ? (
@@ -141,11 +148,6 @@ function TrainingPlanAthleteRow({
           {action.buttonLabel}
         </Button>
         )}
-        {action.planStatusLabel ? (
-          <p className="mt-0.5 max-w-[16rem] text-right text-[11px] leading-snug text-slate-400">
-            {action.planStatusLabel}
-          </p>
-        ) : null}
         {action.helperBelowButton ? (
           <p className="mt-0.5 max-w-[16rem] text-right text-[11px] leading-snug text-slate-500">
             {action.helperBelowButton}

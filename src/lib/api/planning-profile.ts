@@ -1878,6 +1878,7 @@ export async function createPlanningProfileMe(
   const raw = await apiRequest(paths.entities.athletePlanningProfileMe(id), {
     method: "POST",
     body: JSON.stringify(buildPlanningProfileCreateBody(draft, record)),
+    timeoutMs: 30_000,
   });
   return parsePlanningProfileRecord(adaptBackendSuccess(raw));
 }

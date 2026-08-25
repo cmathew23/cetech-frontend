@@ -6,6 +6,8 @@ import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
 const FYN_ASSISTANT_TIMEOUT_MS = 60_000;
+/** Sequential backend budget: 15s classifier + context retrieval + 60s PLAN_EXPLANATION + overhead. */
+const FYN_ASSISTANT_QUERY_TIMEOUT_MS = 120_000;
 
 const ATHLETE_FYN_PROMPT_LABELS: Record<string, string> = {
   EXPLAIN_TODAYS_PLAN: "Explain today’s plan",
@@ -287,7 +289,7 @@ export async function queryFynAssistant(
     {
       method: "POST",
       body: JSON.stringify(body),
-      timeoutMs: FYN_ASSISTANT_TIMEOUT_MS,
+      timeoutMs: FYN_ASSISTANT_QUERY_TIMEOUT_MS,
     },
   );
 

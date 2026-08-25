@@ -72,6 +72,7 @@ describe("queryFynAssistant", () => {
       "/entities/entity-1/athletes/athlete-1/fyn-assistant/query",
     );
     expect(options.method).toBe("POST");
+    expect(options.timeoutMs).toBe(120_000);
     expect(typeof options.body).toBe("string");
 
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
@@ -246,6 +247,7 @@ describe("fetchFynAssistantHistory", () => {
       "/entities/entity-1/athletes/athlete-1/fyn-assistant/history",
     );
     expect(options.method).toBe("GET");
+    expect(options.timeoutMs).toBe(60_000);
     expect(result.windowHours).toBe(72);
     expect(result.items).toHaveLength(1);
     expect(result.messages).toHaveLength(2);

@@ -3647,14 +3647,13 @@ function fynRevisionActionIsRestDay(key: FynRevisionActionKey): boolean {
 
 /**
  * Domain- and action-specific example placeholder for the "Tell Fyn what to change" context field.
- * Chosen after the coach has picked an action so the example matches the exact task; falls back to
- * the generic placeholder for actions without a tailored example.
+ * Chosen after the coach has picked an action so the example matches the exact task; otherwise uses
+ * a domain-specific generic example (never another domain's terminology).
  */
 export function fynRevisionContextPlaceholder(
   domain: TrainingPlanGenerationDomain,
   actionKey: FynRevisionActionKey | null,
 ): string {
-  if (actionKey === null) return FYN_REVISION_INPUT_PLACEHOLDER;
   if (domain === "SKILLS") {
     if (actionKey === "ADD_SESSION") {
       return "Example: Add Lag Putting Foundation and keep intensity low.";
@@ -3663,13 +3662,27 @@ export function fynRevisionContextPlaceholder(
     if (actionKey === "UPDATE_SESSION_ITEMS") {
       return "Example: Add one lag putting drill and remove the advanced drill.";
     }
+    return FYN_REVISION_INPUT_PLACEHOLDER;
   }
-  if (domain === "NUTRITION" && actionKey === "ADD_ITEM") {
-    return "Example: Add a lighter carb option to breakfast.";
+  if (domain === "NUTRITION") {
+    if (actionKey === "ADD_ITEM") {
+      return "Example: Add a lighter carb option to breakfast.";
+    }
+    if (actionKey === "REPLACE_ITEM") {
+      return "Example: Replace this food item with a more suitable alternative.";
+    }
+    if (actionKey === "UPDATE_ITEM") {
+      return "Example: Adjust the serving quantity for this food item.";
+    }
+    if (actionKey === "REMOVE_ITEM") {
+      return "Example: Remove this food item from the meal.";
+    }
+    return "Example: Adjust this food item in the meal.";
   }
   if (domain === "S_AND_C") {
     if (actionKey === "ADD_ITEM") return "Example: Add a low-load mobility exercise.";
     if (actionKey === "ADD_SESSION") return "Example: Add a low-load mobility session.";
+    return "Example: Adjust this exercise in the session.";
   }
   return FYN_REVISION_INPUT_PLACEHOLDER;
 }

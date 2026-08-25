@@ -4827,17 +4827,78 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(fynRevisionContextPlaceholder("NUTRITION", "ADD_ITEM")).toBe(
       "Example: Add a lighter carb option to breakfast.",
     );
+    expect(fynRevisionContextPlaceholder("NUTRITION", "REPLACE_ITEM")).toBe(
+      "Example: Replace this food item with a more suitable alternative.",
+    );
+    expect(fynRevisionContextPlaceholder("NUTRITION", "UPDATE_ITEM")).toBe(
+      "Example: Adjust the serving quantity for this food item.",
+    );
+    expect(fynRevisionContextPlaceholder("NUTRITION", "REMOVE_ITEM")).toBe(
+      "Example: Remove this food item from the meal.",
+    );
     expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_ITEM")).toBe(
       "Example: Add a low-load mobility exercise.",
     );
     expect(fynRevisionContextPlaceholder("S_AND_C", "ADD_SESSION")).toBe(
       "Example: Add a low-load mobility session.",
     );
-    // Actions without a tailored example fall back to the generic placeholder.
     expect(fynRevisionContextPlaceholder("SKILLS", "REPLACE_ITEM")).toBe(
       FYN_REVISION_INPUT_PLACEHOLDER,
     );
+    expect(fynRevisionContextPlaceholder("SKILLS", "REMOVE_ITEM")).toBe(
+      FYN_REVISION_INPUT_PLACEHOLDER,
+    );
     expect(fynRevisionContextPlaceholder("SKILLS", null)).toBe(FYN_REVISION_INPUT_PLACEHOLDER);
+    expect(fynRevisionContextPlaceholder("NUTRITION", null)).toBe(
+      "Example: Adjust this food item in the meal.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", "REMOVE_ITEM")).toBe(
+      "Example: Adjust this exercise in the session.",
+    );
+    expect(fynRevisionContextPlaceholder("S_AND_C", null)).toBe(
+      "Example: Adjust this exercise in the session.",
+    );
+  });
+
+  it("does not leak another domain's terminology in revision placeholders", () => {
+    const samples: Array<{
+      domain: "SKILLS" | "NUTRITION" | "S_AND_C";
+      actionKey: Parameters<typeof fynRevisionContextPlaceholder>[1];
+    }> = [
+      { domain: "SKILLS", actionKey: null },
+      { domain: "SKILLS", actionKey: "REPLACE_ITEM" },
+      { domain: "SKILLS", actionKey: "REMOVE_ITEM" },
+      { domain: "SKILLS", actionKey: "ADD_ITEM" },
+      { domain: "SKILLS", actionKey: "ADD_SESSION" },
+      { domain: "SKILLS", actionKey: "UPDATE_SESSION_ITEMS" },
+      { domain: "NUTRITION", actionKey: null },
+      { domain: "NUTRITION", actionKey: "ADD_ITEM" },
+      { domain: "NUTRITION", actionKey: "REPLACE_ITEM" },
+      { domain: "NUTRITION", actionKey: "UPDATE_ITEM" },
+      { domain: "NUTRITION", actionKey: "REMOVE_ITEM" },
+      { domain: "S_AND_C", actionKey: null },
+      { domain: "S_AND_C", actionKey: "ADD_ITEM" },
+      { domain: "S_AND_C", actionKey: "ADD_SESSION" },
+      { domain: "S_AND_C", actionKey: "REMOVE_ITEM" },
+      { domain: "S_AND_C", actionKey: "REPLACE_ITEM" },
+      { domain: "S_AND_C", actionKey: "UPDATE_ITEM" },
+    ];
+    const skillsTerms = /\bbunker\b|\bdrill\b/i;
+    const nutritionTerms = /\bfood\b|\bmeal\b/i;
+    const sandCTerms = /\bexercise\b/i;
+
+    for (const { domain, actionKey } of samples) {
+      const placeholder = fynRevisionContextPlaceholder(domain, actionKey);
+      if (domain !== "SKILLS") {
+        expect(placeholder).not.toMatch(skillsTerms);
+      }
+      if (domain !== "NUTRITION") {
+        expect(placeholder).not.toMatch(nutritionTerms);
+      }
+      if (domain !== "S_AND_C") {
+        expect(placeholder).not.toMatch(sandCTerms);
+      }
+    }
   });
 
   it("renders the action-specific placeholder inside the context field", () => {
@@ -4858,6 +4919,43 @@ describe("Training Plan Workspace lifecycle display", () => {
       ),
     );
     expect(html).toContain("Example: Add a pace-control putting drill.");
+  });
+
+  it("renders Nutrition item-action placeholders instead of the Skills fallback", () => {
+    const context = makeRevisionContext({ generationDomain: "NUTRITION" });
+    const targets = fynRevisionLeveledTargetOptions(context, {
+      domain: "NUTRITION",
+      scheduleDays: [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Breakfast",
+              items: [
+                { order: 0, label: "White rice", nutritionCatalogItemId: "nut-1" },
+                { order: 1, label: "Juice", nutritionCatalogItemId: "nut-2" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const itemTarget = targets.find((option) => option.level === "ITEM")!;
+    const html = renderToStaticMarkup(
+      createElement(
+        FynRevisionContextPanel,
+        fynPanelProps({
+          domain: "NUTRITION",
+          context,
+          targetOptions: targets,
+          selectedTargetKey: itemTarget.key,
+          selectedActionKey: "REMOVE_ITEM",
+        }),
+      ),
+    );
+    expect(html).toContain("Example: Remove this food item from the meal.");
+    expect(html).not.toContain(FYN_REVISION_INPUT_PLACEHOLDER);
   });
 
   it("offers ADD_ITEM at the SESSION/meal level for every domain", () => {

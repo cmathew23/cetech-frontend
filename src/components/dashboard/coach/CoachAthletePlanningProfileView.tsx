@@ -2164,6 +2164,46 @@ export function shouldRetainOpenDomainReviewPlan(input: {
   );
 }
 
+/**
+ * Workflow 3 specialists are not planning-context owners, so the submitted-domain bootstrap
+ * effect exits early on every workspace change. Never wipe an open review drawer's already-loaded
+ * schedule — approve/release only mutate workspace status and would otherwise leave
+ * contentSource "none" / "Loading generated …" with Release still visible.
+ */
+export function resolveDomainPlanStatesForNonOwnerWorkspaceReset(input: {
+  previous: Record<TrainingPlanGenerationDomain, HeadCoachDomainPlanState>;
+  drawerOpen: boolean;
+  drawerDomain: TrainingPlanGenerationDomain | null;
+}): Record<TrainingPlanGenerationDomain, HeadCoachDomainPlanState> {
+  const empty = createEmptyHeadCoachDomainPlanStates();
+  const resolveDomain = (
+    domain: TrainingPlanGenerationDomain,
+  ): HeadCoachDomainPlanState => {
+    const previous = input.previous[domain];
+    if (
+      shouldRetainOpenDomainReviewPlan({
+        domain,
+        drawerOpen: input.drawerOpen,
+        drawerDomain: input.drawerDomain,
+        activeDetail: previous.activeDetail,
+        latestDraft: previous.latestDraft,
+      })
+    ) {
+      return {
+        ...previous,
+        loading: false,
+        error: null,
+      };
+    }
+    return empty[domain];
+  };
+  return {
+    SKILLS: resolveDomain("SKILLS"),
+    NUTRITION: resolveDomain("NUTRITION"),
+    S_AND_C: resolveDomain("S_AND_C"),
+  };
+}
+
 export function hasPlanningContextSnapshotChanged(
   previousSnapshotId: string | null | undefined,
   nextSnapshotId: string | null,
@@ -2820,7 +2860,7 @@ export function DomainPlanHistoryDetailPanel({
   ];
 
   return (
-    <div className="min-w-0 space-y-5 overflow-x-hidden">
+    <div className="min-w-0 space-y-5">
       <dl className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {metadataItems.map((item) => (
           <div
@@ -2839,7 +2879,7 @@ export function DomainPlanHistoryDetailPanel({
           {error}
         </div>
       ) : detail ? (
-        <div className="min-w-0 max-w-full overflow-x-hidden">{children ?? null}</div>
+        <div className="min-w-0 max-w-full">{children ?? null}</div>
       ) : null}
     </div>
   );
@@ -5948,7 +5988,7 @@ export function FynRevisionContextPanel({
                         onChange={() => onSelectAction(action.key)}
                         disabled={disabled}
                       />
-                      <span className="font-medium">{action.label}</span>
+                      <span className="min-w-0 break-words font-medium">{action.label}</span>
                     </label>
                   );
                 })}
@@ -6139,7 +6179,7 @@ export function FynRevisionContextPanel({
             <div className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Adjust serving</span>
               <div
-                className="flex items-center gap-3"
+                className="flex min-w-0 flex-wrap items-center gap-3"
                 data-testid="fyn-nutrition-serving-stepper"
               >
                 <button
@@ -6152,7 +6192,7 @@ export function FynRevisionContextPanel({
                   −
                 </button>
                 <span
-                  className="min-w-[6rem] text-center text-sm font-medium text-textPrimary"
+                  className="min-w-0 break-words text-center text-sm font-medium text-textPrimary"
                   data-testid="fyn-nutrition-serving-value"
                 >
                   {formatNutritionServingValue(servingStepper.quantity, servingStepper.unit)}
@@ -6857,8 +6897,8 @@ export function resolveContextBuilderDrawerLayoutClasses(input: {
         : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
     ),
     panelClassName: cn(
-      "absolute inset-y-0 right-0 flex h-full min-h-0 w-full max-w-3xl flex-col overflow-hidden",
-      "rounded-l-xl border-l border-border bg-bg shadow-2xl",
+      "absolute inset-y-0 right-0 flex h-full min-h-0 w-full min-w-0 max-w-3xl flex-col overflow-hidden",
+      "rounded-l-xl border-l border-border bg-bg shadow-2xl max-md:max-w-full max-md:rounded-none",
       input.closing
         ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
         : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
@@ -6874,7 +6914,7 @@ export function resolveDomainReviewDrawerLayoutClasses(input: {
   panelClassName: string;
 } {
   return {
-    rootClassName: "fixed inset-0 z-50",
+    rootClassName: "fixed inset-0 z-[60]",
     backdropClassName: cn(
       "absolute inset-0 cursor-default bg-slate-950/25",
       input.closing
@@ -6882,10 +6922,11 @@ export function resolveDomainReviewDrawerLayoutClasses(input: {
         : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
     ),
     panelClassName: cn(
-      "domain-review-drawer--workspace-scoped absolute right-0 flex h-auto w-full max-w-3xl flex-col",
+      "domain-review-drawer--workspace-scoped absolute right-0 flex h-auto w-full min-w-0 max-w-3xl flex-col",
       "top-[var(--training-plan-review-drawer-top,5rem)] bottom-[var(--training-plan-review-drawer-bottom,1.5rem)]",
       "overflow-hidden rounded-l-xl border-l border-border bg-bg shadow-2xl",
       "[max-height:calc(100dvh-var(--training-plan-review-drawer-top,5rem)-var(--training-plan-review-drawer-bottom,1.5rem))]",
+      "max-md:inset-0 max-md:max-h-[100dvh] max-md:rounded-none max-md:border-0",
       input.closing
         ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
         : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
@@ -7067,7 +7108,7 @@ function renderKeyValueList(rows: Array<{ label: string; value: ReactNode }>): R
       {rows.map((row, index) => (
         <div key={`${row.label}-${index}`} className="grid gap-1 sm:grid-cols-[12rem_1fr] sm:gap-3">
           <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "text-xs")}>{row.label}</dt>
-          <dd className="min-w-0 text-sm text-textPrimary">{row.value}</dd>
+          <dd className="min-w-0 break-words text-sm text-textPrimary">{row.value}</dd>
         </div>
       ))}
     </dl>
@@ -17093,7 +17134,14 @@ export function CoachAthletePlanningProfileView({
       athleteIdTrimmed === "" ||
       !isHeadCoachPlanningContextOwner
     ) {
-      setHeadCoachDomainPlanStates(createEmptyHeadCoachDomainPlanStates());
+      setHeadCoachDomainPlanStates((previous) => {
+        const drawerSelection = domainReviewDrawerSelectionRef.current;
+        return resolveDomainPlanStatesForNonOwnerWorkspaceReset({
+          previous,
+          drawerOpen: drawerSelection.open,
+          drawerDomain: drawerSelection.domain,
+        });
+      });
       setSubmittedDomainPlansBootstrapState("idle");
       return;
     }
@@ -17399,11 +17447,17 @@ export function CoachAthletePlanningProfileView({
                 version: { ...domainState.activeDetail.version, status },
               }
             : domainState.activeDetail;
+        const sourceDraft =
+          domainState.latestDraft ??
+          (input.domain === "SKILLS" &&
+          (latestSkillsDraft?.trainingPlanId?.trim() ?? "") === input.planId
+            ? latestSkillsDraft
+            : null);
         const latestDraft =
           isStatusOnlyPlanMutation &&
-          domainState.latestDraft !== null &&
-          (domainState.latestDraft.trainingPlanId?.trim() ?? "") === input.planId
-            ? { ...domainState.latestDraft, status }
+          sourceDraft !== null &&
+          (sourceDraft.trainingPlanId?.trim() ?? "") === input.planId
+            ? { ...sourceDraft, status }
             : domainState.latestDraft;
         return {
           ...current,
@@ -17453,7 +17507,7 @@ export function CoachAthletePlanningProfileView({
           : current,
       );
     },
-    [persistedVerifiedDomain],
+    [latestSkillsDraft, persistedVerifiedDomain],
   );
 
   const reconcileRevisedDomainPlanDetail = useCallback(
@@ -18361,17 +18415,25 @@ export function CoachAthletePlanningProfileView({
         setLatestSkillsDraftError(null);
         setLatestSkillsDraftErrorDomain(null);
         setGeneratePlanError(null);
-        if (generationDomain === "NUTRITION") {
-          // Atomically replace the drawer's displayed Nutrition draft with this complete full-plan
-          // response. In Head Coach review mode the global `latestSkillsDraft` is cleared, so the
+        if (generationDomain === "NUTRITION" || generationDomain === "SKILLS") {
+          // Atomically replace the drawer's displayed draft with this complete full-plan
+          // response. After approve/release the global `latestSkillsDraft` can be cleared, so the
           // drawer renders the per-domain `state.latestDraft`; both slots must receive the same
           // freshly parsed object so a stale global draft can never shadow a successful reload.
           setHeadCoachDomainPlanStates((prev) => {
-            const current = prev.NUTRITION;
+            const current = prev[generationDomain];
             const nextDraft = resolveNewerDomainReviewDraft(current.latestDraft, result);
             if (nextDraft === null) return prev;
             if (nextDraft === current.latestDraft) return prev;
-            return { ...prev, NUTRITION: { ...current, latestDraft: nextDraft } };
+            return {
+              ...prev,
+              [generationDomain]: {
+                ...current,
+                loading: false,
+                error: null,
+                latestDraft: nextDraft,
+              },
+            };
           });
         }
         if (shouldRenderAssistantDomainWorkspace && !skipDetailHydration) {
@@ -18596,6 +18658,16 @@ export function CoachAthletePlanningProfileView({
         ) {
           // S&C post-generation / Nutrition+Skills post-approve-release: workspace same identity —
           // keep installed latest authoritative.
+          return;
+        }
+        const drawerSelection = domainReviewDrawerSelectionRef.current;
+        if (
+          currentCoachGenerationDomain !== null &&
+          drawerSelection.open &&
+          drawerSelection.domain === currentCoachGenerationDomain
+        ) {
+          // Open Skills/Nutrition/S&C review already has a usable schedule. Approve/release only
+          // changes workspace status — do not clear it into "Loading generated …".
           return;
         }
         const clearResolvedBootstrapLatestDraft = () => {
@@ -20981,7 +21053,7 @@ export function CoachAthletePlanningProfileView({
 
         {!state.loading && !state.error ? (
           <>
-            <dl className="grid gap-2 sm:grid-cols-2">
+            <dl className="grid min-w-0 gap-2 xl:grid-cols-2">
               <DetailRow label="Domain" value={reviewModel.domainLabel} />
               <DetailRow label="Assigned Coach" value={reviewModel.assignedCoachLabel} />
               <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
@@ -21199,13 +21271,13 @@ export function CoachAthletePlanningProfileView({
         <div className="space-y-1">
           <h5 className="text-sm font-medium text-textPrimary">{sessionHeading}</h5>
           {sessionDetails.length > 0 ? (
-            <div className="text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
+            <div className="break-words text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
           ) : null}
           {hasRenderableValue(session.description) ? (
             <div className="text-sm text-textSecondary">{displayValue(session.description)}</div>
           ) : null}
           {hasRenderableValue(sessionNotes) ? (
-            <div className="text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
+            <div className="break-words text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
           ) : null}
         </div>
         {session.sessionStructureSections.length > 0 ? (
@@ -21973,12 +22045,12 @@ export function CoachAthletePlanningProfileView({
           onClick={handleCloseDomainReviewDrawer}
         />
         <aside className={drawerLayoutClasses.panelClassName}>
-          <header className="space-y-2 border-b border-border px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
+          <header className="space-y-2 border-b border-border px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
                 <h3
                   id="domain-review-drawer-title"
-                  className="text-lg font-medium text-textPrimary"
+                  className="break-words text-lg font-medium text-textPrimary"
                 >
                   {domainPlanReviewTitle(reviewDomain)}
                 </h3>
@@ -21986,6 +22058,7 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
+                className="shrink-0"
                 disabled={deterministicRevisionSubmitPending}
                 onClick={handleCloseDomainReviewDrawer}
               >
@@ -21993,7 +22066,7 @@ export function CoachAthletePlanningProfileView({
               </Button>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-4 py-5 sm:px-5">
             <div className="space-y-5">
               <section className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
@@ -23455,10 +23528,10 @@ export function CoachAthletePlanningProfileView({
     const domain = detail?.domain ?? row.domain;
     return (
       <Modal
-        className="max-h-[90vh] w-full max-w-6xl overflow-x-hidden overflow-y-auto rounded-2xl bg-card p-0 shadow-lg"
+        className="max-h-[min(90dvh,90vh)] w-full min-w-0 max-w-6xl overflow-y-auto rounded-2xl bg-card p-0 shadow-lg"
         aria-labelledby="domain-plan-history-title"
       >
-        <div className="min-w-0 space-y-5 overflow-x-hidden px-6 py-6 sm:px-7 sm:py-7">
+        <div className="min-w-0 space-y-5 px-4 py-5 sm:px-7 sm:py-7">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
               <h2
@@ -23945,7 +24018,7 @@ export function CoachAthletePlanningProfileView({
               Locked planning context for your assigned domain.
             </p>
           </div>
-          <dl className="grid gap-2 sm:grid-cols-2">
+          <dl className="grid min-w-0 gap-2 xl:grid-cols-2">
             <DetailRow label="Athlete" value={assistantAthleteDisplay} />
             <DetailRow label="Your Role" value={assistantRoleLabel(currentCoachGenerationDomain)} />
             <DetailRow
@@ -24771,7 +24844,7 @@ export function CoachAthletePlanningProfileView({
               ? lockedContextSummaryCopy
               : "Context not locked. Lock and share context before domain generation starts."}
           </div>
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <dl className="grid min-w-0 gap-2 text-sm xl:grid-cols-2">
             <DetailRow
               label="Plan window"
               value={formatDateRange(contextStartDate, contextEndDate)}
@@ -28054,10 +28127,10 @@ export function CoachAthletePlanningProfileView({
           onClick={handleCloseContextBuilderDrawer}
         />
         <aside className={drawerLayoutClasses.panelClassName}>
-          <header className="shrink-0 space-y-2 border-b border-border px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <h3 id="context-step-drawer-title" className="text-lg font-medium text-textPrimary">
+          <header className="shrink-0 space-y-2 border-b border-border px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <h3 id="context-step-drawer-title" className="break-words text-lg font-medium text-textPrimary">
                   {drawerTitle}
                 </h3>
                 <p className="text-sm text-textSecondary">{drawerDescription}</p>
@@ -28065,18 +28138,19 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
+                className="shrink-0"
                 onClick={handleCloseContextBuilderDrawer}
               >
                 Close
               </Button>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-4 py-5 sm:px-5">
             <div className="space-y-5 [&_section]:rounded-none [&_section]:border-0 [&_section]:bg-transparent [&_section]:p-0 [&_section]:shadow-none">
               {renderContextBuilderDrawerStepContent(step)}
             </div>
           </div>
-          <footer className="flex shrink-0 justify-end border-t border-border px-5 py-4">
+          <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border px-4 py-4 sm:px-5">
             <Button
               type="button"
               variant="secondary"
@@ -28232,7 +28306,7 @@ export function CoachAthletePlanningProfileView({
         primary={
           <section className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <DashboardStatusNotice type="success" compact className="min-w-[16rem] flex-1">
+              <DashboardStatusNotice type="success" compact className="min-w-0 w-full flex-1 sm:min-w-[16rem]">
                 Planning context is locked. Domain plans are generated from this snapshot.
               </DashboardStatusNotice>
               <Button

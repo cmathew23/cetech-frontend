@@ -85,10 +85,10 @@ export function AssignedAthletesTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-4">
-        <label className="flex min-w-[10rem] flex-col gap-1.5">
+        <label className="flex min-w-0 w-full flex-col gap-1.5 sm:w-auto sm:min-w-[10rem]">
           <span className="text-xs font-medium text-slate-600">Athlete status</span>
           <select
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-primary/35 focus-visible:ring-2"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-primary/35 focus-visible:ring-2"
             value={lifecycleFilter}
             onChange={(e) => setLifecycleFilter(e.target.value as RosterStatusFilter)}
           >
@@ -99,10 +99,10 @@ export function AssignedAthletesTable({
             ))}
           </select>
         </label>
-        <label className="flex min-w-[10rem] flex-col gap-1.5">
+        <label className="flex min-w-0 w-full flex-col gap-1.5 sm:w-auto sm:min-w-[10rem]">
           <span className="text-xs font-medium text-slate-600">Membership</span>
           <select
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-primary/35 focus-visible:ring-2"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-primary/35 focus-visible:ring-2"
             value={membershipFilter}
             onChange={(e) => setMembershipFilter(e.target.value as RosterStatusFilter)}
           >
@@ -151,7 +151,7 @@ export function AssignedAthletesTable({
                           : "—"}
                       </span>
                       <span
-                        className="block max-w-[20rem] truncate text-xs text-slate-500"
+                        className="block max-w-full break-all text-xs text-slate-500"
                         title={row.email}
                       >
                         {row.email}

@@ -104,7 +104,7 @@ export function FynChatThread({
                     </span>
                   </p>
                 ) : (
-                  <p className="whitespace-pre-wrap text-sm text-textPrimary">
+                  <p className="whitespace-pre-wrap break-words text-sm text-textPrimary">
                     {message.text}
                   </p>
                 )}

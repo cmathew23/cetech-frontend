@@ -139,6 +139,7 @@ import {
   resolveWorkflowReviewResetScopeDomain,
   resolveHeadCoachReviewActiveDetailAfterRefresh,
   shouldRetainOpenDomainReviewPlan,
+  resolveDomainPlanStatesForNonOwnerWorkspaceReset,
   shouldUseCachedDomainPlanStateForWorkspace,
   hasPlanningContextSnapshotChanged,
   resolveDomainReviewSurfaceIdentity,
@@ -12187,6 +12188,9 @@ describe("resolveDomainReviewDrawerWorkflowActions", () => {
 
     expect(layout.panelClassName).toContain("domain-review-drawer--workspace-scoped");
     expect(layout.panelClassName).toContain("[max-height:calc");
+    expect(layout.panelClassName).toContain("min-w-0");
+    expect(layout.panelClassName).toContain("max-md:inset-0");
+    expect(layout.panelClassName).toContain("max-md:max-h-[100dvh]");
     expect(layout.panelClassName).not.toContain("top-0");
     expect(layout.panelClassName).not.toContain("h-full");
   });
@@ -12200,6 +12204,8 @@ describe("resolveDomainReviewDrawerWorkflowActions", () => {
     expect(layout.panelClassName).toContain("h-full");
     expect(layout.panelClassName).toContain("min-h-0");
     expect(layout.panelClassName).toContain("overflow-hidden");
+    expect(layout.panelClassName).toContain("min-w-0");
+    expect(layout.panelClassName).toContain("max-md:max-w-full");
     expect(layout.panelClassName).not.toContain("100dvh");
     expect(layout.panelClassName).not.toContain("100vh");
     expect(layout.panelClassName).not.toContain("fixed");
@@ -14058,6 +14064,141 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe("latest_domain_draft");
   });
 
+  it("keeps Workflow 3 Skills activeDetail visible after non-owner workspace reset on approve", () => {
+    const activeDetail = {
+      plan: { id: "skills-plan", status: "HEAD_COACH_APPROVED" },
+      version: {
+        id: "skills-v1",
+        versionNumber: 1,
+        status: "HEAD_COACH_APPROVED",
+      },
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              title: "Putting",
+              items: [{ skillCode: "GOLF_PUTT_005", label: "3-6-9 Circle Pressure Drill" }],
+            },
+          ],
+        },
+      ],
+    } as never;
+    const previous = {
+      SKILLS: {
+        loading: false,
+        error: null,
+        latestDraft: null,
+        activeDetail,
+        summaryStatus: "HEAD_COACH_APPROVED",
+        summaryPlanId: "skills-plan",
+        summaryVersionId: "skills-v1",
+      },
+      NUTRITION: {
+        loading: false,
+        error: null,
+        latestDraft: null,
+        activeDetail: null,
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+      },
+      S_AND_C: {
+        loading: false,
+        error: null,
+        latestDraft: null,
+        activeDetail: null,
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+      },
+    };
+
+    const afterApproveReset = resolveDomainPlanStatesForNonOwnerWorkspaceReset({
+      previous,
+      drawerOpen: true,
+      drawerDomain: "SKILLS",
+    });
+
+    expect(afterApproveReset.SKILLS.activeDetail).toBe(activeDetail);
+    expect(afterApproveReset.SKILLS.loading).toBe(false);
+    expect(afterApproveReset.SKILLS.error).toBeNull();
+    expect(afterApproveReset.NUTRITION.activeDetail).toBeNull();
+    expect(afterApproveReset.S_AND_C.activeDetail).toBeNull();
+
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: afterApproveReset.SKILLS.activeDetail,
+      latestDraft: null,
+    });
+    expect(contentSource).toBe("active_detail");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "SKILLS",
+        contentSource,
+        loading: false,
+        error: null,
+      }),
+    ).toBeNull();
+
+    const approveLabels = resolveDomainReviewDisplayLabels({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      rawPlanStatus: "HEAD_COACH_APPROVED",
+    });
+    expect(approveLabels.planStatusLabel).toBe("Skills Coach Approved");
+
+    const approveActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "approved",
+      canShowViewPlan: false,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: true,
+      hasViewPlanContext: false,
+    });
+    expect(approveActions.canShowReleaseAction).toBe(true);
+
+    // Pre-approval draft path unchanged: open drawer with AI_GENERATED detail still renders.
+    const preApprovalDetail = {
+      ...activeDetail,
+      plan: { ...activeDetail.plan, status: "AI_GENERATED" },
+      version: { ...activeDetail.version, status: "AI_GENERATED" },
+    };
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "SKILLS",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: true,
+        activeDetail: preApprovalDetail,
+        latestDraft: null,
+      }),
+    ).toBe("active_detail");
+
+    // Closed drawer / other domains still reset to empty (Nutrition/S&C unchanged).
+    const closedReset = resolveDomainPlanStatesForNonOwnerWorkspaceReset({
+      previous,
+      drawerOpen: false,
+      drawerDomain: null,
+    });
+    expect(closedReset.SKILLS.activeDetail).toBeNull();
+    expect(closedReset.NUTRITION.activeDetail).toBeNull();
+    expect(closedReset.S_AND_C.activeDetail).toBeNull();
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("resolveDomainPlanStatesForNonOwnerWorkspaceReset");
+    expect(source).toContain(
+      "return resolveDomainPlanStatesForNonOwnerWorkspaceReset({",
+    );
+  });
+
   it("retains Skills latest draft identity after approve/release while revise still refreshes", () => {
     expect(
       shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
@@ -14110,6 +14251,142 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(source.slice(approvePin, approvePin + 280)).toContain(
       "skillsRetainedDraftIdentityRef.current",
     );
+  });
+
+  it("keeps Skills review schedule after approve when global latest is cleared", () => {
+    const loadedPlan = {
+      trainingPlanId: "skills-plan",
+      trainingPlanVersionId: "skills-v20",
+      versionNumber: 20,
+      status: "HEAD_COACH_APPROVED",
+      days: [
+        {
+          dayIndex: 1,
+          sessions: [{ title: "Putting", items: [{ label: "3-6-9 Circle Pressure Drill" }] }],
+        },
+      ],
+    } as never;
+
+    const previous = {
+      SKILLS: {
+        loading: false,
+        error: null,
+        latestDraft: loadedPlan,
+        activeDetail: null,
+        summaryStatus: "HEAD_COACH_APPROVED",
+        summaryPlanId: "skills-plan",
+        summaryVersionId: "skills-v20",
+      },
+      NUTRITION: {
+        loading: false,
+        error: null,
+        latestDraft: null,
+        activeDetail: null,
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+      },
+      S_AND_C: {
+        loading: false,
+        error: null,
+        latestDraft: null,
+        activeDetail: null,
+        summaryStatus: null,
+        summaryPlanId: null,
+        summaryVersionId: null,
+      },
+    };
+
+    const afterApproveReset = resolveDomainPlanStatesForNonOwnerWorkspaceReset({
+      previous,
+      drawerOpen: true,
+      drawerDomain: "SKILLS",
+    });
+    expect(afterApproveReset.SKILLS.latestDraft).toBe(loadedPlan);
+    expect(afterApproveReset.SKILLS.loading).toBe(false);
+
+    const contentSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: afterApproveReset.SKILLS.latestDraft,
+    });
+    expect(contentSource).toBe("latest_domain_draft");
+    expect(
+      resolveDomainReviewPlanLoadMessage({
+        domain: "SKILLS",
+        contentSource,
+        loading: true,
+        error: null,
+      }),
+    ).toBeNull();
+
+    const approveActions = resolveDomainReviewDrawerWorkflowActions({
+      workflowStatus: "approved",
+      canShowViewPlan: false,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+      canShowReleaseAction: true,
+      hasViewPlanContext: false,
+    });
+    expect(approveActions.canShowReleaseAction).toBe(true);
+
+    const preApprovalSource = resolveDomainReviewDrawerContentSource({
+      domain: "SKILLS",
+      workflowStatus: "draft_generated",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: { ...loadedPlan, status: "AI_GENERATED" },
+    });
+    expect(preApprovalSource).toBe("latest_domain_draft");
+
+    const nutritionAfterApprove = resolveDomainReviewDrawerContentSource({
+      domain: "NUTRITION",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: {
+        trainingPlanId: "nutrition-plan",
+        trainingPlanVersionId: "nutrition-v1",
+        status: "HEAD_COACH_APPROVED",
+        days: [{ dayIndex: 1, sessions: [{ title: "Breakfast", items: [] }] }],
+      } as never,
+    });
+    const sandCAfterApprove = resolveDomainReviewDrawerContentSource({
+      domain: "S_AND_C",
+      workflowStatus: "approved",
+      directReleaseSkillsOwner: true,
+      activeDetail: null,
+      latestDraft: {
+        trainingPlanId: "sandc-plan",
+        trainingPlanVersionId: "sandc-v1",
+        status: "HEAD_COACH_APPROVED",
+        days: [{ dayIndex: 1, sessions: [{ title: "Strength", items: [] }] }],
+      } as never,
+    });
+    expect(nutritionAfterApprove).toBe("latest_domain_draft");
+    expect(sandCAfterApprove).toBe("latest_domain_draft");
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain('generationDomain === "NUTRITION" || generationDomain === "SKILLS"');
+    expect(source).toContain(
+      "do not clear it into \"Loading generated …\"",
+    );
+    expect(
+      resolveDomainReviewDrawerContentSource({
+        domain: "SKILLS",
+        workflowStatus: "approved",
+        directReleaseSkillsOwner: true,
+        activeDetail: null,
+        latestDraft: null,
+      }),
+    ).toBe("none");
   });
 
   it("retains Skills plan after RELEASE when selectedVersionId is stale but summary.versionId matches", () => {

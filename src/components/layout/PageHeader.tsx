@@ -58,7 +58,7 @@ export function PageHeader({
             ) : null}
             <h1
               className={cn(
-                "text-2xl font-medium tracking-tight text-textPrimary sm:text-3xl",
+                "text-2xl font-medium tracking-tight break-words text-textPrimary sm:text-3xl",
                 titleClassName,
               )}
             >

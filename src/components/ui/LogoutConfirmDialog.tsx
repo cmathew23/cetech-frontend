@@ -40,7 +40,7 @@ export function LogoutConfirmDialog({
       aria-labelledby="logout-dialog-title"
       aria-describedby="logout-confirm-message"
     >
-      <div className="flex flex-col items-center px-7 py-7 sm:px-8 sm:py-8">
+      <div className="flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8">
         <LogOut
           className="mb-4 h-10 w-10 shrink-0 text-primary"
           aria-hidden="true"

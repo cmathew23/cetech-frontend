@@ -120,14 +120,14 @@ function TrainingPlanAthleteRow({
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 flex-col items-stretch gap-0 sm:items-end">
+      <div className="flex min-w-0 w-full shrink-0 flex-col items-stretch gap-0 sm:w-auto sm:items-end">
         {action.href && !action.disabled ? (
           <Link href={action.href}>
             <Button
               type="button"
               variant={action.disabled ? "neutral" : "primary"}
               className={cn(
-                "whitespace-nowrap px-4 py-2 text-xs sm:text-sm",
+                "w-full px-4 py-2 text-xs sm:text-sm",
                 action.disabled && TRAINING_PLAN_DISABLED_BUTTON_CLASS,
               )}
               disabled={action.disabled}
@@ -140,7 +140,7 @@ function TrainingPlanAthleteRow({
           type="button"
           variant={action.disabled ? "neutral" : "primary"}
           className={cn(
-            "whitespace-nowrap px-4 py-2 text-xs sm:text-sm",
+            "w-full px-4 py-2 text-xs sm:text-sm",
             action.disabled && TRAINING_PLAN_DISABLED_BUTTON_CLASS,
           )}
           disabled={action.disabled}

@@ -165,7 +165,7 @@ export function CoachDashboardView() {
               Roster and release settings from your coach dashboard context.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1">
               <p className="text-xs font-normal tracking-wide text-textSecondary">
                 Assigned Athletes
@@ -273,7 +273,7 @@ export function CoachDashboardView() {
               Academy, profile, and configuration from your membership.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <DashboardCardShell
               accent={false}
               majorOuter
@@ -327,7 +327,7 @@ export function CoachDashboardView() {
               majorOuter
               title="Configuration"
               titleClassName={DASHBOARD_CARD_TITLE_CLASS}
-              className="space-y-3 md:col-span-2 lg:col-span-1"
+              className="space-y-3 md:col-span-2 xl:col-span-1"
             >
               <dl className="space-y-2">
                 <DetailRow

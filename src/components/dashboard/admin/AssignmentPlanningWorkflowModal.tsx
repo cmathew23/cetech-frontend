@@ -41,7 +41,7 @@ export function AssignmentPlanningWorkflowModal({
       aria-labelledby="assignment-planning-workflow-title"
       aria-describedby="assignment-planning-workflow-copy"
     >
-      <div className="relative px-7 py-7 sm:px-8 sm:py-8">
+      <div className="relative px-4 py-6 sm:px-8 sm:py-8">
         <button
           type="button"
           className="absolute right-4 top-4 rounded-md p-1 text-textSecondary hover:bg-slate-100 hover:text-textPrimary"

@@ -342,12 +342,12 @@ export function LogSportResultModal({
       className="w-full max-w-lg overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
       aria-labelledby="log-sport-result-title"
     >
-      <div className="flex max-h-[min(90vh,720px)] flex-col">
-        <div className="border-b border-slate-200/80 px-5 py-4">
-          <h2
-            id="log-sport-result-title"
-            className="text-lg font-semibold text-textPrimary"
-          >
+      <div className="flex max-h-[min(90dvh,720px)] flex-col">
+        <div className="border-b border-slate-200/80 px-4 py-4 sm:px-5">
+            <h2
+              id="log-sport-result-title"
+              className="break-words text-lg font-semibold text-textPrimary"
+            >
             Log Sport Result
           </h2>
           <p className="mt-1 text-sm text-textSecondary">{drillTitle}</p>
@@ -360,7 +360,7 @@ export function LogSportResultModal({
           </p>
         </div>
 
-        <div className="space-y-4 overflow-y-auto px-5 py-4">
+        <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
           <fieldset className="space-y-2">
             <legend className="text-xs font-semibold text-textPrimary">Where</legend>
             {MODE_OPTIONS.map((option) => (
@@ -542,7 +542,7 @@ export function LogSportResultModal({
           {error ? <Alert variant="danger">{error}</Alert> : null}
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-4 py-4 sm:px-5">
           <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>

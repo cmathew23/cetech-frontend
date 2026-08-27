@@ -42,7 +42,7 @@ export function DeactivateMemberConfirmModal({
       aria-labelledby="deactivate-member-title"
       aria-describedby="deactivate-member-desc"
     >
-      <div className="flex flex-col items-center px-7 py-7 sm:px-8 sm:py-8">
+      <div className="flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8">
         <UserRoundX
           className="mb-4 h-10 w-10 shrink-0 text-danger"
           aria-hidden="true"

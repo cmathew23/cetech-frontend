@@ -174,7 +174,7 @@ export function CoachAthletePerformancePageContent() {
         padding="compact"
         className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
       >
-        <div className="space-y-2">
+        <div className="min-w-0 max-w-full space-y-2">
           <label
             htmlFor="athlete-performance-select"
             className="text-sm font-medium text-textPrimary"
@@ -183,6 +183,7 @@ export function CoachAthletePerformancePageContent() {
           </label>
           <Select
             id="athlete-performance-select"
+            className="min-w-0 max-w-full"
             value={selectedAthleteId}
             disabled={loadingRoster || athletes.length === 0}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>

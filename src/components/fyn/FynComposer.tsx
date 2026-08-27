@@ -24,15 +24,16 @@ export function FynComposer({
   }
 
   return (
-    <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => void handleSubmit(e)}>
+    <form className="flex min-w-0 flex-col gap-2 sm:flex-row" onSubmit={(e) => void handleSubmit(e)}>
       <Input
         value={message}
         onChange={(event: ChangeEvent<HTMLInputElement>) => setMessage(event.target.value)}
         placeholder={placeholder}
         disabled={disabled}
         aria-label="Fyn follow-up message"
+        className="min-w-0 w-full flex-1"
       />
-      <Button type="submit" disabled={disabled || message.trim() === ""}>
+      <Button type="submit" disabled={disabled || message.trim() === ""} className="w-full shrink-0 sm:w-auto">
         Send
       </Button>
     </form>

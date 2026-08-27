@@ -824,10 +824,10 @@ function renderNutritionDayTotalsPanel(entries: unknown[]) {
     rows.map((row) => (
       <div
         key={`${keyPrefix}-${row.label}-${row.value}`}
-        className="grid grid-cols-[minmax(0,9rem)_1fr] gap-2 text-sm"
+        className="grid min-w-0 grid-cols-[minmax(0,9rem)_1fr] gap-2 text-sm"
       >
         <dt className="font-medium text-textSecondary">{row.label}</dt>
-        <dd className="min-w-0 text-textPrimary">{row.value}</dd>
+        <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
       </div>
     ));
 
@@ -1329,7 +1329,7 @@ function renderJournalStructureSections(
                           {detailRows.map((row, rowIdx) => (
                             <div
                               key={`${sectionIdx}-${section.key}-${itemIndex}-r-${rowIdx}`}
-                              className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
+                              className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
                             >
                               <dt className="text-textSecondary">{row.label}</dt>
                               <dd className="min-w-0 break-words text-textPrimary">
@@ -1795,14 +1795,14 @@ function NutritionSessionAdherencePanel({
       {historyPhase === "ready" && latestAthleteEvent ? (
         <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
           {latestAthleteEvent.athleteNotes ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Note</dt>
               <dd className="min-w-0 break-words text-textPrimary">
                 {latestAthleteEvent.athleteNotes}
               </dd>
             </div>
           ) : null}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Logged</dt>
             <dd className="text-textPrimary">
               {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
@@ -2101,7 +2101,7 @@ function SessionAdherencePanel({
 
       {historyPhase === "ready" && latestAthleteEvent ? (
         <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Status</dt>
             <dd className="text-textPrimary">
               {latestAthleteEvent.adherenceOutcome
@@ -2110,7 +2110,7 @@ function SessionAdherencePanel({
             </dd>
           </div>
           {latestAthleteEvent.completionPercent !== null ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Completion</dt>
               <dd className="text-textPrimary">
                 {Math.round(latestAthleteEvent.completionPercent)}%
@@ -2118,7 +2118,7 @@ function SessionAdherencePanel({
             </div>
           ) : null}
           {latestAthleteEvent.actualDurationMinutes !== null ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Duration</dt>
               <dd className="text-textPrimary">
                 {Math.round(latestAthleteEvent.actualDurationMinutes)} min
@@ -2126,14 +2126,14 @@ function SessionAdherencePanel({
             </div>
           ) : null}
           {latestAthleteEvent.athleteNotes ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Note</dt>
               <dd className="min-w-0 break-words text-textPrimary">
                 {latestAthleteEvent.athleteNotes}
               </dd>
             </div>
           ) : null}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Logged</dt>
             <dd className="text-textPrimary">
               {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
@@ -2379,7 +2379,7 @@ function renderJournalItem(
             {detailRows.map((row) => (
               <div
                 key={`${row.label}-${row.value}`}
-                className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm"
+                className="grid min-w-0 grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm"
               >
                 <dt className="font-medium text-textSecondary">{row.label}</dt>
                 <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
@@ -2836,10 +2836,10 @@ export function AthleteWeeklyPlanJournalPageContent() {
                             {weekTotalsRows.map((row) => (
                               <div
                                 key={`week-nut-${row.label}-${row.value}`}
-                                className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 text-xs"
+                                className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 text-xs"
                               >
                                 <dt className="text-textSecondary">{row.label}</dt>
-                                <dd className="min-w-0 text-textPrimary">{row.value}</dd>
+                                <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
                               </div>
                             ))}
                           </dl>

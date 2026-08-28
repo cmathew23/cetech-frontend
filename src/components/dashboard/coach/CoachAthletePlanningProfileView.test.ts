@@ -79,6 +79,7 @@ import {
   shouldSkipPersistedVersionsFetchWhenSummaryStatusPresent,
   runTrainingPlanPostActionRefresh,
   projectWorkspaceAfterTrainingPlanMutation,
+  projectHeadApproveReleaseAvailability,
   shouldShowStep6PreGenerationReadiness,
   shouldUseSpecialistTrainingPlanWorkspace,
   resolveWorkspaceTrainingPlanShellOwnership,
@@ -17771,6 +17772,220 @@ describe("resolveDomainReleaseVisible", () => {
         versionId: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("HEAD_APPROVE local release projection", () => {
+  const planIds = { planId: "sandc-plan", versionId: "sandc-v6" } as const;
+
+  function headCoachApprovalDomain(overrides: Parameters<typeof shellAssignmentDomain>[0] = {}) {
+    return shellAssignmentDomain({
+      ownerType: "ASSIGNED_DOMAIN_COACH",
+      ownerUserId: "sandc-coach",
+      ownerCoachProfileId: "sandc-profile",
+      ownedByCurrentUser: false,
+      canOpen: true,
+      canApprove: true,
+      canRelease: false,
+      releaseMode: "HEAD_COACH_APPROVAL",
+      ...overrides,
+    });
+  }
+
+  function submittedWorkspace(input: {
+    domain: "SKILLS" | "NUTRITION" | "S_AND_C";
+    workflowShape?: string;
+    domainAssignment?: ReturnType<typeof shellAssignmentDomain>;
+    assignmentReleaseMode?: "HEAD_COACH_APPROVAL" | "DIRECT_DOMAIN_RELEASE";
+  }) {
+    const domainAssignment = input.domainAssignment ?? headCoachApprovalDomain();
+    const base = workflow1OwnedSkillsWorkspace({
+      workflowShape: input.workflowShape ?? "WORKFLOW_1",
+      assignmentContext: shellAssignmentContext({
+        releaseMode: input.assignmentReleaseMode ?? "HEAD_COACH_APPROVAL",
+        domains: {
+          SKILLS: input.domain === "SKILLS" ? domainAssignment : shellAssignmentDomain(),
+          NUTRITION: input.domain === "NUTRITION" ? domainAssignment : shellAssignmentDomain(),
+          S_AND_C: input.domain === "S_AND_C" ? domainAssignment : shellAssignmentDomain(),
+        },
+      }),
+    });
+    base.domains[input.domain] = {
+      ...base.domains[input.domain],
+      allowedActions: ["HEAD_APPROVE", "REQUEST_REVISION"],
+      submittedForReview: true,
+      summary: {
+        ...base.domains[input.domain].summary,
+        trainingPlanId: planIds.planId,
+        versionId: planIds.versionId,
+        status: "ASSISTANT_COACH_APPROVED",
+      },
+    };
+    return base;
+  }
+
+  function releaseVisible(
+    workspace: TrainingPlanWorkspace,
+    domain: "SKILLS" | "NUTRITION" | "S_AND_C",
+    requiredReleaseMode: "HEAD_COACH_APPROVAL" | "DIRECT_DOMAIN_RELEASE" = "HEAD_COACH_APPROVAL",
+  ) {
+    return resolveDomainReleaseVisible({
+      assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
+      assignmentDomainContext: workspace.assignmentContext?.domains[domain],
+      requiredReleaseMode,
+      legacyCanRelease: workspace.domains[domain].allowedActions.includes("RELEASE"),
+      planId: planIds.planId,
+      versionId: planIds.versionId,
+    });
+  }
+
+  it("makes W1 Head Coach release visible immediately after HEAD_APPROVE without a refetch", () => {
+    const before = submittedWorkspace({ domain: "S_AND_C" });
+    expect(releaseVisible(before, "S_AND_C")).toBe(false);
+
+    const after = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: before,
+      domain: "S_AND_C",
+      action: "HEAD_APPROVE",
+      ...planIds,
+    })!;
+
+    expect(after.domains.S_AND_C.summary.status).toBe("HEAD_COACH_APPROVED");
+    expect(after.domains.S_AND_C.allowedActions).toContain("RELEASE");
+    expect(after.assignmentContext?.domains.S_AND_C.canRelease).toBe(true);
+    expect(releaseVisible(after, "S_AND_C")).toBe(true);
+    expect(
+      resolveDomainReviewDrawerWorkflowActions({
+        workflowStatus: "approved",
+        canShowViewPlan: false,
+        canShowSubmitForReview: false,
+        canShowReviseAction: false,
+        canShowApproveAction: false,
+        canShowRequestRevisionAction: false,
+        canShowReleaseAction: releaseVisible(after, "S_AND_C"),
+        hasViewPlanContext: false,
+      }).canShowReleaseAction,
+    ).toBe(true);
+    expect(
+      domainIntegrationNextActionLabel({
+        workflowStatus: "approved",
+        assignmentDomainContext: after.assignmentContext!.domains.S_AND_C,
+        planningContextLocked: true,
+        loading: false,
+        hasError: false,
+        canGenerate: false,
+        canSubmitForReview: false,
+        canViewPlan: false,
+        canReview: false,
+        canRelease: releaseVisible(after, "S_AND_C"),
+        isCurrentReviewPlan: true,
+      }),
+    ).toBe("Approved and ready to release.");
+    expect(projectHeadApproveReleaseAvailability(after, "S_AND_C")).toBe(after);
+  });
+
+  it("does not enable release before approval or for a non-releaser", () => {
+    const submitted = submittedWorkspace({ domain: "S_AND_C" });
+    const afterSubmit = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: submitted,
+      domain: "S_AND_C",
+      action: "SUBMIT_REVIEW",
+      ...planIds,
+    })!;
+    expect(afterSubmit.assignmentContext?.domains.S_AND_C.canRelease).toBe(false);
+    expect(releaseVisible(afterSubmit, "S_AND_C")).toBe(false);
+
+    const unauthorized = submittedWorkspace({
+      domain: "S_AND_C",
+      domainAssignment: headCoachApprovalDomain({
+        ownedByCurrentUser: true,
+        canApprove: false,
+        canSubmitForReview: true,
+      }),
+    });
+    const afterUnauthorizedApprove = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: unauthorized,
+      domain: "S_AND_C",
+      action: "HEAD_APPROVE",
+      ...planIds,
+    })!;
+    expect(afterUnauthorizedApprove.domains.S_AND_C.allowedActions).toContain("RELEASE");
+    expect(afterUnauthorizedApprove.assignmentContext?.domains.S_AND_C.canRelease).toBe(false);
+    expect(releaseVisible(afterUnauthorizedApprove, "S_AND_C")).toBe(false);
+  });
+
+  it("enables authorized Head Coach release on the shared W2A and W2B approval path", () => {
+    for (const [workflowShape, domain] of [
+      ["WORKFLOW_2A", "SKILLS"],
+      ["WORKFLOW_2B", "NUTRITION"],
+    ] as const) {
+      const before = submittedWorkspace({ domain, workflowShape });
+      expect(releaseVisible(before, domain)).toBe(false);
+      const after = projectWorkspaceAfterTrainingPlanMutation({
+        workspace: before,
+        domain,
+        action: "HEAD_APPROVE",
+        planId: `${domain}-plan`,
+        versionId: `${domain}-version`,
+      })!;
+      expect(after.assignmentContext?.domains[domain].canRelease).toBe(true);
+      expect(
+        resolveDomainReleaseVisible({
+          assignmentReleaseMode: after.assignmentContext?.releaseMode,
+          assignmentDomainContext: after.assignmentContext?.domains[domain],
+          requiredReleaseMode: "HEAD_COACH_APPROVAL",
+          legacyCanRelease: after.domains[domain].allowedActions.includes("RELEASE"),
+          planId: `${domain}-plan`,
+          versionId: `${domain}-version`,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("does not change Workflow 3 DIRECT_DOMAIN_RELEASE assignment canRelease", () => {
+    const before = submittedWorkspace({
+      domain: "S_AND_C",
+      workflowShape: "WORKFLOW_3",
+      assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+      domainAssignment: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: true,
+        canApprove: true,
+        canRelease: true,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+    });
+    const after = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: before,
+      domain: "S_AND_C",
+      action: "HEAD_APPROVE",
+      ...planIds,
+    })!;
+    expect(after.assignmentContext?.releaseMode).toBe("DIRECT_DOMAIN_RELEASE");
+    expect(after.assignmentContext?.domains.S_AND_C.canRelease).toBe(true);
+    expect(after.assignmentContext?.domains.S_AND_C.releaseMode).toBe("DIRECT_DOMAIN_RELEASE");
+    expect(releaseVisible(after, "S_AND_C", "DIRECT_DOMAIN_RELEASE")).toBe(true);
+
+    const deniedDirect = submittedWorkspace({
+      domain: "S_AND_C",
+      workflowShape: "WORKFLOW_3",
+      assignmentReleaseMode: "DIRECT_DOMAIN_RELEASE",
+      domainAssignment: shellAssignmentDomain({
+        ownerType: "ASSIGNED_DOMAIN_COACH",
+        ownedByCurrentUser: false,
+        canApprove: true,
+        canRelease: false,
+        releaseMode: "DIRECT_DOMAIN_RELEASE",
+      }),
+    });
+    const afterDenied = projectWorkspaceAfterTrainingPlanMutation({
+      workspace: deniedDirect,
+      domain: "S_AND_C",
+      action: "HEAD_APPROVE",
+      ...planIds,
+    })!;
+    expect(afterDenied.assignmentContext?.domains.S_AND_C.canRelease).toBe(false);
+    expect(releaseVisible(afterDenied, "S_AND_C", "DIRECT_DOMAIN_RELEASE")).toBe(false);
   });
 });
 

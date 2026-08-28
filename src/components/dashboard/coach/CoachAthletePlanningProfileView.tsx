@@ -9486,7 +9486,7 @@ export function projectWorkspaceAfterTrainingPlanMutation(input: {
   if (input.workspace === null) return null;
   const current = input.workspace.domains[input.domain];
   const status = postActionStatus(input.action);
-  return {
+  const projected: TrainingPlanWorkspace = {
     ...input.workspace,
     domains: {
       ...input.workspace.domains,
@@ -9514,6 +9514,65 @@ export function projectWorkspaceAfterTrainingPlanMutation(input: {
         },
       },
     },
+  };
+  if (input.action !== "HEAD_APPROVE") return projected;
+  return projectHeadApproveReleaseAvailability(projected, input.domain);
+}
+
+/**
+ * After a successful Head Coach approval, keep Release available from the same
+ * assignmentContext / allowedActions that resolveDomainReleaseVisible reads.
+ * Does not apply to DIRECT_DOMAIN_RELEASE or users who cannot approve.
+ */
+export function projectHeadApproveReleaseAvailability(
+  workspace: TrainingPlanWorkspace,
+  domain: TrainingPlanGenerationDomain,
+): TrainingPlanWorkspace {
+  if ((workspace.domains[domain].summary.status?.trim() ?? "") !== "HEAD_COACH_APPROVED") {
+    return workspace;
+  }
+  const domainEntry = workspace.domains[domain];
+  const allowedActions = domainEntry.allowedActions.includes("RELEASE")
+    ? domainEntry.allowedActions
+    : [...domainEntry.allowedActions, "RELEASE"];
+  const assignment = workspace.assignmentContext;
+  const domainAssignment = assignment?.domains[domain];
+  const enableHeadCoachApprovalCanRelease =
+    assignment !== undefined &&
+    domainAssignment !== undefined &&
+    assignment.releaseMode === "HEAD_COACH_APPROVAL" &&
+    domainAssignment.releaseMode === "HEAD_COACH_APPROVAL" &&
+    domainAssignment.canApprove === true;
+
+  if (
+    allowedActions === domainEntry.allowedActions &&
+    (!enableHeadCoachApprovalCanRelease || domainAssignment.canRelease)
+  ) {
+    return workspace;
+  }
+
+  return {
+    ...workspace,
+    domains: {
+      ...workspace.domains,
+      [domain]: {
+        ...domainEntry,
+        allowedActions,
+      },
+    },
+    assignmentContext:
+      enableHeadCoachApprovalCanRelease && assignment !== undefined && domainAssignment !== undefined
+        ? {
+            ...assignment,
+            domains: {
+              ...assignment.domains,
+              [domain]: {
+                ...domainAssignment,
+                canRelease: true,
+              },
+            },
+          }
+        : workspace.assignmentContext,
   };
 }
 
@@ -17543,31 +17602,12 @@ export function CoachAthletePlanningProfileView({
           input.domain === "S_AND_C" ||
           input.domain === "NUTRITION") &&
         (input.action === "HEAD_APPROVE" || input.action === "RELEASE");
-      setWorkspace((current) => {
-        const projected = projectWorkspaceAfterTrainingPlanMutation({
+      setWorkspace((current) =>
+        projectWorkspaceAfterTrainingPlanMutation({
           workspace: current,
           ...input,
-        });
-        if (projected === null || !isStatusOnlyPlanMutation) {
-          return projected;
-        }
-        // Ensure Release remains available from local approve projection without a workspace refetch.
-        if (input.action === "HEAD_APPROVE") {
-          const domainEntry = projected.domains[input.domain];
-          if (domainEntry.allowedActions.includes("RELEASE")) return projected;
-          return {
-            ...projected,
-            domains: {
-              ...projected.domains,
-              [input.domain]: {
-                ...domainEntry,
-                allowedActions: [...domainEntry.allowedActions, "RELEASE"],
-              },
-            },
-          };
-        }
-        return projected;
-      });
+        }),
+      );
       setHeadCoachDomainPlanStates((current) => {
         const domainState = current[input.domain];
         const activeDetail =

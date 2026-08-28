@@ -4555,6 +4555,17 @@ export const EMPTY_SANDC_ADD_ITEM_VALUES: SandCAddItemValues = {
   reps: null,
 };
 
+/** UPDATE_ITEM reps stepper seed: exact numeric reps, else a leading positive integer in descriptive reps. */
+function sandCUpdateItemRepsControlValue(
+  target: FynRevisionTargetOption | null,
+): number | null {
+  if (target?.numericReps != null) return target.numericReps;
+  const match = /^([1-9]\d*)/.exec((target?.reps ?? "").trim());
+  if (match === null) return null;
+  const parsed = Number(match[1]);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export function sandCParameterValuesForAction(
   target: FynRevisionTargetOption | null,
   actionKey: FynRevisionActionKey,
@@ -4563,7 +4574,7 @@ export function sandCParameterValuesForAction(
   return {
     durationMinutes: target?.durationMinutes ?? null,
     sets: target?.sets ?? null,
-    reps: target?.numericReps ?? null,
+    reps: sandCUpdateItemRepsControlValue(target),
   };
 }
 
@@ -4667,7 +4678,10 @@ export function buildSandCRevisionPatch(input: {
       input.target.durationMinutes,
     );
     const sets = changedSandCNumericValue(input.sets, input.target.sets);
-    const reps = changedSandCNumericValue(input.reps, input.target.numericReps);
+    const reps = changedSandCNumericValue(
+      input.reps,
+      sandCUpdateItemRepsControlValue(input.target),
+    );
     if (durationMinutes === undefined && sets === undefined && reps === undefined) return null;
     return {
       type: "UPDATE_ITEM",

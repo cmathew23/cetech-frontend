@@ -6431,6 +6431,138 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
+    it("preloads UPDATE_ITEM reps from a leading positive integer in descriptive reps", () => {
+      const descriptiveTargets = fynRevisionLeveledTargetOptions(context, {
+        domain: "S_AND_C",
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    label: "Cable Woodchoppers",
+                    exerciseCatalogItemId: "exercise-woodchoppers",
+                    durationMinutes: 10,
+                    sets: 3,
+                    reps: "3 / side",
+                  },
+                  {
+                    label: "Deadbug",
+                    exerciseCatalogItemId: "exercise-deadbug",
+                    durationMinutes: 8,
+                    sets: 3,
+                    reps: "6 each side",
+                  },
+                  {
+                    label: "Back squat",
+                    exerciseCatalogItemId: "exercise-squat",
+                    durationMinutes: 20,
+                    sets: 3,
+                    reps: 8,
+                  },
+                  {
+                    label: "Carry",
+                    exerciseCatalogItemId: "exercise-carry",
+                    durationMinutes: 12,
+                    sets: 2,
+                    reps: "To fatigue",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const woodchoppers = descriptiveTargets.find(
+        (target) => target.itemLabel === "Cable Woodchoppers",
+      )!;
+      const deadbug = descriptiveTargets.find((target) => target.itemLabel === "Deadbug")!;
+      const squat = descriptiveTargets.find((target) => target.itemLabel === "Back squat")!;
+      const carry = descriptiveTargets.find((target) => target.itemLabel === "Carry")!;
+
+      expect(woodchoppers.numericReps).toBeNull();
+      expect(woodchoppers.reps).toBe("3 / side");
+      expect(sandCParameterValuesForAction(woodchoppers, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 10,
+        sets: 3,
+        reps: 3,
+      });
+      expect(deadbug.numericReps).toBeNull();
+      expect(deadbug.reps).toBe("6 each side");
+      expect(sandCParameterValuesForAction(deadbug, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 8,
+        sets: 3,
+        reps: 6,
+      });
+      expect(sandCParameterValuesForAction(squat, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 20,
+        sets: 3,
+        reps: 8,
+      });
+      expect(carry.numericReps).toBeNull();
+      expect(carry.reps).toBe("To fatigue");
+      expect(sandCParameterValuesForAction(carry, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 12,
+        sets: 2,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(woodchoppers, "ADD_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+
+      const woodchoppersHtml = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context,
+            targetOptions: descriptiveTargets,
+            selectedTargetKey: woodchoppers.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+            sandCAddItemValues: sandCParameterValuesForAction(woodchoppers, "UPDATE_ITEM"),
+          }),
+        ),
+      );
+      expect(woodchoppersHtml).toContain('data-testid="fyn-sandc-reps-value">3');
+      expect(woodchoppersHtml).not.toContain("3 / side");
+
+      expect(
+        buildSandCRevisionPatch({
+          target: woodchoppers,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 12,
+          sets: 3,
+          reps: 3,
+        }),
+      ).toEqual({
+        type: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-woodchoppers", durationMinutes: 12 },
+      });
+      expect(
+        buildSandCRevisionPatch({
+          target: woodchoppers,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 10,
+          sets: 3,
+          reps: 4,
+        }),
+      ).toEqual({
+        type: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-woodchoppers", reps: 4 },
+      });
+    });
+
     it("preloads UPDATE_ITEM from the rendered schedule item, not targetMap catalog defaults", () => {
       const catalogTargetMap = {
         days: [
@@ -6498,7 +6630,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(sandCParameterValuesForAction(currentTarget, "UPDATE_ITEM")).toEqual({
         durationMinutes: 8,
         sets: 3,
-        reps: null,
+        reps: 6,
       });
       expect(sandCParameterValuesForAction(currentTarget, "ADD_ITEM")).toEqual({
         durationMinutes: null,
@@ -6522,7 +6654,8 @@ describe("Training Plan Workspace lifecycle display", () => {
       );
       expect(html).toContain('data-testid="fyn-sandc-durationMinutes-value">8');
       expect(html).toContain('data-testid="fyn-sandc-sets-value">3');
-      expect(html).toContain('data-testid="fyn-sandc-reps-value">6 each side');
+      expect(html).toContain('data-testid="fyn-sandc-reps-value">6');
+      expect(html).not.toContain("6 each side");
       expect(html).not.toContain('data-testid="fyn-sandc-durationMinutes-value">10');
       expect(html).not.toContain(">Unset<");
 
@@ -6532,7 +6665,7 @@ describe("Training Plan Workspace lifecycle display", () => {
           actionKey: "UPDATE_ITEM",
           durationMinutes: 9,
           sets: 3,
-          reps: null,
+          reps: 6,
         }),
       ).toEqual({
         type: "UPDATE_ITEM",

@@ -437,6 +437,8 @@ export type CoachAthleteGeneratedDraftItem = {
   reps: string | null;
   intensity: string | null;
   notes: string | null;
+  /** Response-only YouTube URLs on S&C exercises; omit when empty. */
+  videos?: string[];
 };
 
 export type CoachAthleteGeneratedDraftSession = {
@@ -1041,6 +1043,10 @@ export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDr
     intensity: readStringKey([record], ["intensity"]),
     notes: readStringKey([record], ["notes"]),
   };
+  const videos = readStringListKey([record], ["videos"]).slice(0, 3);
+  if (videos.length > 0) {
+    item.videos = videos;
+  }
   return (
     item.order !== null ||
     item.itemType ||

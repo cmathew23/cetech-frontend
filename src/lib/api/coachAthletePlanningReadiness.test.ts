@@ -1944,6 +1944,46 @@ describe("training plan generation timeouts and helpers", () => {
     });
   });
 
+  it("keeps response-only S&C videos on parsed generated draft items", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-sandc-1",
+        trainingPlanVersionId: "version-sandc-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-1",
+                    label: "Back squat",
+                    videos: [
+                      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                      "https://youtu.be/abcdefghijk",
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "S_AND_C",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]?.videos).toEqual([
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://youtu.be/abcdefghijk",
+    ]);
+  });
+
   it("keeps numeric Skills reps in their prior normalized string form", async () => {
     apiRequestMock.mockResolvedValue({
       data: {

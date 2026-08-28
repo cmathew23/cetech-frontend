@@ -12,6 +12,7 @@ import {
   normalizeSkillPrimaryGoalName,
   SkillGoalAttributionText,
 } from "@/components/dashboard/SkillGoalAttribution";
+import { SandCExerciseDemonstrationVideos } from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
@@ -932,6 +933,7 @@ export function collectDetailRows(record: Record<string, unknown>): Array<{ labe
       key === "assignedCoachId" ||
       key === "exerciseCatalogItemId" ||
       key === "nutritionCatalogItemId" ||
+      key === "videos" ||
       JOURNAL_DEFAULT_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
@@ -1092,6 +1094,7 @@ export function collectStructureItemDetailRows(
       key === "id" ||
       key === "exerciseCatalogItemId" ||
       key === "nutritionCatalogItemId" ||
+      key === "videos" ||
       STRUCTURE_ITEM_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
@@ -1236,6 +1239,7 @@ function renderJournalStructureSections(
   options?: {
     nutritionDomain?: boolean;
     skillDomain?: boolean;
+    sandCDomain?: boolean;
     skillsSportMetrics?: SkillsSportMetricsJournalOptions;
   },
 ) {
@@ -1244,6 +1248,7 @@ function renderJournalStructureSections(
 
   const nutritionDomain = options?.nutritionDomain === true;
   const skillDomain = options?.skillDomain === true;
+  const sandCDomain = options?.sandCDomain === true;
 
   return (
     <div className="space-y-3 border-t border-slate-200/80 pt-2">
@@ -1340,6 +1345,9 @@ function renderJournalStructureSections(
                         </dl>
                       ) : heading.startsWith("Item ") ? (
                         <p className="text-xs text-textSecondary">Structured entry</p>
+                      ) : null}
+                      {sandCDomain ? (
+                        <SandCExerciseDemonstrationVideos videos={mergedSkillItem.videos} />
                       ) : null}
                       {drillLogContext && skillsSportMetrics ? (
                         <div className="mt-2">
@@ -2390,6 +2398,7 @@ function renderJournalItem(
         {renderJournalStructureSections(item, {
           nutritionDomain,
           skillDomain: adherenceDomainKey === "SKILLS",
+          sandCDomain: adherenceDomainKey === "S_AND_C",
           skillsSportMetrics: options?.skillsSportMetrics,
         })}
         {!hasStructuredContent && detailRows.length === 0 ? (

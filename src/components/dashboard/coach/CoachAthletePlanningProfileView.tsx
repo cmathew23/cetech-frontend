@@ -7,6 +7,7 @@ import {
 import { DashboardStatusNotice } from "@/components/dashboard/shared/DashboardStatusNotice";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { SkillGoalAttributionText } from "@/components/dashboard/SkillGoalAttribution";
+import { SandCExerciseDemonstrationVideos } from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos";
 import { DASHBOARD_DETAIL_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GoalDisplayBlock } from "@/components/goals/GoalDisplayBlock";
@@ -2491,6 +2492,22 @@ export function isUsableGeneratedDomainDraft(
   return trainingDays !== null && trainingDays > 0;
 }
 
+/**
+ * View Draft Plan hydrates only when the open drawer would have no renderable
+ * latest draft and no active/detail graph. Uses {@link resolveDomainReviewViewDraftContentSource}.
+ */
+export function shouldHydrateDomainReviewOnViewDraft(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  directReleaseSkillsOwner: boolean;
+  latestDraftDisplayDomain: TrainingPlanGenerationDomain | null;
+  globalLatestDraft: CoachAthleteLatestDomainDraft | null;
+  perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+}): boolean {
+  return resolveDomainReviewViewDraftContentSource(input) === "none";
+}
+
 /** S&C-only: skip post-generation active/detail when latest already installed usable content. */
 export function shouldSkipSandCPostGenerationDetailRefresh(input: {
   domain: TrainingPlanGenerationDomain;
@@ -3773,9 +3790,51 @@ export function fynRevisionAvailableActions(
 }
 
 /**
- * Builds coach-selectable targets at every level the domain supports, keeping only targets that
- * expose at least one available action. Same source priority as {@link fynRevisionTargetOptions}.
+ * Copies UPDATE preload fields from the currently rendered schedule item onto a revision target
+ * matched by 1-based day/session/item indices. Identity, keys, and indices stay on the original
+ * target so targetMap selection is unchanged.
  */
+function revisionTargetItemMatchKey(target: FynRevisionTargetOption): string | null {
+  if (target.level !== "ITEM") return null;
+  const { dayIndex, sessionIndex, itemIndex } = target.indices;
+  if (dayIndex === null || sessionIndex === null || itemIndex === null) return null;
+  return `${dayIndex}|${sessionIndex}|${itemIndex}`;
+}
+
+export function overlayRevisionTargetParametersFromSchedule(
+  targets: readonly FynRevisionTargetOption[],
+  domain: TrainingPlanGenerationDomain,
+  scheduleDays: readonly unknown[] | null | undefined,
+): FynRevisionTargetOption[] {
+  if (!Array.isArray(scheduleDays) || scheduleDays.length === 0) return [...targets];
+  const renderedItems = fynBuildLeveledTargets(domain, scheduleDays, FYN_ITEM_LEVEL_ONLY);
+  const byIndex = new Map<string, FynRevisionTargetOption>();
+  for (const item of renderedItems) {
+    const key = revisionTargetItemMatchKey(item);
+    if (key !== null) byIndex.set(key, item);
+  }
+  if (byIndex.size === 0) return [...targets];
+  return targets.map((target) => {
+    const key = revisionTargetItemMatchKey(target);
+    if (key === null) return target;
+    const rendered = byIndex.get(key);
+    if (rendered === undefined) return target;
+    return {
+      ...target,
+      serving: rendered.serving,
+      durationMinutes: rendered.durationMinutes,
+      sets: rendered.sets,
+      numericReps: rendered.numericReps,
+      reps: rendered.reps,
+      exerciseCatalogItemId: rendered.exerciseCatalogItemId ?? target.exerciseCatalogItemId,
+      target: {
+        ...target.target,
+        currentId: rendered.target.currentId ?? target.target.currentId,
+      },
+    };
+  });
+}
+
 function fynRestDayCategoryTargetOption(): FynRevisionTargetOption {
   return {
     key: FYN_REST_DAY_TARGET_KEY,
@@ -3804,6 +3863,7 @@ function fynRestDayCategoryTargetOption(): FynRevisionTargetOption {
   };
 }
 
+/** Coach-selectable targets at every level the domain supports; UPDATE fields overlay from scheduleDays. */
 export function fynRevisionLeveledTargetOptions(
   context: CoachAthleteDomainDraftRevisionContext | null,
   options?: {
@@ -3832,6 +3892,8 @@ export function fynRevisionLeveledTargetOptions(
     return [restDayTarget, ...list];
   };
 
+  const overlay = (list: FynRevisionTargetOption[]) =>
+    overlayRevisionTargetParametersFromSchedule(list, domain, options?.scheduleDays);
   const sources: readonly unknown[][] = [
     fynTargetMapCandidateArray(context?.targetMap ?? null),
     [...(options?.scheduleDays ?? [])],
@@ -3841,14 +3903,16 @@ export function fynRevisionLeveledTargetOptions(
     if (days.length === 0) continue;
     // Rest Day category must not mask an empty nested walk — flat targetMap still needs a turn.
     const built = withActions(fynBuildLeveledTargets(domain, days, scheduleLevels));
-    if (built.length > 0) return withRestDayCategory(built);
+    if (built.length > 0) return overlay(withRestDayCategory(built));
   }
   // Flat targetMap fallback: ITEM-level targets only (+ Rest Day category when supported).
-  return withRestDayCategory(
-    withActions(
-      fynTargetOptionsFromFlatList(
-        domain,
-        fynTargetMapCandidateArray(context?.targetMap ?? null),
+  return overlay(
+    withRestDayCategory(
+      withActions(
+        fynTargetOptionsFromFlatList(
+          domain,
+          fynTargetMapCandidateArray(context?.targetMap ?? null),
+        ),
       ),
     ),
   );
@@ -4398,6 +4462,23 @@ export function sandCDraftFromRevisionResult(
   result: TrainingPlanReviseResult,
 ): CoachAthleteLatestDomainDraft | null {
   return skillsDraftFromRevisionResult(result);
+}
+
+/**
+ * After a successful S&C revise POST, the canonical latest GET is the displayed draft when it is
+ * usable and not older than the POST candidate. Reload failure keeps the already-applied revision.
+ */
+export function resolveSandCLatestDraftAfterRevisionReload(input: {
+  postRevisionDraft: CoachAthleteLatestDomainDraft;
+  reloadedLatestDraft: CoachAthleteLatestDomainDraft | null;
+}): CoachAthleteLatestDomainDraft {
+  const reloaded = input.reloadedLatestDraft;
+  if (reloaded === null || !isUsableGeneratedDomainDraft(reloaded)) {
+    return input.postRevisionDraft;
+  }
+  return (
+    resolveNewerDomainReviewDraft(input.postRevisionDraft, reloaded) ?? input.postRevisionDraft
+  );
 }
 
 /** S&C reuses the Skills Fyn context projection with domain stamped as S_AND_C. */
@@ -5287,6 +5368,36 @@ export function resolveLatestDraftForDomainReview(
   // Same plan version (including a same-version-id refetch): the per-domain cache is authoritative
   // because every domain-scoped full-plan reload writes there, while the global slot may lag.
   return perDomainDraft;
+}
+
+/**
+ * Canonical View Draft Plan / open-drawer content source: the same latest-draft picker the
+ * domain review drawer uses, then {@link resolveDomainReviewDrawerContentSource}.
+ * Global latest is eligible only when `latestDraftDisplayDomain` matches the clicked domain.
+ */
+export function resolveDomainReviewViewDraftContentSource(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  directReleaseSkillsOwner: boolean;
+  latestDraftDisplayDomain: TrainingPlanGenerationDomain | null;
+  globalLatestDraft: CoachAthleteLatestDomainDraft | null;
+  perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+}): DomainReviewDrawerContentSource {
+  const latestDraft = resolveLatestDraftForDomainReview(input.domain, {
+    isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+    headCoachOwnedSkillsDraft: null,
+    latestDraftDisplayDomain: input.latestDraftDisplayDomain,
+    latestSkillsDraft: input.globalLatestDraft,
+    perDomainLatestDraft: input.perDomainLatestDraft,
+  });
+  return resolveDomainReviewDrawerContentSource({
+    domain: input.domain,
+    workflowStatus: input.workflowStatus,
+    directReleaseSkillsOwner: input.directReleaseSkillsOwner,
+    activeDetail: input.activeDetail,
+    latestDraft,
+  });
 }
 
 /**
@@ -6322,6 +6433,12 @@ export function FynRevisionContextPanel({
                 ] as const
               ).map(([field, label]) => {
                 const value = sandCAddItemValues[field];
+                const descriptiveReps =
+                  field === "reps" &&
+                  value === null &&
+                  selectedAction.key === "UPDATE_ITEM"
+                    ? selectedTargetOption?.reps?.trim() || null
+                    : null;
                 return (
                   <div
                     key={field}
@@ -6343,7 +6460,7 @@ export function FynRevisionContextPanel({
                         className="min-w-12 text-center font-medium"
                         data-testid={`fyn-sandc-${field}-value`}
                       >
-                        {value ?? "Unset"}
+                        {value ?? descriptiveReps ?? "Unset"}
                       </span>
                       <button
                         type="button"
@@ -21159,6 +21276,7 @@ export function CoachAthletePlanningProfileView({
       showSkillsRepsVerbatim?: boolean;
       rawItem?: Record<string, unknown> | null;
       shouldLogNutritionItem?: boolean;
+      showSandCVideos?: boolean;
     } = {},
   ) {
     const title = (item as { title?: DisplayableValue }).title;
@@ -21236,6 +21354,9 @@ export function CoachAthletePlanningProfileView({
           <div className="text-sm text-textSecondary">Notes: {displayValue(item.notes)}</div>
         ) : null}
         <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+        {options.showSandCVideos === true ? (
+          <SandCExerciseDemonstrationVideos videos={item.videos ?? options.rawItem?.videos} />
+        ) : null}
       </li>
     );
   }
@@ -21246,6 +21367,7 @@ export function CoachAthletePlanningProfileView({
     options: {
       showNutritionCalories?: boolean;
       showSkillsRepsVerbatim?: boolean;
+      showSandCVideos?: boolean;
       dayOffset?: number;
     } = {},
   ) {
@@ -21293,6 +21415,7 @@ export function CoachAthletePlanningProfileView({
                       renderDomainReviewDrawerStructureItem(item, itemOffset, {
                         showNutritionCalories: options.showNutritionCalories,
                         showSkillsRepsVerbatim: options.showSkillsRepsVerbatim,
+                        showSandCVideos: options.showSandCVideos,
                         rawItem: readRawPersistedSectionItemAt(section.raw, itemOffset),
                         shouldLogNutritionItem:
                           options.showNutritionCalories === true &&
@@ -21426,6 +21549,7 @@ export function CoachAthletePlanningProfileView({
                         renderDomainReviewDrawerSession(session, sessionOffset, {
                           showNutritionCalories,
                           showSkillsRepsVerbatim: domain === "SKILLS",
+                          showSandCVideos: domain === "S_AND_C",
                           dayOffset,
                         }),
                       )}
@@ -21669,6 +21793,9 @@ export function CoachAthletePlanningProfileView({
                                       </div>
                                     ) : null}
                                     <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+                                    {domain === "S_AND_C" ? (
+                                      <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                    ) : null}
                                   </li>
                                 );
                               })}
@@ -22860,6 +22987,9 @@ export function CoachAthletePlanningProfileView({
                                       <SkillGoalAttributionText
                                         primaryGoalName={item.primaryGoalName}
                                       />
+                                      {detail.generationDomain === "S_AND_C" ? (
+                                        <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                      ) : null}
                                     </div>
                                   );
                                 })}
@@ -23277,7 +23407,23 @@ export function CoachAthletePlanningProfileView({
                 variant="secondary"
                 onClick={() => {
                   handleOpenDomainReviewDrawer(domain);
-                  if (model.actionContext !== null) {
+                  if (
+                    model.actionContext !== null &&
+                    shouldHydrateDomainReviewOnViewDraft({
+                      domain,
+                      workflowStatus: model.workflowStatus,
+                      directReleaseSkillsOwner: isDirectReleaseDomainOwner({
+                        domain,
+                        assignmentReleaseMode:
+                          workspace?.assignmentContext?.releaseMode,
+                        assignmentDomainContext: model.assignmentDomainContext,
+                      }),
+                      latestDraftDisplayDomain,
+                      globalLatestDraft: latestSkillsDraft,
+                      perDomainLatestDraft: model.state.latestDraft,
+                      activeDetail: model.activeDetail,
+                    })
+                  ) {
                     openHeadCoachDomainPlanReview(model.actionContext);
                   }
                 }}
@@ -24003,6 +24149,7 @@ export function CoachAthletePlanningProfileView({
                   <DetailRow label="Notes" value={displayValue(item.notes)} />
                 ) : null}
               </dl>
+              <SandCExerciseDemonstrationVideos videos={item.videos} />
             </div>
           ))}
         </div>
@@ -25391,6 +25538,73 @@ export function CoachAthletePlanningProfileView({
         );
       }
       setReviseSandCSuccess(null);
+    } else {
+      const postRevisionDraft = sandCDraftFromRevisionResult(outcome.result);
+      if (postRevisionDraft !== null) {
+        let reloadedLatestDraft: CoachAthleteLatestDomainDraft | null = null;
+        try {
+          reloadedLatestDraft = await fetchCoalescedLatestDraft("S_AND_C", true);
+        } catch {
+          reloadedLatestDraft = null;
+        }
+        const hydratedDraft = resolveSandCLatestDraftAfterRevisionReload({
+          postRevisionDraft,
+          reloadedLatestDraft,
+        });
+        if (hydratedDraft !== postRevisionDraft) {
+          const nextPlanId =
+            hydratedDraft.trainingPlanId?.trim() ||
+            postRevisionDraft.trainingPlanId?.trim() ||
+            "";
+          const nextVersionId =
+            hydratedDraft.trainingPlanVersionId?.trim() ||
+            postRevisionDraft.trainingPlanVersionId?.trim() ||
+            "";
+          setLatestSkillsDraft(hydratedDraft);
+          setLatestDraftDomain("S_AND_C");
+          setLatestSkillsDraftRequestState("success");
+          setLatestSkillsDraftMissing(false);
+          setLatestSkillsDraftError(null);
+          setLatestSkillsDraftErrorDomain(null);
+          if (nextPlanId !== "" && nextVersionId !== "") {
+            setSandCActiveReviseIds({
+              trainingPlanId: nextPlanId,
+              versionId: nextVersionId,
+            });
+            knownDomainPlanIdsRef.current.S_AND_C = nextPlanId;
+            if (sandCInstalledGeneratedDraftIdentityRef.current !== null) {
+              sandCInstalledGeneratedDraftIdentityRef.current = {
+                planId: nextPlanId,
+                versionId: nextVersionId,
+              };
+            }
+          }
+          setHeadCoachDomainPlanStates((current) => ({
+            ...current,
+            S_AND_C: {
+              ...current.S_AND_C,
+              loading: false,
+              error: null,
+              latestDraft: hydratedDraft,
+              summaryStatus: hydratedDraft.status ?? current.S_AND_C.summaryStatus,
+              summaryPlanId: nextPlanId || current.S_AND_C.summaryPlanId,
+              summaryVersionId: nextVersionId || current.S_AND_C.summaryVersionId,
+            },
+          }));
+          setFynRevisionContexts((current) => ({
+            ...current,
+            S_AND_C: {
+              context: projectSandCFynContextAfterRevision(
+                current.S_AND_C?.context ?? null,
+                outcome.result,
+                hydratedDraft,
+              ),
+              loading: false,
+              error: null,
+            },
+          }));
+        }
+      }
     }
     setReviseSandCLoading(false);
   }
@@ -28766,6 +28980,11 @@ export function CoachAthletePlanningProfileView({
                                                   <SkillGoalAttributionText
                                                     primaryGoalName={item.primaryGoalName}
                                                   />
+                                                  {persistedPlanDisplayDomain === "S_AND_C" ? (
+                                                    <SandCExerciseDemonstrationVideos
+                                                      videos={item.videos}
+                                                    />
+                                                  ) : null}
                                                 </div>
                                               ))}
                                             </div>
@@ -29060,6 +29279,9 @@ export function CoachAthletePlanningProfileView({
                                           <SkillGoalAttributionText
                                             primaryGoalName={item.primaryGoalName}
                                           />
+                                          {latestDraftDisplayDomain === "S_AND_C" ? (
+                                            <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                          ) : null}
                                         </div>
                                       ))}
                                 </div>

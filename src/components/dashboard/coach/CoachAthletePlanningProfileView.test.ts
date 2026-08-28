@@ -149,9 +149,11 @@ import {
   countDomainReviewTrainingDays,
   countLatestDomainDraftTrainingDays,
   resolveDomainReviewDrawerContentSource,
+  resolveDomainReviewViewDraftContentSource,
   resolveSkillsReviewDrawerDisplayedVersion,
   shouldSkipSkillsPostApprovalPlanRefresh,
   isUsableGeneratedDomainDraft,
+  shouldHydrateDomainReviewOnViewDraft,
   shouldSkipSandCPostGenerationDetailRefresh,
   shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve,
   resolveSkillsApproveReleaseWorkspaceRetainVersionId,
@@ -232,6 +234,7 @@ import {
   resolveSkillsSelectedRevisionOption,
   skillsDraftFromRevisionResult,
   sandCDraftFromRevisionResult,
+  resolveSandCLatestDraftAfterRevisionReload,
   projectSkillsFynContextAfterRevision,
   projectSandCFynContextAfterRevision,
   runSkillsRevisionLocalLifecycle,
@@ -5608,6 +5611,60 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
+    it("preloads UPDATE_ITEM duration and reps from the rendered drill, not targetMap defaults", () => {
+      const catalogContext = makeRevisionContext({
+        generationDomain: "SKILLS",
+        targetMap: {
+          days: [
+            {
+              dayIndex: 2,
+              sessions: [
+                {
+                  sessionIndex: 3,
+                  items: [
+                    {
+                      label: "Current drill",
+                      skillCode: "CURRENT",
+                      durationMinutes: 10,
+                      reps: "10",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      const currentTarget = fynRevisionLeveledTargetOptions(catalogContext, {
+        domain: "SKILLS",
+        scheduleDays: skillsSchedule,
+      }).find((target) => target.level === "ITEM")!;
+      expect(currentTarget.durationMinutes).toBe(15);
+      expect(currentTarget.reps).toBe("3 lengths x 4 balls");
+      expect(
+        buildSkillsRevisionPatch({
+          target: currentTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 15,
+          reps: "3 lengths x 4 balls",
+        }),
+      ).toBeNull();
+      expect(
+        buildSkillsRevisionPatch({
+          target: currentTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 20,
+          reps: "3 lengths x 4 balls",
+        }),
+      ).toEqual({
+        operation: "UPDATE_ITEM",
+        dayIndex: 2,
+        sessionIndex: 3,
+        itemIndex: 1,
+        item: { skillCode: "CURRENT", durationMinutes: 20 },
+      });
+    });
+
     it("renders Skills reps verbatim without appending a second reps label", () => {
       const source = readFileSync(
         new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
@@ -6374,6 +6431,118 @@ describe("Training Plan Workspace lifecycle display", () => {
       });
     });
 
+    it("preloads UPDATE_ITEM from the rendered schedule item, not targetMap catalog defaults", () => {
+      const catalogTargetMap = {
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    label: "Deadbug",
+                    exerciseCatalogItemId: "exercise-deadbug",
+                    durationMinutes: 10,
+                    sets: 3,
+                    reps: 12,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      const renderedSchedule = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              items: [
+                {
+                  label: "Deadbug",
+                  exerciseCatalogItemId: "exercise-deadbug",
+                  durationMinutes: 8,
+                  sets: 3,
+                  reps: "6 each side",
+                },
+              ],
+            },
+          ],
+        },
+      ];
+      const catalogContext = makeRevisionContext({
+        generationDomain: "S_AND_C",
+        targetMap: catalogTargetMap,
+      });
+      const staleTarget = fynRevisionLeveledTargetOptions(catalogContext, {
+        domain: "S_AND_C",
+        scheduleDays: [],
+      }).find((target) => target.itemLabel === "Deadbug")!;
+      expect(sandCParameterValuesForAction(staleTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 10,
+        sets: 3,
+        reps: 12,
+      });
+
+      const currentTargets = fynRevisionLeveledTargetOptions(catalogContext, {
+        domain: "S_AND_C",
+        scheduleDays: renderedSchedule,
+      });
+      const currentTarget = currentTargets.find((target) => target.itemLabel === "Deadbug")!;
+      expect(currentTarget.durationMinutes).toBe(8);
+      expect(currentTarget.sets).toBe(3);
+      expect(currentTarget.numericReps).toBeNull();
+      expect(currentTarget.reps).toBe("6 each side");
+      expect(sandCParameterValuesForAction(currentTarget, "UPDATE_ITEM")).toEqual({
+        durationMinutes: 8,
+        sets: 3,
+        reps: null,
+      });
+      expect(sandCParameterValuesForAction(currentTarget, "ADD_ITEM")).toEqual({
+        durationMinutes: null,
+        sets: null,
+        reps: null,
+      });
+
+      const html = renderToStaticMarkup(
+        createElement(
+          FynRevisionContextPanel,
+          fynPanelProps({
+            domain: "S_AND_C",
+            context: catalogContext,
+            targetOptions: currentTargets,
+            selectedTargetKey: currentTarget.key,
+            selectedActionKey: "UPDATE_ITEM",
+            singlePatchMode: true,
+            sandCAddItemValues: sandCParameterValuesForAction(currentTarget, "UPDATE_ITEM"),
+          }),
+        ),
+      );
+      expect(html).toContain('data-testid="fyn-sandc-durationMinutes-value">8');
+      expect(html).toContain('data-testid="fyn-sandc-sets-value">3');
+      expect(html).toContain('data-testid="fyn-sandc-reps-value">6 each side');
+      expect(html).not.toContain('data-testid="fyn-sandc-durationMinutes-value">10');
+      expect(html).not.toContain(">Unset<");
+
+      expect(
+        buildSandCRevisionPatch({
+          target: currentTarget,
+          actionKey: "UPDATE_ITEM",
+          durationMinutes: 9,
+          sets: 3,
+          reps: null,
+        }),
+      ).toEqual({
+        type: "UPDATE_ITEM",
+        dayIndex: 1,
+        sessionIndex: 1,
+        itemIndex: 1,
+        item: { exerciseCatalogItemId: "exercise-deadbug", durationMinutes: 9 },
+      });
+    });
+
     it("clears Update values for Add and initializes fresh values from Remove to Update", () => {
       const firstTarget = targets().find((target) => target.itemLabel === "Back squat")!;
       const secondTarget = {
@@ -7035,13 +7204,17 @@ describe("Training Plan Workspace lifecycle display", () => {
         new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
         "utf8",
       );
-      const sandCMutationStart = source.indexOf(
+      const handlerStart = source.indexOf("async function handleReviseSandCPlan(");
+      const handlerEnd = source.indexOf("function beginExplicitSeasonCreateForm()", handlerStart);
+      const handler = source.slice(handlerStart, handlerEnd);
+      const sandCMutationStart = handler.indexOf(
         "mutate: () =>\n        reviseCoachAthleteSandCTrainingPlan",
       );
-      const applyStart = source.indexOf("applyReturnedRevision: (reviseResult) => {", sandCMutationStart);
-      const applyEnd = source.indexOf("showSuccess: () => {", applyStart);
-      const applyCallback = source.slice(applyStart, applyEnd);
+      const applyStart = handler.indexOf("applyReturnedRevision: (reviseResult) => {", sandCMutationStart);
+      const applyEnd = handler.indexOf("showSuccess: () => {", applyStart);
+      const applyCallback = handler.slice(applyStart, applyEnd);
 
+      expect(handlerStart).toBeGreaterThan(-1);
       expect(sandCMutationStart).toBeGreaterThan(-1);
       expect(applyStart).toBeGreaterThan(sandCMutationStart);
       expect(applyEnd).toBeGreaterThan(applyStart);
@@ -7050,11 +7223,204 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(applyCallback).not.toContain("fynRevisionOptionsRequestRef");
       expect(applyCallback).not.toContain("setFynRevisionOptionStates");
       expect(applyCallback).not.toContain("loadLatestSkillsDraft");
+      expect(applyCallback).not.toContain("fetchCoalescedLatestDraft");
       expect(applyCallback).not.toContain("refreshTrainingPlanWorkspace");
       expect(applyCallback).not.toContain("reconcileRevisedDomainPlanDetail");
+      expect(handler).toContain('fetchCoalescedLatestDraft("S_AND_C", true)');
+      expect(handler.split('fetchCoalescedLatestDraft("S_AND_C", true)').length - 1).toBe(1);
+      expect(handler).toContain("resolveSandCLatestDraftAfterRevisionReload");
+      const skillsHandler = source.slice(
+        source.indexOf("async function handleReviseSkillsPlan("),
+        source.indexOf("async function handleReviseNutritionPlan("),
+      );
+      const nutritionHandler = source.slice(
+        source.indexOf("async function handleReviseNutritionPlan("),
+        handlerStart,
+      );
+      expect(skillsHandler).not.toContain("resolveSandCLatestDraftAfterRevisionReload");
+      expect(nutritionHandler).not.toContain("resolveSandCLatestDraftAfterRevisionReload");
+      expect(skillsHandler).not.toContain('fetchCoalescedLatestDraft("S_AND_C"');
+      expect(nutritionHandler).not.toContain('fetchCoalescedLatestDraft("S_AND_C"');
       expect(source).toContain(
         "sandCActiveReviseIds?.versionId,\n    sandCReviseIds?.trainingPlanId,\n    sandCReviseIds?.versionId,",
       );
+    });
+
+    it("prefers the canonical latest GET as displayed S&C draft and keeps POST on reload failure", () => {
+      const keepVideos = ["https://www.youtube.com/watch?v=keep-squat"];
+      const addedVideos = ["https://www.youtube.com/watch?v=added-carry"];
+      const postDraft = {
+        trainingPlanId: "sandc-plan-1",
+        trainingPlanVersionId: "sandc-v2",
+        versionNumber: 2,
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  { exerciseCatalogItemId: "exercise-current", label: "Back squat" },
+                  { exerciseCatalogItemId: "exercise-added", label: "Farmer carry" },
+                ],
+              },
+            ],
+          },
+        ],
+        raw: { source: "post" },
+      } as never;
+      const reloadedAdd = {
+        trainingPlanId: "sandc-plan-1",
+        trainingPlanVersionId: "sandc-v2",
+        versionNumber: 2,
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-current",
+                    label: "Back squat",
+                    sets: "3",
+                    videos: keepVideos,
+                  },
+                  {
+                    exerciseCatalogItemId: "exercise-added",
+                    label: "Farmer carry",
+                    videos: addedVideos,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        raw: { source: "latest" },
+      } as never;
+      const addResult = resolveSandCLatestDraftAfterRevisionReload({
+        postRevisionDraft: postDraft,
+        reloadedLatestDraft: reloadedAdd,
+      });
+      expect(addResult).toBe(reloadedAdd);
+      expect(addResult.days[0]?.sessions[0]?.items).toEqual(
+        reloadedAdd.days[0]?.sessions[0]?.items,
+      );
+
+      const reloadedRemove = {
+        ...reloadedAdd,
+        days: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-current",
+                    label: "Back squat",
+                    videos: keepVideos,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as never;
+      const removeResult = resolveSandCLatestDraftAfterRevisionReload({
+        postRevisionDraft: postDraft,
+        reloadedLatestDraft: reloadedRemove,
+      });
+      expect(removeResult.days[0]?.sessions[0]?.items).toHaveLength(1);
+      expect(removeResult.days[0]?.sessions[0]?.items[0]).toMatchObject({
+        exerciseCatalogItemId: "exercise-current",
+        videos: keepVideos,
+      });
+
+      const reloadedUpdate = {
+        ...reloadedAdd,
+        days: [
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-current",
+                    label: "Back squat",
+                    sets: "5",
+                    reps: "5",
+                    videos: keepVideos,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as never;
+      const updateResult = resolveSandCLatestDraftAfterRevisionReload({
+        postRevisionDraft: postDraft,
+        reloadedLatestDraft: reloadedUpdate,
+      });
+      expect(updateResult.days[0]?.sessions[0]?.items[0]).toMatchObject({
+        exerciseCatalogItemId: "exercise-current",
+        sets: "5",
+        videos: keepVideos,
+      });
+
+      const reloadedRestDay = {
+        ...reloadedAdd,
+        days: [
+          {
+            dayIndex: 1,
+            isRestDay: true,
+            sessions: [],
+          },
+          {
+            dayIndex: 2,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-current",
+                    label: "Back squat",
+                    videos: keepVideos,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as never;
+      const restDayResult = resolveSandCLatestDraftAfterRevisionReload({
+        postRevisionDraft: postDraft,
+        reloadedLatestDraft: reloadedRestDay,
+      });
+      expect(restDayResult.days[1]?.sessions[0]?.items[0]).toMatchObject({
+        exerciseCatalogItemId: "exercise-current",
+        videos: keepVideos,
+      });
+
+      expect(
+        resolveSandCLatestDraftAfterRevisionReload({
+          postRevisionDraft: postDraft,
+          reloadedLatestDraft: null,
+        }),
+      ).toBe(postDraft);
+      expect(
+        resolveSandCLatestDraftAfterRevisionReload({
+          postRevisionDraft: postDraft,
+          reloadedLatestDraft: {
+            ...reloadedAdd,
+            trainingPlanVersionId: "sandc-v1",
+            versionNumber: 1,
+          } as never,
+        }),
+      ).toBe(postDraft);
     });
 
     it("does not let a discarded stale option enable Apply", () => {
@@ -9254,6 +9620,61 @@ describe("Training Plan Workspace lifecycle display", () => {
       >;
       expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "calories")).toBe(130);
       expect(readNutritionMetricValue(parsedFromPlan, revisedBananaMilkshakeRaw, "protein")).toBe(3.6);
+    });
+
+    it("preloads UPDATE serving from the rendered plan item, not a stale targetMap serving", () => {
+      const staleServingContext = makeRevisionContext({
+        generationDomain: "NUTRITION",
+        draft: null,
+        targetMap: {
+          days: [
+            {
+              dayIndex: 1,
+              sessions: [
+                {
+                  sessionIndex: 1,
+                  items: [
+                    {
+                      label: "Banana milkshake",
+                      nutritionCatalogItemId: "nut-shake",
+                      serving: "1 glass",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      const renderedDays = [
+        {
+          dayIndex: 1,
+          sessions: [
+            {
+              sessionIndex: 1,
+              title: "Snacks",
+              items: [{ label: "Banana milkshake", nutritionCatalogItemId: "nut-shake", serving: "2 glass" }],
+            },
+          ],
+        },
+      ];
+      const itemTarget = fynRevisionLeveledTargetOptions(staleServingContext, {
+        domain: "NUTRITION",
+        scheduleDays: renderedDays,
+      }).find((option) => option.level === "ITEM")!;
+      expect(itemTarget.serving).toBe("2 glass");
+      expect(parseNutritionServing(itemTarget.serving)).toEqual({
+        quantity: 2,
+        unit: "glass",
+        step: 1,
+      });
+      expect(
+        buildNutritionServingAdjustment(itemTarget, 2),
+      ).toBeNull();
+      expect(buildNutritionServingAdjustment(itemTarget, 3)).toEqual({
+        targetQuantity: 3,
+        servingUnit: "glass",
+      });
     });
 
     it("rebuilds the dropdown from the latest context only after the full plan reload, keeping the drawer open", async () => {
@@ -15710,11 +16131,151 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     ).toBe(true);
     expect(
       shouldKeepDomainReviewDrawerOpenForTab({
+        selectedWorkflowTab: "generate",
+        shell: "specialist_domain",
+        headCoachReviewMode: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepDomainReviewDrawerOpenForTab({
         selectedWorkflowTab: "plan-dates",
         shell: "skills_coach_planning",
         headCoachReviewMode: false,
       }),
     ).toBe(false);
+    expect(
+      shouldKeepDomainReviewDrawerOpenForTab({
+        selectedWorkflowTab: "plan-dates",
+        shell: "specialist_domain",
+        headCoachReviewMode: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("opens View Draft Plan from the same content source the drawer will render", () => {
+    const generatedSandCLatest = {
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-v4",
+      versionNumber: 4,
+      status: "AI_GENERATED",
+      days: [
+        {
+          sessions: [
+            {
+              items: [
+                {
+                  label: "Deadbug",
+                  videos: ["https://youtu.be/deadbug-1"],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as never;
+    const revisedSandCLatest = {
+      ...generatedSandCLatest,
+      trainingPlanVersionId: "sandc-v5",
+      versionNumber: 5,
+    } as never;
+    const activeDetail = {
+      plan: { id: "sandc-plan-1" },
+      version: { id: "sandc-v4" },
+      days: [],
+    } as never;
+    const skillsLatest = {
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-v2",
+      status: "AI_GENERATED",
+      days: [{ sessions: [{ items: [{ label: "Serve" }] }] }],
+    } as never;
+    const nutritionLatest = {
+      trainingPlanId: "nutrition-plan-1",
+      trainingPlanVersionId: "nutrition-v2",
+      status: "AI_GENERATED",
+      days: [{ sessions: [{ items: [{ label: "Oats", serving: "1 cup" }] }] }],
+    } as never;
+
+    const sandCViewDraft = (
+      overrides: Partial<Parameters<typeof shouldHydrateDomainReviewOnViewDraft>[0]> = {},
+    ) =>
+      shouldHydrateDomainReviewOnViewDraft({
+        domain: "S_AND_C",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        latestDraftDisplayDomain: "S_AND_C",
+        globalLatestDraft: null,
+        perDomainLatestDraft: null,
+        activeDetail: null,
+        ...overrides,
+      });
+
+    expect(
+      resolveDomainReviewViewDraftContentSource({
+        domain: "S_AND_C",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        latestDraftDisplayDomain: "S_AND_C",
+        globalLatestDraft: generatedSandCLatest,
+        perDomainLatestDraft: null,
+        activeDetail: null,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(sandCViewDraft({ globalLatestDraft: generatedSandCLatest })).toBe(false);
+    expect(sandCViewDraft({ globalLatestDraft: revisedSandCLatest })).toBe(false);
+    expect(sandCViewDraft({ activeDetail })).toBe(false);
+    expect(sandCViewDraft()).toBe(true);
+    expect(
+      sandCViewDraft({
+        latestDraftDisplayDomain: "SKILLS",
+        globalLatestDraft: skillsLatest,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHydrateDomainReviewOnViewDraft({
+        domain: "SKILLS",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        latestDraftDisplayDomain: "SKILLS",
+        globalLatestDraft: null,
+        perDomainLatestDraft: skillsLatest,
+        activeDetail: null,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHydrateDomainReviewOnViewDraft({
+        domain: "NUTRITION",
+        workflowStatus: "draft_generated",
+        directReleaseSkillsOwner: false,
+        latestDraftDisplayDomain: "NUTRITION",
+        globalLatestDraft: null,
+        perDomainLatestDraft: nutritionLatest,
+        activeDetail: null,
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const viewDraftStart = source.lastIndexOf("View Draft Plan");
+    const matrixReviewStart = source.indexOf("{reviewPlanButtonLabel(domain)}");
+    expect(viewDraftStart).toBeGreaterThan(-1);
+    expect(matrixReviewStart).toBeGreaterThan(-1);
+    const viewDraftOnClick = source.slice(Math.max(0, viewDraftStart - 1200), viewDraftStart);
+    expect(viewDraftOnClick).toContain("shouldHydrateDomainReviewOnViewDraft");
+    expect(viewDraftOnClick).toContain("globalLatestDraft: latestSkillsDraft");
+    expect(viewDraftOnClick).toContain("perDomainLatestDraft: model.state.latestDraft");
+    expect(viewDraftOnClick).toContain("handleOpenDomainReviewDrawer(domain)");
+    expect(source.slice(Math.max(0, matrixReviewStart - 400), matrixReviewStart)).toContain(
+      "handleOpenDomainReviewDrawer(domain)",
+    );
+    expect(source.slice(Math.max(0, matrixReviewStart - 400), matrixReviewStart)).toContain(
+      "openHeadCoachDomainPlanReview(actionContext)",
+    );
+    expect(source.slice(Math.max(0, matrixReviewStart - 400), matrixReviewStart)).not.toContain(
+      "shouldHydrateDomainReviewOnViewDraft",
+    );
   });
 
   it("shows Workflow 3 Skills draft drawer Approve Plan and Revise Plan actions", () => {

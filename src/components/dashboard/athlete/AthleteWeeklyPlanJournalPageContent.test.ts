@@ -228,4 +228,57 @@ describe("Athlete weekly plan Nutrition presentation", () => {
       { label: "Notes", value: "Balance tall." },
     ]);
   });
+
+  it("does not flatten videos URLs into generic exercise detail rows", () => {
+    const rows = collectStructureItemDetailRows({
+      label: "Back squat",
+      sets: 3,
+      reps: "5",
+      videos: [
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://youtu.be/abcdefghijk",
+      ],
+    });
+    expect(rows).toEqual([
+      { label: "Sets", value: "3" },
+      { label: "Reps", value: "5" },
+    ]);
+    expect(rows.some((row) => row.label === "Videos")).toBe(false);
+    expect(JSON.stringify(rows)).not.toContain("youtube.com");
+    expect(JSON.stringify(rows)).not.toContain("youtu.be");
+  });
+
+  it("does not flatten videos URLs into session-level detail rows", () => {
+    const rows = collectDetailRows({
+      name: "Lower body",
+      objective: "Strength",
+      videos: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    });
+    expect(rows.some((row) => row.label === "Videos")).toBe(false);
+    expect(JSON.stringify(rows)).not.toContain("youtube.com");
+  });
+});
+
+describe("S&C demonstration video journal wiring", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  it("shows demonstration videos only on S&C structured exercises", () => {
+    expect(journalSource).toContain('sandCDomain: adherenceDomainKey === "S_AND_C"');
+    expect(journalSource).toContain("{sandCDomain ? (");
+    expect(journalSource).toContain(
+      "<SandCExerciseDemonstrationVideos videos={mergedSkillItem.videos} />",
+    );
+    expect(journalSource).toContain(
+      'from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos"',
+    );
+  });
+
+  it("does not add demonstration videos to Skills or Nutrition render branches", () => {
+    expect(journalSource).toContain('skillDomain: adherenceDomainKey === "SKILLS"');
+    expect(journalSource).toContain("nutritionDomain: domain.key === \"NUTRITION\"");
+    expect(journalSource).not.toContain('sandCDomain: adherenceDomainKey === "SKILLS"');
+  });
 });

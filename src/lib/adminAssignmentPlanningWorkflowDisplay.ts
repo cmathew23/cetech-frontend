@@ -121,6 +121,7 @@ function domainLine(
 
 /**
  * A workflow id is returned only when every required structural coach is present.
+ * W2A vs W2B is generation ownership (`canGeneratePlan`), not SKILLS capability overlap.
  */
 function identifyCompleteWorkflow(
   headCoach: AdminAssignmentWorkflowCoachInput | null,
@@ -133,8 +134,13 @@ function identifyCompleteWorkflow(
     return separateSkillsCoach ? "W3" : null;
   }
   const headHasSkills = coachHasDomain(headCoach, "SKILLS");
-  if (separateSkillsCoach && headHasSkills) return "W2B";
-  if (!separateSkillsCoach && headHasSkills) return "W2A";
+  const headGeneratesSkills = headHasSkills && headCoach.canGeneratePlan === true;
+  const separateGeneratesSkills = separateSkillsCoach?.canGeneratePlan === true;
+  if (headGeneratesSkills && separateGeneratesSkills) return null;
+  if (separateSkillsCoach && headHasSkills && separateGeneratesSkills) {
+    return "W2B";
+  }
+  if (headHasSkills && !separateGeneratesSkills) return "W2A";
   if (separateSkillsCoach && !headHasSkills) return "W1";
   return null;
 }
@@ -183,11 +189,13 @@ function incompleteGuidance(
     }
   }
   if (headHasSkills && separateSkillsCoach) {
+    const workflowLabel =
+      separateSkillsCoach.canGeneratePlan === true ? "Workflow 2B" : "Workflow 2A";
     if (!nutritionCoach) {
-      return "A Nutrition Coach is required to establish Workflow 2B.";
+      return `A Nutrition Coach is required to establish ${workflowLabel}.`;
     }
     if (!sandCCoach) {
-      return "An S&C Coach is required to establish Workflow 2B.";
+      return `An S&C Coach is required to establish ${workflowLabel}.`;
     }
   }
   if (!headHasSkills && separateSkillsCoach) {

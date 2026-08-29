@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { EntityAssignmentRow } from "@/types/academyAdmin.types";
 import {
+  DUPLICATE_SKILLS_PLAN_GENERATOR_MESSAGE,
   MISSING_HEAD_COACH_MESSAGE,
   academyHasActiveHeadCoach,
   domainCoachLimitMessage,
@@ -40,6 +41,7 @@ function roster(
 function activeAssignment(
   coachProfileId: string,
   status = "ACTIVE",
+  canGeneratePlan = false,
 ): EntityAssignmentRow {
   return {
     assignmentId: `assignment-${coachProfileId}`,
@@ -55,7 +57,7 @@ function activeAssignment(
     createdAt: "2026-01-01T00:00:00Z",
     status,
     missingHeadCoachAssignment: false,
-    canGeneratePlan: false,
+    canGeneratePlan,
   };
 }
 
@@ -86,6 +88,30 @@ const academyWithHeadCoach = roster([
   },
   {
     coachProfileId: S_AND_C_COACH_B,
+    functions: ["STRENGTH_AND_CONDITIONING_COACH"],
+  },
+]);
+
+const academyWithSkillsHeadCoach = roster([
+  {
+    coachProfileId: HEAD_COACH_ID,
+    role: "HEAD_COACH",
+    functions: ["SKILLS_COACH"],
+  },
+  {
+    coachProfileId: SKILLS_COACH_A,
+    functions: ["SKILLS_COACH"],
+  },
+  {
+    coachProfileId: SKILLS_COACH_B,
+    functions: ["SKILLS_COACH"],
+  },
+  {
+    coachProfileId: NUTRITION_COACH_A,
+    functions: ["NUTRITION_COACH"],
+  },
+  {
+    coachProfileId: S_AND_C_COACH_A,
     functions: ["STRENGTH_AND_CONDITIONING_COACH"],
   },
 ]);
@@ -139,6 +165,19 @@ describe("resolveAcademyAssignmentCoachRoster", () => {
       ],
     );
 
+    expect(resolved).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          coachProfileId: SKILLS_COACH_A,
+          functions: ["SKILLS_COACH"],
+        }),
+        expect.objectContaining({
+          coachProfileId: SKILLS_COACH_B,
+          functions: ["SKILLS_COACH"],
+        }),
+      ]),
+    );
+
     const result = validateAssignmentSelection({
       athleteProfileId: ATHLETE_ID,
       selectedCoachProfileIds: [SKILLS_COACH_A, SKILLS_COACH_B],
@@ -147,9 +186,50 @@ describe("resolveAcademyAssignmentCoachRoster", () => {
     });
 
     expect(result).toEqual({
+      ok: true,
+      coachesToCreate: [SKILLS_COACH_A, SKILLS_COACH_B],
+    });
+  });
+
+  it("still applies Nutrition uniqueness after email-linked roster resolution", () => {
+    const resolved = resolveAcademyAssignmentCoachRoster(
+      [
+        {
+          email: "nutrition-a@example.com",
+          role: "ASSISTANT_COACH",
+          functions: ["NUTRITION_COACH"],
+          membershipStatus: "ACTIVE",
+        },
+        {
+          email: "nutrition-b@example.com",
+          role: "ASSISTANT_COACH",
+          functions: ["NUTRITION_COACH"],
+          membershipStatus: "ACTIVE",
+        },
+      ],
+      [
+        {
+          coachProfileId: NUTRITION_COACH_A,
+          displayEmail: "nutrition-a@example.com",
+        },
+        {
+          coachProfileId: NUTRITION_COACH_B,
+          displayEmail: "nutrition-b@example.com",
+        },
+      ],
+    );
+
+    const result = validateAssignmentSelection({
+      athleteProfileId: ATHLETE_ID,
+      selectedCoachProfileIds: [NUTRITION_COACH_A, NUTRITION_COACH_B],
+      assignments: [],
+      academyCoaches: resolved,
+    });
+
+    expect(result).toEqual({
       ok: false,
       useModal: true,
-      message: domainCoachLimitMessage("SKILLS"),
+      message: domainCoachLimitMessage("NUTRITION"),
     });
   });
 });
@@ -224,11 +304,6 @@ describe("validateAssignmentSelection", () => {
 
   it.each([
     {
-      label: "Skills",
-      selected: [SKILLS_COACH_A, SKILLS_COACH_B],
-      domain: "SKILLS" as const,
-    },
-    {
       label: "Nutrition",
       selected: [NUTRITION_COACH_A, NUTRITION_COACH_B],
       domain: "NUTRITION" as const,
@@ -263,12 +338,6 @@ describe("validateAssignmentSelection", () => {
   );
 
   it.each([
-    {
-      label: "Skills",
-      existing: SKILLS_COACH_A,
-      selected: SKILLS_COACH_B,
-      domain: "SKILLS" as const,
-    },
     {
       label: "Nutrition",
       existing: NUTRITION_COACH_A,
@@ -363,19 +432,70 @@ describe("validateAssignmentSelection", () => {
     expect(createAssignment).toHaveBeenCalledTimes(4);
   });
 
-  it("blocks a second Skills coach with modal copy", () => {
+  it("allows Head Coach with SKILLS plus a separate Skills Coach", () => {
     const result = validateAssignmentSelection({
       athleteProfileId: ATHLETE_ID,
-      selectedCoachProfileIds: [HEAD_COACH_ID, SKILLS_COACH_B],
-      assignments: [activeAssignment(SKILLS_COACH_A)],
-      academyCoaches: academyWithHeadCoach,
+      selectedCoachProfileIds: [HEAD_COACH_ID, SKILLS_COACH_A],
+      assignments: [],
+      academyCoaches: academyWithSkillsHeadCoach,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      coachesToCreate: [HEAD_COACH_ID, SKILLS_COACH_A],
+    });
+  });
+
+  it("allows Head Coach SKILLS with canGeneratePlan false and Skills Coach with canGeneratePlan true", () => {
+    const result = validateAssignmentSelection({
+      athleteProfileId: ATHLETE_ID,
+      selectedCoachProfileIds: [HEAD_COACH_ID, SKILLS_COACH_A],
+      assignments: [
+        activeAssignment(HEAD_COACH_ID, "ACTIVE", false),
+        activeAssignment(SKILLS_COACH_A, "ACTIVE", true),
+      ],
+      academyCoaches: academyWithSkillsHeadCoach,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      coachesToCreate: [],
+    });
+  });
+
+  it("allows Head Coach SKILLS with canGeneratePlan true when no second Skills generator is active", () => {
+    const result = validateAssignmentSelection({
+      athleteProfileId: ATHLETE_ID,
+      selectedCoachProfileIds: [HEAD_COACH_ID, SKILLS_COACH_A],
+      assignments: [activeAssignment(HEAD_COACH_ID, "ACTIVE", true)],
+      academyCoaches: academyWithSkillsHeadCoach,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      coachesToCreate: [SKILLS_COACH_A],
+    });
+  });
+
+  it("rejects two active Skills plan generators by ownership, not SKILLS capability", () => {
+    const result = validateAssignmentSelection({
+      athleteProfileId: ATHLETE_ID,
+      selectedCoachProfileIds: [HEAD_COACH_ID, SKILLS_COACH_A],
+      assignments: [
+        activeAssignment(HEAD_COACH_ID, "ACTIVE", true),
+        activeAssignment(SKILLS_COACH_A, "ACTIVE", true),
+      ],
+      academyCoaches: academyWithSkillsHeadCoach,
     });
 
     expect(result).toEqual({
       ok: false,
       useModal: true,
-      message: domainCoachLimitMessage("SKILLS"),
+      message: DUPLICATE_SKILLS_PLAN_GENERATOR_MESSAGE,
     });
+    expect(result.ok ? "" : result.message).not.toBe(
+      domainCoachLimitMessage("SKILLS"),
+    );
   });
 
   it("blocks a second Nutrition coach with modal copy", () => {

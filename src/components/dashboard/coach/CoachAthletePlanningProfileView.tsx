@@ -10913,6 +10913,14 @@ export function buildSeasonCycleUpdatePayload(
   };
 }
 
+/** Existing selected season is editable only before Planning Context Lock & Share. */
+export function isExistingSeasonEditOpen(input: {
+  editing: boolean;
+  planningContextLocked: boolean;
+}): boolean {
+  return input.editing === true && input.planningContextLocked !== true;
+}
+
 function yearStartDateInput(year: number): string {
   return `${year}-01-01`;
 }
@@ -13263,6 +13271,7 @@ export function CoachAthletePlanningProfileView({
   const [planOwnershipLoading, setPlanOwnershipLoading] = useState(false);
   const [selectedSeasonCycleId, setSelectedSeasonCycleId] = useState<string | null>(null);
   const [seasonCreateFormExplicit, setSeasonCreateFormExplicit] = useState(false);
+  const [selectedSeasonEditing, setSelectedSeasonEditing] = useState(false);
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
   const [durationDays, setDurationDays] = useState<7 | 15 | 30>(7);
   const [planStartDate, setPlanStartDate] = useState(() =>
@@ -14393,12 +14402,14 @@ export function CoachAthletePlanningProfileView({
   useEffect(() => {
     if (!selectedSeason) {
       selectedSeasonFormHydrationIdRef.current = null;
+      setSelectedSeasonEditing(false);
       return;
     }
     if (selectedSeasonFormHydrationIdRef.current === selectedSeason.seasonCycleId) {
       return;
     }
     selectedSeasonFormHydrationIdRef.current = selectedSeason.seasonCycleId;
+    setSelectedSeasonEditing(false);
     const fields = resolveSeasonFormFieldsFromCycle(selectedSeason);
     setSeasonName(fields.name);
     setSeasonNameEdited(true);
@@ -25774,6 +25785,7 @@ export function CoachAthletePlanningProfileView({
   function beginExplicitSeasonCreateForm() {
     setSeasonCreateFormExplicit(true);
     setSelectedSeasonCycleId(null);
+    setSelectedSeasonEditing(false);
     setSelectedGoalIds([]);
     setSeasonError(null);
     setSeasonSuccess(null);
@@ -25860,7 +25872,19 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
-  async function handleSaveSelectedSeasonAndContinue() {
+  function beginSelectedSeasonEdit() {
+    if (planningContextLocked || selectedSeason == null) return;
+    const fields = resolveSeasonFormFieldsFromCycle(selectedSeason);
+    setSeasonName(fields.name);
+    setSeasonNameEdited(true);
+    setSeasonYear(fields.year);
+    setSeasonStartDate(fields.startDate);
+    setSeasonEndDate(fields.endDate);
+    setSeasonError(null);
+    setSelectedSeasonEditing(true);
+  }
+
+  async function handleSaveSelectedSeasonChanges() {
     if (selectedSeasonCycleId == null || selectedSeason == null) {
       setSeasonError("Select a season first.");
       setSeasonSuccess(null);
@@ -25885,6 +25909,7 @@ export function CoachAthletePlanningProfileView({
     };
     if (!isSeasonCycleFormDirty(selectedSeason, form)) {
       setSeasonError(null);
+      setSelectedSeasonEditing(false);
       return;
     }
 
@@ -25901,6 +25926,7 @@ export function CoachAthletePlanningProfileView({
       setSeasonYear(nextFields.year);
       setSeasonStartDate(nextFields.startDate !== "" ? nextFields.startDate : seasonStartDate);
       setSeasonEndDate(nextFields.endDate !== "" ? nextFields.endDate : seasonEndDate);
+      setSelectedSeasonEditing(false);
       setSeasonSuccess("Season updated.");
     } catch (e) {
       setSeasonError(formatApiError(e, "Failed to update season. Please try again."));
@@ -26894,6 +26920,7 @@ export function CoachAthletePlanningProfileView({
                           const nextId = event.target.value;
                           if (nextId === "") {
                             setSelectedSeasonCycleId(null);
+                            setSelectedSeasonEditing(false);
                             setSelectedGoalIds([]);
                             setSeasonCreateFormExplicit(false);
                             setSeasonError(null);
@@ -26902,6 +26929,7 @@ export function CoachAthletePlanningProfileView({
                           }
                           setSeasonCreateFormExplicit(false);
                           setSelectedSeasonCycleId(nextId);
+                          setSelectedSeasonEditing(false);
                           setSelectedGoalIds([]);
                           setSeasonError(null);
                           setSeasonSuccess(null);
@@ -26935,65 +26963,106 @@ export function CoachAthletePlanningProfileView({
                       </dl>
                       {selectedSeason ? (
                         <div className="space-y-3 border-y border-border/70 py-3">
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Season Name</span>
-                              <input
-                                type="text"
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                                value={seasonName}
-                                onChange={(event) => {
-                                  setSeasonNameEdited(true);
-                                  setSeasonName(event.target.value);
+                          {isExistingSeasonEditOpen({
+                            editing: selectedSeasonEditing,
+                            planningContextLocked,
+                          }) ? (
+                            <>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season Name</span>
+                                  <input
+                                    type="text"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonName}
+                                    onChange={(event) => {
+                                      setSeasonNameEdited(true);
+                                      setSeasonName(event.target.value);
+                                    }}
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Year</span>
+                                  <input
+                                    type="number"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonYear}
+                                    onChange={(event) =>
+                                      setSeasonYear(Number(event.target.value) || seasonYear)
+                                    }
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season Start Date</span>
+                                  <input
+                                    type="date"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonStartDate}
+                                    onChange={(event) => setSeasonStartDate(event.target.value)}
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season End Date</span>
+                                  <input
+                                    type="date"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonEndDate}
+                                    onChange={(event) => setSeasonEndDate(event.target.value)}
+                                  />
+                                </label>
+                              </div>
+                              <dl className="space-y-2">
+                                <DetailRow
+                                  label="Sport"
+                                  value={displayValue(selectedSeason.sport)}
+                                />
+                              </dl>
+                              <Button
+                                type="button"
+                                variant="primary"
+                                disabled={seasonCreateLoading}
+                                onClick={() => {
+                                  void handleSaveSelectedSeasonChanges();
                                 }}
-                              />
-                            </label>
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Year</span>
-                              <input
-                                type="number"
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                                value={seasonYear}
-                                onChange={(event) =>
-                                  setSeasonYear(Number(event.target.value) || seasonYear)
-                                }
-                              />
-                            </label>
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Season Start Date</span>
-                              <input
-                                type="date"
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                                value={seasonStartDate}
-                                onChange={(event) => setSeasonStartDate(event.target.value)}
-                              />
-                            </label>
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Season End Date</span>
-                              <input
-                                type="date"
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                                value={seasonEndDate}
-                                onChange={(event) => setSeasonEndDate(event.target.value)}
-                              />
-                            </label>
-                          </div>
-                          <dl className="space-y-2">
-                            <DetailRow
-                              label="Sport"
-                              value={displayValue(selectedSeason.sport)}
-                            />
-                          </dl>
-                          <Button
-                            type="button"
-                            variant="primary"
-                            disabled={seasonCreateLoading}
-                            onClick={() => {
-                              void handleSaveSelectedSeasonAndContinue();
-                            }}
-                          >
-                            {seasonCreateLoading ? "Saving Season..." : "Save & Continue"}
-                          </Button>
+                              >
+                                {seasonCreateLoading ? "Saving Changes..." : "Save Changes"}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <dl className="space-y-2">
+                                <DetailRow
+                                  label="Season Name"
+                                  value={displayValue(selectedSeason.name)}
+                                />
+                                <DetailRow
+                                  label="Year"
+                                  value={displayValue(selectedSeason.year)}
+                                />
+                                <DetailRow
+                                  label="Season Start Date"
+                                  value={formatDateOnly(dateOnly(selectedSeason.startDate), "—")}
+                                />
+                                <DetailRow
+                                  label="Season End Date"
+                                  value={formatDateOnly(dateOnly(selectedSeason.endDate), "—")}
+                                />
+                                <DetailRow
+                                  label="Sport"
+                                  value={displayValue(selectedSeason.sport)}
+                                />
+                              </dl>
+                              {!planningContextLocked ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  onClick={() => beginSelectedSeasonEdit()}
+                                >
+                                  Edit Season
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       ) : null}
                     </>

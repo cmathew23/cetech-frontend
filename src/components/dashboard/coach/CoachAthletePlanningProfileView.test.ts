@@ -137,6 +137,7 @@ import {
   resolveSeasonFormFieldsFromCycle,
   isSeasonCycleFormDirty,
   buildSeasonCycleUpdatePayload,
+  isExistingSeasonEditOpen,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
   resolvePlanStartDateInputBounds,
@@ -17546,7 +17547,7 @@ describe("season create display state", () => {
     expect(handler).toContain("setGoalCreateLoading(false)");
   });
 
-  it("populates editable season fields from the selected cycle and patches only when dirty", () => {
+  it("keeps selected existing season read-only until Edit Season, then patches and returns to view", () => {
     const selectedSeason = {
       ...createdCustomSeason,
       year: 2026,
@@ -17625,18 +17626,37 @@ describe("season create display state", () => {
     const selectedSeasonUiEnd = source.indexOf(") : showSeasonCreateForm ? (", selectedSeasonUiStart);
     const selectedSeasonUi = source.slice(selectedSeasonUiStart, selectedSeasonUiEnd);
     expect(selectedSeasonUiStart).toBeGreaterThan(-1);
+    expect(selectedSeasonUi).toContain("isExistingSeasonEditOpen");
+    expect(selectedSeasonUi).toContain("Edit Season");
+    expect(selectedSeasonUi).toContain("Save Changes");
+    expect(selectedSeasonUi).not.toContain("Save & Continue");
+    expect(selectedSeasonUi).toContain("handleSaveSelectedSeasonChanges()");
+    expect(selectedSeasonUi).toContain("beginSelectedSeasonEdit()");
     expect(selectedSeasonUi).toContain('type="text"');
     expect(selectedSeasonUi).toContain('type="number"');
     expect(selectedSeasonUi).toContain('type="date"');
     expect(selectedSeasonUi).toContain("value={seasonName}");
     expect(selectedSeasonUi).toContain("value={seasonYear}");
+    expect(selectedSeasonUi).toContain("formatDateOnly(dateOnly(selectedSeason.startDate), \"—\")");
+    expect(selectedSeasonUi).toContain("formatDateOnly(dateOnly(selectedSeason.endDate), \"—\")");
+    expect(selectedSeasonUi).not.toContain("displayValue(dateOnly(selectedSeason.startDate))");
     expect(selectedSeasonUi).toContain("value={seasonStartDate}");
     expect(selectedSeasonUi).toContain("value={seasonEndDate}");
+    expect(selectedSeasonUi).toContain('label="Sport"');
     expect(selectedSeasonUi).not.toContain("readOnly");
-    expect(selectedSeasonUi).toContain("handleSaveSelectedSeasonAndContinue()");
     expect(source).toContain("Setting Season Phase");
 
-    const saveStart = source.indexOf("async function handleSaveSelectedSeasonAndContinue()");
+    expect(
+      isExistingSeasonEditOpen({ editing: false, planningContextLocked: false }),
+    ).toBe(false);
+    expect(
+      isExistingSeasonEditOpen({ editing: true, planningContextLocked: false }),
+    ).toBe(true);
+    expect(
+      isExistingSeasonEditOpen({ editing: true, planningContextLocked: true }),
+    ).toBe(false);
+
+    const saveStart = source.indexOf("async function handleSaveSelectedSeasonChanges()");
     const saveEnd = source.indexOf("async function handleCreatePhase(", saveStart);
     const saveHandler = source.slice(saveStart, saveEnd);
     expect(saveStart).toBeGreaterThan(-1);
@@ -17644,7 +17664,11 @@ describe("season create display state", () => {
     expect(saveHandler).toContain("await updateSeasonCycle(selectedSeasonCycleId, payload)");
     expect(saveHandler.match(/updateSeasonCycle\(/g)?.length).toBe(1);
     expect(saveHandler).toContain("buildSeasonCycleUpdatePayload(form)");
+    expect(saveHandler).toContain("setSelectedSeasonEditing(false)");
     expect(saveHandler).toContain("setSeasonError(formatApiError(e,");
+    expect(saveHandler.slice(saveHandler.indexOf("} catch (e)"))).not.toContain(
+      "setSelectedSeasonEditing(false)",
+    );
     expect(saveHandler).not.toContain("setSelectedWorkflowTab(");
     expect(saveHandler).not.toContain("router.push");
     expect(saveHandler).not.toContain("createSeasonCycle(");
@@ -17652,13 +17676,16 @@ describe("season create display state", () => {
     expect(saveHandler).not.toContain("lockCoachAthletePlanningContext");
 
     const createStart = source.indexOf("async function handleCreateMvpSeason()");
-    const createEnd = source.indexOf(
-      "async function handleSaveSelectedSeasonAndContinue()",
-      createStart,
-    );
+    const createEnd = source.indexOf("function beginSelectedSeasonEdit()", createStart);
     const createHandler = source.slice(createStart, createEnd);
     expect(createHandler).toContain("await createSeasonCycle(payload)");
     expect(createHandler).not.toContain("updateSeasonCycle(");
+
+    const beginEditStart = source.indexOf("function beginSelectedSeasonEdit()");
+    const beginEdit = source.slice(beginEditStart, saveStart);
+    expect(beginEdit).toContain("setSelectedSeasonEditing(true)");
+    expect(beginEdit).toContain("resolveSeasonFormFieldsFromCycle(selectedSeason)");
+    expect(beginEdit).toContain("planningContextLocked");
 
     const populateEffect = source.slice(
       source.indexOf("selectedSeasonFormHydrationIdRef"),

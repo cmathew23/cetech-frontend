@@ -155,6 +155,7 @@ import {
   shouldSkipSkillsPostApprovalPlanRefresh,
   isUsableGeneratedDomainDraft,
   shouldHydrateDomainReviewOnViewDraft,
+  shouldFallbackSpecialistDrawerDetailToLatestDraft,
   shouldSkipSandCPostGenerationDetailRefresh,
   shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve,
   resolveSkillsApproveReleaseWorkspaceRetainVersionId,
@@ -16355,10 +16356,33 @@ describe("Workflow 3 Skills coach Tab 6", () => {
         activeDetail: null,
       }),
     ).toBe("latest_domain_draft");
+    const idsOnlySandCLatest = {
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-v4",
+      versionNumber: 4,
+      status: "AI_GENERATED",
+      days: [],
+    } as never;
+    const usableActiveDetail = {
+      plan: { id: "sandc-plan-1" },
+      version: { id: "sandc-v4" },
+      days: [{ sessions: [{ items: [{ title: "Deadbug" }] }] }],
+    } as never;
+
     expect(sandCViewDraft({ globalLatestDraft: generatedSandCLatest })).toBe(false);
     expect(sandCViewDraft({ globalLatestDraft: revisedSandCLatest })).toBe(false);
-    expect(sandCViewDraft({ activeDetail })).toBe(false);
+    expect(sandCViewDraft({ activeDetail })).toBe(true);
+    expect(sandCViewDraft({ activeDetail: usableActiveDetail })).toBe(false);
     expect(sandCViewDraft()).toBe(true);
+    expect(
+      sandCViewDraft({
+        workflowStatus: "revision_requested",
+        globalLatestDraft: null,
+        perDomainLatestDraft: null,
+        activeDetail: null,
+      }),
+    ).toBe(true);
+    expect(sandCViewDraft({ globalLatestDraft: idsOnlySandCLatest })).toBe(true);
     expect(
       sandCViewDraft({
         latestDraftDisplayDomain: "SKILLS",
@@ -16399,7 +16423,7 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     const viewDraftOnClick = source.slice(Math.max(0, viewDraftStart - 1200), viewDraftStart);
     expect(viewDraftOnClick).toContain("shouldHydrateDomainReviewOnViewDraft");
     expect(viewDraftOnClick).toContain("globalLatestDraft: latestSkillsDraft");
-    expect(viewDraftOnClick).toContain("perDomainLatestDraft: model.state.latestDraft");
+    expect(viewDraftOnClick).toContain("perDomainLatestDraft: model.latestDraft");
     expect(viewDraftOnClick).toContain("handleOpenDomainReviewDrawer(domain)");
     expect(source.slice(Math.max(0, matrixReviewStart - 400), matrixReviewStart)).toContain(
       "handleOpenDomainReviewDrawer(domain)",
@@ -16410,6 +16434,110 @@ describe("Workflow 3 Skills coach Tab 6", () => {
     expect(source.slice(Math.max(0, matrixReviewStart - 400), matrixReviewStart)).not.toContain(
       "shouldHydrateDomainReviewOnViewDraft",
     );
+  });
+
+  it("loads latest S&C draft on first View Draft click when specialist detail hydration cannot run", () => {
+    const usableSandCLatest = {
+      trainingPlanId: "sandc-plan-702",
+      trainingPlanVersionId: "sandc-v1",
+      versionNumber: 1,
+      status: "AI_GENERATED",
+      days: [{ sessions: [{ items: [{ label: "Bear Walk" }] }] }],
+    } as never;
+    const revisionRequestedEmpty = {
+      domain: "S_AND_C" as const,
+      workflowStatus: "revision_requested" as const,
+      directReleaseSkillsOwner: false,
+      latestDraftDisplayDomain: "S_AND_C" as const,
+      globalLatestDraft: null,
+      perDomainLatestDraft: null,
+      activeDetail: null,
+    };
+    expect(shouldHydrateDomainReviewOnViewDraft(revisionRequestedEmpty)).toBe(true);
+    expect(resolveDomainReviewViewDraftContentSource(revisionRequestedEmpty)).toBe("none");
+    expect(
+      resolveDomainReviewViewDraftContentSource({
+        ...revisionRequestedEmpty,
+        globalLatestDraft: usableSandCLatest,
+      }),
+    ).toBe("latest_domain_draft");
+    expect(
+      shouldHydrateDomainReviewOnViewDraft({
+        ...revisionRequestedEmpty,
+        globalLatestDraft: usableSandCLatest,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: "detail",
+        shouldHydrateResolvedDownstreamDrawer: false,
+        shouldHydrateDirectReleaseDetail: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: "detail",
+        shouldHydrateResolvedDownstreamDrawer: true,
+        shouldHydrateDirectReleaseDetail: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: "detail",
+        shouldHydrateResolvedDownstreamDrawer: false,
+        shouldHydrateDirectReleaseDetail: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: "latest",
+        shouldHydrateResolvedDownstreamDrawer: false,
+        shouldHydrateDirectReleaseDetail: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: null,
+        shouldHydrateResolvedDownstreamDrawer: false,
+        shouldHydrateDirectReleaseDetail: false,
+      }),
+    ).toBe(false);
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const reviewFnStart = source.indexOf("function openHeadCoachDomainPlanReview");
+    const reviewFnEnd = source.indexOf("function resolveDomainReviewSurfaceModel", reviewFnStart);
+    const reviewFn = source.slice(reviewFnStart, reviewFnEnd);
+    const headCoachBranch = reviewFn.indexOf("if (headCoachReviewMode)");
+    const fallbackCall = reviewFn.indexOf("shouldFallbackSpecialistDrawerDetailToLatestDraft");
+    const latestFallbackLoad = reviewFn.indexOf(
+      "loadSpecialistLatestDraftForReview();",
+      fallbackCall,
+    );
+    expect(headCoachBranch).toBeGreaterThan(-1);
+    expect(reviewFn.slice(headCoachBranch, headCoachBranch + 280)).toContain(
+      "refreshHeadCoachDomainPlanState(domain)",
+    );
+    expect(fallbackCall).toBeGreaterThan(headCoachBranch);
+    expect(latestFallbackLoad).toBeGreaterThan(fallbackCall);
+    expect(source).toContain(
+      'if (generationDomain === "NUTRITION" || generationDomain === "SKILLS")',
+    );
+    expect(source).not.toContain(
+      'if (generationDomain === "NUTRITION" || generationDomain === "SKILLS" || generationDomain === "S_AND_C")',
+    );
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({ domain: "S_AND_C", action: "HEAD_APPROVE" }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({ domain: "S_AND_C", action: "RELEASE" }),
+    ).toBe(true);
+    expect(
+      shouldSkipSkillsPostApprovalPlanRefresh({ domain: "SKILLS", action: "HEAD_APPROVE" }),
+    ).toBe(true);
   });
 
   it("shows Workflow 3 Skills draft drawer Approve Plan and Revise Plan actions", () => {

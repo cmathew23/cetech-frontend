@@ -2493,8 +2493,9 @@ export function isUsableGeneratedDomainDraft(
 }
 
 /**
- * View Draft Plan hydrates only when the open drawer would have no renderable
- * latest draft and no active/detail graph. Uses {@link resolveDomainReviewViewDraftContentSource}.
+ * View Draft Plan hydrates only when the drawer-stable latest picker and
+ * active/detail graph both lack a usable schedule. Ids-only drafts are not enough.
+ * Uses {@link resolveLatestDraftForDomainReview} and {@link isUsableGeneratedDomainDraft}.
  */
 export function shouldHydrateDomainReviewOnViewDraft(input: {
   domain: TrainingPlanGenerationDomain;
@@ -2505,7 +2506,22 @@ export function shouldHydrateDomainReviewOnViewDraft(input: {
   perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
   activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
 }): boolean {
-  return resolveDomainReviewViewDraftContentSource(input) === "none";
+  void input.workflowStatus;
+  void input.directReleaseSkillsOwner;
+  const latestDraft = resolveLatestDraftForDomainReview(input.domain, {
+    isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+    headCoachOwnedSkillsDraft: null,
+    latestDraftDisplayDomain: input.latestDraftDisplayDomain,
+    latestSkillsDraft: input.globalLatestDraft,
+    perDomainLatestDraft: input.perDomainLatestDraft,
+  });
+  if (isUsableGeneratedDomainDraft(latestDraft)) return false;
+  const activeTrainingDays = countDomainReviewTrainingDays(input.activeDetail);
+  return !(
+    input.activeDetail !== null &&
+    activeTrainingDays !== null &&
+    activeTrainingDays > 0
+  );
 }
 
 /** S&C-only: skip post-generation active/detail when latest already installed usable content. */
@@ -2633,6 +2649,23 @@ export function resolveDomainReviewPlanLoadMessage(input: {
   // Drawer opens only after generation. No rendered plan yet means detail is
   // still pending — never show the empty submitted-plan message.
   return `Loading generated ${domainPlanHistoryDomainLabel(input.domain)} plan...`;
+}
+
+/**
+ * Specialist workspace with a resolved plan/version still needs a fetch when
+ * neither downstream active/detail nor direct-release detail hydration applies.
+ * Use the existing latest-domain-draft loader instead of returning without I/O.
+ */
+export function shouldFallbackSpecialistDrawerDetailToLatestDraft(input: {
+  specialistRequestKind: "detail" | "latest" | null;
+  shouldHydrateResolvedDownstreamDrawer: boolean;
+  shouldHydrateDirectReleaseDetail: boolean;
+}): boolean {
+  return (
+    input.specialistRequestKind === "detail" &&
+    !input.shouldHydrateResolvedDownstreamDrawer &&
+    !input.shouldHydrateDirectReleaseDetail
+  );
 }
 
 export function shouldHydrateDirectReleaseDomainDrawerDetail(input: {
@@ -20436,7 +20469,7 @@ export function CoachAthletePlanningProfileView({
     if (planId !== "") {
       knownDomainPlanIdsRef.current[domain] = planId;
     }
-    if (specialistDrawerContentRequest?.kind === "latest") {
+    const loadSpecialistLatestDraftForReview = () => {
       setHeadCoachDomainPlanStates((prev) => ({
         ...prev,
         [domain]: { ...prev[domain], loading: true, error: null },
@@ -20457,6 +20490,9 @@ export function CoachAthletePlanningProfileView({
           },
         }));
       });
+    };
+    if (specialistDrawerContentRequest?.kind === "latest") {
+      loadSpecialistLatestDraftForReview();
       return;
     }
 
@@ -20483,17 +20519,15 @@ export function CoachAthletePlanningProfileView({
       workspaceResolvesDownstreamDomainBootstrap &&
       currentCoachGenerationDomain === domain &&
       specialistDrawerContentRequest?.kind === "detail";
-    if (
-      shouldHydrateResolvedDownstreamDrawer ||
-      shouldHydrateDirectReleaseDomainDrawerDetail({
-        domain,
-        assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-        assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
-        planId,
-        versionId,
-        activeDetail,
-      })
-    ) {
+    const shouldHydrateDirectReleaseDetail = shouldHydrateDirectReleaseDomainDrawerDetail({
+      domain,
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+      planId,
+      versionId,
+      activeDetail,
+    });
+    if (shouldHydrateResolvedDownstreamDrawer || shouldHydrateDirectReleaseDetail) {
       setHeadCoachDomainPlanStates((prev) => ({
         ...prev,
         [domain]: { ...prev[domain], loading: true, error: null },
@@ -20554,6 +20588,15 @@ export function CoachAthletePlanningProfileView({
     }
 
     headCoachReviewDetailFetchKeyRef.current = null;
+    if (
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: specialistDrawerContentRequest?.kind ?? null,
+        shouldHydrateResolvedDownstreamDrawer,
+        shouldHydrateDirectReleaseDetail,
+      })
+    ) {
+      loadSpecialistLatestDraftForReview();
+    }
   }
 
   function resolveDomainReviewSurfaceModel(
@@ -23474,7 +23517,7 @@ export function CoachAthletePlanningProfileView({
                       }),
                       latestDraftDisplayDomain,
                       globalLatestDraft: latestSkillsDraft,
-                      perDomainLatestDraft: model.state.latestDraft,
+                      perDomainLatestDraft: model.latestDraft,
                       activeDetail: model.activeDetail,
                     })
                   ) {

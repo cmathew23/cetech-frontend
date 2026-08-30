@@ -2,6 +2,7 @@
 
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 import {
   shouldShowWeeklyTrainingLoadCard,
@@ -29,40 +30,15 @@ export function formatTrainingLoadComparisonPhrase(
   return status === "HIGHER" ? `${hours} h higher` : `${hours} h lower`;
 }
 
-function parseDateOnly(value: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return null;
-  }
-  return date;
-}
-
-function formatDayMonth(date: Date): string {
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
 export function formatTrainingLoadWeekRange(
   weekStart?: string | null,
   weekEnd?: string | null,
 ): string | null {
   if (!weekStart?.trim() || !weekEnd?.trim()) return null;
-  const start = parseDateOnly(weekStart);
-  const end = parseDateOnly(weekEnd);
-  if (!start || !end) return null;
-  const endYear = end.getFullYear();
-  if (start.getFullYear() === endYear) {
-    return `${formatDayMonth(start)} – ${formatDayMonth(end)} ${endYear}`;
-  }
-  return `${formatDayMonth(start)} ${start.getFullYear()} – ${formatDayMonth(end)} ${endYear}`;
+  const start = formatDateOnly(weekStart, "");
+  const end = formatDateOnly(weekEnd, "");
+  if (start === "" || end === "") return null;
+  return `${start} – ${end}`;
 }
 
 function scopeCaption(

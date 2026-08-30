@@ -194,8 +194,8 @@ describe("GolfSportsMetricsComparisonControls", () => {
       later: "version-2",
     });
 
-    expect(html.indexOf("2026-06-01 – 2026-06-07")).toBeLessThan(
-      html.indexOf("2026-05-25 – 2026-05-31"),
+    expect(html.indexOf("01/06/2026 – 07/06/2026")).toBeLessThan(
+      html.indexOf("25/05/2026 – 31/05/2026"),
     );
     expect(html).toContain('data-comparison-container="mounted"');
     expect(html).toContain('&quot;entityId&quot;:&quot;entity-1&quot;');

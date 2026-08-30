@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { formatDateOnly, formatDateRange } from "@/lib/dateTime";
 import type {
   SportMetricsGolfComparisonCategory,
   SportMetricsGolfComparisonData,
@@ -48,28 +49,8 @@ function formatComparisonStatus(
   return labels[status];
 }
 
-function formatWeekDate(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return value;
-  const month = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ][Number(match[2]) - 1];
-  return month ? `${Number(match[3])} ${month}` : value;
-}
-
 function formatWeekRange(snapshot: SportMetricsGolfComparisonSnapshot): string {
-  return `${formatWeekDate(snapshot.weekStartDate)} – ${formatWeekDate(snapshot.weekEndDate)}`;
+  return formatDateRange(snapshot.weekStartDate, snapshot.weekEndDate);
 }
 
 function SnapshotMetadata({
@@ -82,8 +63,8 @@ function SnapshotMetadata({
   return (
     <Card title={title} accent={false} padding="compact">
       <dl className="space-y-2 text-sm">
-        <MetadataRow label="Week start" value={snapshot.weekStartDate} />
-        <MetadataRow label="Week end" value={snapshot.weekEndDate} />
+        <MetadataRow label="Week start" value={formatDateOnly(snapshot.weekStartDate)} />
+        <MetadataRow label="Week end" value={formatDateOnly(snapshot.weekEndDate)} />
       </dl>
     </Card>
   );

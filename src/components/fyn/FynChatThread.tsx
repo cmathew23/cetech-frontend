@@ -3,6 +3,7 @@
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { FynAvatar } from "@/components/fyn/FynAvatar";
+import { formatDateTime } from "@/lib/dateTime";
 
 export const FYN_LOADING_MESSAGE_ID = "__fyn_loading__";
 
@@ -32,16 +33,8 @@ function sourceLabels(usedSources: FynChatMessage["usedSources"]): string[] {
 
 function formatMessageTimestamp(createdAt?: string): string | null {
   if (!createdAt) return null;
-
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return null;
-
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  const formatted = formatDateTime(createdAt, "");
+  return formatted === "" ? null : formatted;
 }
 
 export function FynChatThread({

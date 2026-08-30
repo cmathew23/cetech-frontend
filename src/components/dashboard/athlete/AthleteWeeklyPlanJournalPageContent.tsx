@@ -37,6 +37,7 @@ import {
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatDateOnly,
+  formatDateRange,
   formatDateWithWeekday,
   getLocalDateKey,
   getPlanningDateKey,
@@ -2750,7 +2751,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
     (planningIds.phase === "ready" && state.phase === "loading");
   const journal = state.phase === "ready" ? state.journal : null;
   const weekSubtitle = journal
-    ? `${formatDateOnly(journal.weekStartDate)} - ${formatDateOnly(journal.weekEndDate)}`
+    ? formatDateRange(journal.weekStartDate, journal.weekEndDate)
     : "Review the released sessions and plan items for your current training week.";
   const allDomainsNotReleased = journal
     ? DOMAIN_SECTIONS.every((domain) => journal.domains[domain.key].status === "NOT_RELEASED")

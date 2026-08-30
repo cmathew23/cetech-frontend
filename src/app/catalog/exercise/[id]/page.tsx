@@ -7,8 +7,9 @@ import { Card } from "@/components/ui/Card";
 import { Heading } from "@/components/ui/Heading";
 import { Stack } from "@/components/ui/Stack";
 import { isNormalizedApiError, type NormalizedApiError } from "@/lib/apiClient";
-import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { getExerciseCatalogItemById } from "@/lib/api/exerciseCatalog";
+import { formatDateOrDateTime } from "@/lib/dateTime";
+import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import type { ExerciseCatalogDetail } from "@/types/catalog.types";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -24,7 +25,17 @@ const TRACEABILITY_KEYS = [
   "updatedAt",
 ];
 
-function renderValue(value: unknown): string {
+const TRACEABILITY_TIMESTAMP_KEYS = new Set([
+  "providerUpdatedAt",
+  "ingestedAt",
+  "createdAt",
+  "updatedAt",
+]);
+
+function renderValue(key: string, value: unknown): string {
+  if (typeof value === "string" && TRACEABILITY_TIMESTAMP_KEYS.has(key)) {
+    return formatDateOrDateTime(value);
+  }
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) {
@@ -194,7 +205,7 @@ export default function ExerciseCatalogDetailPage() {
                         <p key={key} className="text-textSecondary">
                           {key}:{" "}
                           <span className="font-medium text-textPrimary">
-                            {renderValue(value)}
+                            {renderValue(key, value)}
                           </span>
                         </p>
                       ))}

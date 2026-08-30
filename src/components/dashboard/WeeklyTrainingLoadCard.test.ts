@@ -1,5 +1,6 @@
 import {
   formatTrainingLoadComparisonPhrase,
+  formatTrainingLoadWeekRange,
   WeeklyTrainingLoadCard,
 } from "@/components/dashboard/WeeklyTrainingLoadCard";
 import {
@@ -117,6 +118,15 @@ describe("formatTrainingLoadComparisonPhrase", () => {
   });
 });
 
+describe("formatTrainingLoadWeekRange", () => {
+  it("formats view ranges as DD/MM/YYYY – DD/MM/YYYY", () => {
+    expect(formatTrainingLoadWeekRange("2026-01-01", "2026-08-31")).toBe(
+      "01/01/2026 – 31/08/2026",
+    );
+    expect(formatTrainingLoadWeekRange("", "2026-08-16")).toBeNull();
+  });
+});
+
 describe("WeeklyTrainingLoadCard", () => {
   it("renders athlete/head cumulative hierarchy, table, and natural comparisons", () => {
     const html = render({ comparison: comparison() });
@@ -161,7 +171,7 @@ describe("WeeklyTrainingLoadCard", () => {
       weekEnd: "2026-08-16",
     });
 
-    expect(html).toContain("10 Aug – 16 Aug 2026");
+    expect(html).toContain("10/08/2026 – 16/08/2026");
   });
 
   it("omits the week line when dates are unavailable", () => {
@@ -172,8 +182,8 @@ describe("WeeklyTrainingLoadCard", () => {
       weekEnd: "2026-08-16",
     });
 
-    expect(html).not.toContain("Aug 2026");
-    expect(missingStart).not.toContain("Aug 2026");
+    expect(html).not.toContain("10/08/2026");
+    expect(missingStart).not.toContain("10/08/2026");
   });
 
   it("uses contract flags for missing/partial/current-week states", () => {

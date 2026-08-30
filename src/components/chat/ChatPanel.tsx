@@ -8,6 +8,7 @@ import { getChatSocket } from "@/lib/chatSocket";
 import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/shared/dashboardTypography";
+import { formatDateTime } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
@@ -24,14 +25,7 @@ type ChatPanelProps = {
 };
 
 function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  return formatDateTime(value, "");
 }
 
 function mergeUniqueMessages(

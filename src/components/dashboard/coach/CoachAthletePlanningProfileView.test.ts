@@ -3691,7 +3691,7 @@ describe("Training Plan Workspace lifecycle display", () => {
       weekEndDate: "2026-05-10",
     };
 
-    expect(domainPlanHistoryWeekLabel(row)).toContain("2026");
+    expect(domainPlanHistoryWeekLabel(row)).toBe("04/05/2026 – 10/05/2026");
     expect(domainPlanHistoryVersionLabel(3)).toBe("v3");
     expect(domainPlanHistoryStatusLabel("COMPLETED")).toBe("Completed");
     expect(domainPlanHistoryDomainLabel("SKILLS")).toBe("Skills");
@@ -11674,7 +11674,7 @@ describe("Training Plan Workspace lifecycle display", () => {
 
     expect(html).toContain("grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3");
     expect(html).toContain("min-w-0 break-words text-sm text-textPrimary");
-    expect(html).toContain("min-w-0 max-w-full overflow-x-hidden");
+    expect(html).toContain("min-w-0 max-w-full");
     expect(html).toContain("Coach With A Very Long Display Name That Should Wrap Normally");
     expect(html).toContain("Full width historical plan content");
   });

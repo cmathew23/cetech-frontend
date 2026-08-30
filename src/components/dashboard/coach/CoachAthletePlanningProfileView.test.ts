@@ -134,6 +134,9 @@ import {
   resolveSetupStateAfterSeasonCreate,
   resolveSetupStateAfterGoalsSeasonBackgroundRefresh,
   formatSeasonOptionLabel,
+  resolveSeasonFormFieldsFromCycle,
+  isSeasonCycleFormDirty,
+  buildSeasonCycleUpdatePayload,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
   resolvePlanStartDateInputBounds,
@@ -17541,6 +17544,130 @@ describe("season create display state", () => {
     expect(handler).not.toContain("router.replace");
     expect(handler).toContain("setGoalCreateLoading(true)");
     expect(handler).toContain("setGoalCreateLoading(false)");
+  });
+
+  it("populates editable season fields from the selected cycle and patches only when dirty", () => {
+    const selectedSeason = {
+      ...createdCustomSeason,
+      year: 2026,
+      name: "Trott 2026 Golf Season",
+      startDate: "2026-01-01T00:00:00.000Z",
+      endDate: "2026-12-31T00:00:00.000Z",
+    };
+    const populated = resolveSeasonFormFieldsFromCycle(selectedSeason);
+    expect(populated).toEqual({
+      name: "Trott 2026 Golf Season",
+      year: 2026,
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+    });
+    expect(isSeasonCycleFormDirty(selectedSeason, populated)).toBe(false);
+    expect(
+      isSeasonCycleFormDirty(selectedSeason, {
+        ...populated,
+        name: "Updated Season",
+      }),
+    ).toBe(true);
+    expect(
+      isSeasonCycleFormDirty(selectedSeason, {
+        ...populated,
+        year: 2027,
+      }),
+    ).toBe(true);
+    expect(
+      isSeasonCycleFormDirty(selectedSeason, {
+        ...populated,
+        startDate: "2026-02-01",
+      }),
+    ).toBe(true);
+    expect(
+      isSeasonCycleFormDirty(selectedSeason, {
+        ...populated,
+        endDate: "2026-11-30",
+      }),
+    ).toBe(true);
+
+    const otherSeason = {
+      ...selectedSeason,
+      seasonCycleId: "season-custom-2",
+      id: "season-custom-2",
+      name: "Other Season",
+      year: 2027,
+      startDate: "2027-01-01T00:00:00.000Z",
+      endDate: "2027-12-31T00:00:00.000Z",
+    };
+    expect(resolveSeasonFormFieldsFromCycle(otherSeason)).toEqual({
+      name: "Other Season",
+      year: 2027,
+      startDate: "2027-01-01",
+      endDate: "2027-12-31",
+    });
+
+    expect(
+      buildSeasonCycleUpdatePayload({
+        name: "  Updated Season  ",
+        year: 2027,
+        startDate: "2027-01-15",
+        endDate: "2027-11-01",
+      }),
+    ).toEqual({
+      name: "Updated Season",
+      year: 2027,
+      startDate: "2027-01-15T00:00:00.000Z",
+      endDate: "2027-11-01T00:00:00.000Z",
+    });
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const selectedSeasonUiStart = source.indexOf("{hasSelectedSeasonForPlan ? (");
+    const selectedSeasonUiEnd = source.indexOf(") : showSeasonCreateForm ? (", selectedSeasonUiStart);
+    const selectedSeasonUi = source.slice(selectedSeasonUiStart, selectedSeasonUiEnd);
+    expect(selectedSeasonUiStart).toBeGreaterThan(-1);
+    expect(selectedSeasonUi).toContain('type="text"');
+    expect(selectedSeasonUi).toContain('type="number"');
+    expect(selectedSeasonUi).toContain('type="date"');
+    expect(selectedSeasonUi).toContain("value={seasonName}");
+    expect(selectedSeasonUi).toContain("value={seasonYear}");
+    expect(selectedSeasonUi).toContain("value={seasonStartDate}");
+    expect(selectedSeasonUi).toContain("value={seasonEndDate}");
+    expect(selectedSeasonUi).not.toContain("readOnly");
+    expect(selectedSeasonUi).toContain("handleSaveSelectedSeasonAndContinue()");
+    expect(source).toContain("Setting Season Phase");
+
+    const saveStart = source.indexOf("async function handleSaveSelectedSeasonAndContinue()");
+    const saveEnd = source.indexOf("async function handleCreatePhase(", saveStart);
+    const saveHandler = source.slice(saveStart, saveEnd);
+    expect(saveStart).toBeGreaterThan(-1);
+    expect(saveHandler).toContain("isSeasonCycleFormDirty(selectedSeason, form)");
+    expect(saveHandler).toContain("await updateSeasonCycle(selectedSeasonCycleId, payload)");
+    expect(saveHandler.match(/updateSeasonCycle\(/g)?.length).toBe(1);
+    expect(saveHandler).toContain("buildSeasonCycleUpdatePayload(form)");
+    expect(saveHandler).toContain("setSeasonError(formatApiError(e,");
+    expect(saveHandler).not.toContain("setSelectedWorkflowTab(");
+    expect(saveHandler).not.toContain("router.push");
+    expect(saveHandler).not.toContain("createSeasonCycle(");
+    expect(saveHandler).not.toContain("createSeasonCyclePhase(");
+    expect(saveHandler).not.toContain("lockCoachAthletePlanningContext");
+
+    const createStart = source.indexOf("async function handleCreateMvpSeason()");
+    const createEnd = source.indexOf(
+      "async function handleSaveSelectedSeasonAndContinue()",
+      createStart,
+    );
+    const createHandler = source.slice(createStart, createEnd);
+    expect(createHandler).toContain("await createSeasonCycle(payload)");
+    expect(createHandler).not.toContain("updateSeasonCycle(");
+
+    const populateEffect = source.slice(
+      source.indexOf("selectedSeasonFormHydrationIdRef"),
+      source.indexOf("const hasEntitySeasons"),
+    );
+    expect(populateEffect).toContain("resolveSeasonFormFieldsFromCycle(selectedSeason)");
+    expect(populateEffect).toContain(
+      "selectedSeasonFormHydrationIdRef.current === selectedSeason.seasonCycleId",
+    );
   });
 });
 

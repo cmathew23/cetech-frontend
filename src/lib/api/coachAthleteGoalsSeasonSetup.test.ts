@@ -12,6 +12,7 @@ import {
   createGoal,
   createPhaseAwareGoal,
   fetchGoalLibrary,
+  updateSeasonCycle,
 } from "@/lib/api/coachAthleteGoalsSeasonSetup";
 
 describe("fetchGoalLibrary", () => {
@@ -250,5 +251,44 @@ describe("createGoal", () => {
     const options = apiRequestMock.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(options.method).toBe("POST");
     expect(options).not.toHaveProperty("timeoutMs");
+  });
+});
+
+describe("updateSeasonCycle", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("PATCHes only name, year, startDate, and endDate for the season id", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        seasonCycleId: "season-1",
+        name: "Updated Season",
+        year: 2027,
+        startDate: "2027-01-15T00:00:00.000Z",
+        endDate: "2027-11-01T00:00:00.000Z",
+      },
+    });
+
+    const result = await updateSeasonCycle("season-1", {
+      name: "Updated Season",
+      year: 2027,
+      startDate: "2027-01-15T00:00:00.000Z",
+      endDate: "2027-11-01T00:00:00.000Z",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    const [path, options] = apiRequestMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe("/season-cycles/season-1");
+    expect(options.method).toBe("PATCH");
+    expect(JSON.parse(String(options.body))).toEqual({
+      name: "Updated Season",
+      year: 2027,
+      startDate: "2027-01-15T00:00:00.000Z",
+      endDate: "2027-11-01T00:00:00.000Z",
+    });
+    expect(result.seasonCycleId).toBe("season-1");
+    expect(result.name).toBe("Updated Season");
   });
 });

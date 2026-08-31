@@ -248,6 +248,20 @@ describe("Athlete weekly plan Nutrition presentation", () => {
     expect(JSON.stringify(rows)).not.toContain("youtu.be");
   });
 
+  it("does not flatten measurementContract into structured item detail rows", () => {
+    const rows = collectStructureItemDetailRows({
+      label: "Start line drill",
+      reps: "12",
+      measurementContract: {
+        metricKey: "start_line_consistency",
+        requiredResultFields: ["attempts", "targetHits"],
+      },
+    });
+    expect(rows).toEqual([{ label: "Reps", value: "12" }]);
+    expect(JSON.stringify(rows)).not.toContain("measurementContract");
+    expect(JSON.stringify(rows)).not.toContain("requiredResultFields");
+  });
+
   it("does not flatten videos URLs into session-level detail rows", () => {
     const rows = collectDetailRows({
       name: "Lower body",
@@ -280,5 +294,42 @@ describe("S&C demonstration video journal wiring", () => {
     expect(journalSource).toContain('skillDomain: adherenceDomainKey === "SKILLS"');
     expect(journalSource).toContain("nutritionDomain: domain.key === \"NUTRITION\"");
     expect(journalSource).not.toContain('sandCDomain: adherenceDomainKey === "SKILLS"');
+  });
+});
+
+describe("Skills goal relationship presentation", () => {
+  it("shows goal, success criterion, and target value from the same Skills item path", () => {
+    const journalSource = readFileSync(
+      fileURLToPath(
+        new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+
+    expect(journalSource).toContain("successCriteria={successCriteria}");
+    expect(journalSource).toContain("targetValue={targetValue}");
+    expect(journalSource).toContain('row.label === "Success Criteria"');
+    expect(journalSource).toContain('row.label === "Target Value"');
+    expect(journalSource).toContain("const showItemGoalAttribution = skillDomain || sandCDomain");
+  });
+});
+
+describe("Nutrition and S&C goal attribution presentation", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("reuses SkillGoalAttributionText for S&C structured items when backend fields are present", () => {
+    expect(journalSource).toContain("const showItemGoalAttribution = skillDomain || sandCDomain");
+    expect(journalSource).toContain("sandCDomain: adherenceDomainKey === \"S_AND_C\"");
+  });
+
+  it("renders SkillGoalAttributionText on Nutrition structured items from supplied item fields only", () => {
+    expect(journalSource).toContain("primaryGoalName={mergedItem.primaryGoalName}");
+    expect(journalSource).toContain("successCriteria={mergedItem.successCriteria}");
+    expect(journalSource).toContain("targetValue={mergedItem.targetValue}");
   });
 });

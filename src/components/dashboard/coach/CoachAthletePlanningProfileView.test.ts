@@ -138,6 +138,17 @@ import {
   isSeasonCycleFormDirty,
   buildSeasonCycleUpdatePayload,
   isExistingSeasonEditOpen,
+  applyLibraryGoalSelection,
+  appendCustomGoalEntry,
+  createCustomGoalEntry,
+  createDefaultGoalDraftFields,
+  isGoalTargetDateOutsidePhaseWindow,
+  optionalGoalTargetDatePayload,
+  parseOptionalGoalTargetValue,
+  patchCustomGoalEntry,
+  patchGoalDraftFields,
+  pruneLibraryGoalDrafts,
+  removeCustomGoalEntry,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
   resolvePlanStartDateInputBounds,
@@ -17545,6 +17556,151 @@ describe("season create display state", () => {
     expect(handler).not.toContain("router.replace");
     expect(handler).toContain("setGoalCreateLoading(true)");
     expect(handler).toContain("setGoalCreateLoading(false)");
+    expect(handler).toContain("for (const goal of selectedLibraryGoals)");
+    expect(handler).toContain("for (const entry of customGoalEntries)");
+    expect(handler).toContain("optionalGoalTargetDatePayload(draft.targetDate)");
+    expect(handler).toContain("optionalGoalTargetDatePayload(entry.targetDate)");
+    expect(handler).not.toContain("planEndDate");
+    expect(handler).not.toContain("setGoalPriority(");
+  });
+
+  it("keeps independent Goal Library and custom goal draft fields", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("applyLibraryGoalSelection(");
+    expect(source).toContain("<GoalDraftMetadataFields");
+    expect(source).toContain("+ Add Goal");
+    expect(source).toContain("Remove Goal");
+    expect(source).toContain("appendCustomGoalEntry(current, nextId)");
+    expect(source).toContain("removeCustomGoalEntry(current, entry.id)");
+    expect(source).not.toContain("value={goalPriority}");
+    expect(source).not.toContain("value={goalTargetDate}");
+    expect(source).not.toContain("value={goalTargetValue}");
+  });
+
+  it("holds independent metadata for two selected library goals and two custom entries", () => {
+    let selectedIds: string[] = [];
+    let drafts: Record<string, ReturnType<typeof createDefaultGoalDraftFields>> = {};
+    const first = applyLibraryGoalSelection(selectedIds, drafts, "lib-a", true);
+    selectedIds = first.selectedIds;
+    drafts = first.drafts;
+    const second = applyLibraryGoalSelection(selectedIds, drafts, "lib-b", true);
+    selectedIds = second.selectedIds;
+    drafts = second.drafts;
+    drafts = patchGoalDraftFields(drafts, "lib-a", {
+      priority: "HIGH",
+      targetValue: "8",
+      targetDate: "2026-03-01",
+    });
+    drafts = patchGoalDraftFields(drafts, "lib-b", {
+      priority: "LOW",
+      targetValue: "3",
+      targetDate: "2026-04-15",
+    });
+
+    expect(selectedIds).toEqual(["lib-a", "lib-b"]);
+    expect(drafts["lib-a"]).toEqual({
+      priority: "HIGH",
+      targetValue: "8",
+      targetDate: "2026-03-01",
+    });
+    expect(drafts["lib-b"]).toEqual({
+      priority: "LOW",
+      targetValue: "3",
+      targetDate: "2026-04-15",
+    });
+
+    const deselected = applyLibraryGoalSelection(selectedIds, drafts, "lib-a", false);
+    expect(deselected.selectedIds).toEqual(["lib-b"]);
+    expect(deselected.drafts).not.toHaveProperty("lib-a");
+    expect(deselected.drafts["lib-b"]?.targetDate).toBe("2026-04-15");
+    expect(pruneLibraryGoalDrafts(drafts, ["lib-b"])).toEqual({
+      "lib-b": {
+        priority: "LOW",
+        targetValue: "3",
+        targetDate: "2026-04-15",
+      },
+    });
+
+    const libraryPayloads = selectedIds.map((id) => ({
+      libraryGoalId: id,
+      priority: drafts[id]!.priority,
+      ...(() => {
+        const parsed = parseOptionalGoalTargetValue(drafts[id]!.targetValue);
+        return parsed.ok && parsed.value !== undefined ? { targetValue: parsed.value } : {};
+      })(),
+      ...optionalGoalTargetDatePayload(drafts[id]!.targetDate),
+    }));
+    expect(libraryPayloads).toEqual([
+      {
+        libraryGoalId: "lib-a",
+        priority: "HIGH",
+        targetValue: 8,
+        targetDate: "2026-03-01T00:00:00.000Z",
+      },
+      {
+        libraryGoalId: "lib-b",
+        priority: "LOW",
+        targetValue: 3,
+        targetDate: "2026-04-15T00:00:00.000Z",
+      },
+    ]);
+
+    let custom = [createCustomGoalEntry("custom-goal-1")];
+    expect(custom).toHaveLength(1);
+    custom = appendCustomGoalEntry(custom, "custom-goal-2");
+    expect(custom.map((entry) => entry.id)).toEqual(["custom-goal-1", "custom-goal-2"]);
+    custom = patchCustomGoalEntry(custom, "custom-goal-1", {
+      goalName: "Goal A",
+      priority: "HIGH",
+      targetDate: "2026-05-01",
+    });
+    custom = patchCustomGoalEntry(custom, "custom-goal-2", {
+      goalName: "Goal B",
+      priority: "LOW",
+      targetValue: "12",
+    });
+    expect(custom[0]?.goalName).toBe("Goal A");
+    expect(custom[0]?.priority).toBe("HIGH");
+    expect(custom[1]?.goalName).toBe("Goal B");
+    expect(custom[1]?.targetValue).toBe("12");
+    expect(custom[1]?.targetDate).toBe("");
+
+    const remaining = removeCustomGoalEntry(custom, "custom-goal-1");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.id).toBe("custom-goal-2");
+    expect(remaining[0]?.goalName).toBe("Goal B");
+    expect(removeCustomGoalEntry(remaining, "custom-goal-2")).toEqual(remaining);
+
+    const customPayloads = custom.map((entry) => ({
+      goalName: entry.goalName,
+      priority: entry.priority,
+      ...(() => {
+        const parsed = parseOptionalGoalTargetValue(entry.targetValue);
+        return parsed.ok && parsed.value !== undefined ? { targetValue: parsed.value } : {};
+      })(),
+      ...optionalGoalTargetDatePayload(entry.targetDate),
+    }));
+    expect(customPayloads).toEqual([
+      {
+        goalName: "Goal A",
+        priority: "HIGH",
+        targetDate: "2026-05-01T00:00:00.000Z",
+      },
+      {
+        goalName: "Goal B",
+        priority: "LOW",
+        targetValue: 12,
+      },
+    ]);
+    expect(optionalGoalTargetDatePayload("")).toEqual({});
+    expect(optionalGoalTargetDatePayload("2026-08-31")).toEqual({
+      targetDate: "2026-08-31T00:00:00.000Z",
+    });
+    expect(parseOptionalGoalTargetValue("")).toEqual({ ok: true });
+    expect(isGoalTargetDateOutsidePhaseWindow("", "2026-01-01", "2026-06-30")).toBe(false);
   });
 
   it("keeps selected existing season read-only until Edit Season, then patches and returns to view", () => {

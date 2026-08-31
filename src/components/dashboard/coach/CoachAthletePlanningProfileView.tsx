@@ -10797,6 +10797,174 @@ function coachFacingGoalTitle(goal: {
   return "Unnamed goal";
 }
 
+export type GoalDraftFields = {
+  priority: GoalPriority;
+  targetValue: string;
+  targetDate: string;
+};
+
+export type CustomGoalEntry = GoalDraftFields & {
+  id: string;
+  goalName: string;
+  successCriteria: string;
+};
+
+export function createDefaultGoalDraftFields(): GoalDraftFields {
+  return { priority: "MEDIUM", targetValue: "", targetDate: "" };
+}
+
+export function createCustomGoalEntry(id: string): CustomGoalEntry {
+  return {
+    id,
+    goalName: "",
+    successCriteria: "",
+    ...createDefaultGoalDraftFields(),
+  };
+}
+
+export function applyLibraryGoalSelection(
+  selectedIds: string[],
+  drafts: Record<string, GoalDraftFields>,
+  libraryGoalId: string,
+  checked: boolean,
+): { selectedIds: string[]; drafts: Record<string, GoalDraftFields> } {
+  if (checked) {
+    if (selectedIds.includes(libraryGoalId)) {
+      return { selectedIds, drafts };
+    }
+    return {
+      selectedIds: [...selectedIds, libraryGoalId],
+      drafts: {
+        ...drafts,
+        [libraryGoalId]: drafts[libraryGoalId] ?? createDefaultGoalDraftFields(),
+      },
+    };
+  }
+  const nextDrafts = { ...drafts };
+  delete nextDrafts[libraryGoalId];
+  return {
+    selectedIds: selectedIds.filter((id) => id !== libraryGoalId),
+    drafts: nextDrafts,
+  };
+}
+
+export function patchGoalDraftFields(
+  drafts: Record<string, GoalDraftFields>,
+  libraryGoalId: string,
+  patch: Partial<GoalDraftFields>,
+): Record<string, GoalDraftFields> {
+  const current = drafts[libraryGoalId] ?? createDefaultGoalDraftFields();
+  return { ...drafts, [libraryGoalId]: { ...current, ...patch } };
+}
+
+export function pruneLibraryGoalDrafts(
+  drafts: Record<string, GoalDraftFields>,
+  selectedIds: string[],
+): Record<string, GoalDraftFields> {
+  const selected = new Set(selectedIds);
+  const next: Record<string, GoalDraftFields> = {};
+  for (const [id, draft] of Object.entries(drafts)) {
+    if (selected.has(id)) next[id] = draft;
+  }
+  return next;
+}
+
+export function patchCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+  patch: Partial<CustomGoalEntry>,
+): CustomGoalEntry[] {
+  return entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry));
+}
+
+export function removeCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+): CustomGoalEntry[] {
+  if (entries.length <= 1) return entries;
+  return entries.filter((entry) => entry.id !== id);
+}
+
+export function appendCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+): CustomGoalEntry[] {
+  return [...entries, createCustomGoalEntry(id)];
+}
+
+export function parseOptionalGoalTargetValue(
+  raw: string,
+): { ok: true; value?: number } | { ok: false } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true };
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return { ok: false };
+  return { ok: true, value: numeric };
+}
+
+export function optionalGoalTargetDatePayload(
+  targetDate: string,
+): { targetDate: string } | Record<string, never> {
+  const trimmed = targetDate.trim();
+  if (trimmed === "") return {};
+  return { targetDate: `${trimmed}T00:00:00.000Z` };
+}
+
+export function isGoalTargetDateOutsidePhaseWindow(
+  targetDate: string,
+  phaseStartYmd: string | null,
+  phaseEndYmd: string | null,
+): boolean {
+  const date = targetDate.trim();
+  if (date === "" || !phaseStartYmd || !phaseEndYmd) return false;
+  return date < phaseStartYmd || date > phaseEndYmd;
+}
+
+function GoalDraftMetadataFields({
+  draft,
+  onChange,
+}: {
+  draft: GoalDraftFields;
+  onChange: (patch: Partial<GoalDraftFields>) => void;
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Priority</span>
+        <select
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+          value={draft.priority}
+          onChange={(event) =>
+            onChange({ priority: event.target.value as GoalPriority })
+          }
+        >
+          <option value="LOW">LOW</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="HIGH">HIGH</option>
+        </select>
+      </label>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Numeric Target Value (Optional)</span>
+        <input
+          type="number"
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+          value={draft.targetValue}
+          onChange={(event) => onChange({ targetValue: event.target.value })}
+        />
+      </label>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Target Date</span>
+        <input
+          type="date"
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+          value={draft.targetDate}
+          onChange={(event) => onChange({ targetDate: event.target.value })}
+        />
+      </label>
+    </div>
+  );
+}
+
 export function formatSeasonOptionLabel(season: SeasonCycleSummary): string {
   if (season.name) return season.name;
   if (season.year !== null && season.sport) {
@@ -13335,11 +13503,13 @@ export function CoachAthletePlanningProfileView({
   const [goalLibraryError, setGoalLibraryError] = useState<string | null>(null);
   const [goalLibraryCategories, setGoalLibraryCategories] = useState<GoalLibraryCategory[]>([]);
   const [selectedLibraryGoalIds, setSelectedLibraryGoalIds] = useState<string[]>([]);
-  const [goalName, setGoalName] = useState("");
-  const [goalSuccessCriteria, setGoalSuccessCriteria] = useState("");
-  const [goalTargetDate, setGoalTargetDate] = useState("");
-  const [goalPriority, setGoalPriority] = useState<GoalPriority>("MEDIUM");
-  const [goalTargetValue, setGoalTargetValue] = useState("");
+  const [libraryGoalDrafts, setLibraryGoalDrafts] = useState<
+    Record<string, GoalDraftFields>
+  >({});
+  const [customGoalEntries, setCustomGoalEntries] = useState<CustomGoalEntry[]>(() => [
+    createCustomGoalEntry("custom-goal-1"),
+  ]);
+  const customGoalEntrySeqRef = useRef(1);
 
   useEffect(() => {
     if (!athleteSportCode) return;
@@ -14444,6 +14614,7 @@ export function CoachAthletePlanningProfileView({
       setGoalLibraryError(null);
       setGoalLibraryLoading(false);
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
       return;
     }
 
@@ -14452,6 +14623,7 @@ export function CoachAthletePlanningProfileView({
       setGoalLibraryError(null);
       setGoalLibraryLoading(false);
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
       return;
     }
 
@@ -14479,6 +14651,7 @@ export function CoachAthletePlanningProfileView({
         if (cancelled) return;
         setGoalLibraryCategories([]);
         setSelectedLibraryGoalIds([]);
+        setLibraryGoalDrafts({});
         setGoalLibraryError(formatApiError(e, "Could not load Goal Library."));
       } finally {
         if (!cancelled) setGoalLibraryLoading(false);
@@ -14495,6 +14668,10 @@ export function CoachAthletePlanningProfileView({
     entityId,
     goalLibraryLevel,
   ]);
+
+  useEffect(() => {
+    setLibraryGoalDrafts((current) => pruneLibraryGoalDrafts(current, selectedLibraryGoalIds));
+  }, [selectedLibraryGoalIds]);
 
   const activeGoals = useMemo(
     () => setupState.goals.filter((goal) => goal.status === "ACTIVE"),
@@ -26179,41 +26356,39 @@ export function CoachAthletePlanningProfileView({
       setGoalSuccess(null);
       return;
     }
-    if (goalCreationMode === "CUSTOM" && goalName.trim() === "") {
-      setGoalError("Skill goal name is required.");
-      setGoalSuccess(null);
-      return;
+    if (goalCreationMode === "CUSTOM") {
+      for (const entry of customGoalEntries) {
+        if (entry.goalName.trim() === "") {
+          setGoalError("Skill goal name is required.");
+          setGoalSuccess(null);
+          return;
+        }
+      }
     }
     if (goalCreationMode === "LIBRARY" && selectedLibraryGoals.length === 0) {
       setGoalError("Select at least one Goal Library item.");
       setGoalSuccess(null);
       return;
     }
-    if (
-      goalTargetDate.trim() !== "" &&
-      activePhaseForSelectedSeason.startDate &&
-      activePhaseForSelectedSeason.endDate &&
-      (() => {
-        const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
-        const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
-        return phaseStart && phaseEnd
-          ? goalTargetDate < phaseStart || goalTargetDate > phaseEnd
-          : false;
-      })()
-    ) {
-      setGoalError("Goal target date must fall inside the detected current phase.");
-      setGoalSuccess(null);
-      return;
-    }
-    let parsedTargetValue: number | undefined;
-    if (goalTargetValue.trim() !== "") {
-      const numeric = Number(goalTargetValue);
-      if (!Number.isFinite(numeric)) {
+    const draftsToValidate: GoalDraftFields[] =
+      goalCreationMode === "LIBRARY"
+        ? selectedLibraryGoals.map(
+            (goal) => libraryGoalDrafts[goal.libraryGoalId] ?? createDefaultGoalDraftFields(),
+          )
+        : customGoalEntries;
+    const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
+    const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
+    for (const draft of draftsToValidate) {
+      if (isGoalTargetDateOutsidePhaseWindow(draft.targetDate, phaseStart, phaseEnd)) {
+        setGoalError("Goal target date must fall inside the detected current phase.");
+        setGoalSuccess(null);
+        return;
+      }
+      if (!parseOptionalGoalTargetValue(draft.targetValue).ok) {
         setGoalError("Target value must be a valid number.");
         setGoalSuccess(null);
         return;
       }
-      parsedTargetValue = numeric;
     }
 
     setGoalCreateLoading(true);
@@ -26223,6 +26398,9 @@ export function CoachAthletePlanningProfileView({
     try {
       if (goalCreationMode === "LIBRARY") {
         for (const goal of selectedLibraryGoals) {
+          const draft =
+            libraryGoalDrafts[goal.libraryGoalId] ?? createDefaultGoalDraftFields();
+          const parsedTarget = parseOptionalGoalTargetValue(draft.targetValue);
           await createPhaseAwareGoal({
             athleteId: athleteIdTrimmed,
             entityId,
@@ -26235,11 +26413,11 @@ export function CoachAthletePlanningProfileView({
               goal.successCriteria.length > 0 ? goal.successCriteria.join("\n") : undefined,
             goalCategory: goal.goalCategory,
             createdByCoachId: coachUserId,
-            priority: goalPriority,
-            ...(parsedTargetValue !== undefined ? { targetValue: parsedTargetValue } : {}),
-            ...(goalTargetDate.trim() !== ""
-              ? { targetDate: `${goalTargetDate}T00:00:00.000Z` }
+            priority: draft.priority,
+            ...(parsedTarget.ok && parsedTarget.value !== undefined
+              ? { targetValue: parsedTarget.value }
               : {}),
+            ...optionalGoalTargetDatePayload(draft.targetDate),
             goalSourceType: "LIBRARY",
             libraryGoalId: goal.libraryGoalId,
             categoryKey: goal.categoryKey,
@@ -26257,24 +26435,27 @@ export function CoachAthletePlanningProfileView({
           });
         }
       } else {
-        await createPhaseAwareGoal({
-          athleteId: athleteIdTrimmed,
-          entityId,
-          seasonCycleId: selectedSeasonCycleId,
-          seasonPhaseId: activePhaseForSelectedSeason.phaseId,
-          goalType: "PERFORMANCE",
-          domain: effectiveCoachGenerationDomain,
-          goalName,
-          successCriteria: goalSuccessCriteria,
-          goalCategory: "TRAINING",
-          createdByCoachId: coachUserId,
-          priority: goalPriority,
-          ...(parsedTargetValue !== undefined ? { targetValue: parsedTargetValue } : {}),
-          ...(goalTargetDate.trim() !== ""
-            ? { targetDate: `${goalTargetDate}T00:00:00.000Z` }
-            : {}),
-          goalSourceType: "CUSTOM",
-        });
+        for (const entry of customGoalEntries) {
+          const parsedTarget = parseOptionalGoalTargetValue(entry.targetValue);
+          await createPhaseAwareGoal({
+            athleteId: athleteIdTrimmed,
+            entityId,
+            seasonCycleId: selectedSeasonCycleId,
+            seasonPhaseId: activePhaseForSelectedSeason.phaseId,
+            goalType: "PERFORMANCE",
+            domain: effectiveCoachGenerationDomain,
+            goalName: entry.goalName,
+            successCriteria: entry.successCriteria,
+            goalCategory: "TRAINING",
+            createdByCoachId: coachUserId,
+            priority: entry.priority,
+            ...(parsedTarget.ok && parsedTarget.value !== undefined
+              ? { targetValue: parsedTarget.value }
+              : {}),
+            ...optionalGoalTargetDatePayload(entry.targetDate),
+            goalSourceType: "CUSTOM",
+          });
+        }
       }
       await refreshGoalsSeasonSetup({
         background: true,
@@ -26283,14 +26464,14 @@ export function CoachAthletePlanningProfileView({
       setGoalSuccess(
         goalCreationMode === "LIBRARY"
           ? `${selectedLibraryGoals.length} Goal Library goal${selectedLibraryGoals.length === 1 ? "" : "s"} created successfully.`
-          : "Skill goal created successfully.",
+          : customGoalEntries.length === 1
+            ? "Skill goal created successfully."
+            : `${customGoalEntries.length} skill goals created successfully.`,
       );
-      setGoalName("");
-      setGoalSuccessCriteria("");
-      setGoalTargetDate("");
-      setGoalTargetValue("");
-      setGoalPriority("MEDIUM");
+      setCustomGoalEntries([createCustomGoalEntry("custom-goal-1")]);
+      customGoalEntrySeqRef.current = 1;
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
     } catch (e) {
       setGoalError(formatApiError(e, "Could not create goal."));
     } finally {
@@ -27586,32 +27767,60 @@ export function CoachAthletePlanningProfileView({
                                   {category.categoryLabel}
                                 </p>
                                 <div className="space-y-2">
-                                  {categoryGoals.map((goal) => (
-                                    <label
-                                      key={goal.libraryGoalId}
-                                      className="flex items-start gap-2 text-sm text-textPrimary"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedLibraryGoalIds.includes(goal.libraryGoalId)}
-                                        onChange={(event) => {
-                                          setSelectedLibraryGoalIds((current) =>
-                                            event.target.checked
-                                              ? [...current, goal.libraryGoalId]
-                                              : current.filter((id) => id !== goal.libraryGoalId),
-                                          );
-                                        }}
-                                      />
-                                      <div className="space-y-1">
-                                        <p className="font-medium text-textPrimary">{goal.goalName}</p>
-                                        {goal.successCriteria.length > 0 ? (
-                                          <p className="text-textSecondary">
-                                            {goal.successCriteria.join(" ")}
-                                          </p>
+                                  {categoryGoals.map((goal) => {
+                                    const selected = selectedLibraryGoalIds.includes(
+                                      goal.libraryGoalId,
+                                    );
+                                    const draft =
+                                      libraryGoalDrafts[goal.libraryGoalId] ??
+                                      createDefaultGoalDraftFields();
+                                    return (
+                                      <div key={goal.libraryGoalId} className="space-y-2">
+                                        <label className="flex items-start gap-2 text-sm text-textPrimary">
+                                          <input
+                                            type="checkbox"
+                                            checked={selected}
+                                            onChange={(event) => {
+                                              const next = applyLibraryGoalSelection(
+                                                selectedLibraryGoalIds,
+                                                libraryGoalDrafts,
+                                                goal.libraryGoalId,
+                                                event.target.checked,
+                                              );
+                                              setSelectedLibraryGoalIds(next.selectedIds);
+                                              setLibraryGoalDrafts(next.drafts);
+                                            }}
+                                          />
+                                          <div className="space-y-1">
+                                            <p className="font-medium text-textPrimary">
+                                              {goal.goalName}
+                                            </p>
+                                            {goal.successCriteria.length > 0 ? (
+                                              <p className="text-textSecondary">
+                                                {goal.successCriteria.join(" ")}
+                                              </p>
+                                            ) : null}
+                                          </div>
+                                        </label>
+                                        {selected ? (
+                                          <div className="ml-6">
+                                            <GoalDraftMetadataFields
+                                              draft={draft}
+                                              onChange={(patch) =>
+                                                setLibraryGoalDrafts((current) =>
+                                                  patchGoalDraftFields(
+                                                    current,
+                                                    goal.libraryGoalId,
+                                                    patch,
+                                                  ),
+                                                )
+                                              }
+                                            />
+                                          </div>
                                         ) : null}
                                       </div>
-                                    </label>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               </div>
                             );
@@ -27620,64 +27829,85 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : null}
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {goalCreationMode === "CUSTOM" ? (
-                      <label className="space-y-1 text-sm text-textPrimary">
-                        <span className="font-medium">
-                          {currentPhaseGoalNameLabel(effectiveCoachGenerationDomain)}
-                        </span>
-                        <input
-                          type="text"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                          value={goalName}
-                          onChange={(event) => setGoalName(event.target.value)}
-                        />
-                      </label>
-                    ) : null}
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Priority</span>
-                      <select
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalPriority}
-                        onChange={(event) =>
-                          setGoalPriority(event.target.value as GoalPriority)
-                        }
+                  {goalCreationMode === "CUSTOM" ? (
+                    <div className="space-y-3">
+                      {customGoalEntries.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="space-y-3 border-y border-border/70 py-3 first:border-t-0 first:pt-0"
+                        >
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="space-y-1 text-sm text-textPrimary">
+                              <span className="font-medium">
+                                {currentPhaseGoalNameLabel(effectiveCoachGenerationDomain)}
+                              </span>
+                              <input
+                                type="text"
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                value={entry.goalName}
+                                onChange={(event) =>
+                                  setCustomGoalEntries((current) =>
+                                    patchCustomGoalEntry(current, entry.id, {
+                                      goalName: event.target.value,
+                                    }),
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1 text-sm text-textPrimary md:col-span-2">
+                              <span className="font-medium">Success Criteria / Measurement</span>
+                              <textarea
+                                rows={3}
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                                value={entry.successCriteria}
+                                onChange={(event) =>
+                                  setCustomGoalEntries((current) =>
+                                    patchCustomGoalEntry(current, entry.id, {
+                                      successCriteria: event.target.value,
+                                    }),
+                                  )
+                                }
+                              />
+                            </label>
+                          </div>
+                          <GoalDraftMetadataFields
+                            draft={entry}
+                            onChange={(patch) =>
+                              setCustomGoalEntries((current) =>
+                                patchCustomGoalEntry(current, entry.id, patch),
+                              )
+                            }
+                          />
+                          {customGoalEntries.length > 1 ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={() =>
+                                setCustomGoalEntries((current) =>
+                                  removeCustomGoalEntry(current, entry.id),
+                                )
+                              }
+                            >
+                              Remove Goal
+                            </Button>
+                          ) : null}
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          customGoalEntrySeqRef.current += 1;
+                          const nextId = `custom-goal-${customGoalEntrySeqRef.current}`;
+                          setCustomGoalEntries((current) =>
+                            appendCustomGoalEntry(current, nextId),
+                          );
+                        }}
                       >
-                        <option value="LOW">LOW</option>
-                        <option value="MEDIUM">MEDIUM</option>
-                        <option value="HIGH">HIGH</option>
-                      </select>
-                    </label>
-                    {goalCreationMode === "CUSTOM" ? (
-                      <label className="space-y-1 text-sm text-textPrimary">
-                        <span className="font-medium">Success Criteria / Measurement</span>
-                        <textarea
-                          rows={3}
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                          value={goalSuccessCriteria}
-                          onChange={(event) => setGoalSuccessCriteria(event.target.value)}
-                        />
-                      </label>
-                    ) : null}
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Numeric Target Value (Optional)</span>
-                      <input
-                        type="number"
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalTargetValue}
-                        onChange={(event) => setGoalTargetValue(event.target.value)}
-                      />
-                    </label>
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Target Date</span>
-                      <input
-                        type="date"
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalTargetDate}
-                        onChange={(event) => setGoalTargetDate(event.target.value)}
-                      />
-                    </label>
-                  </div>
+                        + Add Goal
+                      </Button>
+                    </div>
+                  ) : null}
                   <Button
                     type="button"
                     variant="secondary"

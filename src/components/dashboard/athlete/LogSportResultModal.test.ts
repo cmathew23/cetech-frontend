@@ -2,10 +2,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   buildGolfPrescribedContext,
+  isAttemptsTargetHitsContract,
+  readDrillMeasurementContract,
   validateGolfDrillV2Form,
   validateGolfRoundSportMetricForm,
+  type GolfDrillV2FormValues,
 } from "@/lib/sportMetrics/buildGolfPrescribedContext";
 import { buildLoggedDrillSummary } from "@/components/dashboard/athlete/LogSportResultModal";
+
+function drillForm(overrides: Partial<GolfDrillV2FormValues> = {}): GolfDrillV2FormValues {
+  return {
+    context: "",
+    attempts: "",
+    successes: "",
+    targetHits: "",
+    qualityRating: "",
+    distanceBand: "",
+    targetRadius: "",
+    missesLeft: "",
+    missesRight: "",
+    missesShort: "",
+    missesLong: "",
+    notes: "",
+    ...overrides,
+  };
+}
 
 const { postGolfSportMetricRecordMock } = vi.hoisted(() => ({
   postGolfSportMetricRecordMock: vi.fn(),
@@ -65,19 +86,20 @@ describe("modal submit payload", () => {
       itemIndex: 0,
     };
 
-    const valueResult = validateGolfDrillV2Form({
-      context: "Practice green",
-      attempts: "9",
-      successes: "7",
-      qualityRating: "4",
-      distanceBand: "3-9ft",
-      targetRadius: "",
-      missesLeft: "1",
-      missesRight: "1",
-      missesShort: "0",
-      missesLong: "0",
-      notes: "Good session",
-    });
+    const valueResult = validateGolfDrillV2Form(
+      drillForm({
+        context: "Practice green",
+        attempts: "9",
+        successes: "7",
+        qualityRating: "4",
+        distanceBand: "3-9ft",
+        missesLeft: "1",
+        missesRight: "1",
+        missesShort: "0",
+        missesLong: "0",
+        notes: "Good session",
+      }),
+    );
 
     expect(valueResult.ok).toBe(true);
     if (!valueResult.ok) return;
@@ -161,19 +183,12 @@ describe("round sport metric form validation", () => {
 
 describe("v2 drill form validation", () => {
   it("validates attempts and successes are required", () => {
-    const result = validateGolfDrillV2Form({
-      context: "",
-      attempts: "",
-      successes: "5",
-      qualityRating: "",
-      distanceBand: "",
-      targetRadius: "",
-      missesLeft: "",
-      missesRight: "",
-      missesShort: "",
-      missesLong: "",
-      notes: "",
-    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "",
+        successes: "5",
+      }),
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -182,19 +197,12 @@ describe("v2 drill form validation", () => {
   });
 
   it("blocks successes greater than attempts", () => {
-    const result = validateGolfDrillV2Form({
-      context: "",
-      attempts: "5",
-      successes: "10",
-      qualityRating: "",
-      distanceBand: "",
-      targetRadius: "",
-      missesLeft: "",
-      missesRight: "",
-      missesShort: "",
-      missesLong: "",
-      notes: "",
-    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "5",
+        successes: "10",
+      }),
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -203,19 +211,13 @@ describe("v2 drill form validation", () => {
   });
 
   it("blocks quality rating outside 1-5 range", () => {
-    const result = validateGolfDrillV2Form({
-      context: "",
-      attempts: "10",
-      successes: "8",
-      qualityRating: "6",
-      distanceBand: "",
-      targetRadius: "",
-      missesLeft: "",
-      missesRight: "",
-      missesShort: "",
-      missesLong: "",
-      notes: "",
-    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "10",
+        successes: "8",
+        qualityRating: "6",
+      }),
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -224,19 +226,21 @@ describe("v2 drill form validation", () => {
   });
 
   it("accepts valid v2 drill form with miss breakdown", () => {
-    const result = validateGolfDrillV2Form({
-      context: "Practice facility",
-      attempts: "20",
-      successes: "15",
-      qualityRating: "3",
-      distanceBand: "10-20yd",
-      targetRadius: "6ft",
-      missesLeft: "2",
-      missesRight: "1",
-      missesShort: "1",
-      missesLong: "1",
-      notes: "Good session",
-    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        context: "Practice facility",
+        attempts: "20",
+        successes: "15",
+        qualityRating: "3",
+        distanceBand: "10-20yd",
+        targetRadius: "6ft",
+        missesLeft: "2",
+        missesRight: "1",
+        missesShort: "1",
+        missesLong: "1",
+        notes: "Good session",
+      }),
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -257,19 +261,12 @@ describe("v2 drill form validation", () => {
   });
 
   it("omits optional fields when empty", () => {
-    const result = validateGolfDrillV2Form({
-      context: "",
-      attempts: "10",
-      successes: "8",
-      qualityRating: "",
-      distanceBand: "",
-      targetRadius: "",
-      missesLeft: "",
-      missesRight: "",
-      missesShort: "",
-      missesLong: "",
-      notes: "",
-    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "10",
+        successes: "8",
+      }),
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -358,5 +355,192 @@ describe("buildLoggedDrillSummary", () => {
     expect(summary.successRate).toBeNull();
     expect(summary.qualityRating).toBeNull();
     expect(summary.context).toBeNull();
+  });
+});
+
+describe("measurementContract-driven drill logging", () => {
+  const attemptsTargetHitsContract = {
+    requiredResultFields: ["attempts", "targetHits"],
+    numeratorField: "targetHits",
+    denominatorField: "attempts",
+  };
+
+  it("treats requiredResultFields [attempts, targetHits] as contract-driven regardless of metricKey", () => {
+    const fromStartLine = readDrillMeasurementContract({
+      measurementContract: {
+        ...attemptsTargetHitsContract,
+        metricKey: "start_line_consistency",
+      },
+    });
+    const fromCustomKey = readDrillMeasurementContract({
+      measurementContract: {
+        ...attemptsTargetHitsContract,
+        metricKey: "any_other_key",
+      },
+    });
+    expect(isAttemptsTargetHitsContract(fromStartLine)).toBe(true);
+    expect(isAttemptsTargetHitsContract(fromCustomKey)).toBe(true);
+  });
+
+  it("does not treat missing or empty measurementContract as contract-driven", () => {
+    expect(isAttemptsTargetHitsContract(readDrillMeasurementContract({}))).toBe(false);
+    expect(
+      isAttemptsTargetHitsContract(
+        readDrillMeasurementContract({ measurementContract: { metricKey: "start_line_consistency" } }),
+      ),
+    ).toBe(false);
+    expect(
+      isAttemptsTargetHitsContract(
+        readDrillMeasurementContract({
+          label: "Custom Goal drill",
+          skillCode: "CUSTOM_GOAL",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("saves only attempts and targetHits and drops stale hidden measurement values", () => {
+    const contract = readDrillMeasurementContract({
+      measurementContract: attemptsTargetHitsContract,
+    });
+    const result = validateGolfDrillV2Form(
+      drillForm({
+        context: "Range",
+        attempts: "12",
+        targetHits: "8",
+        successes: "99",
+        qualityRating: "5",
+        distanceBand: "20-30yd",
+        targetRadius: "3ft",
+        missesLeft: "3",
+        missesRight: "2",
+        missesShort: "1",
+        missesLong: "1",
+        notes: "Solid window",
+      }),
+      contract,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.valueJson).toEqual({
+      attempts: 12,
+      targetHits: 8,
+      context: "Range",
+      notes: "Solid window",
+    });
+    expect(result.valueJson).not.toHaveProperty("successes");
+    expect(result.valueJson).not.toHaveProperty("qualityRating");
+    expect(result.valueJson).not.toHaveProperty("distanceBand");
+    expect(result.valueJson).not.toHaveProperty("targetRadius");
+    expect(result.valueJson).not.toHaveProperty("missesLeft");
+    expect(result.valueJson).not.toHaveProperty("percentage");
+    expect(result.valueJson).not.toHaveProperty("missCounts");
+  });
+
+  it("posts contract-driven valueJson through the existing sport-metric save helper", async () => {
+    postGolfSportMetricRecordMock.mockReset();
+    postGolfSportMetricRecordMock.mockResolvedValue({ success: true });
+
+    const drill = {
+      label: "Start line window",
+      measurementContract: attemptsTargetHitsContract,
+      order: 1,
+    };
+    const contract = readDrillMeasurementContract(drill);
+    const valueResult = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "10",
+        targetHits: "7",
+        successes: "4",
+        qualityRating: "3",
+      }),
+      contract,
+    );
+    expect(valueResult.ok).toBe(true);
+    if (!valueResult.ok) return;
+
+    await postGolfSportMetricRecord("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-skills",
+      plannedSessionId: "session-1",
+      occurredAt: "2026-05-24T16:00:00.000Z",
+      metricType: "DRILL_RESULT",
+      environment: "PRACTICE_FACILITY",
+      source: "ATHLETE_MANUAL",
+      prescribedContextJson: { label: "Start line window" },
+      valueJson: valueResult.valueJson,
+      plannedSkillItemOrder: 1,
+    });
+
+    const payload = postGolfSportMetricRecordMock.mock.calls[0]?.[2] as {
+      valueJson: Record<string, unknown>;
+    };
+    expect(payload.valueJson).toEqual({ attempts: 10, targetHits: 7 });
+    expect(Object.keys(payload.valueJson).sort()).toEqual(["attempts", "targetHits"]);
+  });
+
+  it("preserves legacy payload when measurementContract is absent (unsupported library / custom goal)", () => {
+    const unsupportedLibrary = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "9",
+        successes: "6",
+        qualityRating: "4",
+        missesLeft: "1",
+      }),
+    );
+    const customGoal = validateGolfDrillV2Form(
+      drillForm({
+        attempts: "9",
+        successes: "6",
+        qualityRating: "4",
+        missesLeft: "1",
+      }),
+      readDrillMeasurementContract({ label: "Custom Goal", primaryGoalName: "Make 8/10" }),
+    );
+
+    expect(unsupportedLibrary.ok).toBe(true);
+    expect(customGoal.ok).toBe(true);
+    if (!unsupportedLibrary.ok || !customGoal.ok) return;
+
+    expect(unsupportedLibrary.valueJson).toEqual({
+      attempts: 9,
+      successes: 6,
+      qualityRating: 4,
+      missesLeft: 1,
+    });
+    expect(customGoal.valueJson).toEqual(unsupportedLibrary.valueJson);
+  });
+
+  it("keeps common modal chrome and gates extra measurement fields behind the contract check", () => {
+    const modalSource = readFileSync(
+      new URL("./LogSportResultModal.tsx", import.meta.url),
+      "utf8",
+    );
+    const journalSource = readFileSync(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(modalSource).toContain("Log Sport Result");
+    expect(modalSource).toContain("Planned Drill Classification");
+    expect(modalSource).toContain("Context / Location (optional)");
+    expect(modalSource).toContain("Notes (optional)");
+    expect(modalSource).toContain("Cancel");
+    expect(modalSource).toContain("Save sport result");
+    expect(modalSource).toContain("attemptsTargetHitsOnly");
+    expect(modalSource).toContain('label="Target Hits"');
+    expect(modalSource).toContain('label="Successes"');
+    expect(modalSource).toContain("Quality rating");
+    expect(modalSource).toContain("Distance band");
+    expect(modalSource).toContain("Target radius");
+    expect(modalSource).toContain("Miss breakdown");
+    expect(modalSource).toContain("validateGolfDrillV2Form(drillForm, measurementContract)");
+    expect(modalSource).toContain("postGolfSportMetricRecord");
+    expect(modalSource).not.toContain("fetch(");
+    expect(modalSource).not.toContain("fetchMeasurementContract");
+    expect(journalSource).toContain("drill: mergedSkillItem");
+    expect(journalSource).not.toContain("measurementContract");
+    expect(journalSource).not.toContain("fetchMeasurementContract");
   });
 });

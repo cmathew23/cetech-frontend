@@ -1279,17 +1279,27 @@ function renderJournalStructureSections(
                   const mergedSkillItem = mergeJournalRecordCandidateFields(rawItem);
                   const heading = structureItemHeading(rawItem, itemIndex);
                   const itemRows = collectStructureItemDetailRows(rawItem);
+                  const showItemGoalAttribution = skillDomain || sandCDomain;
                   const detailRows = itemRows.filter(
                     (row) =>
                       row.value.trim().toLowerCase() !== heading.trim().toLowerCase() &&
                       !(
-                        skillDomain &&
-                        (row.label === "Primary Goal Id" || row.label === "Primary Goal Name")
+                        showItemGoalAttribution &&
+                        (row.label === "Primary Goal Id" ||
+                          row.label === "Primary Goal Name" ||
+                          row.label === "Success Criteria" ||
+                          row.label === "Target Value")
                       ),
                   );
-                  const primaryGoalName = skillDomain
+                  const primaryGoalName = showItemGoalAttribution
                     ? normalizeSkillPrimaryGoalName(mergedSkillItem.primaryGoalName)
                     : null;
+                  const successCriteria = showItemGoalAttribution
+                    ? mergedSkillItem.successCriteria
+                    : undefined;
+                  const targetValue = showItemGoalAttribution
+                    ? mergedSkillItem.targetValue
+                    : undefined;
                   const hideGenericHeading =
                     /^Item\s+\d+$/i.test(heading.trim()) && detailRows.length > 0;
                   const skillsSportMetrics = options?.skillsSportMetrics;
@@ -1326,6 +1336,8 @@ function renderJournalStructureSections(
                       ) : null}
                       <SkillGoalAttributionText
                         primaryGoalName={primaryGoalName}
+                        successCriteria={successCriteria}
+                        targetValue={targetValue}
                         className={hideGenericHeading ? undefined : "mt-1"}
                       />
                       {detailRows.length > 0 ? (
@@ -1393,6 +1405,12 @@ function renderJournalStructureSections(
                     className="rounded border border-slate-200/80 bg-white/60 p-2"
                   >
                     {leading}
+                    <SkillGoalAttributionText
+                      primaryGoalName={mergedItem.primaryGoalName}
+                      successCriteria={mergedItem.successCriteria}
+                      targetValue={mergedItem.targetValue}
+                      className={leading ? "mt-1" : undefined}
+                    />
                     {!leading && heading.startsWith("Item ") ? (
                       <p className="text-xs text-textSecondary">Structured entry</p>
                     ) : null}

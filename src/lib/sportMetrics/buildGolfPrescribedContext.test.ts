@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGolfPrescribedContext,
+  isAttemptsTargetHitsContract,
   mapGolfSportMetricLogMode,
+  readDrillMeasurementContract,
   validateGolfDrillSportMetricForm,
 } from "@/lib/sportMetrics/buildGolfPrescribedContext";
 
@@ -120,5 +122,28 @@ describe("validateGolfDrillSportMetricForm", () => {
     if (!result.ok) {
       expect(result.error).toContain("cannot exceed");
     }
+  });
+});
+
+describe("readDrillMeasurementContract", () => {
+  it("reads requiredResultFields from drill.measurementContract", () => {
+    const contract = readDrillMeasurementContract({
+      measurementContract: {
+        metricKey: "tee_shot_corridor_hit_rate",
+        requiredResultFields: ["attempts", "targetHits"],
+        numeratorField: "targetHits",
+        denominatorField: "attempts",
+      },
+    });
+    expect(contract?.requiredResultFields).toEqual(["attempts", "targetHits"]);
+    expect(isAttemptsTargetHitsContract(contract)).toBe(true);
+  });
+
+  it("returns null when requiredResultFields is missing", () => {
+    expect(
+      readDrillMeasurementContract({
+        measurementContract: { metricKey: "unsupported_library_metric" },
+      }),
+    ).toBeNull();
   });
 });

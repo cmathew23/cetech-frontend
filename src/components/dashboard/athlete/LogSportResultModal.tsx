@@ -9,7 +9,9 @@ import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   buildGolfPrescribedContext,
   defaultOccurredAtForJournalDay,
+  isAttemptsTargetHitsContract,
   mapGolfSportMetricLogMode,
+  readDrillMeasurementContract,
   resolveGolfDrillOrder,
   validateGolfDrillV2Form,
   validateGolfRoundSportMetricForm,
@@ -63,6 +65,7 @@ const EMPTY_DRILL_FORM: GolfDrillV2FormValues = {
   context: "",
   attempts: "",
   successes: "",
+  targetHits: "",
   qualityRating: "",
   distanceBand: "",
   targetRadius: "",
@@ -262,10 +265,11 @@ export function LogSportResultModal({
     if (!context || submitting) return;
 
     const enums = mapGolfSportMetricLogMode(mode);
+    const measurementContract = readDrillMeasurementContract(context.drill);
     const valueResult =
       mode === "ACTUAL_ROUND"
         ? validateGolfRoundSportMetricForm(roundForm)
-        : validateGolfDrillV2Form(drillForm);
+        : validateGolfDrillV2Form(drillForm, measurementContract);
 
     if (!valueResult.ok) {
       setError(valueResult.error);
@@ -336,6 +340,8 @@ export function LogSportResultModal({
 
   const drillTitle = drillLabelFromContext(context);
   const isRound = mode === "ACTUAL_ROUND";
+  const measurementContract = readDrillMeasurementContract(context.drill);
+  const attemptsTargetHitsOnly = isAttemptsTargetHitsContract(measurementContract);
 
   return (
     <Modal
@@ -462,75 +468,96 @@ export function LogSportResultModal({
                 value={drillForm.context}
                 onChange={handleDrillField("context")}
               />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormNumberField
-                  id="sport-drill-attempts"
-                  label="Attempts"
-                  required
-                  value={drillForm.attempts}
-                  onChange={handleDrillField("attempts")}
-                />
-                <FormNumberField
-                  id="sport-drill-successes"
-                  label="Successes"
-                  required
-                  value={drillForm.successes}
-                  onChange={handleDrillField("successes")}
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormNumberField
-                  id="sport-drill-quality"
-                  label="Quality rating (1–5, optional)"
-                  value={drillForm.qualityRating}
-                  onChange={handleDrillField("qualityRating")}
-                />
-                <FormTextField
-                  id="sport-drill-distance"
-                  label="Distance band (optional)"
-                  value={drillForm.distanceBand}
-                  onChange={handleDrillField("distanceBand")}
-                />
-              </div>
-              <FormTextField
-                id="sport-drill-target-radius"
-                label="Target radius (optional)"
-                value={drillForm.targetRadius}
-                onChange={handleDrillField("targetRadius")}
-              />
-              <fieldset className="space-y-2">
-                <legend className="text-xs font-semibold text-textPrimary">
-                  Miss breakdown (optional)
-                </legend>
+              {attemptsTargetHitsOnly ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <FormNumberField
-                    id="sport-drill-misses-left"
-                    label="Misses left"
-                    value={drillForm.missesLeft}
-                    onChange={handleDrillField("missesLeft")}
+                    id="sport-drill-attempts"
+                    label="Attempts"
+                    required
+                    value={drillForm.attempts}
+                    onChange={handleDrillField("attempts")}
                   />
                   <FormNumberField
-                    id="sport-drill-misses-right"
-                    label="Misses right"
-                    value={drillForm.missesRight}
-                    onChange={handleDrillField("missesRight")}
+                    id="sport-drill-target-hits"
+                    label="Target Hits"
+                    required
+                    value={drillForm.targetHits}
+                    onChange={handleDrillField("targetHits")}
                   />
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormNumberField
-                    id="sport-drill-misses-short"
-                    label="Misses short"
-                    value={drillForm.missesShort}
-                    onChange={handleDrillField("missesShort")}
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormNumberField
+                      id="sport-drill-attempts"
+                      label="Attempts"
+                      required
+                      value={drillForm.attempts}
+                      onChange={handleDrillField("attempts")}
+                    />
+                    <FormNumberField
+                      id="sport-drill-successes"
+                      label="Successes"
+                      required
+                      value={drillForm.successes}
+                      onChange={handleDrillField("successes")}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormNumberField
+                      id="sport-drill-quality"
+                      label="Quality rating (1–5, optional)"
+                      value={drillForm.qualityRating}
+                      onChange={handleDrillField("qualityRating")}
+                    />
+                    <FormTextField
+                      id="sport-drill-distance"
+                      label="Distance band (optional)"
+                      value={drillForm.distanceBand}
+                      onChange={handleDrillField("distanceBand")}
+                    />
+                  </div>
+                  <FormTextField
+                    id="sport-drill-target-radius"
+                    label="Target radius (optional)"
+                    value={drillForm.targetRadius}
+                    onChange={handleDrillField("targetRadius")}
                   />
-                  <FormNumberField
-                    id="sport-drill-misses-long"
-                    label="Misses long"
-                    value={drillForm.missesLong}
-                    onChange={handleDrillField("missesLong")}
-                  />
-                </div>
-              </fieldset>
+                  <fieldset className="space-y-2">
+                    <legend className="text-xs font-semibold text-textPrimary">
+                      Miss breakdown (optional)
+                    </legend>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <FormNumberField
+                        id="sport-drill-misses-left"
+                        label="Misses left"
+                        value={drillForm.missesLeft}
+                        onChange={handleDrillField("missesLeft")}
+                      />
+                      <FormNumberField
+                        id="sport-drill-misses-right"
+                        label="Misses right"
+                        value={drillForm.missesRight}
+                        onChange={handleDrillField("missesRight")}
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <FormNumberField
+                        id="sport-drill-misses-short"
+                        label="Misses short"
+                        value={drillForm.missesShort}
+                        onChange={handleDrillField("missesShort")}
+                      />
+                      <FormNumberField
+                        id="sport-drill-misses-long"
+                        label="Misses long"
+                        value={drillForm.missesLong}
+                        onChange={handleDrillField("missesLong")}
+                      />
+                    </div>
+                  </fieldset>
+                </>
+              )}
               <FormNotesField
                 id="sport-drill-notes"
                 value={drillForm.notes}

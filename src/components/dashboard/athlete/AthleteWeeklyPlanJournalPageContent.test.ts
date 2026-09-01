@@ -48,7 +48,7 @@ describe("Log Sport Result planning-date guard", () => {
     expect(modalSource).toContain('"PRACTICE_FACILITY"');
     expect(modalSource).toContain('"SIMULATOR"');
     expect(modalSource).toContain('"ACTUAL_ROUND"');
-    expect(modalSource).toContain("On Course");
+    expect(modalSource).toContain("On Golf Course");
     expect(modalSource).not.toContain("canLogSportResult");
   });
 

@@ -523,9 +523,18 @@ describe("measurementContract-driven drill logging", () => {
     );
 
     expect(modalSource).toContain("Log Sport Result");
+    expect(modalSource).toContain("About the Exercise");
     expect(modalSource).toContain("Planned Drill Classification");
+    expect(modalSource).toContain("Metric Source");
+    expect(modalSource).toContain("formatMeasurementMetricSource");
+    expect(modalSource).toContain("measurementMetricName");
+    expect(modalSource).toContain("Where are you doing this?");
+    expect(modalSource).toContain("Practice Facility");
+    expect(modalSource).toContain("Simulator");
+    expect(modalSource).toContain("On Golf Course");
     expect(modalSource).toContain("Context / Location (optional)");
     expect(modalSource).toContain("Notes (optional)");
+    expect(modalSource).toContain("Wearables logging — Coming soon");
     expect(modalSource).toContain("Cancel");
     expect(modalSource).toContain("Save sport result");
     expect(modalSource).toContain("attemptsTargetHitsOnly");
@@ -536,11 +545,440 @@ describe("measurementContract-driven drill logging", () => {
     expect(modalSource).toContain("Target radius");
     expect(modalSource).toContain("Miss breakdown");
     expect(modalSource).toContain("validateGolfDrillV2Form(drillForm, measurementContract)");
+    expect(modalSource).toContain("readMeasurementEntryContract");
+    expect(modalSource).toContain("validateMeasurementEntryForm");
+    expect(modalSource).toContain("entryMode");
+    expect(modalSource).toContain("INDIVIDUAL");
+    expect(modalSource).toContain("CUMULATIVE");
+    expect(modalSource).toContain("+ Add attempt");
     expect(modalSource).toContain("postGolfSportMetricRecord");
     expect(modalSource).not.toContain("fetch(");
     expect(modalSource).not.toContain("fetchMeasurementContract");
     expect(journalSource).toContain("drill: mergedSkillItem");
     expect(journalSource).not.toContain("measurementContract");
+    expect(journalSource).not.toContain("measurementEntryContract");
     expect(journalSource).not.toContain("fetchMeasurementContract");
+  });
+});
+
+describe("measurementEntryContract-driven result logging", () => {
+  const clubHeadSpeedContract = {
+    INDIVIDUAL: {
+      fields: [{ key: "speed", label: "Club Head Speed", type: "NUMBER", unit: "mph" }],
+    },
+    CUMULATIVE: {
+      fields: [
+        { key: "attempts", label: "Attempts", type: "INTEGER" },
+        { key: "averageSpeed", label: "Average club head speed", type: "NUMBER", unit: "mph" },
+      ],
+    },
+  };
+
+  const proximityContract = {
+    INDIVIDUAL: {
+      fields: [
+        { key: "proximityFeet", label: "Proximity to Hole", type: "INTEGER", unit: "ft" },
+        { key: "proximityInches", label: "Proximity to Hole", type: "INTEGER", unit: "in" },
+      ],
+    },
+    CUMULATIVE: {
+      fields: [
+        { key: "attempts", label: "Attempts", type: "INTEGER" },
+        { key: "averageProximityFeet", label: "Average proximity", type: "INTEGER", unit: "ft" },
+        { key: "averageProximityInches", label: "Average proximity", type: "INTEGER", unit: "in" },
+      ],
+    },
+  };
+
+  const scramblingContract = {
+    INDIVIDUAL: {
+      fields: [{ key: "success", label: "Success", type: "BOOLEAN" }],
+    },
+    CUMULATIVE: {
+      fields: [
+        { key: "attempts", label: "Attempts", type: "INTEGER" },
+        { key: "successes", label: "Successes", type: "INTEGER" },
+      ],
+    },
+  };
+
+  const puttingPercentContract = {
+    INDIVIDUAL: {
+      fields: [
+        { key: "puttDistance", label: "Putt distance", type: "NUMBER", unit: "ft" },
+        { key: "made", label: "Made", type: "BOOLEAN" },
+      ],
+    },
+    CUMULATIVE: {
+      fields: [
+        { key: "puttDistance", label: "Putt distance", type: "NUMBER", unit: "ft" },
+        { key: "attempts", label: "Attempts", type: "INTEGER" },
+        { key: "made", label: "Made", type: "INTEGER" },
+      ],
+    },
+  };
+
+  async function postValueJson(valueJson: Record<string, unknown>) {
+    postGolfSportMetricRecordMock.mockReset();
+    postGolfSportMetricRecordMock.mockResolvedValue({ success: true });
+    await postGolfSportMetricRecord("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-skills",
+      plannedSessionId: "session-1",
+      occurredAt: "2026-05-24T16:00:00.000Z",
+      metricType: "DRILL_RESULT",
+      environment: "PRACTICE_FACILITY",
+      source: "ATHLETE_MANUAL",
+      prescribedContextJson: { label: "Contract drill" },
+      valueJson,
+    });
+    return postGolfSportMetricRecordMock.mock.calls[0]?.[2] as {
+      valueJson: Record<string, unknown>;
+    };
+  }
+
+  it("posts Club Head Speed Individual and Cumulative with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: clubHeadSpeedContract,
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [{ speed: "96" }, { speed: "98" }],
+      cumulative: { attempts: "20", averageSpeed: "96" },
+      notes: "",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [{ speed: 96 }, { speed: 98 }],
+    });
+
+    const cumulative = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ speed: "96" }],
+      cumulative: { attempts: "20", averageSpeed: "96" },
+      notes: "",
+    });
+    expect(cumulative.ok).toBe(true);
+    if (!cumulative.ok) return;
+    expect((await postValueJson(cumulative.valueJson)).valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      attempts: 20,
+      averageSpeed: 96,
+    });
+  });
+
+  it("posts Proximity Individual and Cumulative with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: proximityContract,
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [
+        { proximityFeet: "8", proximityInches: "4" },
+        { proximityFeet: "6", proximityInches: "9" },
+      ],
+      cumulative: {
+        attempts: "10",
+        averageProximityFeet: "7",
+        averageProximityInches: "2",
+      },
+      notes: "",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [
+        { proximityFeet: 8, proximityInches: 4 },
+        { proximityFeet: 6, proximityInches: 9 },
+      ],
+    });
+
+    const cumulative = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ proximityFeet: "8", proximityInches: "4" }],
+      cumulative: {
+        attempts: "12",
+        averageProximityFeet: "7",
+        averageProximityInches: "6",
+      },
+      notes: "",
+    });
+    expect(cumulative.ok).toBe(true);
+    if (!cumulative.ok) return;
+    expect((await postValueJson(cumulative.valueJson)).valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      attempts: 12,
+      averageProximityFeet: 7,
+      averageProximityInches: 6,
+    });
+  });
+
+  it("posts Scrambling Individual and Cumulative with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: scramblingContract,
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [{ success: "true" }, { success: "false" }],
+      cumulative: { attempts: "10", successes: "6" },
+      notes: "",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [{ success: true }, { success: false }],
+    });
+
+    const cumulative = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ success: "true" }],
+      cumulative: { attempts: "10", successes: "6" },
+      notes: "",
+    });
+    expect(cumulative.ok).toBe(true);
+    if (!cumulative.ok) return;
+    expect((await postValueJson(cumulative.valueJson)).valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      attempts: 10,
+      successes: 6,
+    });
+  });
+
+  it("posts Putting % Individual and Cumulative with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: puttingPercentContract,
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [
+        { puttDistance: "6", made: "true" },
+        { puttDistance: "6", made: "false" },
+      ],
+      cumulative: { puttDistance: "6", attempts: "20", made: "14" },
+      notes: "",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [
+        { puttDistance: 6, made: true },
+        { puttDistance: 6, made: false },
+      ],
+    });
+
+    const cumulative = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ puttDistance: "6", made: "true" }],
+      cumulative: { puttDistance: "6", attempts: "20", made: "14" },
+      notes: "",
+    });
+    expect(cumulative.ok).toBe(true);
+    if (!cumulative.ok) return;
+    expect((await postValueJson(cumulative.valueJson)).valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      puttDistance: 6,
+      attempts: 20,
+      made: 14,
+    });
+  });
+
+  it("keeps generic measurement fields in source for uncontracted exercises only", () => {
+    const modalSource = readFileSync(
+      new URL("./LogSportResultModal.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(modalSource).toContain("measurementEntryContract ? (");
+    expect(modalSource).toContain("attemptsTargetHitsOnly ? (");
+    expect(modalSource).toContain('label="Successes"');
+    expect(modalSource).not.toMatch(/reps.*length|length.*reps/);
+    expect(modalSource).not.toContain("clubHeadSpeed");
+    expect(modalSource).not.toContain("finalDistanceFt");
+    expect(modalSource).toContain("formatMeasurementMetricSource");
+    expect(modalSource).toContain('field.type === "ENUM"');
+    expect(modalSource).toContain('field.type === "STRING"');
+    expect(modalSource).toContain("hasMeasurementEntryContractPayload");
+    expect(modalSource).not.toContain("targetCarryDistance");
+    expect(modalSource).not.toContain("puttDistanceFeet");
+    expect(modalSource).not.toContain("throughWindow");
+    expect(modalSource).not.toContain("startLie");
+  });
+});
+
+describe("B-exercise contract-driven logging", () => {
+  async function postValueJson(valueJson: Record<string, unknown>) {
+    postGolfSportMetricRecordMock.mockReset();
+    postGolfSportMetricRecordMock.mockResolvedValue({ success: true });
+    await postGolfSportMetricRecord("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-skills",
+      plannedSessionId: "session-1",
+      occurredAt: "2026-05-24T16:00:00.000Z",
+      metricType: "DRILL_RESULT",
+      environment: "PRACTICE_FACILITY",
+      source: "ATHLETE_MANUAL",
+      prescribedContextJson: { label: "B drill" },
+      valueJson,
+    });
+    return postGolfSportMetricRecordMock.mock.calls[0]?.[2] as {
+      valueJson: Record<string, unknown>;
+    };
+  }
+
+  it("posts carry-distance Individual and Cumulative with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: {
+        INDIVIDUAL: {
+          fields: [
+            { key: "targetCarryDistance", label: "Target carry", type: "NUMBER", unit: "yd" },
+            { key: "actualCarryDistance", label: "Actual carry", type: "NUMBER", unit: "yd" },
+          ],
+        },
+        CUMULATIVE: {
+          fields: [
+            { key: "targetCarryDistance", label: "Target carry", type: "NUMBER", unit: "yd" },
+            { key: "attempts", label: "Attempts", type: "INTEGER" },
+            {
+              key: "totalActualCarryDistance",
+              label: "Total actual carry",
+              type: "NUMBER",
+              unit: "yd",
+            },
+          ],
+        },
+      },
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [{ targetCarryDistance: "160", actualCarryDistance: "158" }],
+      cumulative: {
+        targetCarryDistance: "160",
+        attempts: "20",
+        totalActualCarryDistance: "3160",
+      },
+      notes: "",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [{ targetCarryDistance: 160, actualCarryDistance: 158 }],
+    });
+
+    const cumulative = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ targetCarryDistance: "160", actualCarryDistance: "158" }],
+      cumulative: {
+        targetCarryDistance: "160",
+        attempts: "20",
+        totalActualCarryDistance: "3108",
+      },
+      notes: "",
+    });
+    expect(cumulative.ok).toBe(true);
+    if (!cumulative.ok) return;
+    expect((await postValueJson(cumulative.valueJson)).valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      targetCarryDistance: 160,
+      attempts: 20,
+      totalActualCarryDistance: 3108,
+    });
+  });
+
+  it("posts enum + boolean Individual with exact keys", async () => {
+    const { readMeasurementEntryContract, validateMeasurementEntryForm } = await import(
+      "@/lib/sportMetrics/measurementEntryContract"
+    );
+    const contract = readMeasurementEntryContract({
+      measurementEntryContract: {
+        INDIVIDUAL: {
+          fields: [
+            {
+              key: "startLie",
+              label: "Start lie",
+              type: "ENUM",
+              options: ["FAIRWAY", "ROUGH"],
+            },
+            { key: "success", label: "Success", type: "BOOLEAN" },
+          ],
+        },
+        CUMULATIVE: {
+          fields: [
+            { key: "attempts", label: "Attempts", type: "INTEGER" },
+            { key: "successes", label: "Successes", type: "INTEGER" },
+          ],
+        },
+      },
+    });
+    expect(contract).not.toBeNull();
+    if (!contract) return;
+    const individual = validateMeasurementEntryForm({
+      contract,
+      entryMode: "INDIVIDUAL",
+      attempts: [{ startLie: "FAIRWAY", success: "true" }],
+      cumulative: { attempts: "8", successes: "5" },
+      notes: "notes",
+    });
+    expect(individual.ok).toBe(true);
+    if (!individual.ok) return;
+    expect((await postValueJson(individual.valueJson)).valueJson).toEqual({
+      entryMode: "INDIVIDUAL",
+      attempts: [{ startLie: "FAIRWAY", success: true }],
+      notes: "notes",
+    });
+  });
+
+  it("location radio onChange does not rewrite result-entry rows", () => {
+    const modalSource = readFileSync(
+      new URL("./LogSportResultModal.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(modalSource).toMatch(
+      /name="sport-metric-log-mode"[\s\S]*?onChange=\{\(\) => \{\s*setMode\(option\.value\);\s*setError\(null\);\s*\}\}/,
+    );
+    expect(modalSource).not.toMatch(/setMode\(option\.value\);[\s\S]{0,80}setAttemptRows/);
+    expect(modalSource).not.toMatch(/setMode\(option\.value\);[\s\S]{0,80}setCumulativeValues/);
   });
 });

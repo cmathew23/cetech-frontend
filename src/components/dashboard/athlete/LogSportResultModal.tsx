@@ -3,6 +3,7 @@
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { Alert } from "@/components/ui/Alert";
 import { postGolfSportMetricRecord } from "@/lib/api/sportMetricsGolf";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -19,6 +20,17 @@ import {
   type GolfSportMetricLogMode,
   type GolfSportMetricRoundFormValues,
 } from "@/lib/sportMetrics/buildGolfPrescribedContext";
+import {
+  emptyMeasurementEntryValues,
+  formatMeasurementMetricSource,
+  groupMeasurementEntryFields,
+  hasMeasurementEntryContractPayload,
+  readMeasurementEntryContract,
+  validateMeasurementEntryForm,
+  type MeasurementEntryField,
+  type MeasurementEntryFormValues,
+  type MeasurementEntryMode,
+} from "@/lib/sportMetrics/measurementEntryContract";
 import { formatDateOnly } from "@/lib/dateTime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -56,9 +68,9 @@ export type LogSportResultModalProps = {
 };
 
 const MODE_OPTIONS: Array<{ value: GolfSportMetricLogMode; label: string }> = [
-  { value: "PRACTICE_FACILITY", label: "Skills Training — Practice Facility" },
-  { value: "SIMULATOR", label: "Skills Training — Simulator" },
-  { value: "ACTUAL_ROUND", label: "Actual Round — On Course" },
+  { value: "PRACTICE_FACILITY", label: "Practice Facility" },
+  { value: "SIMULATOR", label: "Simulator" },
+  { value: "ACTUAL_ROUND", label: "On Golf Course" },
 ];
 
 const EMPTY_DRILL_FORM: GolfDrillV2FormValues = {
@@ -164,17 +176,44 @@ export function buildLoggedDrillSummary(
   };
 }
 
+function pickStringFromDrillMetadata(
+  drill: Record<string, unknown>,
+  keys: string[],
+): string | null {
+  const direct = pickStringFromDrill(drill, keys);
+  if (direct) return direct;
+  const nestedCandidates = [drill.sportSpecificMetadata, drill.candidateMetadata];
+  for (const nested of nestedCandidates) {
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
+    const text = pickStringFromDrill(nested as Record<string, unknown>, keys);
+    if (text) return text;
+  }
+  return null;
+}
+
 function DrillClassificationDisplay({ drill }: { drill: Record<string, unknown> }) {
   const skillCode = pickStringFromDrill(drill, ["skillCode", "itemType"]);
   const skillArea = pickStringFromDrill(drill, ["skillArea", "golfTaxonomy", "taxonomy"]);
   const sportCapability = pickStringFromDrill(drill, ["sportCapability", "capability"]);
   const skillCategory = resolveSkillCategory(drill);
+  const metricSourceRaw = pickStringFromDrillMetadata(drill, [
+    "measurementMetricSource",
+    "measurementSource",
+  ]);
+  const metricName = pickStringFromDrillMetadata(drill, ["measurementMetricName"]);
 
   const fields: Array<{ label: string; value: string }> = [];
   if (skillCode) fields.push({ label: "Skill Code", value: skillCode });
   if (skillArea) fields.push({ label: "Skill Area", value: skillArea });
   if (sportCapability) fields.push({ label: "Sport Capability", value: sportCapability });
   if (skillCategory) fields.push({ label: "Category", value: skillCategory });
+  if (metricSourceRaw) {
+    fields.push({
+      label: "Metric Source",
+      value: formatMeasurementMetricSource(metricSourceRaw),
+    });
+  }
+  if (metricName) fields.push({ label: "Metric", value: metricName });
 
   if (fields.length === 0) return null;
 
@@ -224,13 +263,28 @@ export function LogSportResultModal({
   onSuccess,
 }: LogSportResultModalProps) {
   const [mode, setMode] = useState<GolfSportMetricLogMode>("PRACTICE_FACILITY");
+  const [entryMode, setEntryMode] = useState<MeasurementEntryMode>("INDIVIDUAL");
+  const [attemptRows, setAttemptRows] = useState<MeasurementEntryFormValues[]>([
+    {},
+  ]);
+  const [cumulativeValues, setCumulativeValues] = useState<MeasurementEntryFormValues>(
+    {},
+  );
   const [drillForm, setDrillForm] = useState<GolfDrillV2FormValues>(EMPTY_DRILL_FORM);
   const [roundForm, setRoundForm] = useState<GolfSportMetricRoundFormValues>(EMPTY_ROUND_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
+    const contract = context
+      ? readMeasurementEntryContract(context.drill)
+      : null;
     setMode("PRACTICE_FACILITY");
+    setEntryMode("INDIVIDUAL");
+    setAttemptRows([
+      emptyMeasurementEntryValues(contract?.INDIVIDUAL.fields ?? []),
+    ]);
+    setCumulativeValues(emptyMeasurementEntryValues(contract?.CUMULATIVE.fields ?? []));
     setDrillForm(EMPTY_DRILL_FORM);
     setRoundForm(EMPTY_ROUND_FORM);
     setSubmitting(false);
@@ -265,9 +319,23 @@ export function LogSportResultModal({
     if (!context || submitting) return;
 
     const enums = mapGolfSportMetricLogMode(mode);
+    const measurementEntryContract = readMeasurementEntryContract(context.drill);
     const measurementContract = readDrillMeasurementContract(context.drill);
-    const valueResult =
-      mode === "ACTUAL_ROUND"
+    if (hasMeasurementEntryContractPayload(context.drill) && !measurementEntryContract) {
+      setError(
+        "This exercise includes a measurement entry contract, but a required contract property is missing or invalid.",
+      );
+      return;
+    }
+    const valueResult = measurementEntryContract
+      ? validateMeasurementEntryForm({
+          contract: measurementEntryContract,
+          entryMode,
+          attempts: attemptRows,
+          cumulative: cumulativeValues,
+          notes: drillForm.notes,
+        })
+      : mode === "ACTUAL_ROUND"
         ? validateGolfRoundSportMetricForm(roundForm)
         : validateGolfDrillV2Form(drillForm, measurementContract);
 
@@ -326,8 +394,11 @@ export function LogSportResultModal({
       setSubmitting(false);
     }
   }, [
+    attemptRows,
     context,
+    cumulativeValues,
     drillForm,
+    entryMode,
     mode,
     occurredAt,
     onClose,
@@ -339,7 +410,11 @@ export function LogSportResultModal({
   if (!open || !context) return null;
 
   const drillTitle = drillLabelFromContext(context);
-  const isRound = mode === "ACTUAL_ROUND";
+  const measurementEntryContract = readMeasurementEntryContract(context.drill);
+  const contractPayloadPresent = hasMeasurementEntryContractPayload(context.drill);
+  const contractUnreadable = contractPayloadPresent && !measurementEntryContract;
+  const isRound =
+    mode === "ACTUAL_ROUND" && !measurementEntryContract && !contractUnreadable;
   const measurementContract = readDrillMeasurementContract(context.drill);
   const attemptsTargetHitsOnly = isAttemptsTargetHitsContract(measurementContract);
 
@@ -367,8 +442,17 @@ export function LogSportResultModal({
         </div>
 
         <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
+              About the Exercise
+            </h3>
+            <DrillClassificationDisplay drill={context.drill} />
+          </section>
+
           <fieldset className="space-y-2">
-            <legend className="text-xs font-semibold text-textPrimary">Where</legend>
+            <legend className="text-xs font-semibold text-textPrimary">
+              Where are you doing this?
+            </legend>
             {MODE_OPTIONS.map((option) => (
               <label
                 key={option.value}
@@ -390,7 +474,115 @@ export function LogSportResultModal({
             ))}
           </fieldset>
 
-          {isRound ? (
+          {measurementEntryContract ? (
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold text-textPrimary">
+                Exercise Result Entry
+              </h3>
+              <fieldset className="space-y-2">
+                <legend className="sr-only">Entry mode</legend>
+                {(["INDIVIDUAL", "CUMULATIVE"] as const).map((option) => (
+                  <label
+                    key={option}
+                    className="flex cursor-pointer items-start gap-2 text-sm text-textPrimary"
+                  >
+                    <input
+                      type="radio"
+                      name="sport-metric-entry-mode"
+                      value={option}
+                      checked={entryMode === option}
+                      onChange={() => {
+                        setEntryMode(option);
+                        setError(null);
+                      }}
+                      className="mt-0.5 h-3.5 w-3.5 border-slate-300 text-primary focus:ring-primary/30"
+                    />
+                    <span>{option === "INDIVIDUAL" ? "Individual" : "Cumulative"}</span>
+                  </label>
+                ))}
+              </fieldset>
+              {entryMode === "INDIVIDUAL" ? (
+                <div className="space-y-3">
+                  {attemptRows.map((row, index) => (
+                    <div
+                      key={`attempt-${index}`}
+                      className="space-y-3 rounded-md border border-slate-200/80 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-textPrimary">
+                          Attempt {index + 1}
+                        </p>
+                        {attemptRows.length > 1 ? (
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-textSecondary underline-offset-2 hover:underline"
+                            onClick={() => {
+                              setAttemptRows((current) =>
+                                current.filter((_, rowIndex) => rowIndex !== index),
+                              );
+                              setError(null);
+                            }}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                      <MeasurementEntryFields
+                        idPrefix={`sport-attempt-${index}`}
+                        fields={measurementEntryContract.INDIVIDUAL.fields}
+                        values={row}
+                        onChange={(key, value) => {
+                          setAttemptRows((current) =>
+                            current.map((item, rowIndex) =>
+                              rowIndex === index ? { ...item, [key]: value } : item,
+                            ),
+                          );
+                          setError(null);
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="text-xs"
+                    onClick={() => {
+                      setAttemptRows((current) => [
+                        ...current,
+                        emptyMeasurementEntryValues(
+                          measurementEntryContract.INDIVIDUAL.fields,
+                        ),
+                      ]);
+                      setError(null);
+                    }}
+                  >
+                    + Add attempt
+                  </Button>
+                </div>
+              ) : (
+                <MeasurementEntryFields
+                  idPrefix="sport-cumulative"
+                  fields={measurementEntryContract.CUMULATIVE.fields}
+                  values={cumulativeValues}
+                  onChange={(key, value) => {
+                    setCumulativeValues((current) => ({ ...current, [key]: value }));
+                    setError(null);
+                  }}
+                />
+              )}
+              <FormNotesField
+                id="sport-drill-notes"
+                value={drillForm.notes}
+                onChange={handleDrillField("notes")}
+              />
+            </div>
+          ) : contractUnreadable ? (
+            <Alert variant="danger">
+              This exercise includes a measurement entry contract, but a required
+              contract property is missing or invalid. Result fields cannot be
+              shown until the contract is complete.
+            </Alert>
+          ) : isRound ? (
             <div className="space-y-3">
               <FormNumberField
                 id="sport-round-holes"
@@ -461,7 +653,6 @@ export function LogSportResultModal({
             </div>
           ) : (
             <div className="space-y-3">
-              <DrillClassificationDisplay drill={context.drill} />
               <FormTextField
                 id="sport-drill-context"
                 label="Context / Location (optional)"
@@ -566,6 +757,10 @@ export function LogSportResultModal({
             </div>
           )}
 
+          <p className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-textSecondary">
+            Wearables logging — Coming soon
+          </p>
+
           {error ? <Alert variant="danger">{error}</Alert> : null}
         </div>
 
@@ -584,6 +779,121 @@ export function LogSportResultModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+function MeasurementEntryFields({
+  idPrefix,
+  fields,
+  values,
+  onChange,
+}: {
+  idPrefix: string;
+  fields: MeasurementEntryField[];
+  values: MeasurementEntryFormValues;
+  onChange: (key: string, value: string) => void;
+}) {
+  const groups = groupMeasurementEntryFields(fields);
+  return (
+    <div className="space-y-3">
+      {groups.map((group) => {
+        const label = group[0]?.label ?? "";
+        return (
+          <div key={`${idPrefix}-${group.map((field) => field.key).join("-")}`} className="space-y-1">
+            <p className="text-xs font-medium text-textSecondary">
+              {label}
+              {group.some((field) => field.required) ? " *" : null}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {group.map((field) => {
+                const id = `${idPrefix}-${field.key}`;
+                const value = values[field.key] ?? "";
+                if (field.type === "BOOLEAN") {
+                  return (
+                    <div key={field.key} className="flex items-center gap-3">
+                      {(["true", "false"] as const).map((option) => (
+                        <label
+                          key={option}
+                          className="flex cursor-pointer items-center gap-1.5 text-sm text-textPrimary"
+                        >
+                          <input
+                            type="radio"
+                            name={id}
+                            value={option}
+                            checked={value === option}
+                            onChange={() => onChange(field.key, option)}
+                            className="h-3.5 w-3.5 border-slate-300 text-primary focus:ring-primary/30"
+                          />
+                          <span>{option === "true" ? "Yes" : "No"}</span>
+                        </label>
+                      ))}
+                    </div>
+                  );
+                }
+                if (field.type === "ENUM") {
+                  return (
+                    <Select
+                      key={field.key}
+                      id={id}
+                      value={value}
+                      onChange={(event: React.ChangeEvent<HTMLSelectElement>) =>
+                        onChange(field.key, event.target.value)
+                      }
+                      required={field.required}
+                      aria-label={field.label}
+                    >
+                      <option value="">Select</option>
+                      {field.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  );
+                }
+                if (field.type === "STRING") {
+                  return (
+                    <Input
+                      key={field.key}
+                      id={id}
+                      type="text"
+                      value={value}
+                      onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                        onChange(field.key, event.target.value)
+                      }
+                      required={field.required}
+                      aria-label={field.label}
+                    />
+                  );
+                }
+                return (
+                  <div key={field.key} className="flex min-w-0 items-center gap-2">
+                    <Input
+                      id={id}
+                      type="number"
+                      step={field.type === "INTEGER" ? 1 : "any"}
+                      inputMode={field.type === "INTEGER" ? "numeric" : "decimal"}
+                      value={value}
+                      onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                        onChange(field.key, event.target.value)
+                      }
+                      required={field.required}
+                      className="w-24"
+                      aria-label={
+                        field.unit ? `${field.label} (${field.unit})` : field.label
+                      }
+                    />
+                    {field.unit ? (
+                      <span className="text-sm text-textSecondary">{field.unit}</span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

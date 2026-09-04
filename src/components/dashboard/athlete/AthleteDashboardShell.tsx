@@ -10,7 +10,9 @@ import {
 import { AthleteWeeklyAdherenceSection } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceSection";
 import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/AthletePendingInvitationCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
-import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
+// Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
+// uncommenting this import and the SportMetricsSection render below.
+// import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
@@ -55,17 +57,20 @@ function AthleteSportMetricsWithPlanVersion({
   entityId: string;
   athleteId: string;
 }) {
-  const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  void entityId;
+  void athleteId;
+  // const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  // return (
+  //   <SportMetricsSection
+  //     entityId={entityId}
+  //     athleteId={athleteId}
+  //     trainingPlanVersionId={trainingPlanVersionId}
+  //     titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+  //     cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+  //   />
+  // );
 
-  return (
-    <SportMetricsSection
-      entityId={entityId}
-      athleteId={athleteId}
-      trainingPlanVersionId={trainingPlanVersionId}
-      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
-      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
-    />
-  );
+  return <p className="text-sm font-medium text-textPrimary">Sports Metrics</p>;
 }
 
 export function AthleteDashboardShell() {

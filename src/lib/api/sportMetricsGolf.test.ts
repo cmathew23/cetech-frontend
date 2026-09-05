@@ -245,6 +245,177 @@ describe("parseSportMetricsGolfWeeklySummaryPayload unlinkedEvidence", () => {
   });
 });
 
+describe("sport metrics golf weekly summary Step 3 goal performance", () => {
+  it("parses nested goal, weeklyActual, and targetComparison without filling missing actual as 0", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        sport: "GOLF",
+        weekStartDate: "2026-09-01",
+        weekEndDate: "2026-09-07",
+        goalEvidence: [
+          {
+            goalId: "goal-1",
+            goal: {
+              goalName: "Improve putting",
+              successCriteria: "Make 8 of 10 from 6 feet",
+              targetValue: 80,
+              primaryMetric: {
+                key: "PUTT_MAKE_PCT",
+                unit: "%",
+                direction: "HIGHER_IS_BETTER",
+              },
+            },
+            weeklyActual: {
+              metricKey: "PUTT_MAKE_PCT",
+              unit: "%",
+              direction: "HIGHER_IS_BETTER",
+              value: 75,
+              attempts: 20,
+              successes: 15,
+              recordCount: 2,
+            },
+            targetComparison: {
+              targetValue: 80,
+              actualValue: 75,
+              direction: "HIGHER_IS_BETTER",
+              targetMet: false,
+            },
+          },
+          {
+            goalId: "goal-2",
+            goal: {
+              goalName: "Proximity to hole",
+              successCriteria: "Average under 15 ft",
+              targetValue: null,
+              primaryMetric: {
+                key: "WEDGE_PROXIMITY",
+                unit: "ft",
+                direction: "LOWER_IS_BETTER",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(parsed.weekStartDate).toBe("2026-09-01");
+    expect(parsed.weekEndDate).toBe("2026-09-07");
+    expect(parsed.goalEvidence).toHaveLength(2);
+    expect(parsed.goalEvidence[0]?.goalId).toBe("goal-1");
+    expect(parsed.goalEvidence[0]?.goal.goalName).toBe("Improve putting");
+    expect(parsed.goalEvidence[0]?.goal.successCriteria).toBe(
+      "Make 8 of 10 from 6 feet",
+    );
+    expect(parsed.goalEvidence[0]?.goal.targetValue).toBe(80);
+    expect(parsed.goalEvidence[0]?.goal.primaryMetric).toEqual({
+      key: "PUTT_MAKE_PCT",
+      unit: "%",
+      direction: "HIGHER_IS_BETTER",
+    });
+    expect(parsed.goalEvidence[0]?.weeklyActual).toEqual({
+      metricKey: "PUTT_MAKE_PCT",
+      unit: "%",
+      direction: "HIGHER_IS_BETTER",
+      value: 75,
+      attempts: 20,
+      successes: 15,
+      total: null,
+      recordCount: 2,
+    });
+    expect(parsed.goalEvidence[0]?.targetComparison).toEqual({
+      targetValue: 80,
+      actualValue: 75,
+      direction: "HIGHER_IS_BETTER",
+      targetMet: false,
+    });
+    expect(parsed.goalEvidence[1]?.goal.goalName).toBe("Proximity to hole");
+    expect(parsed.goalEvidence[1]?.goal.targetValue).toBeNull();
+    expect(parsed.goalEvidence[1]?.weeklyActual).toBeNull();
+    expect(parsed.goalEvidence[1]?.targetComparison).toBeNull();
+  });
+
+  it("preserves received goalEvidence order and keeps same-metric goals independent", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        goalEvidence: [
+          {
+            goalId: "later-listed",
+            goal: {
+              goalName: "Second listed",
+              successCriteria: "B",
+              targetValue: null,
+              primaryMetric: {
+                key: "PUTT_MAKE_PCT",
+                unit: "%",
+                direction: "HIGHER_IS_BETTER",
+              },
+            },
+          },
+          {
+            goalId: "first-listed",
+            goal: {
+              goalName: "First listed",
+              successCriteria: "A",
+              targetValue: null,
+              primaryMetric: {
+                key: "PUTT_MAKE_PCT",
+                unit: "%",
+                direction: "HIGHER_IS_BETTER",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(parsed.goalEvidence.map((group) => group.goalId)).toEqual([
+      "later-listed",
+      "first-listed",
+    ]);
+    expect(parsed.goalEvidence[0]?.goal.goalName).toBe("Second listed");
+    expect(parsed.goalEvidence[1]?.goal.goalName).toBe("First listed");
+  });
+
+  it("omits weeklyActual when value is missing so missing evidence is not 0", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        goalEvidence: [
+          {
+            goalId: "goal-empty",
+            goal: {
+              goalName: "No evidence",
+              successCriteria: "Log results",
+              targetValue: 10,
+              primaryMetric: {
+                key: "PUTT_MAKE_PCT",
+                unit: "%",
+                direction: "HIGHER_IS_BETTER",
+              },
+            },
+            weeklyActual: { unit: "%", recordCount: 0 },
+          },
+        ],
+      },
+    });
+
+    expect(parsed.goalEvidence[0]?.weeklyActual).toBeNull();
+  });
+
+  it("does not compute weeklyActual or targetMet in the weekly-summary parser", () => {
+    const source = readFileSync(
+      new URL("./sportMetricsGolf.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("successes / attempts");
+    expect(source).not.toContain("record.successes /");
+    expect(source).not.toContain("actualValue >= targetValue");
+    expect(source).toContain("targetMet: record.targetMet");
+  });
+});
+
 const comparisonPayload = {
   success: true,
   message: "Sport metric comparison fetched successfully",

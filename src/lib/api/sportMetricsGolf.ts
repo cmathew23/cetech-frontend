@@ -105,6 +105,37 @@ export type SportMetricEvidenceItem = {
   raw: unknown;
 };
 
+export type SportMetricGoalPrimaryMetric = {
+  key: string | null;
+  unit: string | null;
+  direction: string | null;
+};
+
+export type SportMetricGoalSnapshot = {
+  goalName: string | null;
+  successCriteria: string | null;
+  targetValue: number | null;
+  primaryMetric: SportMetricGoalPrimaryMetric | null;
+};
+
+export type SportMetricGoalWeeklyActual = {
+  metricKey: string | null;
+  unit: string | null;
+  direction: string | null;
+  value: number;
+  attempts: number | null;
+  successes: number | null;
+  total: number | null;
+  recordCount: number | null;
+};
+
+export type SportMetricGoalTargetComparison = {
+  targetValue: number | null;
+  actualValue: number | null;
+  direction: string | null;
+  targetMet: boolean;
+};
+
 export type SportMetricGoalEvidenceGroup = {
   goalId: string | null;
   goalTitle: string;
@@ -112,6 +143,9 @@ export type SportMetricGoalEvidenceGroup = {
   successCriteria: string | null;
   evidenceStatus: string | null;
   evidence: SportMetricEvidenceItem[];
+  goal: SportMetricGoalSnapshot;
+  weeklyActual: SportMetricGoalWeeklyActual | null;
+  targetComparison: SportMetricGoalTargetComparison | null;
   raw: unknown;
 };
 
@@ -336,14 +370,68 @@ function parseGoalGroupEvidenceList(
   return [];
 }
 
+function parsePrimaryMetric(raw: unknown): SportMetricGoalPrimaryMetric | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const key = pickString(record, ["key"]);
+  const unit = pickString(record, ["unit"]);
+  const direction = pickString(record, ["direction"]);
+  if (!key && !unit && !direction) return null;
+  return { key, unit, direction };
+}
+
+function parseGoalSnapshot(raw: unknown): SportMetricGoalSnapshot {
+  const record = asRecord(raw);
+  return {
+    goalName: pickString(record, ["goalName"]),
+    successCriteria: pickString(record, ["successCriteria"]),
+    targetValue: record ? readFiniteNumber(record.targetValue) : null,
+    primaryMetric: parsePrimaryMetric(record?.primaryMetric),
+  };
+}
+
+function parseWeeklyActual(raw: unknown): SportMetricGoalWeeklyActual | null {
+  if (raw === undefined || raw === null) return null;
+  const record = asRecord(raw);
+  if (!record || !("value" in record)) return null;
+  const value = readFiniteNumber(record.value);
+  if (value === null) return null;
+  return {
+    metricKey: pickString(record, ["metricKey"]),
+    unit: pickString(record, ["unit"]),
+    direction: pickString(record, ["direction"]),
+    value,
+    attempts: readFiniteNumber(record.attempts),
+    successes: readFiniteNumber(record.successes),
+    total: readFiniteNumber(record.total),
+    recordCount: readFiniteNumber(record.recordCount),
+  };
+}
+
+function parseTargetComparison(
+  raw: unknown,
+): SportMetricGoalTargetComparison | null {
+  if (raw === undefined || raw === null) return null;
+  const record = asRecord(raw);
+  if (!record || typeof record.targetMet !== "boolean") return null;
+  return {
+    targetValue: readFiniteNumber(record.targetValue),
+    actualValue: readFiniteNumber(record.actualValue),
+    direction: pickString(record, ["direction"]),
+    targetMet: record.targetMet,
+  };
+}
+
 function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | null {
   const record = asRecord(raw);
   if (!record) return null;
 
-  const goal = asRecord(record.goal);
+  const goal = parseGoalSnapshot(record.goal);
+  const nestedGoal = asRecord(record.goal);
   const goalTitle =
+    goal.goalName ??
     pickString(record, ["goalTitle", "title", "goalName", "name"]) ??
-    pickString(goal, ["title", "goalTitle", "name", "label"]) ??
+    pickString(nestedGoal, ["title", "goalTitle", "name", "label"]) ??
     "Goal";
 
   const evidence = parseGoalGroupEvidenceList(record);
@@ -353,10 +441,14 @@ function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | nu
     goalTitle,
     goalStatus: pickString(record, ["goalStatus", "status"]),
     successCriteria:
+      goal.successCriteria ??
       pickString(record, ["successCriteria", "criteria", "target"]) ??
-      pickString(goal, ["successCriteria", "criteria", "target"]),
+      pickString(nestedGoal, ["successCriteria", "criteria", "target"]),
     evidenceStatus: pickString(record, ["evidenceStatus", "summaryStatus"]),
     evidence,
+    goal,
+    weeklyActual: parseWeeklyActual(record.weeklyActual),
+    targetComparison: parseTargetComparison(record.targetComparison),
     raw,
   };
 }

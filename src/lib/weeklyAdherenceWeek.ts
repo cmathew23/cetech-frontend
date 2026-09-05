@@ -1,6 +1,14 @@
 import type { AthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { getLocalDateKey, normalizeDateOnlyKey } from "@/lib/dateTime";
 
+export function releasedSkillsTrainingPlanVersionId(
+  journal: Pick<AthleteWeeklyPlanJournal, "domains">,
+): string {
+  const skills = journal.domains.SKILLS;
+  if (skills.status !== "RELEASED") return "";
+  return skills.versionId?.trim() ?? "";
+}
+
 export type WeeklyAdherencePlanRange = {
   weekStart: string;
   weekEnd: string;

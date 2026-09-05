@@ -15,6 +15,7 @@ import {
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
+  releasedSkillsTrainingPlanVersionId,
   resolveWeeklyAdherencePlanRangeFromJournal,
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
@@ -329,7 +330,7 @@ export function WeeklyAdherenceProvider({
         });
         if (!cancelled) {
           setPlanWeekRange(weekRange);
-          setTrainingPlanVersionId(journal.domains.SKILLS?.versionId?.trim() ?? "");
+          setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
           setSummary(data);
           setError(null);
         }

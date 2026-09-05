@@ -17,7 +17,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(page).toContain("return <AthleteDashboardShell />");
   });
 
-  it("renders a Sports Metrics placeholder without mounting legacy Sports Metrics UI", () => {
+  it("renders Weekly Goal Performance without mounting legacy Sports Metrics UI", () => {
     const source = readRelative("./AthleteDashboardShell.tsx");
     const activeImport = source
       .split("\n")
@@ -28,7 +28,10 @@ describe("athlete Sports Metrics legacy isolation", () => {
       );
 
     expect(activeImport).toBeUndefined();
-    expect(source).toContain('return <p className="text-sm font-medium text-textPrimary">Sports Metrics</p>');
+    expect(source).not.toContain(
+      'return <p className="text-sm font-medium text-textPrimary">Sports Metrics</p>',
+    );
+    expect(source).toContain("<AthleteWeeklyGoalPerformanceSection");
     expect(source).not.toContain("fetchSportMetricsGolfWeeklySummary");
     expect(source).not.toContain("fetchSportMetricsGolfComparison");
     expect(source).not.toContain("GolfSportsMetricsComparison");

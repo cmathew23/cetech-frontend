@@ -37,6 +37,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(source).not.toContain("GolfSportsMetricsComparison");
     expect(source).not.toContain("SportMetricsEvidenceCards");
     expect(source).toContain("<AthleteSportMetricsWithPlanVersion");
+    expect(source).not.toContain("allowCoachPracticeRating");
   });
 
   it("does not execute the commented legacy SportMetricsSection path", () => {
@@ -72,8 +73,9 @@ describe("athlete Sports Metrics legacy isolation", () => {
       "utf8",
     );
 
-    expect(overview).toContain("<SportMetricsSection");
     expect(performance).toContain("<SportMetricsSection");
+    expect(performance).toContain("allowCoachPracticeRating");
+    expect(overview).toContain("<SportMetricsSection");
     expect(section).toContain("fetchSportMetricsGolfWeeklySummary");
     expect(section).toContain("<GolfSportsMetricsComparisonControls");
   });

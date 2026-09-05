@@ -5,8 +5,12 @@ import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Select } from "@/components/ui/Select";
 import {
   fetchSportMetricsGolfWeeklySummary,
+  postGolfCoachPracticeRating,
+  releasedPlanTaxonomyAreaKeys,
+  submitGolfCoachPracticeRatingThenRefetch,
   type SportMetricExerciseTrend,
   type SportMetricGoalEvidenceGroup,
   type SportMetricTaxonomyScore,
@@ -460,10 +464,184 @@ export function AthleteTaxonomyPerformanceContent({
   );
 }
 
-export function AthleteSportsMetricsStep4aContent({
+export const COACH_PRACTICE_RATING_OPTIONS = [
+  { rating: 1, label: "1 — Very Poor" },
+  { rating: 2, label: "2 — Poor" },
+  { rating: 3, label: "3 — Average / Stable" },
+  { rating: 4, label: "4 — Good" },
+  { rating: 5, label: "5 — Very Good" },
+] as const;
+
+export function AthletePracticePerformanceContent({
   summary,
 }: {
   summary: SportMetricsGolfWeeklySummary;
+}) {
+  const ratedKeys = new Set(
+    summary.coachPracticeRatings
+      .map((row) => row.taxonomyAreaKey?.trim() ?? "")
+      .filter((key) => key !== ""),
+  );
+  const unratedKeys = releasedPlanTaxonomyAreaKeys(summary).filter(
+    (key) => !ratedKeys.has(key),
+  );
+
+  return (
+    <MetricsSectionCard title="Practice Performance">
+      <div className="space-y-4">
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Practice Performance">
+            {formatCopiedNumber(summary.practiceScoreOutOf100, "Not enough data")}
+          </Field>
+          {summary.practiceNormalizedScore !== null ? (
+            <Field label="Practice normalized">
+              {String(summary.practiceNormalizedScore)}
+            </Field>
+          ) : null}
+          <Field label="Coach Practice Performance">
+            {formatCopiedNumber(
+              summary.coachPracticeScoreOutOf100,
+              "Not rated",
+            )}
+          </Field>
+          {summary.coachPracticeNormalized !== null ? (
+            <Field label="Coach Practice normalized">
+              {String(summary.coachPracticeNormalized)}
+            </Field>
+          ) : null}
+          <Field label="Practice-side Performance">
+            {formatCopiedNumber(
+              summary.practiceSideScoreOutOf100,
+              "Unavailable",
+            )}
+          </Field>
+          {summary.practiceSideNormalized !== null ? (
+            <Field label="Practice-side normalized">
+              {String(summary.practiceSideNormalized)}
+            </Field>
+          ) : null}
+        </dl>
+
+        <div>
+          <p className="mb-2 text-xs text-textSecondary">Coach Practice Ratings</p>
+          {summary.coachPracticeRatings.length === 0 && unratedKeys.length === 0 ? (
+            <p className="text-sm text-textSecondary">No Coach Practice Ratings</p>
+          ) : (
+            <ul className="space-y-2">
+              {summary.coachPracticeRatings.map((row, index) => (
+                <li
+                  key={`${row.taxonomyAreaKey ?? "rating"}-${index}`}
+                  className="text-sm text-textPrimary"
+                >
+                  {(row.taxonomyAreaKey?.trim() || "—") +
+                    ": " +
+                    (row.rating === null ? "Unrated" : String(row.rating)) +
+                    (row.coachRatingScoreOutOf100 === null
+                      ? ""
+                      : ` · ${row.coachRatingScoreOutOf100}`)}
+                </li>
+              ))}
+              {unratedKeys.map((key) => (
+                <li key={`unrated-${key}`} className="text-sm text-textSecondary">
+                  {key}: Unrated
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </MetricsSectionCard>
+  );
+}
+
+export function CoachPracticeRatingForm({
+  summary,
+  taxonomyAreaKey,
+  rating,
+  error,
+  submitting,
+  onTaxonomyAreaKeyChange,
+  onRatingChange,
+  onSubmit,
+}: {
+  summary: SportMetricsGolfWeeklySummary;
+  taxonomyAreaKey: string;
+  rating: number | "";
+  error: string | null;
+  submitting: boolean;
+  onTaxonomyAreaKeyChange: (value: string) => void;
+  onRatingChange: (value: number | "") => void;
+  onSubmit: () => void;
+}) {
+  const taxonomies = releasedPlanTaxonomyAreaKeys(summary);
+  if (taxonomies.length === 0) {
+    return (
+      <MetricsSectionCard title="Coach Practice Rating">
+        <p className="text-sm text-textSecondary">
+          No released-plan taxonomies available to rate.
+        </p>
+      </MetricsSectionCard>
+    );
+  }
+
+  return (
+    <MetricsSectionCard title="Coach Practice Rating">
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <label className="block space-y-1">
+          <span className="text-xs text-textSecondary">Taxonomy</span>
+          <Select
+            value={taxonomyAreaKey}
+            onChange={(event: { target: { value: string } }) =>
+              onTaxonomyAreaKeyChange(event.target.value)
+            }
+          >
+            {taxonomies.map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs text-textSecondary">Rating</span>
+          <Select
+            value={rating === "" ? "" : String(rating)}
+            onChange={(event: { target: { value: string } }) => {
+              const next = Number(event.target.value);
+              onRatingChange(Number.isInteger(next) ? next : "");
+            }}
+          >
+            <option value="">Select rating</option>
+            {COACH_PRACTICE_RATING_OPTIONS.map((option) => (
+              <option key={option.rating} value={option.rating}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {error ? <Alert variant="danger">{error}</Alert> : null}
+        <Button type="submit" disabled={submitting || rating === ""}>
+          Submit rating
+        </Button>
+      </form>
+    </MetricsSectionCard>
+  );
+}
+
+export function AthleteSportsMetricsStep4aContent({
+  summary,
+  allowCoachPracticeRating = false,
+  coachRatingForm,
+}: {
+  summary: SportMetricsGolfWeeklySummary;
+  allowCoachPracticeRating?: boolean;
+  coachRatingForm?: React.ReactNode;
 }) {
   return (
     <div className="min-w-0 space-y-4">
@@ -480,6 +658,8 @@ export function AthleteSportsMetricsStep4aContent({
         strongestTaxonomy={summary.strongestTaxonomy}
         weakestTaxonomy={summary.weakestTaxonomy}
       />
+      <AthletePracticePerformanceContent summary={summary} />
+      {allowCoachPracticeRating ? coachRatingForm : null}
     </div>
   );
 }
@@ -488,10 +668,12 @@ export function AthleteWeeklyGoalPerformanceSection({
   entityId,
   athleteId,
   trainingPlanVersionId,
+  allowCoachPracticeRating = false,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
+  allowCoachPracticeRating?: boolean;
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -499,6 +681,10 @@ export function AthleteWeeklyGoalPerformanceSection({
   const [error, setError] = useState<string | null>(null);
   const [resolvedFetchKey, setResolvedFetchKey] = useState("");
   const [reloadKey, setReloadKey] = useState(1);
+  const [taxonomyAreaKey, setTaxonomyAreaKey] = useState("");
+  const [rating, setRating] = useState<number | "">("");
+  const [ratingError, setRatingError] = useState<string | null>(null);
+  const [submittingRating, setSubmittingRating] = useState(false);
 
   const versionId = trainingPlanVersionId?.trim() ?? "";
   const hasIdentifiers = entityId.trim() !== "" && athleteId.trim() !== "";
@@ -536,7 +722,44 @@ export function AthleteWeeklyGoalPerformanceSection({
     };
   }, [athleteId, entityId, fetchKey, hasIdentifiers, versionId]);
 
+  useEffect(() => {
+    if (!summary) return;
+    const keys = releasedPlanTaxonomyAreaKeys(summary);
+    setTaxonomyAreaKey((current) =>
+      current !== "" && keys.includes(current) ? current : (keys[0] ?? ""),
+    );
+  }, [summary]);
+
   const reload = () => setReloadKey((current) => current + 1);
+
+  const submitCoachRating = () => {
+    if (typeof rating !== "number") return;
+    setSubmittingRating(true);
+    setRatingError(null);
+    void (async () => {
+      try {
+        const nextSummary = await submitGolfCoachPracticeRatingThenRefetch({
+          postRating: () =>
+            postGolfCoachPracticeRating(entityId.trim(), athleteId.trim(), {
+              trainingPlanVersionId: versionId,
+              taxonomyAreaKey,
+              rating,
+            }),
+          refetchWeeklySummary: () =>
+            fetchSportMetricsGolfWeeklySummary({
+              entityId: entityId.trim(),
+              athleteId: athleteId.trim(),
+              trainingPlanVersionId: versionId,
+            }),
+        });
+        setSummary(nextSummary);
+      } catch (e) {
+        setRatingError(formatLoadError(e));
+      } finally {
+        setSubmittingRating(false);
+      }
+    })();
+  };
 
   if (!hasIdentifiers) {
     return (
@@ -589,5 +812,22 @@ export function AthleteWeeklyGoalPerformanceSection({
     );
   }
 
-  return <AthleteSportsMetricsStep4aContent summary={summary} />;
+  return (
+    <AthleteSportsMetricsStep4aContent
+      summary={summary}
+      allowCoachPracticeRating={allowCoachPracticeRating}
+      coachRatingForm={
+        <CoachPracticeRatingForm
+          summary={summary}
+          taxonomyAreaKey={taxonomyAreaKey}
+          rating={rating}
+          error={ratingError}
+          submitting={submittingRating}
+          onTaxonomyAreaKeyChange={setTaxonomyAreaKey}
+          onRatingChange={setRating}
+          onSubmit={submitCoachRating}
+        />
+      }
+    />
+  );
 }

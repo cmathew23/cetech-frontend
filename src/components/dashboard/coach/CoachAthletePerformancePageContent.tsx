@@ -1,5 +1,6 @@
 "use client";
 
+import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
@@ -25,6 +26,7 @@ import {
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
 import {
+  releasedSkillsTrainingPlanVersionId,
   resolveWeeklyAdherencePlanRangeFromJournal,
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
@@ -116,9 +118,7 @@ export function CoachAthletePerformancePageContent() {
         if (range === null) throw new Error("Could not resolve released plan week.");
 
         setWeekRange(range);
-        setTrainingPlanVersionId(
-          journal.domains.SKILLS?.versionId?.trim() ?? null,
-        );
+        setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
 
         const result = await fetchWeeklyAdherenceSummary({
           entityId,
@@ -245,13 +245,21 @@ export function CoachAthletePerformancePageContent() {
           ) : null}
 
           {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (
-            <SportMetricsSection
-              entityId={entityId}
-              athleteId={selectedAthleteId}
-              trainingPlanVersionId={trainingPlanVersionId}
-              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
-              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
-            />
+            <>
+              <AthleteWeeklyGoalPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                allowCoachPracticeRating
+              />
+              <SportMetricsSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              />
+            </>
           ) : null}
 
           {!adherenceLoading && weekRange ? (

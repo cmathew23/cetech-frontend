@@ -150,6 +150,11 @@ export const paths = {
     },
     athleteSportMetricsGolfRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
+    athleteSportMetricsGolfCoachPracticeRatings: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/coach-practice-ratings`,
     athleteWearableProviders: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/providers`,
     athleteWearableConnections: (entityId: string, athleteId: string) =>

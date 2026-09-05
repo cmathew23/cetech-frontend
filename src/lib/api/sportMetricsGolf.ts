@@ -116,6 +116,7 @@ export type SportMetricGoalSnapshot = {
   successCriteria: string | null;
   targetValue: number | null;
   primaryMetric: SportMetricGoalPrimaryMetric | null;
+  taxonomyAreaKey: string | null;
 };
 
 export type SportMetricGoalWeeklyActual = {
@@ -212,6 +213,15 @@ export type SportMetricGoalEvidenceGroup = {
   raw: unknown;
 };
 
+export type SportMetricCoachPracticeRating = {
+  taxonomyAreaKey: string | null;
+  rating: number | null;
+  coachRatingNormalized: number | null;
+  coachRatingScoreOutOf100: number | null;
+  planStartDate: string | null;
+  planEndDate: string | null;
+};
+
 export type SportMetricsGolfWeeklySummary = {
   sport: string;
   weekStartDate: string;
@@ -226,6 +236,13 @@ export type SportMetricsGolfWeeklySummary = {
   taxonomyScores: SportMetricTaxonomyScore[];
   strongestTaxonomy: SportMetricTaxonomyScore | null;
   weakestTaxonomy: SportMetricTaxonomyScore | null;
+  coachPracticeRatings: SportMetricCoachPracticeRating[];
+  practiceNormalizedScore: number | null;
+  practiceScoreOutOf100: number | null;
+  coachPracticeNormalized: number | null;
+  coachPracticeScoreOutOf100: number | null;
+  practiceSideNormalized: number | null;
+  practiceSideScoreOutOf100: number | null;
   raw: unknown;
 };
 
@@ -454,6 +471,7 @@ function parseGoalSnapshot(raw: unknown): SportMetricGoalSnapshot {
     successCriteria: pickString(record, ["successCriteria"]),
     targetValue: record ? readFiniteNumber(record.targetValue) : null,
     primaryMetric: parsePrimaryMetric(record?.primaryMetric),
+    taxonomyAreaKey: pickString(record, ["taxonomyAreaKey"]),
   };
 }
 
@@ -593,6 +611,21 @@ function parseTaxonomyScore(raw: unknown): SportMetricTaxonomyScore | null {
   };
 }
 
+function parseCoachPracticeRating(
+  raw: unknown,
+): SportMetricCoachPracticeRating | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    taxonomyAreaKey: pickString(record, ["taxonomyAreaKey"]),
+    rating: readFiniteNumber(record.rating),
+    coachRatingNormalized: readFiniteNumber(record.coachRatingNormalized),
+    coachRatingScoreOutOf100: readFiniteNumber(record.coachRatingScoreOutOf100),
+    planStartDate: pickString(record, ["planStartDate"]),
+    planEndDate: pickString(record, ["planEndDate"]),
+  };
+}
+
 function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -662,7 +695,8 @@ function unwrapSportMetricsGolfWeeklySummaryPayload(
     "goalEvidence" in direct ||
     "unlinkedEvidence" in direct ||
     "exerciseTrends" in direct ||
-    "taxonomyScores" in direct
+    "taxonomyScores" in direct ||
+    "coachPracticeRatings" in direct
   ) {
     return direct;
   }
@@ -717,6 +751,16 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
     taxonomyScores: mapRecordArray(record.taxonomyScores, parseTaxonomyScore),
     strongestTaxonomy: parseTaxonomyScore(record.strongestTaxonomy),
     weakestTaxonomy: parseTaxonomyScore(record.weakestTaxonomy),
+    coachPracticeRatings: mapRecordArray(
+      record.coachPracticeRatings,
+      parseCoachPracticeRating,
+    ),
+    practiceNormalizedScore: readFiniteNumber(record.practiceNormalizedScore),
+    practiceScoreOutOf100: readFiniteNumber(record.practiceScoreOutOf100),
+    coachPracticeNormalized: readFiniteNumber(record.coachPracticeNormalized),
+    coachPracticeScoreOutOf100: readFiniteNumber(record.coachPracticeScoreOutOf100),
+    practiceSideNormalized: readFiniteNumber(record.practiceSideNormalized),
+    practiceSideScoreOutOf100: readFiniteNumber(record.practiceSideScoreOutOf100),
     raw: payload,
   };
 }
@@ -979,6 +1023,89 @@ export async function fetchSportMetricsGolfWeeklySummary(params: {
   );
 
   return parseSportMetricsGolfWeeklySummaryPayload(raw);
+}
+
+export function releasedPlanTaxonomyAreaKeys(
+  summary: SportMetricsGolfWeeklySummary,
+): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const group of summary.goalEvidence) {
+    const key = group.goal.taxonomyAreaKey?.trim() ?? "";
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+export type PostGolfCoachPracticeRatingPayload = {
+  trainingPlanVersionId: string;
+  taxonomyAreaKey: string;
+  rating: number;
+};
+
+export function buildGolfCoachPracticeRatingRequestBody(
+  payload: PostGolfCoachPracticeRatingPayload,
+): PostGolfCoachPracticeRatingPayload {
+  const trainingPlanVersionId = payload.trainingPlanVersionId.trim();
+  const taxonomyAreaKey = payload.taxonomyAreaKey.trim();
+  const rating = payload.rating;
+
+  if (trainingPlanVersionId === "" || taxonomyAreaKey === "") {
+    throw {
+      message: "Training plan version and taxonomyAreaKey are required.",
+      status: 400,
+      code: "SPORT_METRICS_GOLF_COACH_PRACTICE_RATING_INVALID",
+    };
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw {
+      message: "rating must be an integer from 1 to 5.",
+      status: 400,
+      code: "SPORT_METRICS_GOLF_COACH_PRACTICE_RATING_INVALID",
+    };
+  }
+
+  return { trainingPlanVersionId, taxonomyAreaKey, rating };
+}
+
+export async function postGolfCoachPracticeRating(
+  entityId: string,
+  athleteId: string,
+  payload: PostGolfCoachPracticeRatingPayload,
+): Promise<unknown> {
+  const resolvedEntityId = entityId.trim();
+  const resolvedAthleteId = athleteId.trim();
+  if (resolvedEntityId === "" || resolvedAthleteId === "") {
+    throw {
+      message: "Entity and athlete identifiers are required.",
+      status: 400,
+      code: "SPORT_METRICS_GOLF_IDS_REQUIRED",
+    };
+  }
+
+  const requestBody = buildGolfCoachPracticeRatingRequestBody(payload);
+  return apiRequest(
+    paths.entities.athleteSportMetricsGolfCoachPracticeRatings(
+      resolvedEntityId,
+      resolvedAthleteId,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+      timeoutMs: SPORT_METRICS_GOLF_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function submitGolfCoachPracticeRatingThenRefetch(params: {
+  postRating: () => Promise<unknown>;
+  refetchWeeklySummary: () => Promise<SportMetricsGolfWeeklySummary>;
+}): Promise<SportMetricsGolfWeeklySummary> {
+  await params.postRating();
+  return params.refetchWeeklySummary();
 }
 
 export async function fetchSportMetricsGolfComparison(

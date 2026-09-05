@@ -10,6 +10,7 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import {
+  buildGolfCoachPracticeRatingRequestBody,
   buildGolfSportMetricRecordRequestBody,
   fetchSportMetricsGolfComparison,
   fetchSportMetricsGolfWeeklySummary,
@@ -17,7 +18,10 @@ import {
   hasSportMetricsGolfEvidence,
   parseSportMetricsGolfComparisonPayload,
   parseSportMetricsGolfWeeklySummaryPayload,
+  postGolfCoachPracticeRating,
   postGolfSportMetricRecord,
+  releasedPlanTaxonomyAreaKeys,
+  submitGolfCoachPracticeRatingThenRefetch,
 } from "@/lib/api/sportMetricsGolf";
 
 function parsePostJsonBody(options: Record<string, unknown>): Record<string, unknown> {
@@ -339,6 +343,13 @@ describe("sport metrics golf weekly summary Step 3 goal performance", () => {
     expect(parsed.taxonomyScores).toEqual([]);
     expect(parsed.strongestTaxonomy).toBeNull();
     expect(parsed.weakestTaxonomy).toBeNull();
+    expect(parsed.coachPracticeRatings).toEqual([]);
+    expect(parsed.practiceNormalizedScore).toBeNull();
+    expect(parsed.practiceScoreOutOf100).toBeNull();
+    expect(parsed.coachPracticeNormalized).toBeNull();
+    expect(parsed.coachPracticeScoreOutOf100).toBeNull();
+    expect(parsed.practiceSideNormalized).toBeNull();
+    expect(parsed.practiceSideScoreOutOf100).toBeNull();
   });
 
   it("preserves received goalEvidence order and keeps same-metric goals independent", () => {
@@ -646,9 +657,136 @@ describe("sport metrics golf weekly summary Step 4A", () => {
     expect(source).not.toContain("YTrend +");
     expect(source).not.toContain("strongestTaxonomy =");
     expect(source).toContain("strongestTaxonomy: parseTaxonomyScore(record.strongestTaxonomy)");
-    expect(source).not.toContain("practicePerformance");
     expect(source).not.toContain("overallScore");
-    expect(source).not.toContain("coachPracticeRating");
+    expect(source).not.toContain("coachMatchRating");
+  });
+});
+
+describe("sport metrics golf weekly summary Step 4B", () => {
+  it("copies all seven Step 4B top-level fields and preserves coachPracticeRatings order", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        coachPracticeRatings: [
+          {
+            taxonomyAreaKey: "wedge_play",
+            rating: 4,
+            coachRatingNormalized: 0.75,
+            coachRatingScoreOutOf100: 75,
+            planStartDate: "2026-09-01",
+            planEndDate: "2026-09-07",
+          },
+          {
+            taxonomyAreaKey: "putting",
+            rating: 2,
+            coachRatingNormalized: 0.25,
+            coachRatingScoreOutOf100: 25,
+            planStartDate: "2026-09-01",
+            planEndDate: "2026-09-07",
+          },
+        ],
+        practiceNormalizedScore: 0.6,
+        practiceScoreOutOf100: 60,
+        coachPracticeNormalized: 0.5,
+        coachPracticeScoreOutOf100: 50,
+        practiceSideNormalized: 0.56,
+        practiceSideScoreOutOf100: 56,
+      },
+    });
+
+    expect(parsed.practiceNormalizedScore).toBe(0.6);
+    expect(parsed.practiceScoreOutOf100).toBe(60);
+    expect(parsed.coachPracticeNormalized).toBe(0.5);
+    expect(parsed.coachPracticeScoreOutOf100).toBe(50);
+    expect(parsed.practiceSideNormalized).toBe(0.56);
+    expect(parsed.practiceSideScoreOutOf100).toBe(56);
+    expect(parsed.coachPracticeRatings.map((row) => row.taxonomyAreaKey)).toEqual([
+      "wedge_play",
+      "putting",
+    ]);
+    expect(parsed.coachPracticeRatings[0]?.rating).toBe(4);
+    expect(parsed.coachPracticeRatings[0]?.coachRatingScoreOutOf100).toBe(75);
+  });
+
+  it("keeps null Step 4B scores as null instead of 0", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        coachPracticeRatings: [],
+        practiceNormalizedScore: null,
+        practiceScoreOutOf100: null,
+        coachPracticeNormalized: null,
+        coachPracticeScoreOutOf100: null,
+        practiceSideNormalized: null,
+        practiceSideScoreOutOf100: null,
+      },
+    });
+
+    expect(parsed.coachPracticeRatings).toEqual([]);
+    expect(parsed.practiceNormalizedScore).toBeNull();
+    expect(parsed.practiceScoreOutOf100).toBeNull();
+    expect(parsed.coachPracticeNormalized).toBeNull();
+    expect(parsed.coachPracticeScoreOutOf100).toBeNull();
+    expect(parsed.practiceSideNormalized).toBeNull();
+    expect(parsed.practiceSideScoreOutOf100).toBeNull();
+  });
+
+  it("does not calculate Step 4B aggregates or normalizations", () => {
+    const source = readFileSync(
+      new URL("./sportMetricsGolf.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("0.70 *");
+    expect(source).not.toContain("0.30 *");
+    expect(source).not.toContain("practiceScoreOutOf100 =");
+    expect(source).not.toContain("practiceSideScoreOutOf100 =");
+    expect(source).toContain(
+      "practiceScoreOutOf100: readFiniteNumber(record.practiceScoreOutOf100)",
+    );
+  });
+});
+
+describe("releasedPlanTaxonomyAreaKeys", () => {
+  it("builds eligibility only from goalEvidence[].goal.taxonomyAreaKey in first-seen order", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        goalEvidence: [
+          { goalId: "g1", goal: { goalName: "A", taxonomyAreaKey: "putting" } },
+          { goalId: "g2", goal: { goalName: "B", taxonomyAreaKey: "" } },
+          { goalId: "g3", goal: { goalName: "C" } },
+          { goalId: "g4", goal: { goalName: "D", taxonomyAreaKey: "wedge_play" } },
+          { goalId: "g5", goal: { goalName: "E", taxonomyAreaKey: "putting" } },
+          { goalId: "g6", goal: { goalName: "F", taxonomyAreaKey: "   " } },
+        ],
+        taxonomyScores: [{ taxonomyAreaKey: "driving" }],
+        exerciseTrends: [{ taxonomyAreaKey: "short_game", currentActual: 1 }],
+        coachPracticeRatings: [{ taxonomyAreaKey: "bunker", rating: 3 }],
+        strongestTaxonomy: { taxonomyAreaKey: "distance_control" },
+        weakestTaxonomy: { taxonomyAreaKey: "irons" },
+      },
+    });
+
+    expect(releasedPlanTaxonomyAreaKeys(parsed)).toEqual([
+      "putting",
+      "wedge_play",
+    ]);
+  });
+
+  it("does not make a taxonomy eligible from scores, trends, ratings, or strongest/weakest alone", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        goalEvidence: [],
+        taxonomyScores: [{ taxonomyAreaKey: "taxonomy_scores_only" }],
+        exerciseTrends: [{ taxonomyAreaKey: "exercise_trends_only", currentActual: 1 }],
+        coachPracticeRatings: [{ taxonomyAreaKey: "ratings_only", rating: 5 }],
+        strongestTaxonomy: { taxonomyAreaKey: "strongest_only" },
+        weakestTaxonomy: { taxonomyAreaKey: "weakest_only" },
+      },
+    });
+
+    expect(releasedPlanTaxonomyAreaKeys(parsed)).toEqual([]);
   });
 });
 
@@ -1018,5 +1156,73 @@ describe("postGolfSportMetricRecord", () => {
 
     const path = apiRequestMock.mock.calls[0]?.[0] as string;
     expect(path).not.toMatch(/adherence/i);
+  });
+});
+
+describe("postGolfCoachPracticeRating", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("POSTs exactly trainingPlanVersionId, taxonomyAreaKey, and integer rating", async () => {
+    apiRequestMock.mockResolvedValue({ success: true, data: {} });
+
+    await postGolfCoachPracticeRating("entity-1", "athlete-1", {
+      trainingPlanVersionId: "skills-released-version",
+      taxonomyAreaKey: "putting",
+      rating: 4,
+    });
+
+    const [path, options] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    const body = parsePostJsonBody(options);
+    expect(path).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/golf/coach-practice-ratings",
+    );
+    expect(options.method).toBe("POST");
+    expect(body).toEqual({
+      trainingPlanVersionId: "skills-released-version",
+      taxonomyAreaKey: "putting",
+      rating: 4,
+    });
+    expect(typeof body.rating).toBe("number");
+    expect(Number.isInteger(body.rating)).toBe(true);
+    expect(Object.keys(body)).toEqual([
+      "trainingPlanVersionId",
+      "taxonomyAreaKey",
+      "rating",
+    ]);
+  });
+
+  it("rejects a non-integer rating before sending", () => {
+    expect(() =>
+      buildGolfCoachPracticeRatingRequestBody({
+        trainingPlanVersionId: "version-1",
+        taxonomyAreaKey: "putting",
+        rating: 4.5,
+      }),
+    ).toThrow();
+    expect(apiRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("refetches weekly summary after a successful POST", async () => {
+    const postRating = vi.fn().mockResolvedValue({ success: true });
+    const refetchWeeklySummary = vi.fn().mockResolvedValue({
+      practiceScoreOutOf100: 70,
+    });
+
+    const result = await submitGolfCoachPracticeRatingThenRefetch({
+      postRating,
+      refetchWeeklySummary,
+    });
+
+    expect(postRating).toHaveBeenCalledTimes(1);
+    expect(refetchWeeklySummary).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ practiceScoreOutOf100: 70 });
+    expect(postRating.mock.invocationCallOrder[0]).toBeLessThan(
+      refetchWeeklySummary.mock.invocationCallOrder[0]!,
+    );
   });
 });

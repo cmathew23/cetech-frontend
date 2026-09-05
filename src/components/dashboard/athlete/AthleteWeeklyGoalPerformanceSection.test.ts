@@ -1,8 +1,11 @@
 import {
   AthleteExercisePerformanceContent,
+  AthletePracticePerformanceContent,
   AthleteSportsMetricsStep4aContent,
   AthleteTaxonomyPerformanceContent,
   AthleteWeeklyGoalPerformanceContent,
+  COACH_PRACTICE_RATING_OPTIONS,
+  CoachPracticeRatingForm,
   formatGoalMetricDirection,
 } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { parseSportMetricsGolfWeeklySummaryPayload } from "@/lib/api/sportMetricsGolf";
@@ -10,6 +13,32 @@ import { readFileSync } from "node:fs";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/ui/Button", async () => {
+  const { createElement } = await import("react");
+  return {
+    Button: ({
+      children,
+      ...props
+    }: {
+      children?: ReactNode;
+      [key: string]: unknown;
+    }) => createElement("button", props, children),
+  };
+});
+
+vi.mock("@/components/ui/Select", async () => {
+  const { createElement } = await import("react");
+  return {
+    Select: ({
+      children,
+      ...props
+    }: {
+      children?: ReactNode;
+      [key: string]: unknown;
+    }) => createElement("select", props, children),
+  };
+});
 
 vi.mock("@/components/ui/Card", async () => {
   const { createElement } = await import("react");
@@ -300,6 +329,7 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
     expect(uncommentedMount).toEqual([]);
     expect(shell).toContain("//   <SportMetricsSection");
     expect(shell).toContain("<AthleteWeeklyGoalPerformanceSection");
+    expect(shell).not.toContain("allowCoachPracticeRating");
   });
 
   it("requests weekly-summary only when a released Skills versionId is supplied", () => {
@@ -589,9 +619,135 @@ describe("Athlete Sports Metrics Step 4A", () => {
     expect(source).not.toContain("0.40");
     expect(source).not.toContain("YTrend +");
     expect(source).not.toContain("taxonomyScores.sort");
-    expect(source).not.toContain("practicePerformance");
     expect(source).not.toContain("overallScore");
-    expect(source).not.toContain("coachPracticeRating");
+    expect(source).not.toContain("coachMatchRating");
     expect(source).not.toContain("SportMetricsSection");
+  });
+});
+
+describe("Athlete Sports Metrics Step 4B", () => {
+  it("displays backend practice, coach practice, and practice-side scores without using 0 for null", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: 62,
+        practiceNormalizedScore: 0.62,
+        coachPracticeScoreOutOf100: 70,
+        coachPracticeNormalized: 0.7,
+        practiceSideScoreOutOf100: 65,
+        practiceSideNormalized: 0.65,
+        coachPracticeRatings: [
+          {
+            taxonomyAreaKey: "putting",
+            rating: 4,
+            coachRatingScoreOutOf100: 75,
+          },
+        ],
+        goalEvidence: [
+          { goalId: "g1", goal: { goalName: "Putting", taxonomyAreaKey: "putting" } },
+          { goalId: "g2", goal: { goalName: "Wedges", taxonomyAreaKey: "wedge_play" } },
+        ],
+        taxonomyScores: [{ taxonomyAreaKey: "driving" }],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, { summary: parsed }),
+    );
+
+    expect(html).toContain("Practice Performance");
+    expect(html).toContain("62");
+    expect(html).toContain("Coach Practice Performance");
+    expect(html).toContain("70");
+    expect(html).toContain("Practice-side Performance");
+    expect(html).toContain("65");
+    expect(html).toContain("putting: 4 · 75");
+    expect(html).toContain("wedge_play: Unrated");
+  });
+
+  it("shows unavailable practice-side and unrated coach scores when backend values are null", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: 50,
+        coachPracticeScoreOutOf100: null,
+        practiceSideScoreOutOf100: null,
+        coachPracticeRatings: [],
+        goalEvidence: [
+          { goalId: "g1", goal: { goalName: "Putting", taxonomyAreaKey: "putting" } },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, { summary: parsed }),
+    );
+
+    expect(html).toContain("50");
+    expect(html).toContain("Not rated");
+    expect(html).toContain("Unavailable");
+    expect(html).toContain("putting: Unrated");
+    expect(html).not.toContain(
+      'Practice-side Performance</dt><dd class="text-sm text-textPrimary">0</dd>',
+    );
+  });
+
+  it("does not expose Coach Practice Rating controls in the athlete Step 4B view", () => {
+    const html = renderStep4a({
+      practiceScoreOutOf100: 40,
+      taxonomyScores: [{ taxonomyAreaKey: "putting" }],
+    });
+    expect(html).toContain("Practice Performance");
+    expect(html).not.toContain("Submit rating");
+    expect(html).not.toContain("Very Poor");
+    expect(html).not.toContain(">Coach Practice Rating<");
+  });
+
+  it("lets a coach POST another rating for an already-rated taxonomy", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        goalEvidence: [
+          { goalId: "g1", goal: { goalName: "Putting", taxonomyAreaKey: "putting" } },
+        ],
+        taxonomyScores: [{ taxonomyAreaKey: "driving" }],
+        coachPracticeRatings: [
+          {
+            taxonomyAreaKey: "putting",
+            rating: 3,
+            coachRatingScoreOutOf100: 50,
+          },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(CoachPracticeRatingForm, {
+        summary: parsed,
+        taxonomyAreaKey: "putting",
+        rating: 5,
+        error: null,
+        submitting: false,
+        onTaxonomyAreaKeyChange: () => undefined,
+        onRatingChange: () => undefined,
+        onSubmit: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("Coach Practice Rating");
+    expect(html).toContain("Submit rating");
+    expect(html).toContain("putting");
+    expect(html).toContain("5 — Very Good");
+    expect(COACH_PRACTICE_RATING_OPTIONS.map((option) => option.rating)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+  });
+
+  it("does not calculate Step 4B scores in the UI", () => {
+    const source = readFileSync(
+      new URL("./AthleteWeeklyGoalPerformanceSection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("submitGolfCoachPracticeRatingThenRefetch");
+    expect(source).not.toContain("0.70 *");
+    expect(source).not.toContain("practiceSideScoreOutOf100 +");
+    expect(source).not.toContain("Overall Golfer Performance");
   });
 });

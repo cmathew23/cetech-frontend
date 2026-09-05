@@ -333,6 +333,12 @@ describe("sport metrics golf weekly summary Step 3 goal performance", () => {
     expect(parsed.goalEvidence[1]?.goal.targetValue).toBeNull();
     expect(parsed.goalEvidence[1]?.weeklyActual).toBeNull();
     expect(parsed.goalEvidence[1]?.targetComparison).toBeNull();
+    expect(parsed.goalEvidence[0]?.history).toEqual([]);
+    expect(parsed.goalEvidence[1]?.history).toEqual([]);
+    expect(parsed.exerciseTrends).toEqual([]);
+    expect(parsed.taxonomyScores).toEqual([]);
+    expect(parsed.strongestTaxonomy).toBeNull();
+    expect(parsed.weakestTaxonomy).toBeNull();
   });
 
   it("preserves received goalEvidence order and keeps same-metric goals independent", () => {
@@ -413,6 +419,236 @@ describe("sport metrics golf weekly summary Step 3 goal performance", () => {
     expect(source).not.toContain("record.successes /");
     expect(source).not.toContain("actualValue >= targetValue");
     expect(source).toContain("targetMet: record.targetMet");
+  });
+});
+
+describe("sport metrics golf weekly summary Step 4A", () => {
+  it("copies exerciseTrends, goal history, taxonomyScores, and strongest/weakest without scoring math", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        weekStartDate: "2026-09-01",
+        weekEndDate: "2026-09-07",
+        goalEvidence: [
+          {
+            goalId: "goal-1",
+            goal: {
+              goalName: "Improve putting",
+              successCriteria: "Make 8 of 10",
+              targetValue: 80,
+              primaryMetric: {
+                key: "PUTT_MAKE_PCT",
+                unit: "%",
+                direction: "HIGHER_IS_BETTER",
+              },
+            },
+            history: [
+              {
+                planStartDate: "2026-08-18",
+                planEndDate: "2026-08-24",
+                actual: 70,
+                targetValue: 80,
+                targetComparison: {
+                  targetValue: 80,
+                  actualValue: 70,
+                  direction: "HIGHER_IS_BETTER",
+                  targetMet: false,
+                },
+              },
+              {
+                planStartDate: "2026-08-25",
+                planEndDate: "2026-08-31",
+                actual: 72,
+              },
+            ],
+          },
+        ],
+        exerciseTrends: [
+          {
+            exerciseId: "ex-y",
+            skillCode: "PUTT_6FT",
+            exerciseName: "6ft putts",
+            taxonomyAreaKey: "putting",
+            goalId: "goal-1",
+            linkedGoal: { id: "goal-1", goalName: "Improve putting" },
+            metricKey: "PUTT_MAKE_PCT",
+            metricName: "Make percentage",
+            unit: "%",
+            direction: "HIGHER_IS_BETTER",
+            exerciseType: "Y",
+            currentActual: 75,
+            previousActual: 70,
+            trendScore: 1,
+            trendDirection: "UP",
+            history: [
+              {
+                planStartDate: "2026-08-18",
+                planEndDate: "2026-08-24",
+                actual: 70,
+              },
+              {
+                planStartDate: "2026-08-25",
+                planEndDate: "2026-08-31",
+                actual: 75,
+              },
+            ],
+          },
+          {
+            exerciseId: "ex-z",
+            skillCode: "PUTT_LAG",
+            exerciseName: "Lag putting",
+            taxonomyAreaKey: "putting",
+            goalId: "goal-1",
+            linkedGoal: { id: "goal-1", goalName: "Improve putting" },
+            metricKey: "PROXIMITY",
+            metricName: "Proximity",
+            unit: "ft",
+            direction: "LOWER_IS_BETTER",
+            exerciseType: "Z",
+            currentActual: 8,
+            previousActual: null,
+            trendScore: null,
+            trendDirection: null,
+            history: [],
+          },
+        ],
+        taxonomyScores: [
+          {
+            taxonomyAreaKey: "wedge_play",
+            YTrend: 0.2,
+            ZTrend: -0.1,
+            normalizedScore: 0.08,
+            scoreOutOf100: 54,
+            direction: "HIGHER_IS_BETTER",
+            history: [
+              {
+                planStartDate: "2026-08-25",
+                planEndDate: "2026-08-31",
+                YTrend: 0.1,
+                ZTrend: 0,
+                normalizedScore: 0.06,
+                scoreOutOf100: 53,
+                direction: "HIGHER_IS_BETTER",
+              },
+            ],
+            multiWeekNormalizedScore: 0.07,
+            multiWeekScoreOutOf100: 53.5,
+            multiWeekDirection: "HIGHER_IS_BETTER",
+            rank: 2,
+          },
+          {
+            taxonomyAreaKey: "putting",
+            YTrend: null,
+            ZTrend: null,
+            normalizedScore: null,
+            scoreOutOf100: null,
+            direction: null,
+            history: [],
+            multiWeekNormalizedScore: null,
+            multiWeekScoreOutOf100: null,
+            multiWeekDirection: null,
+          },
+        ],
+        strongestTaxonomy: {
+          taxonomyAreaKey: "wedge_play",
+          YTrend: 0.2,
+          ZTrend: -0.1,
+          normalizedScore: 0.08,
+          scoreOutOf100: 54,
+          direction: "HIGHER_IS_BETTER",
+          history: [],
+          multiWeekNormalizedScore: 0.07,
+          multiWeekScoreOutOf100: 53.5,
+          multiWeekDirection: "HIGHER_IS_BETTER",
+          rank: 1,
+        },
+        weakestTaxonomy: {
+          taxonomyAreaKey: "putting",
+          YTrend: null,
+          ZTrend: null,
+          normalizedScore: null,
+          scoreOutOf100: 40,
+          direction: "HIGHER_IS_BETTER",
+          history: [],
+          multiWeekNormalizedScore: 0.01,
+          multiWeekScoreOutOf100: 40,
+          multiWeekDirection: "HIGHER_IS_BETTER",
+          rank: 2,
+        },
+      },
+    });
+
+    expect(parsed.exerciseTrends).toHaveLength(2);
+    expect(parsed.exerciseTrends[0]?.exerciseType).toBe("Y");
+    expect(parsed.exerciseTrends[0]?.currentActual).toBe(75);
+    expect(parsed.exerciseTrends[0]?.previousActual).toBe(70);
+    expect(parsed.exerciseTrends[0]?.trendDirection).toBe("UP");
+    expect(parsed.exerciseTrends[0]?.history.map((row) => row.planStartDate)).toEqual([
+      "2026-08-18",
+      "2026-08-25",
+    ]);
+    expect(parsed.exerciseTrends[1]?.exerciseType).toBe("Z");
+    expect(parsed.exerciseTrends[1]?.previousActual).toBeNull();
+    expect(parsed.exerciseTrends[1]?.trendScore).toBeNull();
+    expect(parsed.exerciseTrends[1]?.trendDirection).toBeNull();
+    expect(parsed.goalEvidence[0]?.history).toHaveLength(2);
+    expect(parsed.goalEvidence[0]?.history[1]?.targetComparison).toBeNull();
+    expect(parsed.taxonomyScores.map((row) => row.taxonomyAreaKey)).toEqual([
+      "wedge_play",
+      "putting",
+    ]);
+    expect(parsed.taxonomyScores[1]?.scoreOutOf100).toBeNull();
+    expect(parsed.taxonomyScores[1]?.rank).toBeNull();
+    expect(parsed.taxonomyScores[0]?.rank).toBe(2);
+    expect(parsed.strongestTaxonomy?.taxonomyAreaKey).toBe("wedge_play");
+    expect(parsed.weakestTaxonomy?.taxonomyAreaKey).toBe("putting");
+  });
+
+  it("keeps received exercise and taxonomy array order and does not turn null scores into 0", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        exerciseTrends: [
+          { exerciseId: "second-listed", exerciseName: "B", exerciseType: "Z", currentActual: 1 },
+          { exerciseId: "first-listed", exerciseName: "A", exerciseType: "Y", currentActual: 2 },
+        ],
+        taxonomyScores: [
+          { taxonomyAreaKey: "short_game", scoreOutOf100: null, YTrend: null, ZTrend: null },
+          { taxonomyAreaKey: "driving", scoreOutOf100: 0, YTrend: 0, ZTrend: 0 },
+        ],
+        strongestTaxonomy: null,
+        weakestTaxonomy: null,
+      },
+    });
+
+    expect(parsed.exerciseTrends.map((row) => row.exerciseId)).toEqual([
+      "second-listed",
+      "first-listed",
+    ]);
+    expect(parsed.taxonomyScores.map((row) => row.taxonomyAreaKey)).toEqual([
+      "short_game",
+      "driving",
+    ]);
+    expect(parsed.taxonomyScores[0]?.scoreOutOf100).toBeNull();
+    expect(parsed.taxonomyScores[0]?.YTrend).toBeNull();
+    expect(parsed.taxonomyScores[1]?.scoreOutOf100).toBe(0);
+    expect(parsed.strongestTaxonomy).toBeNull();
+    expect(parsed.weakestTaxonomy).toBeNull();
+  });
+
+  it("does not introduce Step 4A scoring or ranking calculations", () => {
+    const source = readFileSync(
+      new URL("./sportMetricsGolf.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("0.60");
+    expect(source).not.toContain("0.40");
+    expect(source).not.toContain("YTrend +");
+    expect(source).not.toContain("strongestTaxonomy =");
+    expect(source).toContain("strongestTaxonomy: parseTaxonomyScore(record.strongestTaxonomy)");
+    expect(source).not.toContain("practicePerformance");
+    expect(source).not.toContain("overallScore");
+    expect(source).not.toContain("coachPracticeRating");
   });
 });
 

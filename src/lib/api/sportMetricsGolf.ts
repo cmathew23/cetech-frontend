@@ -136,6 +136,68 @@ export type SportMetricGoalTargetComparison = {
   targetMet: boolean;
 };
 
+export type SportMetricGoalHistoryObservation = {
+  planStartDate: string | null;
+  planEndDate: string | null;
+  actual: number | null;
+  targetValue: number | null;
+  targetComparison: SportMetricGoalTargetComparison | null;
+};
+
+export type SportMetricExerciseLinkedGoal = {
+  id: string | null;
+  goalName: string | null;
+};
+
+export type SportMetricExerciseHistoryObservation = {
+  planStartDate: string | null;
+  planEndDate: string | null;
+  actual: number | null;
+};
+
+export type SportMetricExerciseTrend = {
+  exerciseId: string | null;
+  skillCode: string | null;
+  exerciseName: string | null;
+  taxonomyAreaKey: string | null;
+  goalId: string | null;
+  linkedGoal: SportMetricExerciseLinkedGoal | null;
+  metricKey: string | null;
+  metricName: string | null;
+  unit: string | null;
+  direction: string | null;
+  exerciseType: string | null;
+  currentActual: number | null;
+  previousActual: number | null;
+  trendScore: number | null;
+  trendDirection: string | null;
+  history: SportMetricExerciseHistoryObservation[];
+};
+
+export type SportMetricTaxonomyHistoryObservation = {
+  planStartDate: string | null;
+  planEndDate: string | null;
+  YTrend: number | null;
+  ZTrend: number | null;
+  normalizedScore: number | null;
+  scoreOutOf100: number | null;
+  direction: string | null;
+};
+
+export type SportMetricTaxonomyScore = {
+  taxonomyAreaKey: string | null;
+  YTrend: number | null;
+  ZTrend: number | null;
+  normalizedScore: number | null;
+  scoreOutOf100: number | null;
+  direction: string | null;
+  history: SportMetricTaxonomyHistoryObservation[];
+  multiWeekNormalizedScore: number | null;
+  multiWeekScoreOutOf100: number | null;
+  multiWeekDirection: string | null;
+  rank: number | null;
+};
+
 export type SportMetricGoalEvidenceGroup = {
   goalId: string | null;
   goalTitle: string;
@@ -146,6 +208,7 @@ export type SportMetricGoalEvidenceGroup = {
   goal: SportMetricGoalSnapshot;
   weeklyActual: SportMetricGoalWeeklyActual | null;
   targetComparison: SportMetricGoalTargetComparison | null;
+  history: SportMetricGoalHistoryObservation[];
   raw: unknown;
 };
 
@@ -159,6 +222,10 @@ export type SportMetricsGolfWeeklySummary = {
   prescribedSkillsCount: number | null;
   goalEvidence: SportMetricGoalEvidenceGroup[];
   unlinkedEvidence: SportMetricEvidenceItem[];
+  exerciseTrends: SportMetricExerciseTrend[];
+  taxonomyScores: SportMetricTaxonomyScore[];
+  strongestTaxonomy: SportMetricTaxonomyScore | null;
+  weakestTaxonomy: SportMetricTaxonomyScore | null;
   raw: unknown;
 };
 
@@ -422,6 +489,110 @@ function parseTargetComparison(
   };
 }
 
+function mapRecordArray<T>(
+  raw: unknown,
+  parseItem: (value: unknown) => T | null,
+): T[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(parseItem).filter((item): item is T => item !== null);
+}
+
+function parseGoalHistoryObservation(
+  raw: unknown,
+): SportMetricGoalHistoryObservation | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    planStartDate: pickString(record, ["planStartDate"]),
+    planEndDate: pickString(record, ["planEndDate"]),
+    actual: readFiniteNumber(record.actual),
+    targetValue: readFiniteNumber(record.targetValue),
+    targetComparison: parseTargetComparison(record.targetComparison),
+  };
+}
+
+function parseExerciseLinkedGoal(
+  raw: unknown,
+): SportMetricExerciseLinkedGoal | null {
+  if (raw === undefined || raw === null) return null;
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    id: pickString(record, ["id"]),
+    goalName: pickString(record, ["goalName"]),
+  };
+}
+
+function parseExerciseHistoryObservation(
+  raw: unknown,
+): SportMetricExerciseHistoryObservation | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    planStartDate: pickString(record, ["planStartDate"]),
+    planEndDate: pickString(record, ["planEndDate"]),
+    actual: readFiniteNumber(record.actual),
+  };
+}
+
+function parseExerciseTrend(raw: unknown): SportMetricExerciseTrend | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    exerciseId: pickString(record, ["exerciseId"]),
+    skillCode: pickString(record, ["skillCode"]),
+    exerciseName: pickString(record, ["exerciseName"]),
+    taxonomyAreaKey: pickString(record, ["taxonomyAreaKey"]),
+    goalId: pickString(record, ["goalId"]),
+    linkedGoal: parseExerciseLinkedGoal(record.linkedGoal),
+    metricKey: pickString(record, ["metricKey"]),
+    metricName: pickString(record, ["metricName"]),
+    unit: pickString(record, ["unit"]),
+    direction: pickString(record, ["direction"]),
+    exerciseType: pickString(record, ["exerciseType"]),
+    currentActual: readFiniteNumber(record.currentActual),
+    previousActual: readFiniteNumber(record.previousActual),
+    trendScore: readFiniteNumber(record.trendScore),
+    trendDirection: pickString(record, ["trendDirection"]),
+    history: mapRecordArray(record.history, parseExerciseHistoryObservation),
+  };
+}
+
+function parseTaxonomyHistoryObservation(
+  raw: unknown,
+): SportMetricTaxonomyHistoryObservation | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    planStartDate: pickString(record, ["planStartDate"]),
+    planEndDate: pickString(record, ["planEndDate"]),
+    YTrend: readFiniteNumber(record.YTrend),
+    ZTrend: readFiniteNumber(record.ZTrend),
+    normalizedScore: readFiniteNumber(record.normalizedScore),
+    scoreOutOf100: readFiniteNumber(record.scoreOutOf100),
+    direction: pickString(record, ["direction"]),
+  };
+}
+
+function parseTaxonomyScore(raw: unknown): SportMetricTaxonomyScore | null {
+  if (raw === undefined || raw === null) return null;
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    taxonomyAreaKey: pickString(record, ["taxonomyAreaKey"]),
+    YTrend: readFiniteNumber(record.YTrend),
+    ZTrend: readFiniteNumber(record.ZTrend),
+    normalizedScore: readFiniteNumber(record.normalizedScore),
+    scoreOutOf100: readFiniteNumber(record.scoreOutOf100),
+    direction: pickString(record, ["direction"]),
+    history: mapRecordArray(record.history, parseTaxonomyHistoryObservation),
+    multiWeekNormalizedScore: readFiniteNumber(record.multiWeekNormalizedScore),
+    multiWeekScoreOutOf100: readFiniteNumber(record.multiWeekScoreOutOf100),
+    multiWeekDirection: pickString(record, ["multiWeekDirection"]),
+    rank: "rank" in record ? readFiniteNumber(record.rank) : null,
+  };
+}
+
 function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -449,6 +620,7 @@ function parseGoalEvidenceGroup(raw: unknown): SportMetricGoalEvidenceGroup | nu
     goal,
     weeklyActual: parseWeeklyActual(record.weeklyActual),
     targetComparison: parseTargetComparison(record.targetComparison),
+    history: mapRecordArray(record.history, parseGoalHistoryObservation),
     raw,
   };
 }
@@ -488,7 +660,9 @@ function unwrapSportMetricsGolfWeeklySummaryPayload(
     "sport" in direct ||
     "weekStartDate" in direct ||
     "goalEvidence" in direct ||
-    "unlinkedEvidence" in direct
+    "unlinkedEvidence" in direct ||
+    "exerciseTrends" in direct ||
+    "taxonomyScores" in direct
   ) {
     return direct;
   }
@@ -539,6 +713,10 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
     prescribedSkillsCount,
     goalEvidence,
     unlinkedEvidence,
+    exerciseTrends: mapRecordArray(record.exerciseTrends, parseExerciseTrend),
+    taxonomyScores: mapRecordArray(record.taxonomyScores, parseTaxonomyScore),
+    strongestTaxonomy: parseTaxonomyScore(record.strongestTaxonomy),
+    weakestTaxonomy: parseTaxonomyScore(record.weakestTaxonomy),
     raw: payload,
   };
 }

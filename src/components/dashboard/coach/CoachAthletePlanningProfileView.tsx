@@ -258,6 +258,8 @@ const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
 ];
 /** Hide competition schedule UI until competition-aware plan generation is end-to-end. */
 const SHOW_COMPETITION_SCHEDULE_UI = false;
+/** Hide custom goal creation UI for Golf MVP; Goal Library remains the creation path. */
+const SHOW_CUSTOM_GOAL_CREATION_UI = false;
 const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
   "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
 // Exact backend message for the deterministic Nutrition stale-version rejection.
@@ -13498,7 +13500,7 @@ export function CoachAthletePlanningProfileView({
   const [competitionImportance, setCompetitionImportance] = useState<"LOW" | "MEDIUM" | "HIGH">(
     "MEDIUM",
   );
-  const [goalCreationMode, setGoalCreationMode] = useState<GoalCreationMode>("CUSTOM");
+  const [goalCreationMode, setGoalCreationMode] = useState<GoalCreationMode>("LIBRARY");
   const [goalLibraryLoading, setGoalLibraryLoading] = useState(false);
   const [goalLibraryError, setGoalLibraryError] = useState<string | null>(null);
   const [goalLibraryCategories, setGoalLibraryCategories] = useState<GoalLibraryCategory[]>([]);
@@ -27686,31 +27688,33 @@ export function CoachAthletePlanningProfileView({
                       value={displayValue(activePhaseForSelectedSeason.phase)}
                     />
                   ) : null}
-                  <div className="space-y-3 border-y border-border/70 py-3">
-                    <p className="text-sm font-medium text-textPrimary">Goal creation mode</p>
-                    <div className="flex flex-wrap gap-4">
-                      <label className="flex items-center gap-2 text-sm text-textPrimary">
-                        <input
-                          type="radio"
-                          name="goal-creation-mode"
-                          checked={goalCreationMode === "CUSTOM"}
-                          onChange={() => setGoalCreationMode("CUSTOM")}
-                        />
-                        <span>Custom goal</span>
-                      </label>
-                      <label className="flex items-center gap-2 text-sm text-textPrimary">
-                        <input
-                          type="radio"
-                          name="goal-creation-mode"
-                          checked={goalCreationMode === "LIBRARY"}
-                          onChange={() => setGoalCreationMode("LIBRARY")}
-                        />
-                        <span>Choose from Goal Library</span>
-                      </label>
+                  {SHOW_CUSTOM_GOAL_CREATION_UI ? (
+                    <div className="space-y-3 border-y border-border/70 py-3">
+                      <p className="text-sm font-medium text-textPrimary">Goal creation mode</p>
+                      <div className="flex flex-wrap gap-4">
+                        <label className="flex items-center gap-2 text-sm text-textPrimary">
+                          <input
+                            type="radio"
+                            name="goal-creation-mode"
+                            checked={goalCreationMode === "CUSTOM"}
+                            onChange={() => setGoalCreationMode("CUSTOM")}
+                          />
+                          <span>Custom goal</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-textPrimary">
+                          <input
+                            type="radio"
+                            name="goal-creation-mode"
+                            checked={goalCreationMode === "LIBRARY"}
+                            onChange={() => setGoalCreationMode("LIBRARY")}
+                          />
+                          <span>Choose from Goal Library</span>
+                        </label>
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
 
-                  {goalCreationMode === "LIBRARY" ? (
+                  {!SHOW_CUSTOM_GOAL_CREATION_UI || goalCreationMode === "LIBRARY" ? (
                     <div className="space-y-3 border-y border-border/70 py-3">
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-textPrimary">Goal Library</p>
@@ -27829,7 +27833,7 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : null}
 
-                  {goalCreationMode === "CUSTOM" ? (
+                  {SHOW_CUSTOM_GOAL_CREATION_UI && goalCreationMode === "CUSTOM" ? (
                     <div className="space-y-3">
                       {customGoalEntries.map((entry) => (
                         <div

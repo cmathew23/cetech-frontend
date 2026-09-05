@@ -17580,6 +17580,25 @@ describe("season create display state", () => {
     expect(source).not.toContain("value={goalTargetValue}");
   });
 
+  it("hides custom goal creation UI and defaults Step 3 to Goal Library", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("const SHOW_CUSTOM_GOAL_CREATION_UI = false;");
+    expect(source).toContain('useState<GoalCreationMode>("LIBRARY")');
+    expect(source).toContain("{SHOW_CUSTOM_GOAL_CREATION_UI ? (");
+    expect(source).toContain(
+      '{!SHOW_CUSTOM_GOAL_CREATION_UI || goalCreationMode === "LIBRARY" ? (',
+    );
+    expect(source).toContain(
+      '{SHOW_CUSTOM_GOAL_CREATION_UI && goalCreationMode === "CUSTOM" ? (',
+    );
+    expect(source).toContain("<span>Custom goal</span>");
+    expect(source).toContain("<span>Choose from Goal Library</span>");
+    expect(source).toContain("Goal Library");
+  });
+
   it("holds independent metadata for two selected library goals and two custom entries", () => {
     let selectedIds: string[] = [];
     let drafts: Record<string, ReturnType<typeof createDefaultGoalDraftFields>> = {};

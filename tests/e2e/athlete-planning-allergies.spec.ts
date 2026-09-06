@@ -299,7 +299,7 @@ test.describe("athlete planning allergies/intolerances", () => {
       .fill("18");
     await page.getByLabel("Injury Status").selectOption("HEALTHY");
     await page.getByLabel("Diet Type").selectOption("OMNIVORE");
-    await page.getByLabel("South Indian").check();
+    await page.getByLabel("Indian").check();
 
     await expect(saveProfile).toBeDisabled();
     expect(createBodies).toHaveLength(0);

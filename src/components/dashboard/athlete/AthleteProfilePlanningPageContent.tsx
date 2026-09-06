@@ -91,6 +91,12 @@ const DIET_TYPE_OPTIONS = [
   { value: "OTHER", label: "Other" },
 ] as const;
 
+const DIET_TYPE_VISIBLE_VALUES = new Set(["", "OMNIVORE", "VEGETARIAN"]);
+
+export const VISIBLE_DIET_TYPE_OPTIONS = DIET_TYPE_OPTIONS.filter((option) =>
+  DIET_TYPE_VISIBLE_VALUES.has(option.value),
+);
+
 const SEX_OPTIONS = [
   { value: "", label: "Select gender" },
   { value: "MALE", label: "Male" },
@@ -114,17 +120,24 @@ const SELF_REPORTED_LEVEL_SELECT_OPTIONS = [
 ] as const;
 
 const REGIONAL_CUISINE_OPTIONS = [
-  "North Indian",
-  "South Indian",
-  "West Indian",
-  "East Indian",
-  "Continental",
-  "Asian",
-  "Mediterranean",
-  "Middle Eastern",
-  "Latin American",
-  "Open to all",
+  { value: "INDIAN", label: "Indian" },
+  { value: "North Indian", label: "North Indian" },
+  { value: "South Indian", label: "South Indian" },
+  { value: "West Indian", label: "West Indian" },
+  { value: "East Indian", label: "East Indian" },
+  { value: "Continental", label: "Continental" },
+  { value: "Asian", label: "Asian" },
+  { value: "Mediterranean", label: "Mediterranean" },
+  { value: "Middle Eastern", label: "Middle Eastern" },
+  { value: "Latin American", label: "Latin American" },
+  { value: "Open to all", label: "Open to all" },
 ] as const;
+
+const REGIONAL_CUISINE_VISIBLE_VALUES = new Set(["INDIAN"]);
+
+export const VISIBLE_REGIONAL_CUISINE_OPTIONS = REGIONAL_CUISINE_OPTIONS.filter(
+  (option) => REGIONAL_CUISINE_VISIBLE_VALUES.has(option.value),
+);
 
 const ALLERGY_OPTIONS = [
   "Celery",
@@ -807,16 +820,18 @@ export function AthleteProfilePlanningPageContent() {
     if (group === "nutritionContext" && field === "regionalCuisinePreference") {
       const selectedValues = Array.isArray(value) ? value : [];
       const selectedSet = new Set(selectedValues);
-      const selectedSummary = REGIONAL_CUISINE_OPTIONS.filter((option) =>
-        selectedSet.has(option),
-      );
+      const selectedSummary = VISIBLE_REGIONAL_CUISINE_OPTIONS.filter((option) =>
+        selectedSet.has(option.value),
+      ).map((option) => option.label);
 
-      function toggleCuisine(option: string) {
+      function toggleCuisine(optionValue: string) {
         if (readOnly) return;
         const next = new Set(selectedSet);
-        if (next.has(option)) next.delete(option);
-        else next.add(option);
-        const ordered = REGIONAL_CUISINE_OPTIONS.filter((item) => next.has(item));
+        if (next.has(optionValue)) next.delete(optionValue);
+        else next.add(optionValue);
+        const ordered = VISIBLE_REGIONAL_CUISINE_OPTIONS.filter((item) =>
+          next.has(item.value),
+        ).map((item) => item.value);
         updateField(group, field, ordered);
       }
 
@@ -831,19 +846,19 @@ export function AthleteProfilePlanningPageContent() {
         >
           <Card padding="compact" accent={false} className="bg-surface">
             <div className="flex flex-wrap gap-2">
-              {REGIONAL_CUISINE_OPTIONS.map((option) => (
+              {VISIBLE_REGIONAL_CUISINE_OPTIONS.map((option) => (
                 <label
-                  key={option}
+                  key={option.value}
                   className="inline-flex w-full min-w-0 cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-sm text-textPrimary sm:w-auto"
                 >
                   <input
                     type="checkbox"
                     className="mt-0.5"
-                    checked={selectedSet.has(option)}
+                    checked={selectedSet.has(option.value)}
                     disabled={readOnly}
-                    onChange={() => toggleCuisine(option)}
+                    onChange={() => toggleCuisine(option.value)}
                   />
-                  <span>{option}</span>
+                  <span>{option.label}</span>
                 </label>
               ))}
             </div>
@@ -1322,7 +1337,7 @@ export function AthleteProfilePlanningPageContent() {
               updateField(group, field, e.target.value)
             }
           >
-            {DIET_TYPE_OPTIONS.map((opt) => (
+            {VISIBLE_DIET_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

@@ -76,7 +76,7 @@ function completedDraft(): PlanningProfileFormState {
   draft.healthStatus = { injuryStatus: "HEALTHY" };
   draft.nutritionContext = {
     dietType: "OMNIVORE",
-    regionalCuisinePreference: ["South Indian"],
+    regionalCuisinePreference: ["INDIAN"],
     allergiesIntolerances: {
       selected: ["Milk"],
       othersText: "",
@@ -246,7 +246,7 @@ describe("APP mandatory field validation", () => {
       healthStatus: { injuryStatus: "HEALTHY" },
       nutritionContext: {
         dietType: "OMNIVORE",
-        regionalCuisinePreference: ["South Indian"],
+        regionalCuisinePreference: ["INDIAN"],
         allergiesIntolerances: {
           selected: ["Milk"],
           othersText: null,
@@ -254,6 +254,28 @@ describe("APP mandatory field validation", () => {
         },
       },
     });
+  });
+
+  it("keeps Regional Cuisine Preference required when none is selected", () => {
+    const draft = completedDraft();
+    draft.nutritionContext.regionalCuisinePreference = [];
+
+    expect(
+      collectPlanningProfileValidationErrors(draft)[
+        "nutritionContext.regionalCuisinePreference"
+      ],
+    ).toBe("Select at least one Regional Cuisine Preference.");
+    expect(() => buildPlanningProfileCreateBody(draft)).toThrow();
+  });
+
+  it("submits selected Indian cuisine as INDIAN", () => {
+    const draft = completedDraft();
+    draft.nutritionContext.regionalCuisinePreference = ["INDIAN"];
+
+    expect(
+      buildPlanningProfileCreateBody(draft).nutritionContext
+        .regionalCuisinePreference,
+    ).toEqual(["INDIAN"]);
   });
 
   it("does not include BMI in create or PATCH payloads", () => {

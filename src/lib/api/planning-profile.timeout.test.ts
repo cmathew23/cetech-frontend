@@ -41,7 +41,7 @@ function completedDraft(): PlanningProfileFormState {
   draft.healthStatus = { injuryStatus: "HEALTHY" };
   draft.nutritionContext = {
     dietType: "OMNIVORE",
-    regionalCuisinePreference: ["South Indian"],
+    regionalCuisinePreference: ["INDIAN"],
     allergiesIntolerances: {
       selected: ["Milk"],
       othersText: "",

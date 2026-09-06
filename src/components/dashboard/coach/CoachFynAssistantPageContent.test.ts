@@ -31,8 +31,15 @@ describe("CoachFynAssistantPageContent free-form chat contract", () => {
     expect(source.match(/fetchFynAssistantHistory\(\{/g)).toHaveLength(2);
     expect(source).toContain("athleteId: requestedAthleteId");
     expect(source).toContain("latestSelectedAthleteIdRef.current === requestedAthleteId");
+    expect(source).toContain("fynHistoryContainsSubmittedTurn(history.messages, trimmedMessage)");
     expect(source).toContain("setMessages(history.messages)");
-    expect(source).toContain("warnings: response.warnings");
-    expect(source).toContain("usedSources: response.usedSources");
+    expect(source).toContain("appendFynAssistantQueryAnswer(current, response)");
+  });
+
+  it("shows the one-question status message next to the composer", () => {
+    expect(source).toContain('<Alert variant="info" role="status">');
+    expect(source).toContain(
+      "Fyn processes one question at a time. Please wait for a response before sending your next question.",
+    );
   });
 });

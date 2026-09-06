@@ -9,12 +9,15 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import {
+  appendFynAssistantQueryAnswer,
   fetchFynAssistantHistory,
+  fynHistoryContainsSubmittedTurn,
   getFynPromptLabel,
   mapFynHistoryToChatMessages,
   queryFynAssistant,
   type FynAssistantHistoryItem,
 } from "@/lib/api/fynAssistant";
+import { FYN_LOADING_MESSAGE_ID } from "@/components/fyn/FynChatThread";
 
 const sampleHistoryItem: FynAssistantHistoryItem = {
   id: "audit-1",
@@ -215,6 +218,68 @@ describe("mapFynHistoryToChatMessages", () => {
 
   it("returns empty array for empty items", () => {
     expect(mapFynHistoryToChatMessages([], "coach")).toEqual([]);
+  });
+});
+
+describe("post-query history merge", () => {
+  const submitted = "any data available for parag shah";
+  const answer =
+    "Athlete Planning Profile is required before Fyn can determine the athlete sport.";
+  const localMessages = [
+    {
+      id: "user-1",
+      role: "user" as const,
+      text: submitted,
+      createdAt: "2026-09-06T18:00:00.000Z",
+    },
+    {
+      id: FYN_LOADING_MESSAGE_ID,
+      role: "loading" as const,
+      text: "Fyn is checking your latest training data...",
+      createdAt: "2026-09-06T18:00:00.000Z",
+    },
+  ];
+  const queryResponse = {
+    answer,
+    warnings: ["No sport-specific services were called for this request."],
+    usedSources: {
+      plan: false,
+      adherence: false,
+      sportMetrics: false,
+      wearables: false,
+    },
+  };
+
+  it("keeps the user message and backend answer when refreshed history omits the submitted turn", () => {
+    expect(fynHistoryContainsSubmittedTurn([], submitted)).toBe(false);
+    const next = appendFynAssistantQueryAnswer(localMessages, queryResponse);
+    expect(next.some((message) => message.id === FYN_LOADING_MESSAGE_ID)).toBe(
+      false,
+    );
+    expect(next[0]).toMatchObject({ role: "user", text: submitted });
+    expect(next[1]).toMatchObject({
+      role: "assistant",
+      text: answer,
+      warnings: queryResponse.warnings,
+      usedSources: queryResponse.usedSources,
+    });
+  });
+
+  it("detects a submitted turn already present in refreshed history", () => {
+    const historyMessages = mapFynHistoryToChatMessages(
+      [
+        {
+          ...sampleHistoryItem,
+          promptKey: "CONVERSATION",
+          userMessage: submitted,
+          assistantMessage: answer,
+        },
+      ],
+      "coach",
+    );
+    expect(fynHistoryContainsSubmittedTurn(historyMessages, submitted)).toBe(
+      true,
+    );
   });
 });
 

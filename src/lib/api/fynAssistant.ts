@@ -1,6 +1,9 @@
 "use client";
 
-import type { FynChatMessage } from "@/components/fyn/FynChatThread";
+import {
+  FYN_LOADING_MESSAGE_ID,
+  type FynChatMessage,
+} from "@/components/fyn/FynChatThread";
 import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
@@ -155,6 +158,33 @@ export function mapFynHistoryToChatMessages(
       },
     ];
   });
+}
+
+export function fynHistoryContainsSubmittedTurn(
+  messages: FynChatMessage[],
+  submittedUserMessage: string,
+): boolean {
+  const text = submittedUserMessage.trim();
+  if (text === "") return false;
+  return messages.some(
+    (message) => message.role === "user" && message.text === text,
+  );
+}
+
+export function appendFynAssistantQueryAnswer(
+  messages: FynChatMessage[],
+  response: FynAssistantResponse,
+): FynChatMessage[] {
+  return messages
+    .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
+    .concat({
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      text: response.answer,
+      createdAt: new Date().toISOString(),
+      warnings: response.warnings,
+      usedSources: response.usedSources,
+    });
 }
 
 function parseFynAssistantResponse(payload: unknown): FynAssistantResponse {

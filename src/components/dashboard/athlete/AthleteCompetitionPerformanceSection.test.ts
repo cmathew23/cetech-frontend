@@ -328,10 +328,16 @@ describe("history season scope", () => {
       }),
     );
     expect(html).toContain("Club Championship");
+    expect(html).toContain("CHAMPIONSHIP");
+    expect(html).toContain("PeakFlow Golf Club");
     expect(html).toContain("2026");
+    expect(html).toContain("Score to Par");
     expect(html).toContain("2");
-    expect(html).toContain("75");
+    expect(html).toContain("Competition Performance");
     expect(html).toContain("Unavailable");
+    expect(html).not.toContain("Athlete Competition Score");
+    expect(html).not.toContain("Coach Competition Score");
+    expect(html).not.toContain("Overall Golfer Performance");
   });
 
   it("requests history with backend weekly-summary seasonCycleId and does not infer season from date", () => {
@@ -356,5 +362,66 @@ describe("no frontend derived competition or OGP calculations", () => {
     expect(source).not.toContain("fairwaysHit /");
     expect(source).toContain("displayBackendNumber");
     expect(source).not.toContain("postGolfCoachCompetitionAssessment");
+  });
+});
+
+describe("F5 presentation", () => {
+  it("shows Overall Golfer Performance in history only when a backend checkpoint exists", () => {
+    const withCheckpoint: GolfCompetitionHistoryPoint = {
+      id: "competition-1",
+      name: "Club Championship",
+      type: "CHAMPIONSHIP",
+      format: 18,
+      venue: "PeakFlow Golf Club",
+      startDate: "2026-09-12T00:00:00.000Z",
+      numberOfDays: 1,
+      seasonPhase: "PRE_SEASON",
+      seasonCycleId: "season-2026",
+      seasonYear: 2026,
+      status: "SUBMITTED",
+      competitionSummary: summary({ scoreToPar: 2 }),
+      athleteAverageSatisfaction: null,
+      athleteCompetitionScore: 75,
+      coachCompetitionAssessment: null,
+      coachCompetitionScore: null,
+      competitionPerformance: 62.5,
+      overallGolferPerformanceCheckpoint: {
+        id: "ogp-1",
+        entityId: "entity-1",
+        athleteProfileId: "athlete-1",
+        seasonCycleId: "season-2026",
+        competitionId: "competition-1",
+        practicePerformance: 80,
+        competitionPerformance: 62.5,
+        overallGolferPerformance: 77.25,
+        checkpointAt: "2026-09-13T10:00:00.000Z",
+      },
+    };
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionHistoryList, {
+        items: [withCheckpoint],
+        selectedId: withCheckpoint.id,
+        onSelect: () => {},
+      }),
+    );
+    expect(html).toContain("Overall Golfer Performance");
+    expect(html).toContain("77.25");
+    expect(html).toContain("62.5");
+  });
+
+  it("keeps selected detail hierarchy on backend values without calculating scores", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionSubmittedDetail, {
+        competition: submittedDetail,
+      }),
+    );
+    expect(html).toContain("Results");
+    expect(html).toContain("Supporting stats");
+    expect(html).toContain("Athlete Average Satisfaction");
+    expect(html).toContain("Fairways Hit %");
+    expect(html).toContain("Practice Performance");
+    expect(html).toContain("Checkpoint");
+    expect(html).toContain("Day evidence");
+    expect(html).toContain("Hole 1 · BOGEY · Score to Par 1");
   });
 });

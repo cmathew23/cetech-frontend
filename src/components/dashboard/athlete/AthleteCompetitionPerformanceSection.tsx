@@ -3,6 +3,10 @@
 import { AthleteCompetitionDaySelector } from "@/components/dashboard/athlete/AthleteCompetitionEntrySection";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  DASHBOARD_DETAIL_LABEL_CLASS,
+  DASHBOARD_SECTION_HEADING_CLASS,
+} from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import {
@@ -49,18 +53,45 @@ function Field({
   );
 }
 
+function HighlightMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  const unavailable = value === UNAVAILABLE;
+  return (
+    <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5">
+      <p className={DASHBOARD_DETAIL_LABEL_CLASS}>{label}</p>
+      <p
+        className={cn(
+          "mt-1 leading-none tabular-nums",
+          unavailable
+            ? "text-sm text-textSecondary"
+            : "text-xl font-medium text-textPrimary",
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export function AthleteCompetitionHoleSummaryFields({
   summary,
+  includeScoreToPar = true,
 }: {
   summary: GolfCompetitionHoleSummary;
+  includeScoreToPar?: boolean;
 }) {
   return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Field label="Score to Par">
-        <span className="text-lg font-medium">
+    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {includeScoreToPar ? (
+        <Field label="Score to Par">
           {displayBackendNumber(summary.scoreToPar)}
-        </span>
-      </Field>
+        </Field>
+      ) : null}
       <Field label="Fairways Hit %">
         {displayBackendNumber(summary.fairwaysHitPercent)}
       </Field>
@@ -82,23 +113,34 @@ export function AthleteCompetitionPerformanceScores({
   athleteCompetitionScore,
   coachCompetitionScore,
   competitionPerformance,
+  scoreToPar,
 }: {
   athleteCompetitionScore: number | null;
   coachCompetitionScore: number | null;
   competitionPerformance: number | null;
+  scoreToPar?: number | null;
 }) {
   return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Field label="Athlete Competition Score">
-        {displayBackendNumber(athleteCompetitionScore)}
-      </Field>
-      <Field label="Coach Competition Score">
-        {displayBackendNumber(coachCompetitionScore)}
-      </Field>
-      <Field label="Competition Performance">
-        {displayBackendNumber(competitionPerformance)}
-      </Field>
-    </dl>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {scoreToPar !== undefined ? (
+        <HighlightMetric
+          label="Score to Par"
+          value={displayBackendNumber(scoreToPar)}
+        />
+      ) : null}
+      <HighlightMetric
+        label="Athlete Competition Score"
+        value={displayBackendNumber(athleteCompetitionScore)}
+      />
+      <HighlightMetric
+        label="Coach Competition Score"
+        value={displayBackendNumber(coachCompetitionScore)}
+      />
+      <HighlightMetric
+        label="Competition Performance"
+        value={displayBackendNumber(competitionPerformance)}
+      />
+    </div>
   );
 }
 
@@ -116,20 +158,27 @@ export function AthleteCompetitionOgpCheckpoint({
   }
 
   return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Field label="Practice Performance">
-        {displayBackendNumber(checkpoint.practicePerformance)}
-      </Field>
-      <Field label="Competition Performance">
-        {displayBackendNumber(checkpoint.competitionPerformance)}
-      </Field>
-      <Field label="Overall Golfer Performance">
-        {displayBackendNumber(checkpoint.overallGolferPerformance)}
-      </Field>
-      <Field label="Checkpoint">
-        {formatDateTime(checkpoint.checkpointAt)}
-      </Field>
-    </dl>
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <HighlightMetric
+          label="Practice Performance"
+          value={displayBackendNumber(checkpoint.practicePerformance)}
+        />
+        <HighlightMetric
+          label="Competition Performance"
+          value={displayBackendNumber(checkpoint.competitionPerformance)}
+        />
+        <HighlightMetric
+          label="Overall Golfer Performance"
+          value={displayBackendNumber(checkpoint.overallGolferPerformance)}
+        />
+      </div>
+      <dl>
+        <Field label="Checkpoint">
+          {formatDateTime(checkpoint.checkpointAt)}
+        </Field>
+      </dl>
+    </div>
   );
 }
 
@@ -151,6 +200,9 @@ export function AthleteCompetitionReadOnlyHoles({
         >
           <summary className="cursor-pointer text-sm font-medium text-textPrimary">
             Hole {hole.holeNumber}
+            {hole.outcome ? ` · ${hole.outcome}` : ""}
+            {" · Score to Par "}
+            {displayBackendNumber(hole.scoreToPar)}
           </summary>
           <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Par">{String(hole.par)}</Field>
@@ -210,32 +262,29 @@ export function AthleteCompetitionHistoryList({
             onClick={() => onSelect(item.id)}
           >
             <p className="text-sm font-medium text-textPrimary">{item.name}</p>
-            <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Field label="Type">{item.type}</Field>
-              <Field label="Venue">{item.venue}</Field>
-              <Field label="Start date">{formatDateOnly(item.startDate)}</Field>
-              <Field label="Season">{String(item.seasonYear)}</Field>
-              <Field label="Score to Par">
-                {displayBackendNumber(item.competitionSummary.scoreToPar)}
-              </Field>
-              <Field label="Athlete Competition Score">
-                {displayBackendNumber(item.athleteCompetitionScore)}
-              </Field>
-              <Field label="Coach Competition Score">
-                {displayBackendNumber(item.coachCompetitionScore)}
-              </Field>
-              <Field label="Competition Performance">
-                {displayBackendNumber(item.competitionPerformance)}
-              </Field>
-              <Field label="Overall Golfer Performance">
-                {item.overallGolferPerformanceCheckpoint
-                  ? displayBackendNumber(
-                      item.overallGolferPerformanceCheckpoint
-                        .overallGolferPerformance,
-                    )
-                  : UNAVAILABLE}
-              </Field>
-            </dl>
+            <p className="mt-1 text-xs text-textSecondary">
+              {item.type} · {item.venue} · {formatDateOnly(item.startDate)} ·
+              Season {String(item.seasonYear)}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <HighlightMetric
+                label="Score to Par"
+                value={displayBackendNumber(item.competitionSummary.scoreToPar)}
+              />
+              <HighlightMetric
+                label="Competition Performance"
+                value={displayBackendNumber(item.competitionPerformance)}
+              />
+              {item.overallGolferPerformanceCheckpoint ? (
+                <HighlightMetric
+                  label="Overall Golfer Performance"
+                  value={displayBackendNumber(
+                    item.overallGolferPerformanceCheckpoint
+                      .overallGolferPerformance,
+                  )}
+                />
+              ) : null}
+            </div>
           </button>
         </li>
       ))}
@@ -255,48 +304,66 @@ export function AthleteCompetitionSubmittedDetail({
     null;
 
   return (
-    <div className="space-y-4">
-      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Competition">{competition.name}</Field>
-        <Field label="Type">{competition.type}</Field>
-        <Field label="Venue">{competition.venue}</Field>
-        <Field label="Start date">
-          {formatDateOnly(competition.startDate)}
-        </Field>
-        <Field label="Format">{String(competition.format)} holes</Field>
-        <Field label="Number of days">{String(competition.numberOfDays)}</Field>
-        <Field label="Season phase">{competition.seasonPhase}</Field>
-        <Field label="Athlete Average Satisfaction">
-          {displayBackendNumber(competition.athleteAverageSatisfaction)}
-        </Field>
-      </dl>
-
-      <AthleteCompetitionHoleSummaryFields
-        summary={competition.competitionSummary}
-      />
-      <AthleteCompetitionPerformanceScores
-        athleteCompetitionScore={competition.athleteCompetitionScore}
-        coachCompetitionScore={competition.coachCompetitionScore}
-        competitionPerformance={competition.competitionPerformance}
-      />
-
-      {competition.coachCompetitionAssessment ? (
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Coach rating">
-            {String(competition.coachCompetitionAssessment.rating)}
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <h3 className="text-base font-medium text-textPrimary">
+          {competition.name}
+        </h3>
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Field label="Type">{competition.type}</Field>
+          <Field label="Venue">{competition.venue}</Field>
+          <Field label="Start date">
+            {formatDateOnly(competition.startDate)}
           </Field>
-          <Field label="Coach notes">
-            {competition.coachCompetitionAssessment.notes?.trim()
-              ? competition.coachCompetitionAssessment.notes
-              : "—"}
-          </Field>
+          <Field label="Format">{String(competition.format)} holes</Field>
+          <Field label="Number of days">{String(competition.numberOfDays)}</Field>
+          <Field label="Season phase">{competition.seasonPhase}</Field>
         </dl>
-      ) : (
-        <p className="text-sm text-textSecondary">Coach assessment pending</p>
-      )}
+      </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium text-textPrimary">
+        <p className={DASHBOARD_SECTION_HEADING_CLASS}>Results</p>
+        <AthleteCompetitionPerformanceScores
+          scoreToPar={competition.competitionSummary.scoreToPar}
+          athleteCompetitionScore={competition.athleteCompetitionScore}
+          coachCompetitionScore={competition.coachCompetitionScore}
+          competitionPerformance={competition.competitionPerformance}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <p className={DASHBOARD_SECTION_HEADING_CLASS}>Supporting stats</p>
+        <AthleteCompetitionHoleSummaryFields
+          summary={competition.competitionSummary}
+          includeScoreToPar={false}
+        />
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Field label="Athlete Average Satisfaction">
+            {displayBackendNumber(competition.athleteAverageSatisfaction)}
+          </Field>
+        </dl>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-slate-200/80 p-3">
+        <p className={DASHBOARD_SECTION_HEADING_CLASS}>Coach assessment</p>
+        {competition.coachCompetitionAssessment ? (
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Coach rating">
+              {String(competition.coachCompetitionAssessment.rating)}
+            </Field>
+            <Field label="Coach notes">
+              {competition.coachCompetitionAssessment.notes?.trim()
+                ? competition.coachCompetitionAssessment.notes
+                : "—"}
+            </Field>
+          </dl>
+        ) : (
+          <p className="text-sm text-textSecondary">Coach assessment pending</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <p className={DASHBOARD_SECTION_HEADING_CLASS}>
           Overall Golfer Performance
         </p>
         <AthleteCompetitionOgpCheckpoint
@@ -306,6 +373,7 @@ export function AthleteCompetitionSubmittedDetail({
 
       {competition.days.length > 0 ? (
         <div className="space-y-3">
+          <p className={DASHBOARD_SECTION_HEADING_CLASS}>Day evidence</p>
           <AthleteCompetitionDaySelector
             numberOfDays={competition.numberOfDays}
             selectedDayNumber={selectedDay?.dayNumber ?? 1}

@@ -299,12 +299,17 @@ export function CoachCompetitionPerformanceSection({
           <>
             <AthleteCompetitionSubmittedDetail competition={detail} />
             {canAssess ? (
-              <CoachCompetitionAssessmentForm
-                submitting={submitting}
-                onSubmit={(payload) => {
-                  void onAssess(payload);
-                }}
-              />
+              <div className="space-y-3 rounded-lg border border-slate-200/80 p-3">
+                <p className="text-sm font-medium text-textPrimary">
+                  Coach assessment
+                </p>
+                <CoachCompetitionAssessmentForm
+                  submitting={submitting}
+                  onSubmit={(payload) => {
+                    void onAssess(payload);
+                  }}
+                />
+              </div>
             ) : null}
           </>
         ) : null}

@@ -33,6 +33,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     );
     expect(source).toContain("<AthleteWeeklyGoalPerformanceSection");
     expect(source).toContain("<AthleteCompetitionEntrySection");
+    expect(source).toContain("<AthleteCompetitionPerformanceSection");
     expect(source).not.toContain("fetchSportMetricsGolfWeeklySummary");
     expect(source).not.toContain("fetchSportMetricsGolfComparison");
     expect(source).not.toContain("GolfSportsMetricsComparison");

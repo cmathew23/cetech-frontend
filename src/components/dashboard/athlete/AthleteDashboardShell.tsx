@@ -11,6 +11,7 @@ import { AthleteWeeklyAdherenceSection } from "@/components/dashboard/athlete/At
 import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/AthletePendingInvitationCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
 import { AthleteCompetitionEntrySection } from "@/components/dashboard/athlete/AthleteCompetitionEntrySection";
+import { AthleteCompetitionPerformanceSection } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 // Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
 // uncommenting this import and the SportMetricsSection render below.
@@ -22,6 +23,7 @@ import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentif
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { routeFromAccessContext } from "@/lib/accessContext";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 function isPendingStatus(status: string): boolean {
   return status.trim().toUpperCase() === "PENDING";
@@ -60,6 +62,9 @@ function AthleteSportMetricsWithPlanVersion({
   athleteId: string;
 }) {
   const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  const [submittedCompetitionId, setSubmittedCompetitionId] = useState<
+    string | null
+  >(null);
   // return (
   //   <SportMetricsSection
   //     entityId={entityId}
@@ -81,6 +86,13 @@ function AthleteSportMetricsWithPlanVersion({
         entityId={entityId}
         athleteId={athleteId}
         trainingPlanVersionId={trainingPlanVersionId}
+        onCompetitionSubmitted={setSubmittedCompetitionId}
+      />
+      <AthleteCompetitionPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+        focusCompetitionId={submittedCompetitionId}
       />
     </>
   );

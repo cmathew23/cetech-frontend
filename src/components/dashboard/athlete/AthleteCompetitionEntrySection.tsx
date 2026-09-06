@@ -275,10 +275,12 @@ export function AthleteCompetitionEntrySection({
   entityId,
   athleteId,
   trainingPlanVersionId,
+  onCompetitionSubmitted,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
+  onCompetitionSubmitted?: (competitionId: string) => void;
 }) {
   const resolvedEntityId = entityId.trim();
   const resolvedAthleteId = athleteId.trim();
@@ -436,6 +438,7 @@ export function AthleteCompetitionEntrySection({
       clearActiveGolfCompetitionId(resolvedEntityId, resolvedAthleteId);
       setCompetition(result.competition);
       setDays(daysFromCompetition(result.competition));
+      onCompetitionSubmitted?.(result.competition.id);
     } catch (e) {
       setError(formatError(e));
     } finally {

@@ -2798,6 +2798,9 @@ export function AthleteWeeklyPlanJournalPageContent() {
         subtitle={weekSubtitle}
         trailing={<AthleteHeaderIdentityMetadata />}
       />
+      <Alert variant="info" role="status">
+        Training reminder: Before and after your Skills and Strength & Conditioning sessions, allow 15–20 minutes for a proper warm-up and cool-down.
+      </Alert>
       {isLoading ? (
         <DashboardCardShell majorOuter title="Weekly Plan Journal" className="min-h-[220px]">
           <div className="flex min-h-[120px] items-center justify-center text-sm text-textSecondary">

@@ -333,3 +333,30 @@ describe("Nutrition and S&C goal attribution presentation", () => {
     expect(journalSource).toContain("targetValue={mergedItem.targetValue}");
   });
 });
+
+const WARM_UP_COOL_DOWN_GUIDANCE =
+  "Training reminder: Before and after your Skills and Strength & Conditioning sessions, allow 15–20 minutes for a proper warm-up and cool-down.";
+
+describe("Weekly Training warm-up / cool-down guidance banner", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("renders the guidance once as an info Alert below the page heading", () => {
+    expect(journalSource).toContain("<PageHeader");
+    expect(journalSource).toContain(
+      `<Alert variant="info" role="status">\n        ${WARM_UP_COOL_DOWN_GUIDANCE}\n      </Alert>`,
+    );
+    expect(journalSource.split(WARM_UP_COOL_DOWN_GUIDANCE)).toHaveLength(2);
+    expect(journalSource.indexOf("<PageHeader")).toBeLessThan(
+      journalSource.indexOf(WARM_UP_COOL_DOWN_GUIDANCE),
+    );
+    expect(journalSource).toContain('<Alert variant="info" role="status">');
+    expect(journalSource).not.toContain(
+      `<Alert variant="info" role="status" dismissible>`,
+    );
+  });
+});

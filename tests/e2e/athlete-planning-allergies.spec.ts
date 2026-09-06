@@ -249,11 +249,11 @@ test.describe("athlete planning allergies/intolerances", () => {
 
     await page.getByLabel("Date of Birth").fill("2022-07-30");
     await expect(
-      page.getByText("Athlete age must be between 5 and 80 years"),
+      page.getByText("Athlete age must be between 8 and 70 years for plan generation."),
     ).toBeVisible();
     await page.getByLabel("Date of Birth").fill("2000-01-02");
     await expect(
-      page.getByText("Athlete age must be between 5 and 80 years"),
+      page.getByText("Athlete age must be between 8 and 70 years for plan generation."),
     ).toHaveCount(0);
     await page.getByLabel("Gender").selectOption("MALE");
     await page.getByLabel("Height (cm)").fill("99");

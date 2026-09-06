@@ -1448,13 +1448,16 @@ export function collectPlanningProfileValidationErrors(
     try {
       const dateOfBirthIso = toIsoFromUiDob(dob);
       const age = calculateUtcCalendarAge(dateOfBirthIso, new Date());
-      if (age < 5 || age > 80) {
+      if (age < 8 || age > 70) {
         errors[fieldErrorKey("athleteContext", "dateOfBirth")] =
-          "Athlete age must be between 5 and 80 years";
+          "Athlete age must be between 8 and 70 years for plan generation.";
       }
-    } catch {
+    } catch (error) {
       errors[fieldErrorKey("athleteContext", "dateOfBirth")] =
-        "Date of Birth must be a valid past date.";
+        isNormalizedApiError(error) &&
+        error.message === "dateOfBirth cannot be in the future"
+          ? "Athlete age must be between 8 and 70 years for plan generation."
+          : "Date of Birth must be a valid past date.";
     }
   }
 

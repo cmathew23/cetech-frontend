@@ -18,6 +18,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function formatUtcYmd(date: Date): string {
+  const year = String(date.getUTCFullYear());
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dobAtExactUtcAge(ageYears: number): string {
+  const now = new Date();
+  return formatUtcYmd(
+    new Date(
+      Date.UTC(
+        now.getUTCFullYear() - ageYears,
+        now.getUTCMonth(),
+        now.getUTCDate(),
+      ),
+    ),
+  );
+}
+
+function dobAtExactUtcAgePlusDays(ageYears: number, days: number): string {
+  const now = new Date();
+  return formatUtcYmd(
+    new Date(
+      Date.UTC(
+        now.getUTCFullYear() - ageYears,
+        now.getUTCMonth(),
+        now.getUTCDate() + days,
+      ),
+    ),
+  );
+}
+
+const APP_DOB_AGE_ERROR =
+  "Athlete age must be between 8 and 70 years for plan generation.";
+
 function completedDraft(): PlanningProfileFormState {
   const draft = buildPlanningProfileDefaults({ primarySport: "Football" });
   draft.athleteContext = {
@@ -237,12 +273,9 @@ describe("APP mandatory field validation", () => {
 });
 
 describe("APP anthropometric validation", () => {
-  it.each([
-    ["2021-07-29", "exactly age 5"],
-    ["1946-07-29", "exactly age 80"],
-  ])("accepts %s (%s)", (dateOfBirth) => {
+  it("accepts DOB at exactly age 8", () => {
     const draft = completedDraft();
-    draft.athleteContext.dateOfBirth = dateOfBirth;
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAge(8);
 
     expect(
       collectPlanningProfileValidationErrors(draft)[
@@ -251,29 +284,48 @@ describe("APP anthropometric validation", () => {
     ).toBeUndefined();
   });
 
-  it.each([
-    ["2021-07-30", "younger than 5"],
-    ["1945-07-29", "older than 80"],
-  ])("rejects %s (%s)", (dateOfBirth) => {
+  it("accepts DOB at exactly age 70", () => {
     const draft = completedDraft();
-    draft.athleteContext.dateOfBirth = dateOfBirth;
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAge(70);
 
     expect(
       collectPlanningProfileValidationErrors(draft)[
         "athleteContext.dateOfBirth"
       ],
-    ).toBe("Athlete age must be between 5 and 80 years");
+    ).toBeUndefined();
   });
 
-  it("rejects a future DOB", () => {
+  it("rejects DOB at age 7", () => {
     const draft = completedDraft();
-    draft.athleteContext.dateOfBirth = "2027-07-29";
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAgePlusDays(8, 1);
 
     expect(
       collectPlanningProfileValidationErrors(draft)[
         "athleteContext.dateOfBirth"
       ],
-    ).toBe("Date of Birth must be a valid past date.");
+    ).toBe(APP_DOB_AGE_ERROR);
+  });
+
+  it("rejects DOB at exactly age 71", () => {
+    const draft = completedDraft();
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAge(71);
+
+    expect(
+      collectPlanningProfileValidationErrors(draft)[
+        "athleteContext.dateOfBirth"
+      ],
+    ).toBe(APP_DOB_AGE_ERROR);
+  });
+
+  it("rejects a future DOB with the age range message", () => {
+    const draft = completedDraft();
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAgePlusDays(0, 1);
+
+    expect(
+      collectPlanningProfileValidationErrors(draft)[
+        "athleteContext.dateOfBirth"
+      ],
+    ).toBe(APP_DOB_AGE_ERROR);
   });
 
   it.each(["100", "220"])("accepts height %s cm", (heightCm) => {
@@ -407,13 +459,13 @@ describe("APP anthropometric validation", () => {
   it("validates age for a DOB-only edit", () => {
     const baseline = completedDraft();
     const draft = structuredClone(baseline);
-    draft.athleteContext.dateOfBirth = "2021-07-30";
+    draft.athleteContext.dateOfBirth = dobAtExactUtcAgePlusDays(8, 1);
 
     expect(
       collectPlanningProfileValidationErrors(draft, { baseline })[
         "athleteContext.dateOfBirth"
       ],
-    ).toBe("Athlete age must be between 5 and 80 years");
+    ).toBe(APP_DOB_AGE_ERROR);
   });
 });
 

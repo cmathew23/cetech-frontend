@@ -1,8 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  ALLERGY_INTOLERANCE_CHOICES_DISABLED,
+  ALLERGY_OPTIONS,
+  INTOLERANCE_OPTIONS,
+  SPECIAL_SELECTABLE_OPTIONS,
   VISIBLE_DIET_TYPE_OPTIONS,
   VISIBLE_REGIONAL_CUISINE_OPTIONS,
 } from "@/components/dashboard/athlete/AthleteProfilePlanningPageContent";
+
+const source = readFileSync(
+  new URL("./AthleteProfilePlanningPageContent.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("APP Diet Type and Regional Cuisine MVP options", () => {
   it("exposes only Omnivore and Vegetarian diet types", () => {
@@ -62,5 +72,49 @@ describe("APP Diet Type and Regional Cuisine MVP options", () => {
     expect(labels).not.toContain("Middle Eastern");
     expect(labels).not.toContain("Latin American");
     expect(labels).not.toContain("Open to all");
+  });
+});
+
+describe("APP Allergies / Intolerances MVP disable", () => {
+  it("renders existing allergy and intolerance options while keeping the data intact", () => {
+    expect([...ALLERGY_OPTIONS]).toEqual([
+      "Celery",
+      "Cereals containing gluten",
+      "Crustaceans",
+      "Eggs",
+      "Fish",
+      "Lupin",
+      "Milk",
+      "Molluscs",
+      "Mustard",
+      "Nuts",
+      "Peanuts",
+      "Sesame seeds",
+      "Soya",
+      "Sulphites",
+    ]);
+    expect([...INTOLERANCE_OPTIONS]).toEqual([
+      "Lactose Intolerant",
+      "Gluten Intolerant",
+      "FODMAP Sensitivity",
+      "Histamine Intolerance",
+      "Fructose Intolerance",
+    ]);
+    expect([...SPECIAL_SELECTABLE_OPTIONS]).toEqual(["Others"]);
+    expect(source).toContain("{ALLERGY_OPTIONS.map((option) => (");
+    expect(source).toContain("{INTOLERANCE_OPTIONS.map((option) => (");
+    expect(source).toContain("{SPECIAL_SELECTABLE_OPTIONS.map((option) => (");
+  });
+
+  it("keeps allergy, intolerance, and Others controls disabled and non-selectable", () => {
+    expect(ALLERGY_INTOLERANCE_CHOICES_DISABLED).toBe(true);
+    expect(source).toContain("|| ALLERGY_INTOLERANCE_CHOICES_DISABLED");
+  });
+
+  it("keeps I do not have food allergies enabled", () => {
+    expect(source).toContain("<span>{NO_FOOD_ALLERGIES_OPTION}</span>");
+    expect(source).toMatch(
+      /checked=\{allergiesValue\.noFoodAllergies\}\s+disabled=\{readOnly\}\s+onChange=\{toggleNoFoodAllergies\}/,
+    );
   });
 });

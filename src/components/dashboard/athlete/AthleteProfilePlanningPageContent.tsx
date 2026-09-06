@@ -139,7 +139,7 @@ export const VISIBLE_REGIONAL_CUISINE_OPTIONS = REGIONAL_CUISINE_OPTIONS.filter(
   (option) => REGIONAL_CUISINE_VISIBLE_VALUES.has(option.value),
 );
 
-const ALLERGY_OPTIONS = [
+export const ALLERGY_OPTIONS = [
   "Celery",
   "Cereals containing gluten",
   "Crustaceans",
@@ -156,7 +156,7 @@ const ALLERGY_OPTIONS = [
   "Sulphites",
 ] as const;
 
-const INTOLERANCE_OPTIONS = [
+export const INTOLERANCE_OPTIONS = [
   "Lactose Intolerant",
   "Gluten Intolerant",
   "FODMAP Sensitivity",
@@ -164,9 +164,11 @@ const INTOLERANCE_OPTIONS = [
   "Fructose Intolerance",
 ] as const;
 
-const SPECIAL_SELECTABLE_OPTIONS = [
+export const SPECIAL_SELECTABLE_OPTIONS = [
   "Others",
 ] as const;
+
+export const ALLERGY_INTOLERANCE_CHOICES_DISABLED = true;
 
 const NO_FOOD_ALLERGIES_OPTION = "I do not have food allergies";
 const SPORT_PERFORMANCE_LEVEL_FIELD =
@@ -900,7 +902,13 @@ export function AthleteProfilePlanningPageContent() {
       }
 
       function toggleAllergyOption(option: string) {
-        if (readOnly || allergiesValue.noFoodAllergies) return;
+        if (
+          readOnly
+          || allergiesValue.noFoodAllergies
+          || ALLERGY_INTOLERANCE_CHOICES_DISABLED
+        ) {
+          return;
+        }
         const nextSet = new Set(selectedSet);
         if (nextSet.has(option)) nextSet.delete(option);
         else nextSet.add(option);
@@ -956,7 +964,11 @@ export function AthleteProfilePlanningPageContent() {
                         type="checkbox"
                         className="mt-0.5"
                         checked={selectedSet.has(option)}
-                        disabled={readOnly || allergiesValue.noFoodAllergies}
+                        disabled={
+                          readOnly
+                          || allergiesValue.noFoodAllergies
+                          || ALLERGY_INTOLERANCE_CHOICES_DISABLED
+                        }
                         onChange={() => toggleAllergyOption(option)}
                       />
                       <span>{option}</span>
@@ -978,7 +990,11 @@ export function AthleteProfilePlanningPageContent() {
                         type="checkbox"
                         className="mt-0.5"
                         checked={selectedSet.has(option)}
-                        disabled={readOnly || allergiesValue.noFoodAllergies}
+                        disabled={
+                          readOnly
+                          || allergiesValue.noFoodAllergies
+                          || ALLERGY_INTOLERANCE_CHOICES_DISABLED
+                        }
                         onChange={() => toggleAllergyOption(option)}
                       />
                       <span>{option}</span>
@@ -1000,7 +1016,11 @@ export function AthleteProfilePlanningPageContent() {
                         type="checkbox"
                         className="mt-0.5"
                         checked={selectedSet.has(option)}
-                        disabled={readOnly || allergiesValue.noFoodAllergies}
+                        disabled={
+                          readOnly
+                          || allergiesValue.noFoodAllergies
+                          || ALLERGY_INTOLERANCE_CHOICES_DISABLED
+                        }
                         onChange={() => toggleAllergyOption(option)}
                       />
                       <span>{option}</span>
@@ -1025,7 +1045,11 @@ export function AthleteProfilePlanningPageContent() {
               <Input
                 id={`${group}-${field}-others`}
                 value={othersText}
-                disabled={readOnly || allergiesValue.noFoodAllergies}
+                disabled={
+                  readOnly
+                  || allergiesValue.noFoodAllergies
+                  || ALLERGY_INTOLERANCE_CHOICES_DISABLED
+                }
                 placeholder="Others (please specify)"
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   updateAllergies({

@@ -215,6 +215,36 @@ test.describe("athlete planning allergies/intolerances", () => {
     );
     expect(checkboxOrder.at(-1)).toBe("I do not have food allergies");
 
+    const disabledAllergyLabels = [
+      "Celery",
+      "Cereals containing gluten",
+      "Crustaceans",
+      "Eggs",
+      "Fish",
+      "Lupin",
+      "Milk",
+      "Molluscs",
+      "Mustard",
+      "Nuts",
+      "Peanuts",
+      "Sesame seeds",
+      "Soya",
+      "Sulphites",
+      "Lactose Intolerant",
+      "Gluten Intolerant",
+      "FODMAP Sensitivity",
+      "Histamine Intolerance",
+      "Fructose Intolerance",
+      "Others",
+    ];
+    for (const name of disabledAllergyLabels) {
+      await expect(page.getByLabel(name, { exact: true })).toBeVisible();
+      await expect(page.getByLabel(name, { exact: true })).toBeDisabled();
+    }
+    await expect(
+      page.getByLabel("I do not have food allergies"),
+    ).toBeEnabled();
+
     const mandatoryControlIds = [
       "athleteContext-dateOfBirth",
       "athleteContext-sex",
@@ -304,8 +334,7 @@ test.describe("athlete planning allergies/intolerances", () => {
     await expect(saveProfile).toBeDisabled();
     expect(createBodies).toHaveLength(0);
 
-    await page.getByLabel("Lactose Intolerant").check();
-    await page.getByLabel("FODMAP Sensitivity").check();
+    await page.getByLabel("I do not have food allergies").check();
     await expect(saveProfile).toBeEnabled();
 
     await page.getByLabel("Date of Birth").fill("2022-07-30");
@@ -380,57 +409,6 @@ test.describe("athlete planning allergies/intolerances", () => {
 
     expect(createBodies).toHaveLength(1);
     expect(createBodies[0].nutritionContext?.allergiesIntolerances).toEqual({
-      selected: ["Lactose Intolerant", "FODMAP Sensitivity"],
-      othersText: null,
-      noFoodAllergies: false,
-    });
-
-    await page.reload();
-    await expect(page.getByLabel("Lactose Intolerant")).toBeChecked();
-    await expect(page.getByLabel("FODMAP Sensitivity")).toBeChecked();
-
-    await page.getByRole("button", { name: "Edit Profile" }).click();
-    await page.getByLabel("Fish").check();
-    await page.getByLabel("Histamine Intolerance").check();
-    await page.getByLabel("Others").check();
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(
-      page.getByText("Others (please specify) is required."),
-    ).toBeVisible();
-
-    await page.getByPlaceholder("Others (please specify)").fill("Nightshades");
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText("Athlete profile planning updated.")).toBeVisible();
-
-    expect(patchBodies).toHaveLength(1);
-    expect(Object.keys(patchBodies[0])).toEqual(["nutritionContext"]);
-    expect(patchBodies[0].nutritionContext?.allergiesIntolerances).toEqual({
-      selected: [
-        "Fish",
-        "Lactose Intolerant",
-        "FODMAP Sensitivity",
-        "Histamine Intolerance",
-        "Others",
-      ],
-      othersText: "Nightshades",
-      noFoodAllergies: false,
-    });
-
-    await page.reload();
-    await expect(page.getByLabel("Others")).toBeChecked();
-    await expect(page.getByPlaceholder("Others (please specify)")).toHaveValue(
-      "Nightshades",
-    );
-
-    await page.getByRole("button", { name: "Edit Profile" }).click();
-    await page.getByLabel("I do not have food allergies").check();
-    await expect(page.getByLabel("Fish")).toBeDisabled();
-    await expect(page.getByLabel("Lactose Intolerant")).toBeDisabled();
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText("Athlete profile planning updated.")).toBeVisible();
-
-    expect(patchBodies).toHaveLength(2);
-    expect(patchBodies[1].nutritionContext?.allergiesIntolerances).toEqual({
       selected: [],
       othersText: null,
       noFoodAllergies: true,
@@ -440,6 +418,7 @@ test.describe("athlete planning allergies/intolerances", () => {
     await expect(page.getByLabel("I do not have food allergies")).toBeChecked();
     await expect(page.getByLabel("Fish")).toBeDisabled();
     await expect(page.getByLabel("Lactose Intolerant")).toBeDisabled();
+    await expect(page.getByLabel("Others")).toBeDisabled();
     await expect(page.getByLabel("Others")).not.toBeChecked();
 
     await page.getByRole("button", { name: "Edit Profile" }).click();

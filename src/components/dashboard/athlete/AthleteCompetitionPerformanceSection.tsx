@@ -266,6 +266,9 @@ export function AthleteCompetitionSubmittedDetail({
         <Field label="Format">{String(competition.format)} holes</Field>
         <Field label="Number of days">{String(competition.numberOfDays)}</Field>
         <Field label="Season phase">{competition.seasonPhase}</Field>
+        <Field label="Athlete Average Satisfaction">
+          {displayBackendNumber(competition.athleteAverageSatisfaction)}
+        </Field>
       </dl>
 
       <AthleteCompetitionHoleSummaryFields

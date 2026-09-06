@@ -14606,8 +14606,11 @@ export function CoachAthletePlanningProfileView({
   ) as Partial<Record<SeasonPhaseType, SeasonPhaseSummary>>;
   const activePhaseForSelectedSeason = detectCurrentPhase(selectedSeasonPhases, today);
   const goalLibraryLevel = useMemo(
-    () => goalLibraryLevelValue(lockedPlanningContextCardFields.validatedLevel),
-    [lockedPlanningContextCardFields.validatedLevel],
+    () =>
+      goalLibraryLevelValue(
+        readinessSources.levelValidation?.validatedLevel ?? null,
+      ),
+    [readinessSources.levelValidation?.validatedLevel],
   );
 
   useEffect(() => {

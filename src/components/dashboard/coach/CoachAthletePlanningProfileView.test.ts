@@ -21485,3 +21485,43 @@ describe("Workflow 1 assistant domain action visibility", () => {
     expect(workspaceShowsDomainSubmitReview(workspace, "SKILLS")).toBe(false);
   });
 });
+
+describe("Goal Library validated level source", () => {
+  const source = readFileSync(
+    new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+    "utf8",
+  );
+  const goalLibraryLevelBlock = source.slice(
+    source.indexOf("const goalLibraryLevel = useMemo("),
+    source.indexOf("useEffect(() => {", source.indexOf("const goalLibraryLevel = useMemo(")),
+  );
+  const fetchEffect = source.slice(
+    source.indexOf("const library = await fetchGoalLibrary({"),
+    source.indexOf("});", source.indexOf("const library = await fetchGoalLibrary({")) + 3,
+  );
+
+  it("uses coach-confirmed levelValidation.validatedLevel for Goal Library", () => {
+    expect(goalLibraryLevelBlock).toContain(
+      "goalLibraryLevelValue(\n        readinessSources.levelValidation?.validatedLevel ?? null,",
+    );
+    expect(fetchEffect).toContain("level: goalLibraryLevel");
+    expect(fetchEffect).toContain("seasonPhase: activePhaseForSelectedSeason.phase");
+  });
+
+  it("does not let stale locked/upstream validatedLevel override the Goal Library request", () => {
+    expect(goalLibraryLevelBlock).not.toContain(
+      "lockedPlanningContextCardFields.validatedLevel",
+    );
+    expect(goalLibraryLevelBlock).not.toContain("upstreamPlanningContext");
+    expect(goalLibraryLevelBlock).not.toContain("profileValidatedLevel");
+  });
+
+  it("does not fetch Goal Library when coach-confirmed validatedLevel is missing or invalid", () => {
+    expect(source).toContain(
+      "if (!activePhaseForSelectedSeason?.phase || !goalLibraryLevel)",
+    );
+    expect(source).toContain(
+      'value === "BEGINNER" ||\n    value === "INTERMEDIATE" ||\n    value === "ADVANCED" ||\n    value === "ELITE"',
+    );
+  });
+});

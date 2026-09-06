@@ -152,7 +152,7 @@ export function CoachChatPageContent() {
   return (
     <div className="w-full min-w-0 max-w-full space-y-6">
       <PageHeader
-        title="Chat with Athlete"
+        title="PeakConnect"
         subtitle="Send and receive text messages with an eligible athlete."
       />
 

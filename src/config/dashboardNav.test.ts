@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  athleteSidebarNavItems,
+  coachSidebarNavItems,
   isCoachSidebarNavItemActive,
   isCoachTrainingPlanRoute,
 } from "@/config/dashboardNav";
@@ -97,5 +99,16 @@ describe("isCoachSidebarNavItemActive", () => {
     expect(isCoachSidebarNavItemActive("/coach/settings", SETTINGS)).toBe(true);
     expect(isCoachSidebarNavItemActive("/coach/settings", DASHBOARD)).toBe(false);
     expect(isCoachSidebarNavItemActive("/coach/dashboard", SETTINGS)).toBe(false);
+  });
+});
+
+describe("PeakConnect module labels", () => {
+  it("uses PeakConnect for coach and athlete chat sidebar items", () => {
+    expect(
+      coachSidebarNavItems.find((item) => item.href === "/coach/chat")?.label,
+    ).toBe("PeakConnect");
+    expect(
+      athleteSidebarNavItems.find((item) => item.href === "/athlete/chat")?.label,
+    ).toBe("PeakConnect");
   });
 });

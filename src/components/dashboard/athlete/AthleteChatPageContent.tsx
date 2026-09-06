@@ -147,7 +147,7 @@ export function AthleteChatPageContent() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Chat with Coach"
+        title="PeakConnect"
         subtitle="Send and receive text messages with an eligible coach."
         trailing={<AthleteHeaderIdentityMetadata />}
       />

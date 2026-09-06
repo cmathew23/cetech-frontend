@@ -10,6 +10,7 @@ import {
 import { AthleteWeeklyAdherenceSection } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceSection";
 import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/AthletePendingInvitationCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
+import { AthleteCompetitionEntrySection } from "@/components/dashboard/athlete/AthleteCompetitionEntrySection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 // Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
 // uncommenting this import and the SportMetricsSection render below.
@@ -70,11 +71,18 @@ function AthleteSportMetricsWithPlanVersion({
   // );
 
   return (
-    <AthleteWeeklyGoalPerformanceSection
-      entityId={entityId}
-      athleteId={athleteId}
-      trainingPlanVersionId={trainingPlanVersionId}
-    />
+    <>
+      <AthleteWeeklyGoalPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+      <AthleteCompetitionEntrySection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+    </>
   );
 }
 

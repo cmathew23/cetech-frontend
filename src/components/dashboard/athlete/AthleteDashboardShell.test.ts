@@ -32,6 +32,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
       'return <p className="text-sm font-medium text-textPrimary">Sports Metrics</p>',
     );
     expect(source).toContain("<AthleteWeeklyGoalPerformanceSection");
+    expect(source).toContain("<AthleteCompetitionEntrySection");
     expect(source).not.toContain("fetchSportMetricsGolfWeeklySummary");
     expect(source).not.toContain("fetchSportMetricsGolfComparison");
     expect(source).not.toContain("GolfSportsMetricsComparison");

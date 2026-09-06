@@ -155,6 +155,37 @@ export const paths = {
       athleteId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/coach-practice-ratings`,
+    athleteSportMetricsGolfCompetitions: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions`,
+    athleteSportMetricsGolfCompetitionHistory: (
+      entityId: string,
+      athleteId: string,
+      query: { seasonCycleId: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/history`;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", query.seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsGolfCompetition: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}`,
+    athleteSportMetricsGolfCompetitionSubmit: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}/submit`,
+    athleteSportMetricsGolfCompetitionCoachAssessments: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}/coach-assessments`,
     athleteWearableProviders: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/providers`,
     athleteWearableConnections: (entityId: string, athleteId: string) =>

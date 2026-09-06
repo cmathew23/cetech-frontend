@@ -75,6 +75,27 @@ describe("sport metrics golf weekly summary", () => {
     expect(parsed.weekEndDate).toBe("2026-05-10");
     expect(parsed.goalEvidence[0]?.goalTitle).toBe("Improve wedge proximity");
     expect(parsed.unlinkedEvidence[0]?.label).toBe("Round notes");
+    expect(parsed.seasonCycleId).toBeNull();
+    expect(parsed.seasonYear).toBeNull();
+  });
+
+  it("copies backend seasonCycleId and seasonYear without inferring them", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        sport: "GOLF",
+        weekStartDate: "2026-05-04",
+        weekEndDate: "2026-05-10",
+        status: "NO_DATA_LOGGED",
+        seasonCycleId: "season-2026",
+        seasonYear: 2026,
+        goalEvidence: [],
+        unlinkedEvidence: [],
+      },
+    });
+
+    expect(parsed.seasonCycleId).toBe("season-2026");
+    expect(parsed.seasonYear).toBe(2026);
   });
 
   it("fetches with trainingPlanVersionId query param only", async () => {

@@ -228,6 +228,8 @@ export type SportMetricsGolfWeeklySummary = {
   weekEndDate: string;
   status: string;
   trainingPlanVersionId: string | null;
+  seasonCycleId: string | null;
+  seasonYear: number | null;
   contextFields: string[];
   prescribedSkillsCount: number | null;
   goalEvidence: SportMetricGoalEvidenceGroup[];
@@ -743,6 +745,8 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
     weekEndDate,
     status,
     trainingPlanVersionId: pickString(record, ["trainingPlanVersionId", "versionId"]),
+    seasonCycleId: pickString(record, ["seasonCycleId"]),
+    seasonYear: readFiniteNumber(record.seasonYear),
     contextFields: pickStringArray(record, ["contextFields", "visibleContextFields"]),
     prescribedSkillsCount,
     goalEvidence,

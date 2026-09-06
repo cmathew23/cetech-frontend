@@ -600,7 +600,7 @@ export function AthleteCompetitionEntrySection({
         {competition ? (
           <div className="space-y-4">
             {readOnly ? (
-              <Alert variant="success">
+              <Alert variant="success" role="status">
                 Competition submitted. This entry is read-only.
               </Alert>
             ) : (

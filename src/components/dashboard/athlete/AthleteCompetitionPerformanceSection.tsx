@@ -60,18 +60,10 @@ function HighlightMetric({
   label: string;
   value: string;
 }) {
-  const unavailable = value === UNAVAILABLE;
   return (
     <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5">
       <p className={DASHBOARD_DETAIL_LABEL_CLASS}>{label}</p>
-      <p
-        className={cn(
-          "mt-1 leading-none tabular-nums",
-          unavailable
-            ? "text-sm text-textSecondary"
-            : "text-xl font-medium text-textPrimary",
-        )}
-      >
+      <p className="mt-1 text-xl font-medium leading-none tabular-nums text-textPrimary">
         {value}
       </p>
     </div>

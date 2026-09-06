@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/Card";
+import { Alert } from "@/components/ui/Alert";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatDateOnly, formatDateRange } from "@/lib/dateTime";
 import type {
@@ -16,8 +17,6 @@ const METRIC_FIELDS = [
   ["Target hits", "targetHits", false],
   ["Success rate", "successRate", true],
 ] as const;
-
-const COMPARISON_BADGE_CLASS = "bg-zinc-200 text-zinc-900";
 
 function formatTaxonomyAreaKey(value: string): string {
   return value
@@ -144,7 +143,7 @@ function DrillRow({
             {drillLabel}
           </h4>
         </div>
-        <StatusBadge variant="neutral" className={COMPARISON_BADGE_CLASS}>
+        <StatusBadge variant="neutral">
           {formatComparisonStatus(drill.status)}
         </StatusBadge>
       </div>
@@ -163,9 +162,7 @@ function DrillRow({
       ) : null}
 
       {drill.taxonomyMismatch ? (
-        <p className="text-sm font-medium text-warning">
-          Classification changed between weeks
-        </p>
+        <Alert variant="warning">Classification changed between weeks</Alert>
       ) : null}
 
       <div className="grid min-w-0 gap-4 sm:grid-cols-3">
@@ -198,7 +195,7 @@ function CategoryCard({
     <Card
       title={formatTaxonomyAreaKey(category.taxonomyAreaKey)}
       actions={
-        <StatusBadge variant="neutral" className={COMPARISON_BADGE_CLASS}>
+        <StatusBadge variant="neutral">
           {formatComparisonStatus(category.status)}
         </StatusBadge>
       }

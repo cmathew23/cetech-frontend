@@ -1066,21 +1066,76 @@ describe("sport metrics golf comparison", () => {
 });
 
 describe("buildGolfSportMetricRecordRequestBody", () => {
+  const basePayload = {
+    trainingPlanVersionId: "version-1",
+    plannedSessionId: "ps-1",
+    occurredAt: "2026-05-24T12:00:00.000Z",
+    metricType: "DRILL_RESULT" as const,
+    environment: "PRACTICE_FACILITY",
+    source: "ATHLETE_MANUAL",
+    prescribedContextJson: { label: "Chip Ladder", order: 1 },
+  };
+
   it("keeps prescribedContextJson and valueJson as objects before serialization", () => {
     const requestBody = buildGolfSportMetricRecordRequestBody({
-      trainingPlanVersionId: "version-1",
-      plannedSessionId: "ps-1",
-      occurredAt: "2026-05-24T12:00:00.000Z",
-      metricType: "DRILL_RESULT",
-      environment: "PRACTICE_FACILITY",
-      source: "ATHLETE_MANUAL",
-      prescribedContextJson: { label: "Chip Ladder", order: 1 },
+      ...basePayload,
       valueJson: { attempts: 5, successes: 4 },
     });
 
     expect(requestBody.prescribedContextJson).toEqual({ label: "Chip Ladder", order: 1 });
     expect(requestBody.valueJson).toEqual({ attempts: 5, successes: 4 });
     expect(JSON.stringify(requestBody)).not.toContain("[object Object]");
+  });
+
+  it("lifts INDIVIDUAL entryMode to the top level and omits it from valueJson", () => {
+    const requestBody = buildGolfSportMetricRecordRequestBody({
+      ...basePayload,
+      valueJson: {
+        entryMode: "INDIVIDUAL",
+        attempts: [{ lineHit: false }],
+        notes: "session notes",
+      },
+    });
+
+    expect(requestBody.entryMode).toBe("INDIVIDUAL");
+    expect(requestBody.valueJson).toEqual({
+      attempts: [{ lineHit: false }],
+      notes: "session notes",
+    });
+    expect(requestBody.valueJson).not.toHaveProperty("entryMode");
+    expect(requestBody.valueJson).not.toHaveProperty("result");
+    expect(requestBody).not.toHaveProperty("result");
+  });
+
+  it("lifts CUMULATIVE entryMode to the top level and omits it from valueJson", () => {
+    const requestBody = buildGolfSportMetricRecordRequestBody({
+      ...basePayload,
+      valueJson: {
+        entryMode: "CUMULATIVE",
+        attempts: 12,
+        successes: 8,
+      },
+    });
+
+    expect(requestBody.entryMode).toBe("CUMULATIVE");
+    expect(requestBody.valueJson).toEqual({
+      attempts: 12,
+      successes: 8,
+    });
+    expect(requestBody.valueJson).not.toHaveProperty("entryMode");
+    expect(requestBody.valueJson).not.toHaveProperty("result");
+    expect(requestBody).not.toHaveProperty("result");
+  });
+
+  it("does not add top-level entryMode for legacy uncontracted valueJson", () => {
+    const requestBody = buildGolfSportMetricRecordRequestBody({
+      ...basePayload,
+      valueJson: { attempts: 5, successes: 4 },
+    });
+
+    expect(requestBody).not.toHaveProperty("entryMode");
+    expect(requestBody.valueJson).toEqual({ attempts: 5, successes: 4 });
+    expect(requestBody.valueJson).not.toHaveProperty("result");
   });
 });
 
@@ -1127,10 +1182,63 @@ describe("postGolfSportMetricRecord", () => {
       }),
     );
     expect(parsedBody.valueJson).toEqual({ attempts: 9, successes: 7 });
+    expect(parsedBody).not.toHaveProperty("entryMode");
     expect(parsedBody.prescribedContextJson).not.toBe("[object Object]");
     expect(parsedBody.valueJson).not.toBe("[object Object]");
     expect(typeof parsedBody.prescribedContextJson).toBe("object");
     expect(typeof parsedBody.valueJson).toBe("object");
+  });
+
+  it("POSTs top-level entryMode copied from contract-driven valueJson", async () => {
+    apiRequestMock.mockResolvedValue({ success: true });
+
+    await postGolfSportMetricRecord("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-skills",
+      plannedSessionId: "session-1",
+      occurredAt: "2026-05-24T16:00:00.000Z",
+      metricType: "DRILL_RESULT",
+      environment: "PRACTICE_FACILITY",
+      source: "ATHLETE_MANUAL",
+      prescribedContextJson: { label: "Chalk Line Start Drill" },
+      valueJson: {
+        entryMode: "INDIVIDUAL",
+        attempts: [{ lineHit: false }],
+      },
+    });
+
+    const individualBody = parsePostJsonBody(
+      apiRequestMock.mock.calls[0]?.[1] as Record<string, unknown>,
+    );
+    expect(individualBody.entryMode).toBe("INDIVIDUAL");
+    expect(individualBody.valueJson).toEqual({ attempts: [{ lineHit: false }] });
+    expect(individualBody.valueJson).not.toHaveProperty("entryMode");
+    expect(individualBody.valueJson).not.toHaveProperty("result");
+
+    apiRequestMock.mockReset();
+    apiRequestMock.mockResolvedValue({ success: true });
+
+    await postGolfSportMetricRecord("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-skills",
+      plannedSessionId: "session-1",
+      occurredAt: "2026-05-24T16:00:00.000Z",
+      metricType: "DRILL_RESULT",
+      environment: "PRACTICE_FACILITY",
+      source: "ATHLETE_MANUAL",
+      prescribedContextJson: { label: "Chalk Line Start Drill" },
+      valueJson: {
+        entryMode: "CUMULATIVE",
+        attempts: 12,
+        successes: 8,
+      },
+    });
+
+    const cumulativeBody = parsePostJsonBody(
+      apiRequestMock.mock.calls[0]?.[1] as Record<string, unknown>,
+    );
+    expect(cumulativeBody.entryMode).toBe("CUMULATIVE");
+    expect(cumulativeBody.valueJson).toEqual({ attempts: 12, successes: 8 });
+    expect(cumulativeBody.valueJson).not.toHaveProperty("entryMode");
+    expect(cumulativeBody.valueJson).not.toHaveProperty("result");
   });
 
   it("serializes nested provider inside valueJson as an object", async () => {

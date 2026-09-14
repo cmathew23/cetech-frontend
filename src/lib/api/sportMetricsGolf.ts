@@ -1238,6 +1238,13 @@ export function buildGolfSportMetricRecordRequestBody(
     requestBody.plannedSkillItemOrder = body.plannedSkillItemOrder;
   }
 
+  const entryMode = body.valueJson.entryMode;
+  if (entryMode === "INDIVIDUAL" || entryMode === "CUMULATIVE") {
+    const { entryMode: _entryMode, ...measurementValueJson } = body.valueJson;
+    requestBody.entryMode = entryMode;
+    requestBody.valueJson = measurementValueJson;
+  }
+
   return requestBody;
 }
 

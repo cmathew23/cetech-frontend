@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   ShieldCheck,
+  Trophy,
   UserRound,
   Users,
   type LucideIcon,
@@ -48,6 +49,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
 export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/athlete/weekly-plan", label: "Weekly Plan", icon: Calendar },
+  { href: "/athlete/competitions", label: "Competitions", icon: Trophy },
   { href: "/athlete/chat", label: "PeakConnect", icon: MessageSquare },
   { href: "/athlete/fyn", label: "Fyn Assistant", icon: Sparkles },
   { href: "/athlete/coaches", label: "Coaches", icon: Users },

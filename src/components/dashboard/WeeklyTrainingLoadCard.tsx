@@ -2,6 +2,8 @@
 
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 import {
@@ -62,28 +64,13 @@ function HeadlineMetric({
   label,
   value,
   caption,
-  mutedValue = false,
 }: {
   label: string;
   value: string;
   caption: string;
-  mutedValue?: boolean;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5">
-      <p className="text-xs font-medium tracking-wide text-textMuted">{label}</p>
-      <p
-        className={cn(
-          "mt-1 font-medium leading-tight text-textPrimary",
-          mutedValue
-            ? "text-sm leading-snug"
-            : "text-2xl tabular-nums leading-none",
-        )}
-      >
-        {value}
-      </p>
-      <p className="mt-1 text-[10px] leading-tight text-textMuted">{caption}</p>
-    </div>
+    <DashboardMetricTile title={label} value={value} caption={caption} />
   );
 }
 
@@ -170,7 +157,7 @@ export function WeeklyTrainingLoadCard({
         ) : null
       }
     >
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className={dashboardMetricGridClass(3)}>
         <HeadlineMetric
           label="Reported weekly training"
           value={
@@ -179,7 +166,6 @@ export function WeeklyTrainingLoadCard({
               : `${formatTrainingLoadHours(comparison.reportedBaselineHours!)} h`
           }
           caption="per week"
-          mutedValue={baselineMissing}
         />
         <HeadlineMetric
           label="AI planned"
@@ -194,7 +180,6 @@ export function WeeklyTrainingLoadCard({
               : `${formatTrainingLoadHours(actualHours)} h`
           }
           caption={caption}
-          mutedValue={completionMissing}
         />
       </div>
 

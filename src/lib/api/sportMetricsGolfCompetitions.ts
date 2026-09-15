@@ -238,6 +238,26 @@ export type GolfCompetitionDetailEnvelopeData = {
   competition: GolfCompetitionDetail;
 };
 
+export type GolfCompetitionListItem = {
+  id: string;
+  name: string;
+  type: GolfCompetitionType;
+  format: GolfCompetitionFormat;
+  venue: string;
+  startDate: string;
+  numberOfDays: number;
+  seasonPhase: GolfCompetitionSeasonPhase;
+  seasonCycleId: string;
+  seasonYear: number;
+  status: GolfCompetitionStatus;
+};
+
+export type GolfCompetitionListData = {
+  seasonCycleId: string;
+  seasonYear: number;
+  competitions: GolfCompetitionListItem[];
+};
+
 export type GolfCompetitionHistoryData = {
   seasonCycleId: string;
   seasonYear: number;
@@ -364,6 +384,34 @@ export async function submitGolfCompetition(params: {
       params.competitionId.trim(),
     ),
     { method: "POST" },
+  );
+}
+
+export async function fetchGolfCompetitions(params: {
+  entityId: string;
+  athleteId: string;
+  seasonCycleId: string;
+}): Promise<GolfCompetitionListData> {
+  const scope = requireScopeIds(params.entityId, params.athleteId);
+  const seasonCycleId = params.seasonCycleId.trim();
+  if (seasonCycleId === "") {
+    throw {
+      message: "seasonCycleId is required.",
+      status: 400,
+      code: "SPORT_METRICS_GOLF_IDS_REQUIRED",
+    };
+  }
+
+  return golfCompetitionRequest(
+    paths.entities.athleteSportMetricsGolfCompetitions(
+      scope.entityId,
+      scope.athleteId,
+      { seasonCycleId },
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+    },
   );
 }
 

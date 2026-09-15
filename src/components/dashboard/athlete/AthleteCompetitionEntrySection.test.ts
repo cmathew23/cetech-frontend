@@ -4,7 +4,8 @@ import {
 } from "@/components/dashboard/athlete/AthleteCompetitionEntrySection";
 import {
   GOLF_COMPETITION_TYPES,
-  buildGolfCompetitionDaysPatch,
+  areAllGolfCompetitionDaysSaved,
+  buildGolfCompetitionDaysPatchThrough,
   emptyGolfCompetitionDays,
   hydrateGolfCompetitionDays,
 } from "@/lib/sportMetrics/golfCompetitionEntry";
@@ -179,6 +180,7 @@ describe("athlete competition entry contracts", () => {
     expect(onSubmit).toContain("setDays(daysFromCompetition(result.competition))");
     expect(onSubmit).not.toContain("setCompetition(null)");
     expect(onSubmit).not.toContain("setDays([])");
+    expect(onSubmit).toContain("!allConfiguredDaysSaved");
   });
 
   it("does not calculate backend-derived competition metrics", () => {
@@ -202,6 +204,25 @@ describe("athlete competition entry contracts", () => {
     expect(source).not.toContain("postGolfCoachCompetitionAssessment");
     expect(source).not.toContain("fetchGolfCompetitionHistory");
     expect(source).not.toContain("competitionPerformance");
+  });
+
+  it("loads an opened competition through fetchGolfCompetition and keeps SUBMITTED read-only", () => {
+    const source = readEntrySource();
+    expect(source).toContain("fetchGolfCompetition({");
+    expect(source).toContain("competitionId: loadId");
+    expect(source).toContain('const readOnly = competition?.status === "SUBMITTED"');
+    expect(source).not.toContain("COMPLETED");
+    expect(source).toContain("Competition submitted. This entry is read-only.");
+  });
+
+  it("PATCHes days through the selected day and does not submit until all configured days are saved", () => {
+    const source = readEntrySource();
+    expect(source).toContain("buildGolfCompetitionDaysPatchThrough(days, selectedDayNumber)");
+    expect(source).toContain("isGolfCompetitionDayReadyToSave(currentDay, competition.format)");
+    expect(source).toContain("!savedDayNumbers.includes(selectedDayNumber - 1)");
+    expect(source).toContain("disabled={");
+    expect(source).toContain("!allConfiguredDaysSaved");
+    expect(source).not.toContain("autosave");
   });
 });
 
@@ -268,7 +289,7 @@ describe("configured days and hole rendering", () => {
 });
 
 describe("complete-days PATCH replacement", () => {
-  it("sends the complete current days collection, not only the selected day", () => {
+  it("sends saved days through the current day, not future unsaved days", () => {
     const days = emptyGolfCompetitionDays(2, 9);
     days[0] = {
       ...days[0]!,
@@ -285,18 +306,23 @@ describe("complete-days PATCH replacement", () => {
       ),
     };
 
-    const payload = buildGolfCompetitionDaysPatch(days);
-    expect(payload.map((day) => day.dayNumber)).toEqual([1, 2]);
-    expect(payload[0]?.date).toBe("2026-09-12");
-    expect(payload[1]?.date).toBe("2026-09-13");
-    expect(payload[0]?.holeResults?.[0]).toMatchObject({
+    const day1Payload = buildGolfCompetitionDaysPatchThrough(days, 1);
+    expect(day1Payload.map((day) => day.dayNumber)).toEqual([1]);
+    expect(day1Payload[0]?.holeResults?.[0]).toMatchObject({
       holeNumber: 1,
       notes: "Day 1",
     });
+
+    const payload = buildGolfCompetitionDaysPatchThrough(days, 2);
+    expect(payload.map((day) => day.dayNumber)).toEqual([1, 2]);
+    expect(payload[0]?.date).toBe("2026-09-12");
+    expect(payload[1]?.date).toBe("2026-09-13");
     expect(payload[1]?.holeResults?.[0]).toMatchObject({
       holeNumber: 1,
       notes: "Day 2",
     });
+    expect(areAllGolfCompetitionDaysSaved(2, [1])).toBe(false);
+    expect(areAllGolfCompetitionDaysSaved(2, [1, 2])).toBe(true);
   });
 
   it("does not drop a previously entered day when another day is saved", async () => {
@@ -334,7 +360,7 @@ describe("complete-days PATCH replacement", () => {
     };
 
     await patchGolfCompetition("entity-1", "athlete-1", "competition-1", {
-      days: buildGolfCompetitionDaysPatch(days),
+      days: buildGolfCompetitionDaysPatchThrough(days, 2),
     });
 
     expect(patchGolfCompetitionMock).toHaveBeenCalledWith(

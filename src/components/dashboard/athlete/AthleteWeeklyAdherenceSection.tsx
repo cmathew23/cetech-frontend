@@ -6,6 +6,8 @@ import {
 } from "@/components/dashboard/WeeklyAdherenceCards";
 import { WeeklyTrainingLoadCard } from "@/components/dashboard/WeeklyTrainingLoadCard";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Card } from "@/components/ui/Card";
 import {
@@ -681,74 +683,64 @@ export function AthleteWeeklyAdherenceSection({
       className={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
       titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-textPrimary">Earlier week</p>
-          <p className="text-sm text-textSecondary">
-            {formatDateOnly(
-              comparisonData.snapshotA.planStartDate,
-              comparisonData.snapshotA.planStartDate,
-            )}{" "}
-            –{" "}
-            {formatDateOnly(
-              comparisonData.snapshotA.planEndDate,
-              comparisonData.snapshotA.planEndDate,
-            )}
-          </p>
-          <p className="text-lg font-medium text-textPrimary">
-            {earlierComparisonValue === null
+      <div className={dashboardMetricGridClass(3)}>
+        <DashboardMetricTile
+          title="Earlier week"
+          value={
+            earlierComparisonValue === null
               ? "Not available"
-              : formatAdherencePercent(earlierComparisonValue)}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-textPrimary">Later week</p>
-          <p className="text-sm text-textSecondary">
-            {formatDateOnly(
-              comparisonData.snapshotB.planStartDate,
-              comparisonData.snapshotB.planStartDate,
-            )}{" "}
-            –{" "}
-            {formatDateOnly(
-              comparisonData.snapshotB.planEndDate,
-              comparisonData.snapshotB.planEndDate,
-            )}
-          </p>
-          <p className="text-lg font-medium text-textPrimary">
-            {laterComparisonValue === null
+              : formatAdherencePercent(earlierComparisonValue)
+          }
+          supporting={
+            <p>
+              {formatDateOnly(
+                comparisonData.snapshotA.planStartDate,
+                comparisonData.snapshotA.planStartDate,
+              )}{" "}
+              –{" "}
+              {formatDateOnly(
+                comparisonData.snapshotA.planEndDate,
+                comparisonData.snapshotA.planEndDate,
+              )}
+            </p>
+          }
+        />
+        <DashboardMetricTile
+          title="Later week"
+          value={
+            laterComparisonValue === null
               ? "Not available"
-              : formatAdherencePercent(laterComparisonValue)}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-textPrimary">Change</p>
-          {comparisonIsComparable && comparisonOutcome && comparisonDelta !== null ? (
-            <>
-              <Badge
-                variant={
-                  comparisonDelta > 0
-                    ? "success"
-                    : comparisonDelta < 0
-                      ? "error"
-                      : "neutral"
-                }
-              >
-                {comparisonOutcome}
-              </Badge>
-              <p className="text-sm text-textSecondary">
-                {comparisonDelta > 0 ? "+" : ""}
-                {formatAdherencePercent(comparisonDelta)}
-              </p>
-            </>
-          ) : (
-            <>
-              <Badge variant="neutral">Comparison unavailable</Badge>
-              {comparisonIsComparable ? (
-                <p className="text-sm text-textSecondary">Not available</p>
-              ) : null}
-            </>
-          )}
-        </div>
+              : formatAdherencePercent(laterComparisonValue)
+          }
+          supporting={
+            <p>
+              {formatDateOnly(
+                comparisonData.snapshotB.planStartDate,
+                comparisonData.snapshotB.planStartDate,
+              )}{" "}
+              –{" "}
+              {formatDateOnly(
+                comparisonData.snapshotB.planEndDate,
+                comparisonData.snapshotB.planEndDate,
+              )}
+            </p>
+          }
+        />
+        <DashboardMetricTile
+          title="Change"
+          value={
+            comparisonIsComparable && comparisonOutcome && comparisonDelta !== null
+              ? `${comparisonDelta > 0 ? "+" : ""}${formatAdherencePercent(comparisonDelta)}`
+              : comparisonIsComparable
+                ? "Not available"
+                : "Comparison unavailable"
+          }
+          caption={
+            comparisonIsComparable && comparisonOutcome && comparisonDelta !== null
+              ? comparisonOutcome
+              : "Comparison unavailable"
+          }
+        />
       </div>
     </Card>
   ) : null;

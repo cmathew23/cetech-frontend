@@ -293,13 +293,18 @@ export function CoachCompetitionPerformanceSection({
             items={history.competitions}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            presentation="dashboard"
+            showRateCompetitionAction
           />
         ) : null}
         {detail ? (
-          <>
-            <AthleteCompetitionSubmittedDetail competition={detail} />
+          <div className="space-y-4 rounded-md border border-primary/80 bg-card p-4">
+            <AthleteCompetitionSubmittedDetail
+              competition={detail}
+              presentation="dashboard"
+            />
             {canAssess ? (
-              <div className="space-y-3 rounded-lg border border-slate-200/80 p-3">
+              <div className="space-y-3 rounded-md border border-border p-4">
                 <p className="text-sm font-medium text-textPrimary">
                   Coach assessment
                 </p>
@@ -311,7 +316,7 @@ export function CoachCompetitionPerformanceSection({
                 />
               </div>
             ) : null}
-          </>
+          </div>
         ) : null}
       </div>
     </Card>

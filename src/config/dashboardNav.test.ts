@@ -111,4 +111,14 @@ describe("PeakConnect module labels", () => {
       athleteSidebarNavItems.find((item) => item.href === "/athlete/chat")?.label,
     ).toBe("PeakConnect");
   });
+
+  it("adds a Competitions item to the athlete sidebar", () => {
+    expect(
+      athleteSidebarNavItems.find((item) => item.href === "/athlete/competitions")
+        ?.label,
+    ).toBe("Competitions");
+    expect(
+      coachSidebarNavItems.find((item) => item.href === "/coach/competitions"),
+    ).toBeUndefined();
+  });
 });

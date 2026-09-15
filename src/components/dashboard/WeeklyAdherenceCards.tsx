@@ -1,7 +1,9 @@
 "use client";
 
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { Card } from "@/components/ui/Card";
-import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/StatusBadge";
+import type { StatusBadgeVariant } from "@/components/ui/StatusBadge";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 import { useEffect } from "react";
@@ -207,22 +209,6 @@ function resolveAdherenceStatus(percent: number): AdherenceStatus {
   return { label: "Action Required", variant: "error" };
 }
 
-function percentToneClass(percent: number): string {
-  if (!Number.isFinite(percent)) return "text-slate-600";
-  if (percent >= 85) return "text-emerald-700";
-  if (percent >= 60) return "text-amber-700";
-  return "text-slate-600";
-}
-
-function AdherenceStatusBadge({ percent }: { percent: number }) {
-  const status = resolveAdherenceStatus(percent);
-  return (
-    <StatusBadge variant={status.variant} className="shrink-0 text-[10px]">
-      {status.label}
-    </StatusBadge>
-  );
-}
-
 function SessionContextLines({
   domainKey,
   ctx,
@@ -309,40 +295,24 @@ function TileContextDetail({ tile }: { tile: WeeklyAdherenceMetricTile }) {
 
 function AdherenceMetricTile({
   tile,
-  softTileTypography = false,
 }: {
   tile: WeeklyAdherenceMetricTile;
-  softTileTypography?: boolean;
 }) {
+  const status = resolveAdherenceStatus(tile.adherencePercent);
   const contextDetail = <TileContextDetail tile={tile} />;
 
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-2.5 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <p
-          className={
-            softTileTypography
-              ? "text-sm font-medium tracking-normal text-textMuted"
-              : "text-xs font-medium tracking-wide text-textMuted"
-          }
-        >
-          {tile.label}
-        </p>
-        <AdherenceStatusBadge percent={tile.adherencePercent} />
-      </div>
-      <p
-        className={cn(
-          softTileTypography
-            ? "mt-1 text-2xl font-medium leading-none tabular-nums"
-            : "mt-1 text-2xl font-semibold leading-none tabular-nums",
-          percentToneClass(tile.adherencePercent),
-        )}
-      >
-        {formatAdherencePercentDisplay(tile.adherencePercent)}
-      </p>
-      <p className="mt-1 text-[10px] leading-tight text-textMuted">{tile.percentMeaning}</p>
-      {contextDetail ? <div className="mt-1.5 space-y-0.5">{contextDetail}</div> : null}
-    </div>
+    <DashboardMetricTile
+      title={tile.label}
+      value={formatAdherencePercentDisplay(tile.adherencePercent)}
+      caption={status.label}
+      supporting={
+        <>
+          <p>{tile.percentMeaning}</p>
+          {contextDetail}
+        </>
+      }
+    />
   );
 }
 
@@ -361,7 +331,6 @@ export function WeeklyAdherenceCards({
   showSectionHeader = true,
   cardTitleClassName,
   cardClassName,
-  softTileTypography = false,
 }: WeeklyAdherenceCardsProps) {
   const tiles = buildWeeklyAdherenceMetricTiles(summary);
   const weekLabel = `${formatDateOnly(summary.weekStart, summary.weekStart)} – ${formatDateOnly(summary.weekEnd, summary.weekEnd)}`;
@@ -380,24 +349,9 @@ export function WeeklyAdherenceCards({
   }, [summary, tiles]);
 
   const grid = (
-    <div
-      className={cn(
-        "grid gap-3",
-        tiles.length >= 4
-          ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
-          : tiles.length === 3
-            ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-            : tiles.length === 2
-              ? "grid-cols-1 sm:grid-cols-2"
-              : "max-w-lg grid-cols-1",
-      )}
-    >
+    <div className={dashboardMetricGridClass(tiles.length)}>
       {tiles.map((tile) => (
-        <AdherenceMetricTile
-          key={tile.key}
-          tile={tile}
-          softTileTypography={softTileTypography}
-        />
+        <AdherenceMetricTile key={tile.key} tile={tile} />
       ))}
     </div>
   );

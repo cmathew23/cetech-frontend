@@ -12,6 +12,7 @@ import {
   createGolfCompetition,
   fetchGolfCompetition,
   fetchGolfCompetitionHistory,
+  fetchGolfCompetitions,
   patchGolfCompetition,
   postGolfCoachCompetitionAssessment,
   submitGolfCompetition,
@@ -184,6 +185,49 @@ describe("golf competition API", () => {
     );
     expect(options.method).toBe("POST");
     expect(options.body).toBeUndefined();
+  });
+
+  it("GETs the season competition list with required seasonCycleId and does not infer it", async () => {
+    await expect(
+      fetchGolfCompetitions({
+        entityId: "entity-1",
+        athleteId: "athlete-1",
+        seasonCycleId: "   ",
+      }),
+    ).rejects.toMatchObject({
+      code: "SPORT_METRICS_GOLF_IDS_REQUIRED",
+    });
+    expect(apiRequestMock).not.toHaveBeenCalled();
+
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      message: "Competitions fetched successfully",
+      data: {
+        seasonCycleId: "season-2026",
+        seasonYear: 2026,
+        competitions: [],
+      },
+    });
+
+    const result = await fetchGolfCompetitions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      seasonCycleId: "season-2026",
+    });
+
+    expect(result).toEqual({
+      seasonCycleId: "season-2026",
+      seasonYear: 2026,
+      competitions: [],
+    });
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/golf/competitions?seasonCycleId=season-2026",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        timeoutMs: 240_000,
+      }),
+    );
   });
 
   it("requires seasonCycleId for history and does not infer it", async () => {

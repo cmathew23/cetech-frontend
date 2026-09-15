@@ -1,6 +1,16 @@
 "use client";
 
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import {
+  AthletePerformanceStat,
+  athletePerformanceGridClass,
+  formatAthleteMetricValue,
+  formatAthleteTrendLabel,
+  formatScoreOutOf100,
+  formatTargetHint,
+  formatTargetMetCaption,
+  formatTaxonomyAreaLabel,
+} from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -8,6 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
 import {
   fetchSportMetricsGolfWeeklySummary,
+  hasSportMetricsGolfEvidence,
   postGolfCoachPracticeRating,
   releasedPlanTaxonomyAreaKeys,
   submitGolfCoachPracticeRatingThenRefetch,
@@ -31,52 +42,6 @@ export function formatGoalMetricDirection(direction: string | null): string {
   if (direction === "HIGHER_IS_BETTER") return "Higher is better";
   if (direction === "LOWER_IS_BETTER") return "Lower is better";
   return direction?.trim() ?? "";
-}
-
-export function formatTrendDirectionLabel(direction: string | null): string {
-  if (direction === "UP") return "Up";
-  if (direction === "DOWN") return "Down";
-  if (direction === "NEUTRAL") return "Neutral";
-  return direction?.trim() ?? "";
-}
-
-function formatValueWithUnit(
-  value: number | string | null,
-  unit: string | null,
-): string {
-  if (value === null) return "";
-  const unitLabel = unit?.trim() ?? "";
-  return unitLabel === "" ? String(value) : `${value} ${unitLabel}`;
-}
-
-function formatCopiedNumber(value: number | null, missingLabel: string): string {
-  if (value === null) return missingLabel;
-  return String(value);
-}
-
-function formatWeekRange(
-  startDate: string | null,
-  endDate: string | null,
-): string {
-  const start = startDate?.trim() ?? "";
-  const end = endDate?.trim() ?? "";
-  if (start === "" || end === "") return "—";
-  return `${formatDateOnly(start, start)} – ${formatDateOnly(end, end)}`;
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <dt className="text-xs text-textSecondary">{label}</dt>
-      <dd className="text-sm text-textPrimary">{children}</dd>
-    </div>
-  );
 }
 
 function MetricsSectionCard({
@@ -129,92 +94,40 @@ export function AthleteWeeklyGoalPerformanceContent({
           No weekly Goal performance returned for this plan week.
         </p>
       ) : (
-        <div className="space-y-4">
+        <div className={athletePerformanceGridClass(goalEvidence.length)}>
           {goalEvidence.map((group, index) => {
             const metric = group.goal.primaryMetric;
             const weeklyActual = group.weeklyActual;
-            const targetValue = group.goal.targetValue;
-            const targetUnit = metric?.unit ?? null;
+            const targetUnit = weeklyActual?.unit ?? metric?.unit ?? null;
             const comparison = group.targetComparison;
+            const targetHint = formatTargetHint(
+              group.goal.targetValue,
+              targetUnit,
+              metric?.direction ?? weeklyActual?.direction ?? null,
+            );
+            const value = weeklyActual
+              ? formatAthleteMetricValue(weeklyActual.value, weeklyActual.unit)
+              : "NO RESULT YET";
 
             return (
-              <article
+              <AthletePerformanceStat
                 key={`${group.goalId ?? "goal"}-${index}`}
-                className="space-y-3 rounded-md border border-border bg-card p-4"
-              >
-                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Goal">
-                    {group.goal.goalName?.trim() || "—"}
-                  </Field>
-                  <Field label="Success Criterion">
-                    {group.goal.successCriteria?.trim() || "—"}
-                  </Field>
-                  <Field label="Metric">{metric?.key?.trim() || "—"}</Field>
-                  <Field label="Unit">{metric?.unit?.trim() || "—"}</Field>
-                  <Field label="Direction">
-                    {formatGoalMetricDirection(metric?.direction ?? null) || "—"}
-                  </Field>
-                  <Field label="Weekly Actual">
-                    {weeklyActual
-                      ? formatValueWithUnit(weeklyActual.value, weeklyActual.unit)
-                      : "No result recorded"}
-                  </Field>
-                  <Field label="Target">
-                    {targetValue === null
-                      ? "Not set"
-                      : formatValueWithUnit(targetValue, targetUnit)}
-                  </Field>
-                  {comparison ? (
-                    <Field label="Target Result">
-                      {comparison.targetMet ? "Target met" : "Target not met"}
-                    </Field>
-                  ) : null}
-                </dl>
-                <div>
-                  <p className="mb-2 text-xs text-textSecondary">Goal history</p>
-                  {group.history.length === 0 ? (
-                    <p className="text-sm text-textSecondary">No Goal history</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {group.history.map((observation, historyIndex) => (
-                        <li
-                          key={`${observation.planStartDate ?? "history"}-${historyIndex}`}
-                          className="text-sm text-textPrimary"
-                        >
-                          <p>
-                            {formatWeekRange(
-                              observation.planStartDate,
-                              observation.planEndDate,
-                            )}
-                          </p>
-                          <p>
-                            Actual:{" "}
-                            {observation.actual === null
-                              ? "Not enough data"
-                              : formatValueWithUnit(observation.actual, targetUnit)}
-                          </p>
-                          {observation.targetValue !== null ? (
-                            <p>
-                              Target:{" "}
-                              {formatValueWithUnit(
-                                observation.targetValue,
-                                targetUnit,
-                              )}
-                            </p>
-                          ) : null}
-                          {observation.targetComparison ? (
-                            <p>
-                              {observation.targetComparison.targetMet
-                                ? "Target met"
-                                : "Target not met"}
-                            </p>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </article>
+                title={group.goal.goalName?.trim() || "Weekly Goal"}
+                value={value}
+                caption={
+                  comparison
+                    ? formatTargetMetCaption(comparison.targetMet)
+                    : weeklyActual
+                      ? "This week"
+                      : undefined
+                }
+                supporting={
+                  <>
+                    {targetHint ? <p>{targetHint}</p> : null}
+                    {weeklyActual && comparison ? <p>This week</p> : null}
+                  </>
+                }
+              />
             );
           })}
         </div>
@@ -225,8 +138,10 @@ export function AthleteWeeklyGoalPerformanceContent({
 
 export function AthleteExercisePerformanceContent({
   exerciseTrends,
+  audience = "athlete",
 }: {
   exerciseTrends: SportMetricExerciseTrend[];
+  audience?: "athlete" | "coach";
 }) {
   return (
     <MetricsSectionCard title="Exercise Performance">
@@ -235,113 +150,43 @@ export function AthleteExercisePerformanceContent({
           No exercise performance returned for this plan week.
         </p>
       ) : (
-        <div className="space-y-4">
+        <div className={athletePerformanceGridClass(exerciseTrends.length)}>
           {exerciseTrends.map((item, index) => {
-            const trendLabel = formatTrendDirectionLabel(item.trendDirection);
+            const trendLabel = formatAthleteTrendLabel(item.trendDirection);
+            const taxonomyLabel = formatTaxonomyAreaLabel(item.taxonomyAreaKey);
+            const directionLabel = formatGoalMetricDirection(item.direction);
+            const current =
+              item.currentActual === null
+                ? "NO RESULT YET"
+                : formatAthleteMetricValue(item.currentActual, item.unit);
+            const previous =
+              item.previousActual === null
+                ? "First recorded result"
+                : `Previous: ${formatAthleteMetricValue(item.previousActual, item.unit)}`;
+
             return (
-              <article
+              <AthletePerformanceStat
                 key={`${item.exerciseId ?? "exercise"}-${index}`}
-                className="space-y-3 rounded-md border border-border bg-card p-4"
-              >
-                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Exercise Name">
-                    {item.exerciseName?.trim() || "—"}
-                  </Field>
-                  {item.linkedGoal?.goalName ? (
-                    <Field label="Goal">{item.linkedGoal.goalName}</Field>
-                  ) : null}
-                  <Field label="Taxonomy">
-                    {item.taxonomyAreaKey?.trim() || "—"}
-                  </Field>
-                  <Field label="Metric">{item.metricName?.trim() || "—"}</Field>
-                  <Field label="Unit">{item.unit?.trim() || "—"}</Field>
-                  <Field label="Direction">
-                    {formatGoalMetricDirection(item.direction) || "—"}
-                  </Field>
-                  <Field label="Exercise Type">
-                    {item.exerciseType?.trim() || "—"}
-                  </Field>
-                  <Field label="Current Actual">
-                    {item.currentActual === null
-                      ? "Not enough data"
-                      : formatValueWithUnit(item.currentActual, item.unit)}
-                  </Field>
-                  <Field label="Previous Actual">
-                    {item.previousActual === null
-                      ? "No previous result"
-                      : formatValueWithUnit(item.previousActual, item.unit)}
-                  </Field>
-                  {trendLabel !== "" ? (
-                    <Field label="Trend Direction">{trendLabel}</Field>
-                  ) : null}
-                </dl>
-                <div>
-                  <p className="mb-2 text-xs text-textSecondary">
-                    Exercise history
-                  </p>
-                  {item.history.length === 0 ? (
-                    <p className="text-sm text-textSecondary">
-                      No exercise history
-                    </p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {item.history.map((observation, historyIndex) => (
-                        <li
-                          key={`${observation.planStartDate ?? "history"}-${historyIndex}`}
-                          className="text-sm text-textPrimary"
-                        >
-                          {formatWeekRange(
-                            observation.planStartDate,
-                            observation.planEndDate,
-                          )}
-                          {": "}
-                          {observation.actual === null
-                            ? "Not enough data"
-                            : formatValueWithUnit(observation.actual, item.unit)}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </article>
+                title={item.exerciseName?.trim() || "Exercise"}
+                value={current}
+                caption={item.currentActual === null ? undefined : "Current performance"}
+                supporting={
+                  <>
+                    {directionLabel ? <p>{directionLabel}</p> : null}
+                    <p>{previous}</p>
+                    {taxonomyLabel ? <p>{taxonomyLabel}</p> : null}
+                    {audience === "coach" && item.linkedGoal?.goalName ? (
+                      <p>{item.linkedGoal.goalName}</p>
+                    ) : null}
+                    {trendLabel !== "" ? <p>{trendLabel}</p> : null}
+                  </>
+                }
+              />
             );
           })}
         </div>
       )}
     </MetricsSectionCard>
-  );
-}
-
-function TaxonomyScoreFields({
-  score,
-}: {
-  score: SportMetricTaxonomyScore;
-}) {
-  return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Field label="Taxonomy">
-        {score.taxonomyAreaKey?.trim() || "—"}
-      </Field>
-      <Field label="Current Week score">
-        {formatCopiedNumber(score.scoreOutOf100, "Not enough data")}
-      </Field>
-      <Field label="Direction">
-        {formatGoalMetricDirection(score.direction) || "Not enough data"}
-      </Field>
-      <Field label="YTrend">
-        {formatCopiedNumber(score.YTrend, "Not enough data")}
-      </Field>
-      <Field label="ZTrend">
-        {formatCopiedNumber(score.ZTrend, "Not enough data")}
-      </Field>
-      <Field label="Multi-week score">
-        {formatCopiedNumber(score.multiWeekScoreOutOf100, "Not enough data")}
-      </Field>
-      <Field label="Multi-week direction">
-        {formatGoalMetricDirection(score.multiWeekDirection) || "Not enough data"}
-      </Field>
-      {score.rank !== null ? <Field label="Rank">{String(score.rank)}</Field> : null}
-    </dl>
   );
 }
 
@@ -354,112 +199,64 @@ export function AthleteTaxonomyPerformanceContent({
   strongestTaxonomy: SportMetricTaxonomyScore | null;
   weakestTaxonomy: SportMetricTaxonomyScore | null;
 }) {
+  const strongestLabel = strongestTaxonomy
+    ? formatTaxonomyAreaLabel(strongestTaxonomy.taxonomyAreaKey) ||
+      strongestTaxonomy.taxonomyAreaKey
+    : null;
+  const weakestLabel = weakestTaxonomy
+    ? formatTaxonomyAreaLabel(weakestTaxonomy.taxonomyAreaKey) ||
+      weakestTaxonomy.taxonomyAreaKey
+    : null;
+
   return (
     <MetricsSectionCard title="Taxonomy Performance">
-      <div className="space-y-4">
-        {taxonomyScores.length === 0 ? (
-          <p className="text-sm text-textSecondary">
-            No taxonomy performance returned for this plan week.
-          </p>
-        ) : (
-          taxonomyScores.map((score, index) => (
-            <article
-              key={`${score.taxonomyAreaKey ?? "taxonomy"}-${index}`}
-              className="space-y-3 rounded-md border border-border bg-card p-4"
-            >
-              <TaxonomyScoreFields score={score} />
-              <div>
-                <p className="mb-2 text-xs text-textSecondary">
-                  Taxonomy history
-                </p>
-                {score.history.length === 0 ? (
-                  <p className="text-sm text-textSecondary">
-                    No taxonomy history
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {score.history.map((observation, historyIndex) => (
-                      <li
-                        key={`${observation.planStartDate ?? "history"}-${historyIndex}`}
-                        className="text-sm text-textPrimary"
-                      >
-                        {formatWeekRange(
-                          observation.planStartDate,
-                          observation.planEndDate,
-                        )}
-                        {": "}
-                        {formatCopiedNumber(
-                          observation.scoreOutOf100,
-                          "Not enough data",
-                        )}
-                        {observation.direction
-                          ? ` · ${formatGoalMetricDirection(observation.direction)}`
-                          : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </article>
-          ))
-        )}
-
-        <article className="space-y-3 rounded-md border border-border bg-card p-4">
-          <p className="text-sm font-medium text-textPrimary">Strongest taxonomy</p>
-          {strongestTaxonomy ? (
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Taxonomy">
-                {strongestTaxonomy.taxonomyAreaKey?.trim() || "—"}
-              </Field>
-              <Field label="Multi-week score">
-                {formatCopiedNumber(
-                  strongestTaxonomy.multiWeekScoreOutOf100,
-                  "Not enough data",
-                )}
-              </Field>
-              <Field label="Multi-week direction">
-                {formatGoalMetricDirection(strongestTaxonomy.multiWeekDirection) ||
-                  "Not enough data"}
-              </Field>
-              {strongestTaxonomy.rank !== null ? (
-                <Field label="Rank">{String(strongestTaxonomy.rank)}</Field>
-              ) : null}
-            </dl>
-          ) : (
-            <p className="text-sm text-textSecondary">
-              No strongest taxonomy available
-            </p>
-          )}
-        </article>
-
-        <article className="space-y-3 rounded-md border border-border bg-card p-4">
-          <p className="text-sm font-medium text-textPrimary">Weakest taxonomy</p>
-          {weakestTaxonomy ? (
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Taxonomy">
-                {weakestTaxonomy.taxonomyAreaKey?.trim() || "—"}
-              </Field>
-              <Field label="Multi-week score">
-                {formatCopiedNumber(
-                  weakestTaxonomy.multiWeekScoreOutOf100,
-                  "Not enough data",
-                )}
-              </Field>
-              <Field label="Multi-week direction">
-                {formatGoalMetricDirection(weakestTaxonomy.multiWeekDirection) ||
-                  "Not enough data"}
-              </Field>
-              {weakestTaxonomy.rank !== null ? (
-                <Field label="Rank">{String(weakestTaxonomy.rank)}</Field>
-              ) : null}
-            </dl>
-          ) : (
-            <p className="text-sm text-textSecondary">
-              No weakest taxonomy available
-            </p>
-          )}
-        </article>
-      </div>
+      {taxonomyScores.length === 0 ? (
+        <p className="text-sm text-textSecondary">
+          No taxonomy performance returned for this plan week.
+        </p>
+      ) : (
+        <div className={athletePerformanceGridClass(taxonomyScores.length)}>
+          {taxonomyScores.map((score, index) => {
+            const title =
+              formatTaxonomyAreaLabel(score.taxonomyAreaKey) ||
+              score.taxonomyAreaKey?.trim() ||
+              "Taxonomy";
+            const hasScore = score.scoreOutOf100 !== null;
+            return (
+              <AthletePerformanceStat
+                key={`${score.taxonomyAreaKey ?? "taxonomy"}-${index}`}
+                title={title}
+                value={
+                  hasScore
+                    ? formatScoreOutOf100(score.scoreOutOf100 as number)
+                    : "BASELINE"
+                }
+                caption={hasScore ? "Current week" : undefined}
+                supporting={
+                  hasScore ? (
+                    score.multiWeekScoreOutOf100 !== null ? (
+                      <p>
+                        Multi-week {formatScoreOutOf100(score.multiWeekScoreOutOf100)}
+                      </p>
+                    ) : (
+                      <p>Current week</p>
+                    )
+                  ) : (
+                    <p>Trend available after comparable results</p>
+                  )
+                }
+              />
+            );
+          })}
+        </div>
+      )}
+      {strongestLabel || weakestLabel ? (
+        <p className="mt-3 text-xs text-textSecondary">
+          {strongestLabel ? `Strongest: ${strongestLabel}` : null}
+          {strongestLabel && weakestLabel ? " · " : null}
+          {weakestLabel ? `Weakest: ${weakestLabel}` : null}
+        </p>
+      ) : null}
     </MetricsSectionCard>
   );
 }
@@ -474,82 +271,60 @@ export const COACH_PRACTICE_RATING_OPTIONS = [
 
 export function AthletePracticePerformanceContent({
   summary,
+  audience = "athlete",
 }: {
   summary: SportMetricsGolfWeeklySummary;
+  audience?: "athlete" | "coach";
 }) {
-  const ratedKeys = new Set(
-    summary.coachPracticeRatings
-      .map((row) => row.taxonomyAreaKey?.trim() ?? "")
-      .filter((key) => key !== ""),
-  );
-  const unratedKeys = releasedPlanTaxonomyAreaKeys(summary).filter(
-    (key) => !ratedKeys.has(key),
-  );
+  const hasScore = summary.practiceScoreOutOf100 !== null;
+  const hasExerciseEvidence =
+    summary.exerciseTrends.some((item) => item.currentActual !== null) ||
+    hasSportMetricsGolfEvidence(summary);
 
   return (
     <MetricsSectionCard title="Practice Performance">
-      <div className="space-y-4">
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Practice Performance">
-            {formatCopiedNumber(summary.practiceScoreOutOf100, "Not enough data")}
-          </Field>
-          {summary.practiceNormalizedScore !== null ? (
-            <Field label="Practice normalized">
-              {String(summary.practiceNormalizedScore)}
-            </Field>
-          ) : null}
-          <Field label="Coach Practice Performance">
-            {formatCopiedNumber(
-              summary.coachPracticeScoreOutOf100,
-              "Not rated",
-            )}
-          </Field>
-          {summary.coachPracticeNormalized !== null ? (
-            <Field label="Coach Practice normalized">
-              {String(summary.coachPracticeNormalized)}
-            </Field>
-          ) : null}
-          <Field label="Practice-side Performance">
-            {formatCopiedNumber(
-              summary.practiceSideScoreOutOf100,
-              "Unavailable",
-            )}
-          </Field>
-          {summary.practiceSideNormalized !== null ? (
-            <Field label="Practice-side normalized">
-              {String(summary.practiceSideNormalized)}
-            </Field>
-          ) : null}
-        </dl>
-
-        <div>
-          <p className="mb-2 text-xs text-textSecondary">Coach Practice Ratings</p>
-          {summary.coachPracticeRatings.length === 0 && unratedKeys.length === 0 ? (
-            <p className="text-sm text-textSecondary">No Coach Practice Ratings</p>
-          ) : (
-            <ul className="space-y-2">
-              {summary.coachPracticeRatings.map((row, index) => (
-                <li
-                  key={`${row.taxonomyAreaKey ?? "rating"}-${index}`}
-                  className="text-sm text-textPrimary"
-                >
-                  {(row.taxonomyAreaKey?.trim() || "—") +
-                    ": " +
-                    (row.rating === null ? "Unrated" : String(row.rating)) +
-                    (row.coachRatingScoreOutOf100 === null
-                      ? ""
-                      : ` · ${row.coachRatingScoreOutOf100}`)}
-                </li>
-              ))}
-              {unratedKeys.map((key) => (
-                <li key={`unrated-${key}`} className="text-sm text-textSecondary">
-                  {key}: Unrated
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      <AthletePerformanceStat
+        title="Practice Performance"
+        value={
+          hasScore
+            ? formatScoreOutOf100(summary.practiceScoreOutOf100 as number)
+            : "BASELINE WEEK"
+        }
+        supporting={
+          <>
+            {!hasScore && hasExerciseEvidence ? (
+              <p>Exercise evidence recorded</p>
+            ) : null}
+            {summary.practiceSideScoreOutOf100 !== null ? (
+              <p>
+                Practice-side Performance{" "}
+                {formatScoreOutOf100(summary.practiceSideScoreOutOf100)}
+              </p>
+            ) : null}
+            <p>
+              {summary.coachPracticeScoreOutOf100 === null
+                ? "Coach rating: Pending"
+                : `Coach Practice Performance ${formatScoreOutOf100(summary.coachPracticeScoreOutOf100)}`}
+            </p>
+            {!hasScore ? (
+              <p>Trend available after comparable results</p>
+            ) : null}
+            {audience === "coach"
+              ? summary.coachPracticeRatings
+                  .filter((row) => row.rating !== null)
+                  .map((row, index) => (
+                    <p key={`${row.taxonomyAreaKey ?? "rating"}-${index}`}>
+                      {(formatTaxonomyAreaLabel(row.taxonomyAreaKey) ||
+                        row.taxonomyAreaKey ||
+                        "Taxonomy") +
+                        ": " +
+                        String(row.rating)}
+                    </p>
+                  ))
+              : null}
+          </>
+        }
+      />
     </MetricsSectionCard>
   );
 }
@@ -603,7 +378,7 @@ export function CoachPracticeRatingForm({
           >
             {taxonomies.map((key) => (
               <option key={key} value={key}>
-                {key}
+                {formatTaxonomyAreaLabel(key) || key}
               </option>
             ))}
           </Select>
@@ -643,6 +418,8 @@ export function AthleteSportsMetricsStep4aContent({
   allowCoachPracticeRating?: boolean;
   coachRatingForm?: React.ReactNode;
 }) {
+  const audience = allowCoachPracticeRating ? "coach" : "athlete";
+
   return (
     <div className="min-w-0 space-y-4">
       <AthleteWeeklyGoalPerformanceContent
@@ -652,13 +429,17 @@ export function AthleteSportsMetricsStep4aContent({
       />
       <AthleteExercisePerformanceContent
         exerciseTrends={summary.exerciseTrends}
+        audience={audience}
       />
       <AthleteTaxonomyPerformanceContent
         taxonomyScores={summary.taxonomyScores}
         strongestTaxonomy={summary.strongestTaxonomy}
         weakestTaxonomy={summary.weakestTaxonomy}
       />
-      <AthletePracticePerformanceContent summary={summary} />
+      <AthletePracticePerformanceContent
+        summary={summary}
+        audience={audience}
+      />
       {allowCoachPracticeRating ? coachRatingForm : null}
     </div>
   );

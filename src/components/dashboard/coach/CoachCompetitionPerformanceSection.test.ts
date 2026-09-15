@@ -196,6 +196,7 @@ describe("coach competition season scope", () => {
     expect(source).not.toContain("getFullYear");
     expect(source).not.toContain("new Date()");
     expect(source).not.toContain("seasonCycleId: competition.startDate");
+    expect(source).not.toContain("fetchGolfCompetitions");
     expect(readPageSource()).toContain("releasedSkillsTrainingPlanVersionId(journal)");
     expect(readPageSource()).toContain("<CoachCompetitionPerformanceSection");
     expect(readPageSource()).toContain("trainingPlanVersionId={trainingPlanVersionId}");
@@ -293,6 +294,7 @@ describe("coach assessment form visibility", () => {
     const source = readCoachSource();
     expect(source).toContain("canShowCoachCompetitionAssessmentForm(detail)");
     expect(source).toContain("{canAssess ? (");
+    expect(source).toContain("Save assessment");
     expect(source).not.toContain("patchGolfCoachCompetitionAssessment");
   });
 });
@@ -378,6 +380,12 @@ describe("no frontend Competition/OGP calculations", () => {
     expect(source).not.toContain("strokes -");
     expect(source).toContain("submitCoachCompetitionAssessmentThenRefetch");
     expect(source).toContain("fetchGolfCompetition");
+    expect(source).toContain('presentation="dashboard"');
+    expect(source).toContain("CoachCompetitionAssessmentForm");
+    expect(source).toContain("showRateCompetitionAction");
+    expect(source.match(/<CoachCompetitionAssessmentForm/g)).toEqual([
+      "<CoachCompetitionAssessmentForm",
+    ]);
     expect(source).not.toContain("HEAD_COACH");
     expect(source).not.toContain("SKILLS_COACH");
   });

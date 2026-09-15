@@ -27,11 +27,14 @@ import {
   GOLF_COMPETITION_FORMATS,
   GOLF_COMPETITION_SATISFACTION_OPTIONS,
   GOLF_COMPETITION_TYPES,
-  buildGolfCompetitionDaysPatch,
+  areAllGolfCompetitionDaysSaved,
+  buildGolfCompetitionDaysPatchThrough,
   clearActiveGolfCompetitionId,
-  emptyGolfCompetitionDays,
   hydrateGolfCompetitionDays,
+  isGolfCompetitionDayReadyToSave,
+  mergeGolfCompetitionDaysAfterSave,
   readActiveGolfCompetitionId,
+  savedGolfCompetitionDayNumbersFromPersisted,
   writeActiveGolfCompetitionId,
   type GolfCompetitionDayForm,
   type GolfCompetitionHoleForm,
@@ -275,11 +278,17 @@ export function AthleteCompetitionEntrySection({
   entityId,
   athleteId,
   trainingPlanVersionId,
+  competitionId,
+  ignoreStoredDraft = false,
+  onCompetitionCreated,
   onCompetitionSubmitted,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
+  competitionId?: string | null;
+  ignoreStoredDraft?: boolean;
+  onCompetitionCreated?: (competitionId: string) => void;
   onCompetitionSubmitted?: (competitionId: string) => void;
 }) {
   const resolvedEntityId = entityId.trim();
@@ -300,14 +309,17 @@ export function AthleteCompetitionEntrySection({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [savedDayNumbers, setSavedDayNumbers] = useState<number[]>([]);
 
   useEffect(() => {
     if (!applicable) return;
-    const storedId = readActiveGolfCompetitionId(
-      resolvedEntityId,
-      resolvedAthleteId,
-    );
-    if (!storedId) return;
+    const requestedId = competitionId?.trim() ?? "";
+    const storedId = ignoreStoredDraft
+      ? ""
+      : (readActiveGolfCompetitionId(resolvedEntityId, resolvedAthleteId) ??
+        "");
+    const loadId = requestedId !== "" ? requestedId : storedId;
+    if (!loadId) return;
 
     let cancelled = false;
     setLoadingDraft(true);
@@ -316,11 +328,17 @@ export function AthleteCompetitionEntrySection({
         const result = await fetchGolfCompetition({
           entityId: resolvedEntityId,
           athleteId: resolvedAthleteId,
-          competitionId: storedId,
+          competitionId: loadId,
         });
         if (cancelled) return;
         setCompetition(result.competition);
         setDays(daysFromCompetition(result.competition));
+        setSavedDayNumbers(
+          savedGolfCompetitionDayNumbersFromPersisted(
+            result.competition.days,
+            result.competition.format,
+          ),
+        );
         setSelectedDayNumber(1);
         setError(null);
       } catch (e) {
@@ -334,11 +352,21 @@ export function AthleteCompetitionEntrySection({
     return () => {
       cancelled = true;
     };
-  }, [applicable, resolvedAthleteId, resolvedEntityId]);
+  }, [
+    applicable,
+    competitionId,
+    ignoreStoredDraft,
+    resolvedAthleteId,
+    resolvedEntityId,
+  ]);
 
   if (!applicable) return null;
 
   const readOnly = competition?.status === "SUBMITTED";
+  const allConfiguredDaysSaved = areAllGolfCompetitionDaysSaved(
+    competition?.numberOfDays ?? 0,
+    savedDayNumbers,
+  );
   const selectedDay =
     days.find((day) => day.dayNumber === selectedDayNumber) ?? days[0] ?? null;
 
@@ -397,7 +425,9 @@ export function AthleteCompetitionEntrySection({
       );
       setCompetition(result.competition);
       setDays(daysFromCompetition(result.competition));
+      setSavedDayNumbers([]);
       setSelectedDayNumber(1);
+      onCompetitionCreated?.(result.competition.id);
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -407,6 +437,22 @@ export function AthleteCompetitionEntrySection({
 
   async function onSaveDraft() {
     if (!competition || saving || readOnly) return;
+    const currentDay =
+      days.find((day) => day.dayNumber === selectedDayNumber) ?? null;
+    if (
+      !currentDay ||
+      !isGolfCompetitionDayReadyToSave(currentDay, competition.format)
+    ) {
+      setError("Complete this day's date and hole results before saving.");
+      return;
+    }
+    if (
+      selectedDayNumber > 1 &&
+      !savedDayNumbers.includes(selectedDayNumber - 1)
+    ) {
+      setError("Save the previous day before saving this day.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -414,10 +460,25 @@ export function AthleteCompetitionEntrySection({
         resolvedEntityId,
         resolvedAthleteId,
         competition.id,
-        { days: buildGolfCompetitionDaysPatch(days) },
+        {
+          days: buildGolfCompetitionDaysPatchThrough(days, selectedDayNumber),
+        },
       );
       setCompetition(result.competition);
-      setDays(daysFromCompetition(result.competition));
+      setDays(
+        mergeGolfCompetitionDaysAfterSave(
+          days,
+          daysFromCompetition(result.competition),
+        ),
+      );
+      setSavedDayNumbers((current) =>
+        current.includes(selectedDayNumber)
+          ? current
+          : [...current, selectedDayNumber].sort((left, right) => left - right),
+      );
+      if (selectedDayNumber < competition.numberOfDays) {
+        setSelectedDayNumber(selectedDayNumber + 1);
+      }
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -426,7 +487,9 @@ export function AthleteCompetitionEntrySection({
   }
 
   async function onSubmit() {
-    if (!competition || submitting || readOnly) return;
+    if (!competition || submitting || readOnly || !allConfiguredDaysSaved) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -450,6 +513,7 @@ export function AthleteCompetitionEntrySection({
     clearActiveGolfCompetitionId(resolvedEntityId, resolvedAthleteId);
     setCompetition(null);
     setDays([]);
+    setSavedDayNumbers([]);
     setCreateForm(EMPTY_CREATE);
     setSelectedDayNumber(1);
     setError(null);
@@ -722,7 +786,9 @@ export function AthleteCompetitionEntrySection({
                 <Button
                   type="button"
                   loading={submitting}
-                  disabled={saving || submitting}
+                  disabled={
+                    saving || submitting || !allConfiguredDaysSaved
+                  }
                   onClick={() => {
                     void onSubmit();
                   }}

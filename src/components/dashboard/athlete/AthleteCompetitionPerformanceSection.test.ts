@@ -5,7 +5,10 @@ import {
   AthleteCompetitionPerformanceScores,
   AthleteCompetitionReadOnlyHoles,
   AthleteCompetitionSubmittedDetail,
+  displayAthleteScoreOutOf100,
   displayBackendNumber,
+  displayBackendPercent,
+  displayScoreToPar,
 } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
 import type {
   GolfCompetitionDetail,
@@ -183,6 +186,18 @@ describe("displayBackendNumber", () => {
     expect(displayBackendNumber(0)).toBe("0");
     expect(displayBackendNumber(75)).toBe("75");
   });
+
+  it("formats display precision without changing stored values", () => {
+    expect(displayBackendNumber(66.66666666666666)).toBe("66.7");
+    expect(displayBackendPercent(71.42857142857143)).toBe("71.4%");
+    expect(displayBackendPercent(55.55555555555556)).toBe("55.6%");
+    expect(displayBackendNumber(3.6666666666666665)).toBe("3.7");
+    expect(displayBackendNumber(2)).toBe("2");
+    expect(displayScoreToPar(2)).toBe("+2");
+    expect(displayScoreToPar(0)).toBe("E");
+    expect(displayScoreToPar(-2)).toBe("-2");
+    expect(displayAthleteScoreOutOf100(66.66666666666666)).toBe("66.7 / 100");
+  });
 });
 
 describe("SUBMITTED competition performance display", () => {
@@ -284,7 +299,7 @@ describe("OGP checkpoint display", () => {
     );
     expect(html).toContain("80");
     expect(html).toContain("75");
-    expect(html).toContain("77.25");
+    expect(html).toContain("77.3");
   });
 
   it("renders pending state when checkpoint is null", () => {
@@ -405,7 +420,7 @@ describe("F5 presentation", () => {
       }),
     );
     expect(html).toContain("Overall Golfer Performance");
-    expect(html).toContain("77.25");
+    expect(html).toContain("77.3");
     expect(html).toContain("62.5");
   });
 
@@ -422,6 +437,156 @@ describe("F5 presentation", () => {
     expect(html).toContain("Practice Performance");
     expect(html).toContain("Checkpoint");
     expect(html).toContain("Day evidence");
-    expect(html).toContain("Hole 1 · BOGEY · Score to Par 1");
+    expect(html).toContain("Hole 1 · BOGEY · Score to Par +1");
+  });
+});
+
+describe("athlete dashboard competition presentation", () => {
+  it("renders pending athlete result as score to par instead of NO RESULT YET", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionPerformanceScores, {
+        athleteCompetitionScore: 66.66666666666666,
+        coachCompetitionScore: null,
+        competitionPerformance: null,
+        scoreToPar: 2,
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("+2");
+    expect(html).toContain("SCORE TO PAR");
+    expect(html).toContain("Athlete score: 66.7 / 100");
+    expect(html).toContain("Coach assessment: Pending");
+    expect(html).not.toContain("NO RESULT YET");
+  });
+
+  it("renders backend Competition Performance as the dominant athlete value", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionPerformanceScores, {
+        athleteCompetitionScore: 75,
+        coachCompetitionScore: 50,
+        competitionPerformance: 62.5,
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).toContain("62.5");
+    expect(html).not.toContain("Unavailable");
+  });
+
+  it("does not fabricate a competition score when backend value is null", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionPerformanceScores, {
+        athleteCompetitionScore: null,
+        coachCompetitionScore: null,
+        competitionPerformance: null,
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("NO RESULT YET");
+    expect(html).not.toContain(" / 100");
+    expect(html).not.toContain("Unavailable");
+  });
+
+  it("renders Overall Golfer Performance from the backend checkpoint without calculating it", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionOgpCheckpoint, {
+        checkpoint: submittedDetail.overallGolferPerformanceCheckpoint,
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("77.3");
+    expect(html).toContain("Practice 80");
+    expect(html).toContain("Competition 75");
+  });
+
+  it("renders coach competition history with the same dashboard hierarchy", () => {
+    const item: GolfCompetitionHistoryPoint = {
+      id: "competition-1",
+      name: "Club Championship",
+      type: "CHAMPIONSHIP",
+      format: 18,
+      venue: "PeakFlow Golf Club",
+      startDate: "2026-09-12T00:00:00.000Z",
+      numberOfDays: 1,
+      seasonPhase: "PRE_SEASON",
+      seasonCycleId: "season-2026",
+      seasonYear: 2026,
+      status: "SUBMITTED",
+      competitionSummary: summary({ scoreToPar: 2 }),
+      athleteAverageSatisfaction: null,
+      athleteCompetitionScore: 75,
+      coachCompetitionAssessment: null,
+      coachCompetitionScore: null,
+      competitionPerformance: null,
+      overallGolferPerformanceCheckpoint: null,
+    };
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionHistoryList, {
+        items: [item],
+        selectedId: item.id,
+        onSelect: () => {},
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).toContain("+2");
+    expect(html).toContain("SCORE TO PAR");
+    expect(html).toContain("Athlete score: 75 / 100");
+    expect(html).toContain("COACH ASSESSMENT PENDING");
+    expect(html).not.toContain("NO RESULT YET");
+    expect(html).not.toContain("Rate Competition");
+    expect(html).toContain("Club Championship");
+    expect(html).not.toContain("Unavailable");
+    expect(html).not.toContain("CHAMPIONSHIP");
+  });
+
+  it("shows Rate Competition on a coach pending-assessment card without a second form", () => {
+    const item: GolfCompetitionHistoryPoint = {
+      id: "competition-1",
+      name: "KS GOLF 2",
+      type: "LOCAL",
+      format: 9,
+      venue: "PeakFlow Golf Club",
+      startDate: "2026-09-12T00:00:00.000Z",
+      numberOfDays: 1,
+      seasonPhase: "IN_SEASON",
+      seasonCycleId: "season-2026",
+      seasonYear: 2026,
+      status: "SUBMITTED",
+      competitionSummary: summary({ scoreToPar: 2 }),
+      athleteAverageSatisfaction: null,
+      athleteCompetitionScore: 66.66666666666666,
+      coachCompetitionAssessment: null,
+      coachCompetitionScore: null,
+      competitionPerformance: null,
+      overallGolferPerformanceCheckpoint: null,
+    };
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionHistoryList, {
+        items: [item],
+        selectedId: item.id,
+        onSelect: () => {},
+        presentation: "dashboard",
+        showRateCompetitionAction: true,
+      }),
+    );
+    expect(html).toContain("KS GOLF 2");
+    expect(html).toContain("+2");
+    expect(html).toContain("SCORE TO PAR");
+    expect(html).toContain("Athlete score: 66.7 / 100");
+    expect(html).toContain("COACH ASSESSMENT PENDING");
+    expect(html).toContain("Rate Competition →");
+    expect(html).not.toContain("NO RESULT YET");
+    expect(html.match(/Rate Competition/g)?.length).toBe(1);
+  });
+
+  it("titles selected dashboard detail with the competition name", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionSubmittedDetail, {
+        competition: submittedDetail,
+        presentation: "dashboard",
+      }),
+    );
+    expect(html).toContain("Club Championship — Competition Detail");
   });
 });

@@ -1,11 +1,12 @@
 "use client";
 
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchAthleteTodayPlan,
@@ -18,9 +19,8 @@ import {
   getLocalDateKey,
   normalizeDateOnlyKey,
 } from "@/lib/dateTime";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 type ViewState =
   | { phase: "loading" }
@@ -199,7 +199,7 @@ export function AthleteTodayPlanCard() {
         ) : todayPlan === null || !hasAnyTodayItems ? (
           <p className="text-sm text-textSecondary">No plan released for today.</p>
         ) : (
-          <div className="space-y-3">
+          <div className={dashboardMetricGridClass(3)}>
             {DOMAIN_SUMMARY.map((domain) => {
               const items =
                 domain.key === "SKILLS"
@@ -213,29 +213,31 @@ export function AthleteTodayPlanCard() {
                 .slice(0, 2);
 
               return (
-                <Card key={domain.key} padding="compact" accent={false} className="bg-bg">
-                  <div className="space-y-1">
-                    <p className="text-[15px] font-medium text-textPrimary">{domain.label}</p>
-                    {items.length === 0 ? (
-                      <p className="text-sm text-textSecondary">{domain.emptyMessage}</p>
-                    ) : (
-                      <>
-                        <p className="text-sm text-textSecondary">
-                          {items.length} released item{items.length === 1 ? "" : "s"} today.
-                        </p>
-                        {preview.length > 0 ? (
-                          <ul className="space-y-1 text-sm text-textPrimary">
-                            {preview.map((line) => (
-                              <li key={`${domain.key}-${line}`} className="truncate">
-                                {line}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                </Card>
+                <DashboardMetricTile
+                  key={domain.key}
+                  title={domain.label}
+                  value={
+                    items.length === 0
+                      ? domain.emptyMessage
+                      : String(items.length)
+                  }
+                  caption={
+                    items.length === 0
+                      ? undefined
+                      : `released item${items.length === 1 ? "" : "s"} today`
+                  }
+                  supporting={
+                    preview.length > 0 ? (
+                      <ul className="space-y-1">
+                        {preview.map((line) => (
+                          <li key={`${domain.key}-${line}`} className="truncate">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null
+                  }
+                />
               );
             })}
           </div>

@@ -155,8 +155,19 @@ export const paths = {
       athleteId: string,
     ) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/coach-practice-ratings`,
-    athleteSportMetricsGolfCompetitions: (entityId: string, athleteId: string) =>
-      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions`,
+    athleteSportMetricsGolfCompetitions: (
+      entityId: string,
+      athleteId: string,
+      query?: { seasonCycleId?: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions`;
+      const seasonCycleId = query?.seasonCycleId?.trim() ?? "";
+      if (seasonCycleId === "") return base;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
     athleteSportMetricsGolfCompetitionHistory: (
       entityId: string,
       athleteId: string,

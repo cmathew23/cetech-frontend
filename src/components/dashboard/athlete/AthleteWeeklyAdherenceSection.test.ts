@@ -1318,7 +1318,7 @@ describe("AthleteWeeklyAdherenceSection training load card", () => {
     );
 
     expect(markup).toContain("Weekly Training Load");
-    expect(markup).toContain("13 Jul – 19 Jul 2026");
+    expect(markup).toContain("13/07/2026 – 19/07/2026");
     expect(markup).toContain("Reported weekly training");
     expect(markup).toContain("8.5 h");
     expect(markup).toContain("1.2 h higher");

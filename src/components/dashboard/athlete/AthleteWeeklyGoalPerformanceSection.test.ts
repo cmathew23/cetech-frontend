@@ -85,6 +85,25 @@ function renderGoals(goalEvidence: unknown[]): string {
   );
 }
 
+function renderCoachStep4a(data: Record<string, unknown>): string {
+  const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+    success: true,
+    data: {
+      sport: "GOLF",
+      weekStartDate: "2026-09-01",
+      weekEndDate: "2026-09-07",
+      ...data,
+    },
+  });
+  return renderToStaticMarkup(
+    createElement(AthleteSportsMetricsStep4aContent, {
+      summary: parsed,
+      allowCoachPracticeRating: true,
+      coachRatingForm: createElement("div", null, "Coach form"),
+    }),
+  );
+}
+
 function renderStep4a(data: Record<string, unknown>): string {
   const parsed = parseSportMetricsGolfWeeklySummaryPayload({
     success: true,
@@ -137,13 +156,57 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
     expect(html).toContain("01/09/2026");
     expect(html).toContain("07/09/2026");
     expect(html).toContain("Improve putting");
-    expect(html).toContain("Make 8 of 10 from 6 feet");
-    expect(html).toContain("PUTT_MAKE_PCT");
-    expect(html).toContain("%");
-    expect(html).toContain("Higher is better");
-    expect(html).toContain("75 %");
-    expect(html).toContain("80 %");
-    expect(html).toContain("Target not met");
+    expect(html).toContain("75%");
+    expect(html).toContain("Target ≥ 80%");
+    expect(html).toContain("TARGET NOT MET");
+    expect(html).not.toContain("PUTT_MAKE_PCT");
+    expect(html).not.toContain("Success Criterion");
+    expect(html).not.toContain("HIGHER_IS_BETTER");
+    expect(html).not.toContain("Goal history");
+  });
+
+  it("uses the same weekly Goal dashboard hierarchy for coach and athlete", () => {
+    const html = renderCoachStep4a({
+      goalEvidence: [
+        {
+          goalId: "goal-1",
+          goal: {
+            goalName: "Improve putting",
+            successCriteria: "Make 8 of 10 from 6 feet",
+            targetValue: 80,
+            primaryMetric: {
+              key: "PUTT_MAKE_PCT",
+              unit: "%",
+              direction: "HIGHER_IS_BETTER",
+            },
+          },
+          weeklyActual: {
+            metricKey: "PUTT_MAKE_PCT",
+            unit: "%",
+            direction: "HIGHER_IS_BETTER",
+            value: 75,
+            attempts: 20,
+            successes: 15,
+            recordCount: 2,
+          },
+          targetComparison: {
+            targetValue: 80,
+            actualValue: 75,
+            direction: "HIGHER_IS_BETTER",
+            targetMet: false,
+          },
+        },
+      ],
+    });
+
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).toContain("Improve putting");
+    expect(html).toContain("75%");
+    expect(html).toContain("TARGET NOT MET");
+    expect(html).toContain("Coach form");
+    expect(html).not.toContain("PUTT_MAKE_PCT");
+    expect(html).not.toContain("Goal history");
+    expect(html).not.toContain("Success Criterion");
   });
 
   it("renders multiple Goals independently without merging same-metric items", () => {
@@ -192,10 +255,10 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
 
     expect(html).toContain("Putting from 6 feet");
     expect(html).toContain("Putting from 10 feet");
-    expect(html).toContain("Make 8 of 10");
-    expect(html).toContain("Make 6 of 10");
-    expect(html).toContain("70 %");
-    expect(html).toContain("50 %");
+    expect(html).toContain("70%");
+    expect(html).toContain("50%");
+    expect(html).not.toContain("Make 8 of 10");
+    expect(html).not.toContain("Make 6 of 10");
     expect(html.indexOf("Putting from 6 feet")).toBeLessThan(
       html.indexOf("Putting from 10 feet"),
     );
@@ -231,10 +294,10 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
       },
     ]);
 
-    expect(html).toContain("10 %");
-    expect(html).toContain("90 %");
-    expect(html).toContain("Target met");
-    expect(html).not.toContain("Target not met");
+    expect(html).toContain("10%");
+    expect(html).toContain("Target ≥ 90%");
+    expect(html).toContain("TARGET MET");
+    expect(html).not.toContain("TARGET NOT MET");
   });
 
   it("keeps Weekly Actual visible with Target Not set and no comparison when target is null", () => {
@@ -262,10 +325,11 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
     ]);
 
     expect(html).toContain("12.4 ft");
-    expect(html).toContain("Not set");
-    expect(html).toContain("Lower is better");
-    expect(html).not.toContain("Target met");
-    expect(html).not.toContain("Target not met");
+    expect(html).not.toContain("Not set");
+    expect(html).not.toContain("LOWER_IS_BETTER");
+    expect(html).not.toContain("WEDGE_PROXIMITY");
+    expect(html).not.toContain("TARGET MET");
+    expect(html).not.toContain("TARGET NOT MET");
     expect(html).not.toContain("Target Result");
   });
 
@@ -286,14 +350,11 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
       },
     ]);
 
-    expect(html).toContain("No result recorded");
-    expect(html).toContain("80 %");
-    expect(html).toContain(
-      'Weekly Actual</dt><dd class="text-sm text-textPrimary">No result recorded</dd>',
-    );
-    expect(html).not.toContain(
-      'Weekly Actual</dt><dd class="text-sm text-textPrimary">0',
-    );
+    expect(html).toContain("NO RESULT YET");
+    expect(html).toContain("Target ≥ 80%");
+    expect(html).not.toContain("No result recorded");
+    expect(html).not.toContain("TARGET MET");
+    expect(html).not.toContain("TARGET NOT MET");
     expect(html).not.toContain("Target Result");
   });
 
@@ -381,7 +442,7 @@ describe("Athlete Sports Metrics Step 4A", () => {
 
     expect(html).toContain("Weekly Goal Performance");
     expect(html).toContain("Improve putting");
-    expect(html).toContain("75 %");
+    expect(html).toContain("75%");
     expect(html).toContain("Exercise Performance");
     expect(html).toContain("Taxonomy Performance");
   });
@@ -440,27 +501,69 @@ describe("Athlete Sports Metrics Step 4A", () => {
 
     expect(html).toContain("Lag putting");
     expect(html).toContain("6ft putts");
-    expect(html).toContain("Improve putting");
-    expect(html).toContain("putting");
-    expect(html).toContain("Proximity");
-    expect(html).toContain("Make percentage");
-    expect(html).toContain(">Z<");
-    expect(html).toContain(">Y<");
+    expect(html).toContain("Putting");
     expect(html).toContain("8.2 ft");
-    expect(html).toContain("75 %");
-    expect(html).toContain("70 %");
-    expect(html).toContain("No previous result");
-    expect(html).toContain("Up");
-    expect(html).not.toContain(
-      'Previous Actual</dt><dd class="text-sm text-textPrimary">0',
-    );
+    expect(html).toContain("75%");
+    expect(html).toContain("Previous: 70%");
+    expect(html).toContain("First recorded result");
+    expect(html).toContain("Improving ↑");
+    expect(html).toContain("Lower is better");
+    expect(html).toContain("Higher is better");
+    expect(html).not.toContain("Proximity");
+    expect(html).not.toContain("Make percentage");
+    expect(html).not.toContain(">Z<");
+    expect(html).not.toContain(">Y<");
+    expect(html).not.toContain("Exercise history");
+    expect(html).not.toContain("TARGET MET");
+    expect(html).not.toContain("No previous result");
     expect(html.indexOf("Lag putting")).toBeLessThan(html.indexOf("6ft putts"));
-    expect(html.indexOf("18/08/2026")).toBe(-1);
-    expect(html.indexOf("25/08/2026")).toBeLessThan(html.indexOf("01/09/2026"));
   });
 
-  it("renders Goal history Actual and comparison only when the backend supplies them", () => {
-    const html = renderGoals([
+  it("adds linked Goal context on coach exercise cards without report fields", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteExercisePerformanceContent, {
+        audience: "coach",
+        exerciseTrends: parseSportMetricsGolfWeeklySummaryPayload({
+          success: true,
+          data: {
+            exerciseTrends: [
+              {
+                exerciseId: "ex-z",
+                exerciseName: "Lag putting",
+                taxonomyAreaKey: "putting",
+                linkedGoal: { id: "goal-1", goalName: "Improve putting" },
+                metricName: "Proximity",
+                unit: "ft",
+                direction: "LOWER_IS_BETTER",
+                exerciseType: "Z",
+                currentActual: 8.2,
+                previousActual: null,
+                trendDirection: null,
+                history: [
+                  {
+                    planStartDate: "2026-08-25",
+                    planEndDate: "2026-08-31",
+                    actual: 9,
+                  },
+                ],
+              },
+            ],
+          },
+        }).exerciseTrends,
+      }),
+    );
+
+    expect(html).toContain("Improve putting");
+    expect(html).toContain("8.2 ft");
+    expect(html).toContain("First recorded result");
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).not.toContain(">Z<");
+    expect(html).not.toContain("Proximity");
+    expect(html).not.toContain("Exercise history");
+  });
+
+  it("hides Goal history for both athlete and coach dashboard cards", () => {
+    const payload = [
       {
         goalId: "goal-history",
         goal: {
@@ -507,13 +610,18 @@ describe("Athlete Sports Metrics Step 4A", () => {
         },
         history: [],
       },
-    ]);
+    ];
 
-    expect(html).toContain("60 %");
-    expect(html).toContain("62 %");
-    expect(html).toContain("Target met");
-    expect(html).toContain("No Goal history");
-    expect(html.indexOf("18/08/2026")).toBeLessThan(html.indexOf("25/08/2026"));
+    const athleteHtml = renderGoals(payload);
+    expect(athleteHtml).not.toContain("Goal history");
+    expect(athleteHtml).not.toContain("60 %");
+    expect(athleteHtml).toContain("History goal");
+
+    const coachHtml = renderCoachStep4a({ goalEvidence: payload });
+    expect(coachHtml).not.toContain("Goal history");
+    expect(coachHtml).not.toContain("60 %");
+    expect(coachHtml).toContain("History goal");
+    expect(coachHtml).toContain("Coach form");
   });
 
   it("renders taxonomy scores, history order, and nulls without converting them to 0", () => {
@@ -579,22 +687,19 @@ describe("Athlete Sports Metrics Step 4A", () => {
       }),
     );
 
-    expect(html).toContain("wedge_play");
-    expect(html).toContain("putting");
-    expect(html).toContain("54");
-    expect(html).toContain("0.2");
-    expect(html).toContain("-0.1");
-    expect(html).toContain("53");
-    expect(html).toContain("Rank");
-    expect(html).toContain("Not enough data");
-    expect(html).not.toContain(
-      'Current Week score</dt><dd class="text-sm text-textPrimary">0</dd>',
-    );
-    expect(html.indexOf("wedge_play")).toBeLessThan(html.indexOf(">putting<"));
-    expect(html.indexOf("18/08/2026")).toBeLessThan(html.indexOf("25/08/2026"));
-    expect(html).toContain("Strongest taxonomy");
-    expect(html).toContain("Weakest taxonomy");
-    expect((html.match(/wedge_play/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(html).toContain("Wedge Play");
+    expect(html).toContain("Putting");
+    expect(html).toContain("54 / 100");
+    expect(html).toContain("Current week");
+    expect(html).toContain("BASELINE");
+    expect(html).toContain("Trend available after comparable results");
+    expect(html).not.toContain("YTrend");
+    expect(html).not.toContain("ZTrend");
+    expect(html).not.toContain("Taxonomy history");
+    expect(html).not.toContain("Not enough data");
+    expect(html).toContain("Strongest: Wedge Play");
+    expect(html).toContain("Weakest: Wedge Play");
+    expect(html.indexOf("Wedge Play")).toBeLessThan(html.indexOf("Putting"));
   });
 
   it("shows a neutral unavailable state when strongest and weakest taxonomies are null", () => {
@@ -606,8 +711,10 @@ describe("Athlete Sports Metrics Step 4A", () => {
       }),
     );
 
-    expect(html).toContain("No strongest taxonomy available");
-    expect(html).toContain("No weakest taxonomy available");
+    expect(html).not.toContain("No strongest taxonomy available");
+    expect(html).not.toContain("No weakest taxonomy available");
+    expect(html).not.toContain("Strongest:");
+    expect(html).not.toContain("Weakest:");
   });
 
   it("does not introduce Step 4A math or Step 4B fields", () => {
@@ -655,13 +762,22 @@ describe("Athlete Sports Metrics Step 4B", () => {
     );
 
     expect(html).toContain("Practice Performance");
-    expect(html).toContain("62");
-    expect(html).toContain("Coach Practice Performance");
-    expect(html).toContain("70");
-    expect(html).toContain("Practice-side Performance");
-    expect(html).toContain("65");
-    expect(html).toContain("putting: 4 · 75");
-    expect(html).toContain("wedge_play: Unrated");
+    expect(html).toContain("62 / 100");
+    expect(html).toContain("Coach Practice Performance 70 / 100");
+    expect(html).toContain("Practice-side Performance 65 / 100");
+    expect(html).not.toContain("putting: 4 · 75");
+    expect(html).not.toContain("wedge_play: Unrated");
+    expect(html).not.toContain("Not enough data");
+
+    const coachHtml = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, {
+        audience: "coach",
+        summary: parsed,
+      }),
+    );
+    expect(coachHtml).toContain("Putting: 4");
+    expect(coachHtml).not.toContain("wedge_play: Unrated");
+    expect(coachHtml).toContain("text-3xl font-bold");
   });
 
   it("shows unavailable practice-side and unrated coach scores when backend values are null", () => {
@@ -681,13 +797,11 @@ describe("Athlete Sports Metrics Step 4B", () => {
       createElement(AthletePracticePerformanceContent, { summary: parsed }),
     );
 
-    expect(html).toContain("50");
-    expect(html).toContain("Not rated");
-    expect(html).toContain("Unavailable");
-    expect(html).toContain("putting: Unrated");
-    expect(html).not.toContain(
-      'Practice-side Performance</dt><dd class="text-sm text-textPrimary">0</dd>',
-    );
+    expect(html).toContain("50 / 100");
+    expect(html).toContain("Coach rating: Pending");
+    expect(html).not.toContain("Unavailable");
+    expect(html).not.toContain("putting: Unrated");
+    expect(html).not.toContain("Not rated");
   });
 
   it("does not expose Coach Practice Rating controls in the athlete Step 4B view", () => {
@@ -699,6 +813,56 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(html).not.toContain("Submit rating");
     expect(html).not.toContain("Very Poor");
     expect(html).not.toContain(">Coach Practice Rating<");
+  });
+
+  it("shows a baseline week state when practice score is unavailable without fabricating a score", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: null,
+        coachPracticeScoreOutOf100: null,
+        practiceSideScoreOutOf100: null,
+        exerciseTrends: [
+          { exerciseName: "Chalk Line Start Drill", currentActual: 100, unit: "%" },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, { summary: parsed }),
+    );
+
+    expect(html).toContain("BASELINE WEEK");
+    expect(html).toContain("Coach rating: Pending");
+    expect(html).toContain("Exercise evidence recorded");
+    expect(html).toContain("Trend available after comparable results");
+    expect(html).not.toContain(" / 100");
+    expect(html).not.toContain("Not enough data");
+    expect(html).not.toContain("Unavailable");
+    expect(html).not.toContain("5 exercise results recorded");
+  });
+
+  it("uses dashboard practice cards for coaches and keeps rating actions", () => {
+    const html = renderCoachStep4a({
+      practiceScoreOutOf100: null,
+      exerciseTrends: [
+        { exerciseName: "Lag putting", currentActual: 2.32, unit: "ft" },
+      ],
+      taxonomyScores: [
+        {
+          taxonomyAreaKey: "putting",
+          YTrend: 0.2,
+          ZTrend: -0.1,
+          scoreOutOf100: null,
+        },
+      ],
+    });
+    expect(html).toContain("Coach form");
+    expect(html).toContain("BASELINE WEEK");
+    expect(html).toContain("BASELINE");
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).not.toContain("YTrend");
+    expect(html).not.toContain("Not enough data");
+    expect(html).not.toContain("Not rated");
   });
 
   it("lets a coach POST another rating for an already-rated taxonomy", () => {
@@ -749,5 +913,37 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(source).not.toContain("0.70 *");
     expect(source).not.toContain("practiceSideScoreOutOf100 +");
     expect(source).not.toContain("Overall Golfer Performance");
+  });
+
+  it("does not change the Log Sport Result workflow", () => {
+    const source = readFileSync(
+      new URL("./AthleteWeeklyGoalPerformanceSection.tsx", import.meta.url),
+      "utf8",
+    );
+    const modal = readFileSync(
+      new URL("./LogSportResultModal.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("LogSportResultModal");
+    expect(modal).toContain("Log Sport Result");
+  });
+});
+
+describe("athlete dashboard visual hierarchy", () => {
+  it("renders numeric performance as the dominant athlete value", () => {
+    const html = renderGoals([
+      {
+        goalId: "goal-1",
+        goal: {
+          goalName: "Improve putting",
+          targetValue: 80,
+          primaryMetric: { unit: "%", direction: "HIGHER_IS_BETTER" },
+        },
+        weeklyActual: { value: 75, unit: "%" },
+        targetComparison: { targetMet: false },
+      },
+    ]);
+    expect(html).toContain("text-3xl font-bold");
+    expect(html).toContain("75%");
   });
 });

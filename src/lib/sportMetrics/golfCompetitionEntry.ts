@@ -180,6 +180,47 @@ function holeInputFromForm(
   return input;
 }
 
+export function golfCompetitionHoleCount(
+  format: GolfCompetitionFormat,
+): number {
+  return format === 9 ? 9 : 18;
+}
+
+export function isGolfCompetitionDayReadyToSave(
+  day: GolfCompetitionDayForm,
+  format: GolfCompetitionFormat,
+): boolean {
+  if (day.date.trim() === "") return false;
+  const holeCount = golfCompetitionHoleCount(format);
+  if (day.holes.length !== holeCount) return false;
+  return day.holes.every((hole) => holeInputFromForm(hole) !== null);
+}
+
+export function areAllGolfCompetitionDaysSaved(
+  numberOfDays: number,
+  savedDayNumbers: number[],
+): boolean {
+  if (numberOfDays < 1) return false;
+  const saved = new Set(savedDayNumbers);
+  for (let dayNumber = 1; dayNumber <= numberOfDays; dayNumber += 1) {
+    if (!saved.has(dayNumber)) return false;
+  }
+  return true;
+}
+
+export function savedGolfCompetitionDayNumbersFromPersisted(
+  days: PersistedDay[] | undefined,
+  format: GolfCompetitionFormat,
+): number[] {
+  const holeCount = golfCompetitionHoleCount(format);
+  return (days ?? [])
+    .filter((day) => {
+      if ((day.date ?? "").trim() === "") return false;
+      return (day.holeResults ?? []).length === holeCount;
+    })
+    .map((day) => day.dayNumber);
+}
+
 export function buildGolfCompetitionDaysPatch(
   days: GolfCompetitionDayForm[],
 ): GolfCompetitionDayInput[] {
@@ -196,6 +237,34 @@ export function buildGolfCompetitionDaysPatch(
         .filter((hole): hole is GolfCompetitionHoleInput => hole !== null),
     };
     return payload;
+  });
+}
+
+/** PATCH replacement payload for days 1..throughDayNumber only. */
+export function buildGolfCompetitionDaysPatchThrough(
+  days: GolfCompetitionDayForm[],
+  throughDayNumber: number,
+): GolfCompetitionDayInput[] {
+  return buildGolfCompetitionDaysPatch(
+    days
+      .filter((day) => day.dayNumber <= throughDayNumber)
+      .sort((left, right) => left.dayNumber - right.dayNumber),
+  );
+}
+
+export function mergeGolfCompetitionDaysAfterSave(
+  local: GolfCompetitionDayForm[],
+  fromServer: GolfCompetitionDayForm[],
+): GolfCompetitionDayForm[] {
+  return local.map((day) => {
+    const server = fromServer.find(
+      (item) => item.dayNumber === day.dayNumber,
+    );
+    if (!server) return day;
+    const serverHasHoles = server.holes.some(
+      (hole) => hole.par.trim() !== "" && hole.strokes.trim() !== "",
+    );
+    return serverHasHoles ? server : day;
   });
 }
 

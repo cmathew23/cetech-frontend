@@ -8,6 +8,7 @@ import {
   CoachPracticeRatingForm,
   formatGoalMetricDirection,
 } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { OverallGolfPerformanceCard } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { parseSportMetricsGolfWeeklySummaryPayload } from "@/lib/api/sportMetricsGolf";
 import { readFileSync } from "node:fs";
 import { createElement, type ReactNode } from "react";
@@ -965,6 +966,88 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(html).not.toContain("Exercise evidence recorded");
   });
 
+  const currentCoachPracticeDataset = {
+    practiceScoreOutOf100: null,
+    coachPracticeScoreOutOf100: 50,
+    practiceSideScoreOutOf100: null,
+    exerciseTrends: [
+      { exerciseName: "Chalk Line Start Drill", currentActual: 100, unit: "%" },
+    ],
+    coachPracticeRatings: [
+      {
+        taxonomyAreaKey: "putting",
+        rating: 3,
+        coachRatingScoreOutOf100: 50,
+      },
+    ],
+  };
+
+  function currentCoachPracticeSummary() {
+    return parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: currentCoachPracticeDataset,
+    });
+  }
+
+  it("shows current Practice Performance 50 as the coach primary value instead of BASELINE WEEK", () => {
+    const parsed = currentCoachPracticeSummary();
+    const html = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, {
+        audience: "coach",
+        summary: parsed,
+      }),
+    );
+
+    expect(html).toContain('mt-4 text-3xl font-bold');
+    expect(html).toContain(">50<");
+    expect(html).not.toMatch(/text-3xl font-bold[^>]*>BASELINE WEEK</);
+    expect(html).toContain("BASELINE WEEK");
+    expect(html).toContain("Trend available after comparable results");
+    expect(html).toContain("Exercise evidence recorded");
+    expect(html).toContain("Coach Practice Performance 50 / 100");
+    expect(html).toContain("Putting: 3");
+  });
+
+  it("shows Practice Performance 50 on Head Coach and Skills Coach Step 4B views", () => {
+    const parsed = currentCoachPracticeSummary();
+    const headCoachHtml = renderToStaticMarkup(
+      createElement(AthleteSportsMetricsStep4aContent, {
+        summary: parsed,
+        audience: "coach",
+        allowCoachPracticeRating: false,
+        coachRatingForm: createElement("div", null, "Coach form"),
+      }),
+    );
+    const skillsCoachHtml = renderToStaticMarkup(
+      createElement(AthleteSportsMetricsStep4aContent, {
+        summary: parsed,
+        audience: "coach",
+        allowCoachPracticeRating: true,
+        coachRatingForm: createElement("div", null, "Coach form"),
+      }),
+    );
+
+    for (const html of [headCoachHtml, skillsCoachHtml]) {
+      expect(html).toContain(">50<");
+      expect(html).not.toMatch(/text-3xl font-bold[^>]*>BASELINE WEEK</);
+      expect(html).toContain("Trend available after comparable results");
+    }
+    expect(headCoachHtml).not.toContain("Coach form");
+    expect(skillsCoachHtml).toContain("Coach form");
+  });
+
+  it("keeps Overall Golf Performance Practice value 50 for the same current dataset", () => {
+    const html = renderToStaticMarkup(
+      createElement(OverallGolfPerformanceCard, {
+        summary: currentCoachPracticeSummary(),
+      }),
+    );
+    expect(html).toContain("Overall Golf Performance");
+    expect(html).toContain("Practice Performance");
+    expect(html).toContain(">50<");
+    expect(html).not.toContain("50 / 100");
+  });
+
   it("uses dashboard practice cards for coaches and keeps rating actions", () => {
     const html = renderCoachStep4a({
       practiceScoreOutOf100: null,
@@ -1037,6 +1120,7 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(source).not.toContain("0.70 *");
     expect(source).not.toContain("practiceSideScoreOutOf100 +");
     expect(source).not.toContain("Overall Golfer Performance");
+    expect(source).toContain("displayedPracticePerformanceScore");
   });
 
   it("does not change the Log Sport Result workflow", () => {

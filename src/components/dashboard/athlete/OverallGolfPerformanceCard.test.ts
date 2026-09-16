@@ -35,6 +35,18 @@ function summaryFrom(data: Record<string, unknown>) {
 }
 
 describe("resolveOverallGolfPerformanceDisplay", () => {
+  it("uses coachPracticeScoreOutOf100 when practiceScoreOutOf100 is null", () => {
+    const values = resolveOverallGolfPerformanceDisplay(
+      summaryFrom({
+        practiceScoreOutOf100: null,
+        coachPracticeScoreOutOf100: 50,
+        competitionPerformance: null,
+        overallGolferPerformance: null,
+      }),
+    );
+    expect(values.practiceValue).toBe("50");
+  });
+
   it("reuses the Practice Performance backend score and keeps null competition/overall visible", () => {
     const values = resolveOverallGolfPerformanceDisplay(
       summaryFrom({

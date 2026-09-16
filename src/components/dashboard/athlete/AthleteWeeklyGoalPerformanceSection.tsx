@@ -1,6 +1,7 @@
 "use client";
 
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import { displayedPracticePerformanceScore } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import {
   AthletePerformanceStat,
   athletePerformanceGridClass,
@@ -290,9 +291,7 @@ export function AthletePracticePerformanceContent({
     summary.exerciseTrends.some((item) => item.currentActual !== null) ||
     hasSportMetricsGolfEvidence(summary);
   const isAthlete = audience === "athlete";
-  const dominantScore = isAthlete
-    ? (summary.practiceScoreOutOf100 ?? summary.coachPracticeScoreOutOf100)
-    : summary.practiceScoreOutOf100;
+  const displayedScore = displayedPracticePerformanceScore(summary);
   const athleteRatingRows = summary.coachPracticeRatings.filter(
     (row) => row.rating !== null && (row.taxonomyAreaKey?.trim() ?? "") !== "",
   );
@@ -302,13 +301,17 @@ export function AthletePracticePerformanceContent({
       <AthletePerformanceStat
         title="Practice Performance"
         value={
-          dominantScore !== null
-            ? formatAthleteMetricValue(dominantScore, null)
+          displayedScore !== null
+            ? formatAthleteMetricValue(displayedScore, null)
             : isAthlete
               ? "NO RESULT YET"
               : "BASELINE WEEK"
         }
-        caption={isAthlete && !hasScore ? "BASELINE WEEK" : undefined}
+        caption={
+          !hasScore && (isAthlete || displayedScore !== null)
+            ? "BASELINE WEEK"
+            : undefined
+        }
         supporting={
           <>
             {isAthlete

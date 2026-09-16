@@ -1,6 +1,7 @@
 "use client";
 
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
@@ -25,6 +26,7 @@ import {
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { coachHasSkillsPlanGenerationAuthority } from "@/lib/coachTrainingPlanActions";
 import { formatDateOnly } from "@/lib/dateTime";
 import {
   releasedSkillsTrainingPlanVersionId,
@@ -251,7 +253,10 @@ export function CoachAthletePerformancePageContent() {
                 entityId={entityId}
                 athleteId={selectedAthleteId}
                 trainingPlanVersionId={trainingPlanVersionId}
-                allowCoachPracticeRating
+                audience="coach"
+                allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(
+                  selectedAthlete,
+                )}
               />
               <SportMetricsSection
                 entityId={entityId}
@@ -259,11 +264,18 @@ export function CoachAthletePerformancePageContent() {
                 trainingPlanVersionId={trainingPlanVersionId}
                 cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
                 titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                hideWeeklyEvidenceCard
               />
               <CoachCompetitionPerformanceSection
                 entityId={entityId}
                 athleteId={selectedAthleteId}
                 trainingPlanVersionId={trainingPlanVersionId}
+              />
+              <OverallGolfPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
               />
             </>
           ) : null}

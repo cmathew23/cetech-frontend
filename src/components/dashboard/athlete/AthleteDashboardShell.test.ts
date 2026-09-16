@@ -35,6 +35,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(source).not.toContain("<AthleteCompetitionEntrySection");
     expect(source).not.toContain("onCompetitionSubmitted");
     expect(source).toContain("<AthleteCompetitionPerformanceSection");
+    expect(source).toContain("<OverallGolfPerformanceSection");
     expect(source).not.toContain("fetchSportMetricsGolfWeeklySummary");
     expect(source).not.toContain("fetchSportMetricsGolfComparison");
     expect(source).not.toContain("GolfSportsMetricsComparison");
@@ -78,7 +79,9 @@ describe("athlete Sports Metrics legacy isolation", () => {
 
     expect(performance).toContain("<SportMetricsSection");
     expect(performance).toContain("allowCoachPracticeRating");
+    expect(performance).toContain("hideWeeklyEvidenceCard");
     expect(overview).toContain("<SportMetricsSection");
+    expect(overview).not.toContain("hideWeeklyEvidenceCard");
     expect(section).toContain("fetchSportMetricsGolfWeeklySummary");
     expect(section).toContain("<GolfSportsMetricsComparisonControls");
   });

@@ -269,6 +269,15 @@ export const COACH_PRACTICE_RATING_OPTIONS = [
   { rating: 5, label: "5 — Very Good" },
 ] as const;
 
+function coachPracticeRatingMeaning(rating: number): string | null {
+  const option = COACH_PRACTICE_RATING_OPTIONS.find((item) => item.rating === rating);
+  if (!option) return null;
+  const separator = " — ";
+  const index = option.label.indexOf(separator);
+  if (index === -1) return null;
+  return option.label.slice(index + separator.length);
+}
+
 export function AthletePracticePerformanceContent({
   summary,
   audience = "athlete",
@@ -280,20 +289,50 @@ export function AthletePracticePerformanceContent({
   const hasExerciseEvidence =
     summary.exerciseTrends.some((item) => item.currentActual !== null) ||
     hasSportMetricsGolfEvidence(summary);
+  const isAthlete = audience === "athlete";
+  const dominantScore = isAthlete
+    ? (summary.practiceScoreOutOf100 ?? summary.coachPracticeScoreOutOf100)
+    : summary.practiceScoreOutOf100;
+  const athleteRatingRows = summary.coachPracticeRatings.filter(
+    (row) => row.rating !== null && (row.taxonomyAreaKey?.trim() ?? "") !== "",
+  );
 
   return (
     <MetricsSectionCard title="Practice Performance">
       <AthletePerformanceStat
         title="Practice Performance"
         value={
-          hasScore
-            ? formatScoreOutOf100(summary.practiceScoreOutOf100 as number)
-            : "BASELINE WEEK"
+          dominantScore !== null
+            ? formatAthleteMetricValue(dominantScore, null)
+            : isAthlete
+              ? "NO RESULT YET"
+              : "BASELINE WEEK"
         }
+        caption={isAthlete && !hasScore ? "BASELINE WEEK" : undefined}
         supporting={
           <>
+            {isAthlete
+              ? athleteRatingRows.map((row, index) => {
+                  const meaning = coachPracticeRatingMeaning(row.rating as number);
+                  const taxonomyLabel = formatTaxonomyAreaLabel(row.taxonomyAreaKey);
+                  return (
+                    <div key={`${row.taxonomyAreaKey}-${index}`}>
+                      {meaning ? (
+                        <p>
+                          {taxonomyLabel}: {meaning}
+                        </p>
+                      ) : null}
+                      <p>Coach rating: {String(row.rating)} / 5</p>
+                    </div>
+                  );
+                })
+              : null}
             {!hasScore && hasExerciseEvidence ? (
-              <p>Exercise evidence recorded</p>
+              <p>
+                {isAthlete
+                  ? "Exercise results recorded"
+                  : "Exercise evidence recorded"}
+              </p>
             ) : null}
             {summary.practiceSideScoreOutOf100 !== null ? (
               <p>
@@ -301,13 +340,19 @@ export function AthletePracticePerformanceContent({
                 {formatScoreOutOf100(summary.practiceSideScoreOutOf100)}
               </p>
             ) : null}
-            <p>
-              {summary.coachPracticeScoreOutOf100 === null
-                ? "Coach rating: Pending"
-                : `Coach Practice Performance ${formatScoreOutOf100(summary.coachPracticeScoreOutOf100)}`}
-            </p>
+            {!isAthlete || athleteRatingRows.length === 0 ? (
+              <p>
+                {summary.coachPracticeScoreOutOf100 === null
+                  ? "Coach rating: Pending"
+                  : `Coach Practice Performance ${formatScoreOutOf100(summary.coachPracticeScoreOutOf100)}`}
+              </p>
+            ) : null}
             {!hasScore ? (
-              <p>Trend available after comparable results</p>
+              <p>
+                {isAthlete
+                  ? "Your trend will appear after another comparable week."
+                  : "Trend available after comparable results"}
+              </p>
             ) : null}
             {audience === "coach"
               ? summary.coachPracticeRatings
@@ -412,13 +457,16 @@ export function CoachPracticeRatingForm({
 export function AthleteSportsMetricsStep4aContent({
   summary,
   allowCoachPracticeRating = false,
+  audience,
   coachRatingForm,
 }: {
   summary: SportMetricsGolfWeeklySummary;
   allowCoachPracticeRating?: boolean;
+  audience?: "athlete" | "coach";
   coachRatingForm?: React.ReactNode;
 }) {
-  const audience = allowCoachPracticeRating ? "coach" : "athlete";
+  const resolvedAudience =
+    audience ?? (allowCoachPracticeRating ? "coach" : "athlete");
 
   return (
     <div className="min-w-0 space-y-4">
@@ -429,7 +477,7 @@ export function AthleteSportsMetricsStep4aContent({
       />
       <AthleteExercisePerformanceContent
         exerciseTrends={summary.exerciseTrends}
-        audience={audience}
+        audience={resolvedAudience}
       />
       <AthleteTaxonomyPerformanceContent
         taxonomyScores={summary.taxonomyScores}
@@ -438,7 +486,7 @@ export function AthleteSportsMetricsStep4aContent({
       />
       <AthletePracticePerformanceContent
         summary={summary}
-        audience={audience}
+        audience={resolvedAudience}
       />
       {allowCoachPracticeRating ? coachRatingForm : null}
     </div>
@@ -450,11 +498,13 @@ export function AthleteWeeklyGoalPerformanceSection({
   athleteId,
   trainingPlanVersionId,
   allowCoachPracticeRating = false,
+  audience,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   allowCoachPracticeRating?: boolean;
+  audience?: "athlete" | "coach";
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -597,6 +647,7 @@ export function AthleteWeeklyGoalPerformanceSection({
     <AthleteSportsMetricsStep4aContent
       summary={summary}
       allowCoachPracticeRating={allowCoachPracticeRating}
+      audience={audience}
       coachRatingForm={
         <CoachPracticeRatingForm
           summary={summary}

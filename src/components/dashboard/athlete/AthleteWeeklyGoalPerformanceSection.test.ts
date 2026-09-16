@@ -519,6 +519,50 @@ describe("Athlete Sports Metrics Step 4A", () => {
     expect(html.indexOf("Lag putting")).toBeLessThan(html.indexOf("6ft putts"));
   });
 
+  it("formats Exercise Performance backend unit enums for athlete display", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteExercisePerformanceContent, {
+        exerciseTrends: parseSportMetricsGolfWeeklySummaryPayload({
+          success: true,
+          data: {
+            exerciseTrends: [
+              {
+                exerciseName: "Step-Through Flow Drill",
+                currentActual: 95.88,
+                previousActual: 90,
+                unit: "MILES_PER_HOUR",
+                direction: "HIGHER_IS_BETTER",
+              },
+              {
+                exerciseName: "Lag putting",
+                currentActual: 2.32,
+                unit: "FEET",
+                direction: "LOWER_IS_BETTER",
+              },
+              {
+                exerciseName: "Chalk Line Start Drill",
+                currentActual: 100,
+                unit: "PERCENTAGE",
+                direction: "HIGHER_IS_BETTER",
+              },
+            ],
+          },
+        }).exerciseTrends,
+      }),
+    );
+
+    expect(html).toContain("95.9 mph");
+    expect(html).toContain("Previous: 90 mph");
+    expect(html).toContain("2.3 ft");
+    expect(html).toContain("100%");
+    expect(html).toContain("Higher is better");
+    expect(html).toContain("Lower is better");
+    expect(html).not.toContain("MILES_PER_HOUR");
+    expect(html).not.toContain("95.88");
+    expect(html).not.toContain("2.32 FEET");
+    expect(html).not.toContain("100 PERCENTAGE");
+  });
+
   it("adds linked Goal context on coach exercise cards without report fields", () => {
     const html = renderToStaticMarkup(
       createElement(AthleteExercisePerformanceContent, {
@@ -762,9 +806,12 @@ describe("Athlete Sports Metrics Step 4B", () => {
     );
 
     expect(html).toContain("Practice Performance");
-    expect(html).toContain("62 / 100");
-    expect(html).toContain("Coach Practice Performance 70 / 100");
+    expect(html).toContain("62");
+    expect(html).not.toContain("62 / 100");
+    expect(html).toContain("Putting: Good");
+    expect(html).toContain("Coach rating: 4 / 5");
     expect(html).toContain("Practice-side Performance 65 / 100");
+    expect(html).not.toContain("Coach Practice Performance 70 / 100");
     expect(html).not.toContain("putting: 4 · 75");
     expect(html).not.toContain("wedge_play: Unrated");
     expect(html).not.toContain("Not enough data");
@@ -797,7 +844,8 @@ describe("Athlete Sports Metrics Step 4B", () => {
       createElement(AthletePracticePerformanceContent, { summary: parsed }),
     );
 
-    expect(html).toContain("50 / 100");
+    expect(html).toContain("50");
+    expect(html).not.toContain("50 / 100");
     expect(html).toContain("Coach rating: Pending");
     expect(html).not.toContain("Unavailable");
     expect(html).not.toContain("putting: Unrated");
@@ -812,6 +860,47 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(html).toContain("Practice Performance");
     expect(html).not.toContain("Submit rating");
     expect(html).not.toContain("Very Poor");
+    expect(html).not.toContain(">Coach Practice Rating<");
+  });
+
+  it("shows Coach Practice Rating controls when Skills plan-generation authority is granted", () => {
+    const html = renderCoachStep4a({
+      practiceScoreOutOf100: 50,
+      taxonomyScores: [{ taxonomyAreaKey: "putting" }],
+    });
+    expect(html).toContain("Coach form");
+    expect(html).toContain("Practice Performance");
+    expect(html).toContain("50");
+    expect(html).not.toContain("50 / 100");
+  });
+
+  it("hides Coach Practice Rating controls without Skills plan-generation authority and keeps read-only practice info", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: 50,
+        coachPracticeScoreOutOf100: 60,
+        practiceSideScoreOutOf100: 55,
+        taxonomyScores: [{ taxonomyAreaKey: "putting" }],
+        coachPracticeRatings: [{ taxonomyAreaKey: "putting", rating: 4 }],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AthleteSportsMetricsStep4aContent, {
+        summary: parsed,
+        audience: "coach",
+        allowCoachPracticeRating: false,
+        coachRatingForm: createElement("div", null, "Coach form"),
+      }),
+    );
+
+    expect(html).toContain("Practice Performance");
+    expect(html).toContain("50");
+    expect(html).not.toContain("50 / 100");
+    expect(html).toContain("Coach Practice Performance 60 / 100");
+    expect(html).toContain("Putting: 4");
+    expect(html).not.toContain("Coach form");
+    expect(html).not.toContain("Submit rating");
     expect(html).not.toContain(">Coach Practice Rating<");
   });
 
@@ -831,14 +920,49 @@ describe("Athlete Sports Metrics Step 4B", () => {
       createElement(AthletePracticePerformanceContent, { summary: parsed }),
     );
 
+    expect(html).toContain("NO RESULT YET");
     expect(html).toContain("BASELINE WEEK");
     expect(html).toContain("Coach rating: Pending");
-    expect(html).toContain("Exercise evidence recorded");
-    expect(html).toContain("Trend available after comparable results");
+    expect(html).toContain("Exercise results recorded");
+    expect(html).toContain("Your trend will appear after another comparable week.");
     expect(html).not.toContain(" / 100");
     expect(html).not.toContain("Not enough data");
     expect(html).not.toContain("Unavailable");
     expect(html).not.toContain("5 exercise results recorded");
+  });
+
+  it("makes backend practice score dominant after a coach rating on a baseline week", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: null,
+        coachPracticeScoreOutOf100: 50,
+        practiceSideScoreOutOf100: null,
+        exerciseTrends: [
+          { exerciseName: "Chalk Line Start Drill", currentActual: 100, unit: "%" },
+        ],
+        coachPracticeRatings: [
+          {
+            taxonomyAreaKey: "putting",
+            rating: 3,
+            coachRatingScoreOutOf100: 50,
+          },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, { summary: parsed }),
+    );
+
+    expect(html).toContain("50");
+    expect(html).not.toContain("50 / 100");
+    expect(html).toContain("BASELINE WEEK");
+    expect(html).toContain("Putting: Average / Stable");
+    expect(html).toContain("Coach rating: 3 / 5");
+    expect(html).toContain("Exercise results recorded");
+    expect(html).toContain("Your trend will appear after another comparable week.");
+    expect(html).not.toContain("Coach Practice Performance 50 / 100");
+    expect(html).not.toContain("Exercise evidence recorded");
   });
 
   it("uses dashboard practice cards for coaches and keeps rating actions", () => {

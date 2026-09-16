@@ -12,6 +12,7 @@ import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/Ath
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
 import { AthleteCompetitionPerformanceSection } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 // Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
 // uncommenting this import and the SportMetricsSection render below.
 // import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
@@ -78,6 +79,11 @@ function AthleteSportMetricsWithPlanVersion({
         trainingPlanVersionId={trainingPlanVersionId}
       />
       <AthleteCompetitionPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+      <OverallGolfPerformanceSection
         entityId={entityId}
         athleteId={athleteId}
         trainingPlanVersionId={trainingPlanVersionId}

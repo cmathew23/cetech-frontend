@@ -253,5 +253,6 @@ describe("GolfSportsMetricsComparisonControls", () => {
       1,
     );
     expect(source).toContain("<SportMetricsWeeklySummary");
+    expect(source).toContain("hideWeeklyEvidenceCard");
   });
 });

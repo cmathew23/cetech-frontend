@@ -4,13 +4,33 @@ import type { ReactNode } from "react";
 
 export type SportsMetricsPresentation = "dashboard" | "detail";
 
+/** Backend Exercise Performance / sports-metrics unit enums and already-friendly labels. */
+const UNIT_DISPLAY_LABELS: Record<string, string> = {
+  PERCENTAGE: "%",
+  PERCENT: "%",
+  PCT: "%",
+  "%": "%",
+  FEET: "ft",
+  FT: "ft",
+  INCHES: "in",
+  IN: "in",
+  YARDS: "yd",
+  YD: "yd",
+  MILES_PER_HOUR: "mph",
+  MPH: "mph",
+};
+
 export function formatDisplayUnit(unit: string | null): string {
   const raw = unit?.trim() ?? "";
   if (raw === "") return "";
-  const upper = raw.toUpperCase();
-  if (upper === "PERCENT" || upper === "PCT" || raw === "%") return "%";
-  if (upper === "FEET" || upper === "FT" || raw === "ft") return "ft";
-  return raw;
+  return UNIT_DISPLAY_LABELS[raw.toUpperCase()] ?? raw;
+}
+
+function formatAthleteMetricNumber(value: number | string): string {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  const rounded = Number(numeric.toFixed(1));
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 export function formatAthleteMetricValue(
@@ -18,10 +38,11 @@ export function formatAthleteMetricValue(
   unit: string | null,
 ): string {
   if (value === null) return "";
+  const formattedValue = formatAthleteMetricNumber(value);
   const unitLabel = formatDisplayUnit(unit);
-  if (unitLabel === "") return String(value);
-  if (unitLabel === "%") return `${value}%`;
-  return `${value} ${unitLabel}`;
+  if (unitLabel === "") return formattedValue;
+  if (unitLabel === "%") return `${formattedValue}%`;
+  return `${formattedValue} ${unitLabel}`;
 }
 
 export function formatScoreOutOf100(value: number): string {

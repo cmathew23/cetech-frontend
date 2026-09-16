@@ -721,12 +721,48 @@ describe("sport metrics golf weekly summary Step 4B", () => {
     expect(parsed.coachPracticeScoreOutOf100).toBe(50);
     expect(parsed.practiceSideNormalized).toBe(0.56);
     expect(parsed.practiceSideScoreOutOf100).toBe(56);
+    expect(parsed.competitionPerformance).toBeNull();
+    expect(parsed.overallGolferPerformance).toBeNull();
+    expect(parsed.overallGolferPerformanceHistory).toEqual([]);
     expect(parsed.coachPracticeRatings.map((row) => row.taxonomyAreaKey)).toEqual([
       "wedge_play",
       "putting",
     ]);
     expect(parsed.coachPracticeRatings[0]?.rating).toBe(4);
     expect(parsed.coachPracticeRatings[0]?.coachRatingScoreOutOf100).toBe(75);
+  });
+
+  it("copies weekly-summary Overall Golf Performance fields without calculating them", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        practiceScoreOutOf100: 50,
+        competitionPerformance: 58.3,
+        overallGolferPerformance: 77.25,
+        overallGolferPerformanceHistory: [
+          {
+            weekStartDate: "2026-08-31",
+            weekEndDate: "2026-09-06",
+            practicePerformance: 48,
+            competitionPerformance: 55,
+            overallGolferPerformance: 70,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.practiceScoreOutOf100).toBe(50);
+    expect(parsed.competitionPerformance).toBe(58.3);
+    expect(parsed.overallGolferPerformance).toBe(77.25);
+    expect(parsed.overallGolferPerformanceHistory).toEqual([
+      {
+        weekStartDate: "2026-08-31",
+        weekEndDate: "2026-09-06",
+        practiceScoreOutOf100: 48,
+        competitionPerformance: 55,
+        overallGolferPerformance: 70,
+      },
+    ]);
   });
 
   it("keeps null Step 4B scores as null instead of 0", () => {
@@ -764,6 +800,14 @@ describe("sport metrics golf weekly summary Step 4B", () => {
     expect(source).toContain(
       "practiceScoreOutOf100: readFiniteNumber(record.practiceScoreOutOf100)",
     );
+    expect(source).toContain(
+      "competitionPerformance: readFiniteNumber(record.competitionPerformance)",
+    );
+    expect(source).toContain(
+      "overallGolferPerformance: readFiniteNumber(record.overallGolferPerformance)",
+    );
+    expect(source).not.toContain("0.45 *");
+    expect(source).not.toContain("0.55 *");
   });
 });
 

@@ -245,7 +245,18 @@ export type SportMetricsGolfWeeklySummary = {
   coachPracticeScoreOutOf100: number | null;
   practiceSideNormalized: number | null;
   practiceSideScoreOutOf100: number | null;
+  competitionPerformance: number | null;
+  overallGolferPerformance: number | null;
+  overallGolferPerformanceHistory: SportMetricOverallGolferPerformanceHistoryPoint[];
   raw: unknown;
+};
+
+export type SportMetricOverallGolferPerformanceHistoryPoint = {
+  weekStartDate: string | null;
+  weekEndDate: string | null;
+  practiceScoreOutOf100: number | null;
+  competitionPerformance: number | null;
+  overallGolferPerformance: number | null;
 };
 
 export type SportMetricsGolfComparisonStatus =
@@ -613,6 +624,26 @@ function parseTaxonomyScore(raw: unknown): SportMetricTaxonomyScore | null {
   };
 }
 
+function parseOverallGolferPerformanceHistoryPoint(
+  raw: unknown,
+): SportMetricOverallGolferPerformanceHistoryPoint | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  return {
+    weekStartDate: pickString(record, [
+      "weekStartDate",
+      "planStartDate",
+      "weekStart",
+    ]),
+    weekEndDate: pickString(record, ["weekEndDate", "planEndDate", "weekEnd"]),
+    practiceScoreOutOf100:
+      readFiniteNumber(record.practiceScoreOutOf100) ??
+      readFiniteNumber(record.practicePerformance),
+    competitionPerformance: readFiniteNumber(record.competitionPerformance),
+    overallGolferPerformance: readFiniteNumber(record.overallGolferPerformance),
+  };
+}
+
 function parseCoachPracticeRating(
   raw: unknown,
 ): SportMetricCoachPracticeRating | null {
@@ -765,6 +796,12 @@ export function parseSportMetricsGolfWeeklySummaryPayload(
     coachPracticeScoreOutOf100: readFiniteNumber(record.coachPracticeScoreOutOf100),
     practiceSideNormalized: readFiniteNumber(record.practiceSideNormalized),
     practiceSideScoreOutOf100: readFiniteNumber(record.practiceSideScoreOutOf100),
+    competitionPerformance: readFiniteNumber(record.competitionPerformance),
+    overallGolferPerformance: readFiniteNumber(record.overallGolferPerformance),
+    overallGolferPerformanceHistory: mapRecordArray(
+      record.overallGolferPerformanceHistory,
+      parseOverallGolferPerformanceHistoryPoint,
+    ),
     raw: payload,
   };
 }

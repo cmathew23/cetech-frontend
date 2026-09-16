@@ -110,6 +110,20 @@ export function headCoachOwnsAssignedDomainGeneration(input: {
   return false;
 }
 
+/**
+ * Whether this coach controls Skills plan generation for the athlete.
+ * Same ownership merge + gate used to show/enable Skills generate actions.
+ */
+export function coachHasSkillsPlanGenerationAuthority(
+  assignedRow: AssignedAthletePlanOwnershipRow | null,
+  readiness?: PlanGenerationOwnershipFlags,
+): boolean {
+  if (assignedRow === null) return false;
+  return !isPlanGenerationBlockedByOwnership(
+    mergePlanGenerationOwnershipForDomain("SKILLS", readiness, assignedRow),
+  );
+}
+
 /** Assistant create is blocked until Head Coach / upstream planning context is locked. */
 export function isCreatePlanBlockedByPlanningContextLock(input: {
   domain: CoachPlanCreationDomain | null;

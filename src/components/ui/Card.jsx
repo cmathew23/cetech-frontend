@@ -1,3 +1,4 @@
+import { DashboardSectionHeading } from "@/components/dashboard/shared/dashboardSectionIcons";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +38,10 @@ export function Card({
         <div className={cn(designSystem.card.header.root)}>
           <div className="min-w-0">
             {title ? (
-              <h3 className={cn(designSystem.card.header.title, titleClassName)}>
-                {title}
-              </h3>
+              <DashboardSectionHeading
+                title={title}
+                className={cn(designSystem.card.header.title, titleClassName)}
+              />
             ) : null}
             {subtitle ? (
               <p className={cn(designSystem.card.header.subtitle)}>{subtitle}</p>

@@ -29,4 +29,16 @@ describe("CoachAthletePerformancePageContent Coach Practice Rating authority", (
       source.indexOf("<WearableSummarySection"),
     );
   });
+
+  it("renders Nutrition Performance immediately above Wearables for Head Coach and Nutrition Coach", () => {
+    expect(source).toContain("<NutritionPerformanceSection");
+    expect(source).toContain("coachCanViewNutritionPerformance");
+    expect(source).toContain("showNutritionPerformance");
+    expect(source.indexOf("<WeeklyAdherenceCards")).toBeLessThan(
+      source.indexOf("<NutritionPerformanceSection"),
+    );
+    expect(source.indexOf("<NutritionPerformanceSection")).toBeLessThan(
+      source.indexOf("<WearableSummarySection"),
+    );
+  });
 });

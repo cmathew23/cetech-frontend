@@ -17,6 +17,7 @@ import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/Ov
 // uncommenting this import and the SportMetricsSection render below.
 // import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
+import { NutritionPerformanceSection } from "@/components/dashboard/NutritionPerformanceSection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
@@ -26,6 +27,30 @@ import { useRouter } from "next/navigation";
 
 function isPendingStatus(status: string): boolean {
   return status.trim().toUpperCase() === "PENDING";
+}
+
+function AthleteNutritionPerformanceWithPlanWindow({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { weekStart, weekEnd, phase } = useAthleteWeeklyAdherence();
+  const weekRangePending =
+    phase === "loading" || phase === "awaiting_identifiers";
+
+  return (
+    <NutritionPerformanceSection
+      entityId={entityId}
+      athleteId={athleteId}
+      weekStart={weekStart}
+      weekEnd={weekEnd}
+      weekRangePending={weekRangePending}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+    />
+  );
 }
 
 function AthleteWearableSummaryWithPlanWindow({
@@ -139,6 +164,10 @@ export function AthleteDashboardShell() {
             athleteId={athleteId}
           />
 
+          <AthleteNutritionPerformanceWithPlanWindow
+            entityId={entityId}
+            athleteId={athleteId}
+          />
           <AthleteWearableSummaryWithPlanWindow
             entityId={entityId}
             athleteId={athleteId}

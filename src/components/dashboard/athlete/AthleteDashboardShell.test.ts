@@ -61,6 +61,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(source).toContain("<AthleteTodayPlanCard />");
     expect(source).toContain("<AthleteWearableSummaryWithPlanWindow");
     expect(source).toContain("<WearableSummarySection");
+    expect(source).toContain("<NutritionPerformanceSection");
   });
 
   it("leaves shared coach SportMetricsSection mounts unchanged", () => {

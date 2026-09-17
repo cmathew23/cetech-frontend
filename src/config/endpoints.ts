@@ -105,6 +105,19 @@ export const paths = {
       params.set("snapshotBId", query.snapshotBId);
       return `${base}?${params.toString()}`;
     },
+    nutritionPerformance: (
+      entityId: string,
+      athleteId: string,
+      query: { weekStart: string; weekEnd: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/nutrition-performance`;
+      const params = new URLSearchParams();
+      params.set("weekStart", query.weekStart);
+      params.set("weekEnd", query.weekEnd);
+      return `${base}?${params.toString()}`;
+    },
+    nutritionPerformanceHistory: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/nutrition-performance/history`,
     athleteWearableSummary: (
       entityId: string,
       athleteId: string,

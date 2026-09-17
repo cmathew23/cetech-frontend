@@ -4,10 +4,8 @@ import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetr
 import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
-import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchAthleteTodayPlan,
   fetchAthleteWeeklyPlanJournal,
@@ -108,11 +106,15 @@ function summarizeTodayItem(item: unknown): string | null {
   return null;
 }
 
-export function AthleteTodayPlanCard() {
-  const { accessContext, accessGateReady } = useAthleteInvitationGate();
-  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
-  const entityId = planningIds.ids?.entityId ?? "";
-  const athleteId = planningIds.ids?.athleteId ?? "";
+export function AthleteTodayPlanCard({
+  entityId,
+  athleteId,
+  identifiersPhase,
+}: {
+  entityId: string;
+  athleteId: string;
+  identifiersPhase: "loading" | "ready" | "not_ready";
+}) {
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -122,8 +124,8 @@ export function AthleteTodayPlanCard() {
   }, []);
 
   useEffect(() => {
-    if (planningIds.phase === "loading") return;
-    if (planningIds.phase === "not_ready") return;
+    if (identifiersPhase === "loading") return;
+    if (identifiersPhase === "not_ready") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -152,10 +154,10 @@ export function AthleteTodayPlanCard() {
     return () => {
       cancelled = true;
     };
-  }, [athleteId, entityId, planningIds.phase, reloadKey]);
+  }, [athleteId, entityId, identifiersPhase, reloadKey]);
 
-  const isLoading = planningIds.phase === "loading" ||
-    (planningIds.phase === "ready" && state.phase === "loading");
+  const isLoading = identifiersPhase === "loading" ||
+    (identifiersPhase === "ready" && state.phase === "loading");
   const todayPlan = state.phase === "ready" ? state.todayPlan : null;
   const allDomainsNotReleased = todayPlan
     ? DOMAIN_SUMMARY.every((domain) => todayPlan.domains[domain.key].status === "NOT_RELEASED")
@@ -179,7 +181,7 @@ export function AthleteTodayPlanCard() {
           <div className="flex min-h-[160px] items-center justify-center text-sm text-textSecondary">
             Loading today’s plan…
           </div>
-        ) : planningIds.phase === "not_ready" ? (
+        ) : identifiersPhase === "not_ready" ? (
           <Alert variant="warning">
             Athlete profile not ready
           </Alert>

@@ -73,6 +73,8 @@ export type SessionDomainContext = {
   completionCredit: number | null;
   plannedDurationMinutes: number;
   actualDurationMinutes: number;
+  /** Backend weekly average session load (AU). Missing/invalid → null; 0 is 0. */
+  averageSessionLoad: number | null;
 };
 
 export type NutritionDomainContext = {
@@ -471,6 +473,9 @@ function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainC
     ]),
     plannedDurationMinutes: readNonNegInt(raw.plannedDurationMinutes),
     actualDurationMinutes: readNonNegInt(raw.actualDurationMinutes),
+    averageSessionLoad: readOptionalFiniteNumber(
+      raw.averageSessionLoad ?? raw.averageWeeklySessionLoad,
+    ),
   };
 }
 
@@ -568,6 +573,8 @@ function sessionContextHasSignal(raw: Record<string, unknown>): boolean {
     "weightedCompletionCredit",
     "plannedDurationMinutes",
     "actualDurationMinutes",
+    "averageSessionLoad",
+    "averageWeeklySessionLoad",
   ] as const;
   return signalKeys.some((key) => key in raw);
 }
@@ -1412,6 +1419,16 @@ export function isSessionContext(
     ctx != null &&
     ("completedItems" in ctx ||
       "plannedDurationMinutes" in ctx ||
-      "actualDurationMinutes" in ctx)
+      "actualDurationMinutes" in ctx ||
+      "averageSessionLoad" in ctx)
   );
+}
+
+export function readStrengthConditioningAverageSessionLoad(
+  summary: WeeklyAdherenceSummary | null | undefined,
+): number | null {
+  const ctx = summary?.domains.STRENGTH_CONDITIONING?.context;
+  if (!isSessionContext(ctx)) return null;
+  const value = ctx.averageSessionLoad;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

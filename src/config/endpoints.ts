@@ -118,6 +118,11 @@ export const paths = {
     },
     nutritionPerformanceHistory: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/nutrition-performance/history`,
+    athleteStrengthConditioningSessionLoadHistory: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/strength-conditioning/session-load/history`,
     athleteWearableSummary: (
       entityId: string,
       athleteId: string,

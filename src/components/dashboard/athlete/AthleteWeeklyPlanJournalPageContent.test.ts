@@ -360,3 +360,39 @@ describe("Weekly Training warm-up / cool-down guidance banner", () => {
     );
   });
 });
+
+describe("S&C session RPE in weekly-plan adherence", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const nutritionPanel = journalSource.slice(
+    journalSource.indexOf("function NutritionSessionAdherencePanel"),
+    journalSource.indexOf("function SessionAdherencePanel"),
+  );
+  const sessionPanel = journalSource.slice(
+    journalSource.indexOf("function SessionAdherencePanel"),
+    journalSource.indexOf("function renderJournalItem("),
+  );
+
+  it("shows Session RPE beside duration for S&C only", () => {
+    expect(sessionPanel).toContain('adherenceDomainKey === "S_AND_C"');
+    expect(sessionPanel).toContain("Session RPE");
+    expect(sessionPanel).toContain("1–10");
+    expect(sessionPanel).toContain("How hard did this session feel?");
+    expect(sessionPanel).toContain("adherence-session-rpe-");
+    expect(sessionPanel).toContain("Actual duration (minutes)");
+    expect(sessionPanel).toContain("parseSessionRpeFormValue");
+    expect(sessionPanel).toContain("sessionRpe:");
+    expect(sessionPanel).not.toContain("sessionRpe: 0");
+  });
+
+  it("does not show Session RPE on Skills or Nutrition adherence forms", () => {
+    expect(nutritionPanel).not.toContain("Session RPE");
+    expect(nutritionPanel).not.toContain("sessionRpe");
+    expect(sessionPanel).toContain('adherenceDomainKey === "S_AND_C" ? (');
+    expect(journalSource).toContain('adherenceDomainKey={adherenceDomainKey}');
+  });
+});

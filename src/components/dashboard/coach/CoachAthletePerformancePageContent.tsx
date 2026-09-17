@@ -10,6 +10,10 @@ import {
   NutritionPerformanceSection,
   coachCanViewNutritionPerformance,
 } from "@/components/dashboard/NutritionPerformanceSection";
+import {
+  SandCSessionLoadSection,
+  coachCanViewSandCSessionLoad,
+} from "@/components/dashboard/SandCSessionLoadSection";
 import { CoachCompetitionPerformanceSection } from "@/components/dashboard/coach/CoachCompetitionPerformanceSection";
 import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
@@ -176,6 +180,10 @@ export function CoachAthletePerformancePageContent() {
     academyCoachRole: dashboard?.academyCoachRole ?? null,
     functions: dashboard?.functions ?? null,
   });
+  const showSandCSessionLoad = coachCanViewSandCSessionLoad({
+    academyCoachRole: dashboard?.academyCoachRole ?? null,
+    functions: dashboard?.functions ?? null,
+  });
 
   return (
     <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
@@ -257,6 +265,19 @@ export function CoachAthletePerformancePageContent() {
               weekEnd={summary.weekEnd}
               cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
               titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+            />
+          ) : null}
+
+          {showSandCSessionLoad && selectedAthleteId !== "" ? (
+            <SandCSessionLoadSection
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+              summary={summary}
+              weekStart={weekRange?.weekStart}
+              weekEnd={weekRange?.weekEnd}
+              weekRangePending={adherenceLoading}
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
             />
           ) : null}
 

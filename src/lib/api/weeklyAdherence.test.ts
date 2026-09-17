@@ -3,6 +3,7 @@ import {
   hasNutritionAdherenceDomain,
   parseTrainingLoadComparison,
   parseWeeklyAdherenceSummaryPayload,
+  readStrengthConditioningAverageSessionLoad,
   shouldShowWeeklyTrainingLoadCard,
   visibleTrainingLoadDomains,
 } from "@/lib/api/weeklyAdherence";
@@ -475,5 +476,76 @@ describe("shouldShowWeeklyTrainingLoadCard", () => {
         "ATHLETE",
       ),
     ).toEqual(["SKILL"]);
+  });
+});
+
+describe("STRENGTH_CONDITIONING averageSessionLoad", () => {
+  it("reads backend averageSessionLoad without defaulting missing to 0", () => {
+    const withLoad = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 2,
+          loggedSessions: 2,
+          adherencePercent: 100,
+          context: {
+            completedItems: 4,
+            plannedItems: 4,
+            averageSessionLoad: 245,
+          },
+        },
+      },
+      visibleDomains: ["STRENGTH_CONDITIONING"],
+    });
+    const zeroLoad = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: {
+            completedItems: 1,
+            plannedItems: 1,
+            averageSessionLoad: 0,
+          },
+        },
+      },
+      visibleDomains: ["STRENGTH_CONDITIONING"],
+    });
+    const missingLoad = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: {
+            completedItems: 1,
+            plannedItems: 1,
+          },
+        },
+        SKILL: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: { completedItems: 1, plannedItems: 1 },
+        },
+      },
+      visibleDomains: ["SKILL", "STRENGTH_CONDITIONING"],
+    });
+
+    expect(readStrengthConditioningAverageSessionLoad(withLoad)).toBe(245);
+    expect(readStrengthConditioningAverageSessionLoad(zeroLoad)).toBe(0);
+    expect(readStrengthConditioningAverageSessionLoad(missingLoad)).toBeNull();
+    expect(missingLoad.domains.SKILL?.context).not.toMatchObject({
+      averageSessionLoad: 245,
+    });
   });
 });

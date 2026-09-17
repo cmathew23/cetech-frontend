@@ -24,8 +24,10 @@ import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchPlannedSessionAdherenceEvents,
+  parseSessionRpeFormValue,
   recordNutritionPlannedSessionAdherenceEvent,
   recordPlannedSessionAdherenceEvent,
+  SESSION_RPE_FORM_ERROR,
   type AthleteSessionAdherenceEvent,
   type SessionAdherenceOutcome,
 } from "@/lib/api/athleteSessionAdherence";
@@ -1988,6 +1990,7 @@ function SessionAdherencePanel({
   const [outcome, setOutcome] = useState<SessionAdherenceOutcome | "">("");
   const [partialCompletedItems, setPartialCompletedItems] = useState("");
   const [actualDurationMinutes, setActualDurationMinutes] = useState("");
+  const [sessionRpe, setSessionRpe] = useState("");
   const [athleteNotes, setAthleteNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{
@@ -2047,6 +2050,22 @@ function SessionAdherencePanel({
       durationValue = parsed;
     }
 
+    const showSessionRpe = adherenceDomainKey === "S_AND_C";
+    let sessionRpeValue: number | undefined;
+    if (showSessionRpe) {
+      const parsedRpe = parseSessionRpeFormValue(sessionRpe);
+      if (parsedRpe.kind === "invalid") {
+        setSubmitMessage({
+          variant: "danger",
+          text: SESSION_RPE_FORM_ERROR,
+        });
+        return;
+      }
+      if (parsedRpe.kind === "value") {
+        sessionRpeValue = parsedRpe.sessionRpe;
+      }
+    }
+
     const completionResult = resolveAdherenceCompletionPercent({
       outcome,
       totalPrescribedItems,
@@ -2071,6 +2090,7 @@ function SessionAdherencePanel({
         ...(durationValue !== undefined
           ? { actualDurationMinutes: durationValue }
           : {}),
+        ...(sessionRpeValue !== undefined ? { sessionRpe: sessionRpeValue } : {}),
         ...(athleteNotes.trim() !== "" ? { athleteNotes: athleteNotes.trim() } : {}),
       });
       setSubmitMessage({ variant: "success", text: "Adherence saved." });
@@ -2093,6 +2113,8 @@ function SessionAdherencePanel({
     outcome,
     partialCompletedItems,
     plannedSessionId,
+    sessionRpe,
+    adherenceDomainKey,
     totalPrescribedItems,
   ]);
 
@@ -2150,6 +2172,13 @@ function SessionAdherencePanel({
               <dd className="text-textPrimary">
                 {Math.round(latestAthleteEvent.actualDurationMinutes)} min
               </dd>
+            </div>
+          ) : null}
+          {adherenceDomainKey === "S_AND_C" &&
+          latestAthleteEvent.sessionRpe !== null ? (
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Session RPE</dt>
+              <dd className="text-textPrimary">{latestAthleteEvent.sessionRpe}</dd>
             </div>
           ) : null}
           {latestAthleteEvent.athleteNotes ? (
@@ -2240,24 +2269,56 @@ function SessionAdherencePanel({
             </span>
           </div>
         ) : null}
-        <div className="space-y-1">
-          <label
-            htmlFor={`adherence-duration-${plannedSessionId}`}
-            className="text-xs font-medium text-textSecondary"
-          >
-            Actual duration (minutes)
-          </label>
-          <Input
-            id={`adherence-duration-${plannedSessionId}`}
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={actualDurationMinutes}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              setActualDurationMinutes(event.target.value)}
-            className="max-w-[10rem]"
-          />
+        <div className="flex min-w-0 flex-wrap gap-3">
+          <div className="min-w-0 space-y-1">
+            <label
+              htmlFor={`adherence-duration-${plannedSessionId}`}
+              className="text-xs font-medium text-textSecondary"
+            >
+              Actual duration (minutes)
+            </label>
+            <Input
+              id={`adherence-duration-${plannedSessionId}`}
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={actualDurationMinutes}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setActualDurationMinutes(event.target.value)}
+              className="max-w-[10rem]"
+            />
+          </div>
+          {adherenceDomainKey === "S_AND_C" ? (
+            <div className="min-w-0 space-y-1">
+              <label
+                htmlFor={`adherence-session-rpe-${plannedSessionId}`}
+                className="text-xs font-medium text-textSecondary"
+              >
+                Session RPE
+              </label>
+              <p className="text-xs text-textSecondary">1–10</p>
+              <Input
+                id={`adherence-session-rpe-${plannedSessionId}`}
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                inputMode="numeric"
+                value={sessionRpe}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setSessionRpe(event.target.value)}
+                className="max-w-[10rem]"
+                aria-describedby={`adherence-session-rpe-help-${plannedSessionId}`}
+              />
+              <p
+                id={`adherence-session-rpe-help-${plannedSessionId}`}
+                className="text-xs text-textSecondary"
+              >
+                How hard did this session feel?
+              </p>
+            </div>
+          ) : null}
         </div>
         <div className="space-y-1">
           <label

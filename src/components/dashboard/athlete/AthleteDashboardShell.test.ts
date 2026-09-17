@@ -58,10 +58,12 @@ describe("athlete Sports Metrics legacy isolation", () => {
   it("leaves unrelated athlete dashboard sections in place", () => {
     const source = readRelative("./AthleteDashboardShell.tsx");
     expect(source).toContain("<AthleteWeeklyAdherenceSection />");
-    expect(source).toContain("<AthleteTodayPlanCard />");
+    expect(source).toContain("<AthleteTodayPlanCard");
+    expect(source).toContain("identifiersPhase={planningIds.phase}");
     expect(source).toContain("<AthleteWearableSummaryWithPlanWindow");
     expect(source).toContain("<WearableSummarySection");
     expect(source).toContain("<NutritionPerformanceSection");
+    expect(source).toContain("<AthleteSandCSessionLoadWithPlanWindow");
   });
 
   it("leaves shared coach SportMetricsSection mounts unchanged", () => {

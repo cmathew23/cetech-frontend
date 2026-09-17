@@ -41,4 +41,13 @@ describe("CoachAthletePerformancePageContent Coach Practice Rating authority", (
       source.indexOf("<WearableSummarySection"),
     );
   });
+
+  it("renders Average Weekly Session Load for Head Coach and S&C Coach", () => {
+    expect(source).toContain("<SandCSessionLoadSection");
+    expect(source).toContain("coachCanViewSandCSessionLoad");
+    expect(source).toContain("showSandCSessionLoad");
+    expect(source.indexOf("<WeeklyTrainingLoadCard")).toBeLessThan(
+      source.indexOf("<SandCSessionLoadSection"),
+    );
+  });
 });

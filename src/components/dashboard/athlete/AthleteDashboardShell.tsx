@@ -22,6 +22,7 @@ import {
 // import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { NutritionPerformanceSection } from "@/components/dashboard/NutritionPerformanceSection";
+import { SandCSessionLoadSection } from "@/components/dashboard/SandCSessionLoadSection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
@@ -31,6 +32,31 @@ import { useRouter } from "next/navigation";
 
 function isPendingStatus(status: string): boolean {
   return status.trim().toUpperCase() === "PENDING";
+}
+
+function AthleteSandCSessionLoadWithPlanWindow({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { weekStart, weekEnd, phase, summary } = useAthleteWeeklyAdherence();
+  const weekRangePending =
+    phase === "loading" || phase === "awaiting_identifiers";
+
+  return (
+    <SandCSessionLoadSection
+      entityId={entityId}
+      athleteId={athleteId}
+      summary={summary}
+      weekStart={weekStart}
+      weekEnd={weekEnd}
+      weekRangePending={weekRangePending}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+    />
+  );
 }
 
 function AthleteNutritionPerformanceWithPlanWindow({
@@ -165,7 +191,15 @@ export function AthleteDashboardShell() {
             />
           ) : null}
           <AthleteWeeklyAdherenceSection />
-          <AthleteTodayPlanCard />
+          <AthleteSandCSessionLoadWithPlanWindow
+            entityId={entityId}
+            athleteId={athleteId}
+          />
+          <AthleteTodayPlanCard
+            entityId={entityId}
+            athleteId={athleteId}
+            identifiersPhase={planningIds.phase}
+          />
 
           <AthleteSportMetricsWithPlanVersion
             entityId={entityId}

@@ -1066,6 +1066,317 @@ export async function fetchSportMetricsGolfWeeklySummary(params: {
   return parseSportMetricsGolfWeeklySummaryPayload(raw);
 }
 
+export const SKILLS_GOLF_HISTORY_EMPTY_MESSAGE =
+  "Historical comparison will appear after the first completed Skills week.";
+
+function parseHistoryWeekList(payload: unknown): unknown[] {
+  const adapted = adaptBackendSuccess(payload);
+  if (Array.isArray(adapted)) return adapted;
+
+  const record = asRecord(adapted);
+  if (!record) return [];
+
+  if (Array.isArray(record.weeks)) return record.weeks;
+  if (Array.isArray(record.history)) return record.history;
+  if (Array.isArray(record.summaries)) return record.summaries;
+  if (Array.isArray(record.data)) return record.data;
+
+  const nested = asRecord(record.data);
+  if (!nested) return [];
+  if (Array.isArray(nested.weeks)) return nested.weeks;
+  if (Array.isArray(nested.history)) return nested.history;
+  if (Array.isArray(nested.summaries)) return nested.summaries;
+  return [];
+}
+
+function projectionRecordOrSelf(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (Array.isArray(value)) return null;
+  return asRecord(value);
+}
+
+function flattenGolfHistoryWeekRecord(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const weeklyGoal = projectionRecordOrSelf(record.weeklyGoalPerformance);
+  const exercise = projectionRecordOrSelf(record.exercisePerformance);
+  const taxonomy = projectionRecordOrSelf(record.taxonomyPerformance);
+  const practice = projectionRecordOrSelf(record.practicePerformance);
+  const competition = projectionRecordOrSelf(record.competitionPerformance);
+  const overall =
+    projectionRecordOrSelf(record.overallGolfPerformance) ??
+    projectionRecordOrSelf(record.overallGolferPerformance);
+
+  const goalEvidence =
+    pickUnknownArray(record, ["goalEvidence", "goalGroups", "goals"]).length > 0
+      ? record.goalEvidence ?? record.goalGroups ?? record.goals
+      : Array.isArray(record.weeklyGoalPerformance)
+        ? record.weeklyGoalPerformance
+        : weeklyGoal
+          ? weeklyGoal.goalEvidence ??
+            weeklyGoal.goalGroups ??
+            weeklyGoal.goals
+          : record.weeklyGoalPerformance;
+
+  const exerciseTrends =
+    pickUnknownArray(record, ["exerciseTrends"]).length > 0
+      ? record.exerciseTrends
+      : Array.isArray(record.exercisePerformance)
+        ? record.exercisePerformance
+        : exercise
+          ? exercise.exerciseTrends ?? exercise.exercises
+          : record.exercisePerformance;
+
+  const taxonomyScores =
+    pickUnknownArray(record, ["taxonomyScores"]).length > 0
+      ? record.taxonomyScores
+      : Array.isArray(record.taxonomyPerformance)
+        ? record.taxonomyPerformance
+        : taxonomy
+          ? taxonomy.taxonomyScores ?? taxonomy.scores
+          : record.taxonomyPerformance;
+
+  const resolvedPracticeScore =
+    readFiniteNumber(record.practiceScoreOutOf100) ??
+    (practice
+      ? readFiniteNumber(practice.practiceScoreOutOf100) ??
+        readFiniteNumber(practice.scoreOutOf100)
+      : null) ??
+    readFiniteNumber(record.practicePerformance);
+
+  const resolvedCoachPracticeScore =
+    readFiniteNumber(record.coachPracticeScoreOutOf100) ??
+    (practice
+      ? readFiniteNumber(practice.coachPracticeScoreOutOf100)
+      : null);
+
+  const resolvedCompetitionPerformance =
+    readFiniteNumber(record.competitionPerformance) ??
+    (competition
+      ? readFiniteNumber(competition.competitionPerformance) ??
+        readFiniteNumber(competition.scoreOutOf100)
+      : null);
+
+  const resolvedOverallPerformance =
+    readFiniteNumber(record.overallGolferPerformance) ??
+    readFiniteNumber(record.overallGolfPerformance) ??
+    (overall
+      ? readFiniteNumber(overall.overallGolferPerformance) ??
+        readFiniteNumber(overall.overallGolfPerformance)
+      : null);
+
+  return {
+    ...record,
+    goalEvidence,
+    exerciseTrends,
+    taxonomyScores,
+    practiceScoreOutOf100: resolvedPracticeScore,
+    coachPracticeScoreOutOf100: resolvedCoachPracticeScore,
+    competitionPerformance: resolvedCompetitionPerformance,
+    overallGolferPerformance: resolvedOverallPerformance,
+  };
+}
+
+function parseGolfHistoryWeek(
+  value: unknown,
+): SportMetricsGolfWeeklySummary | null {
+  const adapted = adaptBackendSuccess(value);
+  const record =
+    asRecord(adapted) ??
+    asRecord(asRecord(adapted)?.data) ??
+    asRecord(value);
+  if (!record) return null;
+  try {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload(
+      flattenGolfHistoryWeekRecord(record),
+    );
+    if (parsed.weekStartDate === "" || parsed.weekEndDate === "") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function parseSportMetricsGolfWeeklySummaryHistoryPayload(
+  payload: unknown,
+): SportMetricsGolfWeeklySummary[] {
+  return parseHistoryWeekList(payload).reduce<SportMetricsGolfWeeklySummary[]>(
+    (weeks, value) => {
+      const parsed = parseGolfHistoryWeek(value);
+      if (parsed) weeks.push(parsed);
+      return weeks;
+    },
+    [],
+  );
+}
+
+export async function fetchSportMetricsGolfWeeklySummaryHistory(params: {
+  entityId: string;
+  athleteId: string;
+}): Promise<SportMetricsGolfWeeklySummary[]> {
+  const entityId = params.entityId.trim();
+  const athleteId = params.athleteId.trim();
+
+  if (entityId === "" || athleteId === "") {
+    throw {
+      message: "Entity and athlete identifiers are required.",
+      status: 400,
+      code: "SPORT_METRICS_GOLF_IDS_REQUIRED",
+    };
+  }
+
+  const raw = await apiRequest(
+    paths.entities.athleteSportMetricsGolfWeeklySummaryHistory(
+      entityId,
+      athleteId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: SPORT_METRICS_GOLF_TIMEOUT_MS,
+    },
+  );
+  return parseSportMetricsGolfWeeklySummaryHistoryPayload(raw);
+}
+
+export function golfHistoryWeekKey(
+  week: Pick<SportMetricsGolfWeeklySummary, "weekStartDate" | "weekEndDate">,
+): string {
+  return `${week.weekStartDate}|${week.weekEndDate}`;
+}
+
+function normalizeGolfUnit(unit: string | null | undefined): string {
+  const raw = unit?.trim() ?? "";
+  if (raw === "") return "";
+  const upper = raw.toUpperCase();
+  if (upper === "PERCENTAGE" || upper === "PERCENT" || upper === "PCT" || upper === "%") {
+    return "%";
+  }
+  return upper;
+}
+
+export function golfHistoryUnitsCompatible(
+  currentUnit: string | null | undefined,
+  historicalUnit: string | null | undefined,
+): boolean {
+  return normalizeGolfUnit(currentUnit) === normalizeGolfUnit(historicalUnit);
+}
+
+export function findMatchingHistoricalGoal(
+  current: SportMetricGoalEvidenceGroup,
+  historicalGoals: SportMetricGoalEvidenceGroup[],
+): SportMetricGoalEvidenceGroup | null {
+  const goalId = current.goalId?.trim() ?? "";
+  if (goalId !== "") {
+    return (
+      historicalGoals.find((goal) => (goal.goalId?.trim() ?? "") === goalId) ??
+      null
+    );
+  }
+  const name =
+    current.goal.goalName?.trim() || current.goalTitle.trim();
+  if (name === "") return null;
+  return (
+    historicalGoals.find((goal) => {
+      const historicalName =
+        goal.goal.goalName?.trim() || goal.goalTitle.trim();
+      return historicalName === name;
+    }) ?? null
+  );
+}
+
+export function findMatchingHistoricalExercise(
+  current: SportMetricExerciseTrend,
+  historicalExercises: SportMetricExerciseTrend[],
+): SportMetricExerciseTrend | null {
+  const exerciseId = current.exerciseId?.trim() ?? "";
+  if (exerciseId !== "") {
+    return (
+      historicalExercises.find(
+        (item) => (item.exerciseId?.trim() ?? "") === exerciseId,
+      ) ?? null
+    );
+  }
+  const skillCode = current.skillCode?.trim() ?? "";
+  const name = current.exerciseName?.trim() ?? "";
+  if (skillCode !== "" && name !== "") {
+    return (
+      historicalExercises.find(
+        (item) =>
+          (item.skillCode?.trim() ?? "") === skillCode &&
+          (item.exerciseName?.trim() ?? "") === name,
+      ) ?? null
+    );
+  }
+  if (name !== "") {
+    const matches = historicalExercises.filter(
+      (item) => (item.exerciseName?.trim() ?? "") === name,
+    );
+    return matches.length === 1 ? (matches[0] ?? null) : null;
+  }
+  return null;
+}
+
+export function findMatchingHistoricalTaxonomy(
+  current: SportMetricTaxonomyScore,
+  historicalScores: SportMetricTaxonomyScore[],
+): SportMetricTaxonomyScore | null {
+  const key = current.taxonomyAreaKey?.trim() ?? "";
+  if (key === "") return null;
+  return (
+    historicalScores.find(
+      (item) => (item.taxonomyAreaKey?.trim() ?? "") === key,
+    ) ?? null
+  );
+}
+
+function roundGolfHistoryAmount(value: number): number {
+  const rounded =
+    (Math.round(Math.abs(value) * 10) / 10) * (value < 0 ? -1 : 1);
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function formatGolfHistoryAmount(value: number, unit: string | null): string {
+  const amount = Math.abs(roundGolfHistoryAmount(value));
+  if (unit === "points") {
+    const display = Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
+    return `${display} points`;
+  }
+  if (unit === null || unit.trim() === "") {
+    const display = Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
+    return display;
+  }
+  const upper = unit.trim().toUpperCase();
+  if (upper === "%" || upper === "PERCENTAGE" || upper === "PERCENT" || upper === "PCT") {
+    const display = Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
+    return `${display}%`;
+  }
+  const display = Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
+  return `${display} ${unit.trim()}`;
+}
+
+export function formatGolfHistoryAbsoluteLabel(
+  value: number | null,
+  unit: string | null,
+): string {
+  if (value === null) return "—";
+  return formatGolfHistoryAmount(value, unit);
+}
+
+export function formatGolfHistoryDifferenceLabel(
+  current: number | null,
+  historical: number | null,
+  unit: string | null,
+): string {
+  if (current === null || historical === null) return "—";
+  const raw = current - historical;
+  const amount = roundGolfHistoryAmount(raw);
+  if (amount === 0) return `→ ${formatGolfHistoryAmount(0, unit)}`;
+  const arrow = raw > 0 ? "↑" : "↓";
+  return `${arrow} ${formatGolfHistoryAmount(raw, unit)}`;
+}
+
 export function releasedPlanTaxonomyAreaKeys(
   summary: SportMetricsGolfWeeklySummary,
 ): string[] {

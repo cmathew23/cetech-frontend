@@ -13,6 +13,10 @@ import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteToda
 import { AthleteCompetitionPerformanceSection } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
+import {
+  SkillsGolfHistoryComparisonProvider,
+  SkillsGolfHistoryWeekSelector,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 // Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
 // uncommenting this import and the SportMetricsSection render below.
 // import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
@@ -97,7 +101,11 @@ function AthleteSportMetricsWithPlanVersion({
   // );
 
   return (
-    <>
+    <SkillsGolfHistoryComparisonProvider
+      entityId={entityId}
+      athleteId={athleteId}
+    >
+      <SkillsGolfHistoryWeekSelector />
       <AthleteWeeklyGoalPerformanceSection
         entityId={entityId}
         athleteId={athleteId}
@@ -113,7 +121,7 @@ function AthleteSportMetricsWithPlanVersion({
         athleteId={athleteId}
         trainingPlanVersionId={trainingPlanVersionId}
       />
-    </>
+    </SkillsGolfHistoryComparisonProvider>
   );
 }
 

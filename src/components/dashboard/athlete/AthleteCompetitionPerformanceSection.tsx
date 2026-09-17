@@ -9,6 +9,10 @@ import {
 } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import {
+  SkillsGolfScalarHistoryComparison,
+  useSkillsGolfHistoryComparison,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { DASHBOARD_SECTION_HEADING_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -22,7 +26,7 @@ import {
   type GolfCompetitionHoleSummary,
   type GolfOverallGolferPerformanceCheckpoint,
 } from "@/lib/api/sportMetricsGolfCompetitions";
-import { fetchSportMetricsGolfWeeklySummary } from "@/lib/api/sportMetricsGolf";
+import { fetchSportMetricsGolfWeeklySummary, type SportMetricsGolfWeeklySummary } from "@/lib/api/sportMetricsGolf";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly, formatDateTime } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
@@ -682,6 +686,8 @@ export function AthleteCompetitionPerformanceSection({
 
   const [seasonCycleId, setSeasonCycleId] = useState<string | null>(null);
   const [seasonYear, setSeasonYear] = useState<number | null>(null);
+  const [weeklySummary, setWeeklySummary] =
+    useState<SportMetricsGolfWeeklySummary | null>(null);
   const [history, setHistory] = useState<GolfCompetitionHistoryData | null>(
     null,
   );
@@ -689,6 +695,9 @@ export function AthleteCompetitionPerformanceSection({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const historicalCompetition =
+    useSkillsGolfHistoryComparison()?.selectedWeek?.competitionPerformance ??
+    null;
 
   useEffect(() => {
     if (!applicable) return;
@@ -703,6 +712,7 @@ export function AthleteCompetitionPerformanceSection({
         });
         if (cancelled) return;
         const nextSeasonCycleId = summary.seasonCycleId?.trim() || null;
+        setWeeklySummary(summary);
         setSeasonCycleId(nextSeasonCycleId);
         setSeasonYear(summary.seasonYear);
         setError(null);
@@ -721,6 +731,7 @@ export function AthleteCompetitionPerformanceSection({
         if (cancelled) return;
         setError(formatError(e));
         setHistory(null);
+        setWeeklySummary(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -816,6 +827,11 @@ export function AthleteCompetitionPerformanceSection({
             presentation="dashboard"
           />
         ) : null}
+        <SkillsGolfScalarHistoryComparison
+          currentValue={weeklySummary?.competitionPerformance ?? null}
+          historicalValue={historicalCompetition}
+          unit="points"
+        />
       </div>
     </Card>
   );

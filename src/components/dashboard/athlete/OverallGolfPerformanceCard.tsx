@@ -8,6 +8,7 @@ import {
 } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { DASHBOARD_METRIC_SUPPORTING_CLASS } from "@/components/dashboard/shared/dashboardTypography";
+import { SkillsGolfScalarHistoryComparison, useSkillsGolfHistoryComparison } from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { Card } from "@/components/ui/Card";
 import {
   fetchSportMetricsGolfWeeklySummary,
@@ -93,6 +94,9 @@ export function OverallGolfPerformanceCard({
   className?: string;
 }) {
   const values = resolveOverallGolfPerformanceDisplay(summary);
+  const historicalOverall =
+    useSkillsGolfHistoryComparison()?.selectedWeek?.overallGolferPerformance ??
+    null;
 
   return (
     <Card
@@ -131,6 +135,11 @@ export function OverallGolfPerformanceCard({
           {values.trendMessage ? <p>{values.trendMessage}</p> : null}
         </div>
       ) : null}
+      <SkillsGolfScalarHistoryComparison
+        currentValue={summary?.overallGolferPerformance ?? null}
+        historicalValue={historicalOverall}
+        unit="points"
+      />
     </Card>
   );
 }

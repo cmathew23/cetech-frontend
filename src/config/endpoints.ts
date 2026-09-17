@@ -140,6 +140,11 @@ export const paths = {
       params.set("trainingPlanVersionId", query.trainingPlanVersionId);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsGolfWeeklySummaryHistory: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/weekly-summary/history`,
     athleteSportMetricsGolfComparison: (
       entityId: string,
       athleteId: string,

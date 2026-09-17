@@ -12,6 +12,11 @@ import {
   formatTargetMetCaption,
   formatTaxonomyAreaLabel,
 } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
+import {
+  SkillsGolfItemHistoryComparison,
+  SkillsGolfScalarHistoryComparison,
+  useSkillsGolfHistoryComparison,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +24,10 @@ import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
 import {
   fetchSportMetricsGolfWeeklySummary,
+  findMatchingHistoricalExercise,
+  findMatchingHistoricalGoal,
+  findMatchingHistoricalTaxonomy,
+  golfHistoryUnitsCompatible,
   hasSportMetricsGolfEvidence,
   postGolfCoachPracticeRating,
   releasedPlanTaxonomyAreaKeys,
@@ -68,6 +77,58 @@ function MetricsSectionCard({
     >
       {children}
     </Card>
+  );
+}
+
+function goalItemKey(group: SportMetricGoalEvidenceGroup, index: number): string {
+  return group.goalId?.trim() || `goal-${index}`;
+}
+
+function WeeklyGoalHistoryComparison({
+  goalEvidence,
+}: {
+  goalEvidence: SportMetricGoalEvidenceGroup[];
+}) {
+  const comparison = useSkillsGolfHistoryComparison();
+  const [selectedKey, setSelectedKey] = useState("");
+  const items = goalEvidence.map((group, index) => ({
+    key: goalItemKey(group, index),
+    label: group.goal.goalName?.trim() || group.goalTitle.trim() || "Weekly Goal",
+  }));
+  const effectiveKey = items.some((item) => item.key === selectedKey)
+    ? selectedKey
+    : (items[0]?.key ?? "");
+  const current =
+    goalEvidence.find(
+      (group, index) => goalItemKey(group, index) === effectiveKey,
+    ) ?? null;
+  const historical = current
+    ? findMatchingHistoricalGoal(
+        current,
+        comparison?.selectedWeek?.goalEvidence ?? [],
+      )
+    : null;
+  const currentValue = current?.weeklyActual?.value ?? null;
+  const currentUnit = current?.weeklyActual?.unit ?? current?.goal.primaryMetric?.unit ?? null;
+  const historicalUnit =
+    historical?.weeklyActual?.unit ?? historical?.goal.primaryMetric?.unit ?? null;
+  const compatible =
+    currentValue !== null &&
+    historical?.weeklyActual != null &&
+    golfHistoryUnitsCompatible(currentUnit, historicalUnit);
+  const historicalValue = compatible ? historical.weeklyActual!.value : null;
+
+  return (
+    <SkillsGolfItemHistoryComparison
+      selectId="skills-golf-history-goal"
+      selectLabel="Goal"
+      items={items}
+      selectedKey={effectiveKey}
+      onSelectedKeyChange={setSelectedKey}
+      currentValue={currentValue}
+      historicalValue={historicalValue}
+      unit={currentUnit}
+    />
   );
 }
 
@@ -133,7 +194,61 @@ export function AthleteWeeklyGoalPerformanceContent({
           })}
         </div>
       )}
+      <WeeklyGoalHistoryComparison goalEvidence={goalEvidence} />
     </MetricsSectionCard>
+  );
+}
+
+function exerciseItemKey(
+  item: SportMetricExerciseTrend,
+  index: number,
+): string {
+  return item.exerciseId?.trim() || `exercise-${index}`;
+}
+
+function ExerciseHistoryComparison({
+  exerciseTrends,
+}: {
+  exerciseTrends: SportMetricExerciseTrend[];
+}) {
+  const comparison = useSkillsGolfHistoryComparison();
+  const [selectedKey, setSelectedKey] = useState("");
+  const items = exerciseTrends.map((item, index) => ({
+    key: exerciseItemKey(item, index),
+    label: item.exerciseName?.trim() || "Exercise",
+  }));
+  const effectiveKey = items.some((item) => item.key === selectedKey)
+    ? selectedKey
+    : (items[0]?.key ?? "");
+  const current =
+    exerciseTrends.find(
+      (item, index) => exerciseItemKey(item, index) === effectiveKey,
+    ) ?? null;
+  const historical = current
+    ? findMatchingHistoricalExercise(
+        current,
+        comparison?.selectedWeek?.exerciseTrends ?? [],
+      )
+    : null;
+  const currentValue = current?.currentActual ?? null;
+  const compatible =
+    currentValue !== null &&
+    historical !== null &&
+    historical.currentActual !== null &&
+    golfHistoryUnitsCompatible(current?.unit, historical.unit);
+  const historicalValue = compatible ? historical.currentActual : null;
+
+  return (
+    <SkillsGolfItemHistoryComparison
+      selectId="skills-golf-history-exercise"
+      selectLabel="Exercise"
+      items={items}
+      selectedKey={effectiveKey}
+      onSelectedKeyChange={setSelectedKey}
+      currentValue={currentValue}
+      historicalValue={historicalValue}
+      unit={current?.unit ?? null}
+    />
   );
 }
 
@@ -187,7 +302,57 @@ export function AthleteExercisePerformanceContent({
           })}
         </div>
       )}
+      <ExerciseHistoryComparison exerciseTrends={exerciseTrends} />
     </MetricsSectionCard>
+  );
+}
+
+function taxonomyItemKey(
+  score: SportMetricTaxonomyScore,
+  index: number,
+): string {
+  return score.taxonomyAreaKey?.trim() || `taxonomy-${index}`;
+}
+
+function TaxonomyHistoryComparison({
+  taxonomyScores,
+}: {
+  taxonomyScores: SportMetricTaxonomyScore[];
+}) {
+  const comparison = useSkillsGolfHistoryComparison();
+  const [selectedKey, setSelectedKey] = useState("");
+  const items = taxonomyScores.map((score, index) => ({
+    key: taxonomyItemKey(score, index),
+    label:
+      formatTaxonomyAreaLabel(score.taxonomyAreaKey) ||
+      score.taxonomyAreaKey?.trim() ||
+      "Taxonomy",
+  }));
+  const effectiveKey = items.some((item) => item.key === selectedKey)
+    ? selectedKey
+    : (items[0]?.key ?? "");
+  const current =
+    taxonomyScores.find(
+      (score, index) => taxonomyItemKey(score, index) === effectiveKey,
+    ) ?? null;
+  const historical = current
+    ? findMatchingHistoricalTaxonomy(
+        current,
+        comparison?.selectedWeek?.taxonomyScores ?? [],
+      )
+    : null;
+
+  return (
+    <SkillsGolfItemHistoryComparison
+      selectId="skills-golf-history-taxonomy"
+      selectLabel="Taxonomy"
+      items={items}
+      selectedKey={effectiveKey}
+      onSelectedKeyChange={setSelectedKey}
+      currentValue={current?.scoreOutOf100 ?? null}
+      historicalValue={historical?.scoreOutOf100 ?? null}
+      unit="points"
+    />
   );
 }
 
@@ -258,6 +423,7 @@ export function AthleteTaxonomyPerformanceContent({
           {weakestLabel ? `Weakest: ${weakestLabel}` : null}
         </p>
       ) : null}
+      <TaxonomyHistoryComparison taxonomyScores={taxonomyScores} />
     </MetricsSectionCard>
   );
 }
@@ -286,12 +452,16 @@ export function AthletePracticePerformanceContent({
   summary: SportMetricsGolfWeeklySummary;
   audience?: "athlete" | "coach";
 }) {
+  const historyComparison = useSkillsGolfHistoryComparison();
   const hasScore = summary.practiceScoreOutOf100 !== null;
   const hasExerciseEvidence =
     summary.exerciseTrends.some((item) => item.currentActual !== null) ||
     hasSportMetricsGolfEvidence(summary);
   const isAthlete = audience === "athlete";
   const displayedScore = displayedPracticePerformanceScore(summary);
+  const historicalScore = displayedPracticePerformanceScore(
+    historyComparison?.selectedWeek ?? null,
+  );
   const athleteRatingRows = summary.coachPracticeRatings.filter(
     (row) => row.rating !== null && (row.taxonomyAreaKey?.trim() ?? "") !== "",
   );
@@ -372,6 +542,11 @@ export function AthletePracticePerformanceContent({
               : null}
           </>
         }
+      />
+      <SkillsGolfScalarHistoryComparison
+        currentValue={displayedScore}
+        historicalValue={historicalScore}
+        unit="points"
       />
     </MetricsSectionCard>
   );

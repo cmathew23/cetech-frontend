@@ -14,9 +14,16 @@ import {
   buildGolfSportMetricRecordRequestBody,
   fetchSportMetricsGolfComparison,
   fetchSportMetricsGolfWeeklySummary,
+  fetchSportMetricsGolfWeeklySummaryHistory,
+  findMatchingHistoricalExercise,
+  findMatchingHistoricalGoal,
+  findMatchingHistoricalTaxonomy,
+  formatGolfHistoryDifferenceLabel,
+  golfHistoryUnitsCompatible,
   formatSportMetricsStatusLabel,
   hasSportMetricsGolfEvidence,
   parseSportMetricsGolfComparisonPayload,
+  parseSportMetricsGolfWeeklySummaryHistoryPayload,
   parseSportMetricsGolfWeeklySummaryPayload,
   postGolfCoachPracticeRating,
   postGolfSportMetricRecord,
@@ -1397,5 +1404,170 @@ describe("postGolfCoachPracticeRating", () => {
     expect(postRating.mock.invocationCallOrder[0]).toBeLessThan(
       refetchWeeklySummary.mock.invocationCallOrder[0]!,
     );
+  });
+});
+
+describe("sport metrics golf weekly summary history", () => {
+  it("parses named completed-week projections onto existing summary fields", () => {
+    const weeks = parseSportMetricsGolfWeeklySummaryHistoryPayload({
+      success: true,
+      data: {
+        weeks: [
+          {
+            weekStartDate: "2026-08-31",
+            weekEndDate: "2026-09-06",
+            weeklyGoalPerformance: {
+              goalEvidence: [
+                {
+                  goalId: "goal-1",
+                  goal: { goalName: "Wedge", primaryMetric: { unit: "ft" } },
+                  weeklyActual: { value: 16.2, unit: "ft" },
+                },
+              ],
+            },
+            exercisePerformance: {
+              exerciseTrends: [
+                {
+                  exerciseId: "ex-1",
+                  exerciseName: "9-shot",
+                  unit: "PERCENTAGE",
+                  currentActual: 62,
+                },
+              ],
+            },
+            taxonomyPerformance: {
+              taxonomyScores: [
+                { taxonomyAreaKey: "putting", scoreOutOf100: 70 },
+              ],
+            },
+            practicePerformance: 48,
+            competitionPerformance: 55,
+            overallGolfPerformance: 71.5,
+          },
+        ],
+      },
+    });
+
+    expect(weeks).toHaveLength(1);
+    expect(weeks[0]?.goalEvidence[0]?.goalId).toBe("goal-1");
+    expect(weeks[0]?.goalEvidence[0]?.weeklyActual?.value).toBe(16.2);
+    expect(weeks[0]?.exerciseTrends[0]?.currentActual).toBe(62);
+    expect(weeks[0]?.taxonomyScores[0]?.scoreOutOf100).toBe(70);
+    expect(weeks[0]?.practiceScoreOutOf100).toBe(48);
+    expect(weeks[0]?.competitionPerformance).toBe(55);
+    expect(weeks[0]?.overallGolferPerformance).toBe(71.5);
+  });
+
+  it("returns an empty list for empty history", () => {
+    expect(
+      parseSportMetricsGolfWeeklySummaryHistoryPayload({
+        success: true,
+        data: { weeks: [] },
+      }),
+    ).toEqual([]);
+  });
+
+  it("fetches the history endpoint without query params", async () => {
+    apiRequestMock.mockResolvedValue({ success: true, data: { weeks: [] } });
+    const weeks = await fetchSportMetricsGolfWeeklySummaryHistory({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+    });
+    expect(weeks).toEqual([]);
+    const [path, options] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(path).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/golf/weekly-summary/history",
+    );
+    expect(options).toMatchObject({ method: "GET", cache: "no-store" });
+  });
+
+  it("matches goals, exercises, and taxonomies by stable identity", () => {
+    const current = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        weekStartDate: "2026-09-14",
+        weekEndDate: "2026-09-20",
+        goalEvidence: [
+          {
+            goalId: "goal-1",
+            goal: { goalName: "Wedge" },
+            weeklyActual: { value: 12, unit: "ft" },
+          },
+        ],
+        exerciseTrends: [
+          {
+            exerciseId: "ex-1",
+            exerciseName: "9-shot",
+            unit: "mph",
+            currentActual: 90,
+          },
+        ],
+        taxonomyScores: [{ taxonomyAreaKey: "putting", scoreOutOf100: 80 }],
+      },
+    });
+    const historical = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        weekStartDate: "2026-08-31",
+        weekEndDate: "2026-09-06",
+        goalEvidence: [
+          {
+            goalId: "goal-1",
+            goal: { goalName: "Wedge" },
+            weeklyActual: { value: 16, unit: "ft" },
+          },
+        ],
+        exerciseTrends: [
+          {
+            exerciseId: "ex-1",
+            exerciseName: "9-shot",
+            unit: "mph",
+            currentActual: 85,
+          },
+        ],
+        taxonomyScores: [{ taxonomyAreaKey: "putting", scoreOutOf100: 74 }],
+      },
+    });
+
+    expect(
+      findMatchingHistoricalGoal(
+        current.goalEvidence[0]!,
+        historical.goalEvidence,
+      )?.weeklyActual?.value,
+    ).toBe(16);
+    expect(
+      findMatchingHistoricalExercise(
+        current.exerciseTrends[0]!,
+        historical.exerciseTrends,
+      )?.currentActual,
+    ).toBe(85);
+    expect(
+      findMatchingHistoricalTaxonomy(
+        current.taxonomyScores[0]!,
+        historical.taxonomyScores,
+      )?.scoreOutOf100,
+    ).toBe(74);
+    expect(
+      findMatchingHistoricalGoal(current.goalEvidence[0]!, []),
+    ).toBeNull();
+  });
+
+  it("treats incompatible units as not comparable", () => {
+    expect(golfHistoryUnitsCompatible("ft", "ft")).toBe(true);
+    expect(golfHistoryUnitsCompatible("PERCENTAGE", "%")).toBe(true);
+    expect(golfHistoryUnitsCompatible("ft", "mph")).toBe(false);
+    expect(golfHistoryUnitsCompatible("ft", null)).toBe(false);
+  });
+
+  it("formats value-direction difference without implying good or bad", () => {
+    expect(formatGolfHistoryDifferenceLabel(90, 85, "mph")).toBe("↑ 5 mph");
+    expect(formatGolfHistoryDifferenceLabel(12, 16, "ft")).toBe("↓ 4 ft");
+    expect(formatGolfHistoryDifferenceLabel(70, 70, "points")).toBe(
+      "→ 0 points",
+    );
+    expect(formatGolfHistoryDifferenceLabel(80, null, "points")).toBe("—");
   });
 });

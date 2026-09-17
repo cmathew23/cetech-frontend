@@ -41,6 +41,10 @@ import {
   DASHBOARD_MAJOR_OUTER_CARD_CLASS,
   DASHBOARD_PAGE_CONTENT_CLASS,
 } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  SkillsGolfHistoryComparisonProvider,
+  SkillsGolfHistoryWeekSelector,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
@@ -257,7 +261,11 @@ export function CoachAthletePerformancePageContent() {
           ) : null}
 
           {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (
-            <>
+            <SkillsGolfHistoryComparisonProvider
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+            >
+              <SkillsGolfHistoryWeekSelector />
               <AthleteWeeklyGoalPerformanceSection
                 entityId={entityId}
                 athleteId={selectedAthleteId}
@@ -286,7 +294,7 @@ export function CoachAthletePerformancePageContent() {
                 trainingPlanVersionId={trainingPlanVersionId}
                 titleClassName={DASHBOARD_CARD_TITLE_CLASS}
               />
-            </>
+            </SkillsGolfHistoryComparisonProvider>
           ) : null}
 
           {showNutritionPerformance && weekRange ? (

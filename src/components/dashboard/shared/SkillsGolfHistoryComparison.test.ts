@@ -204,6 +204,59 @@ describe("SkillsGolfHistoryComparison", () => {
     expect(html).not.toContain("↓ 8%");
   });
 
+  it("compares calibration measurements without directional difference arrows", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        weekStartDate: "2026-09-14",
+        weekEndDate: "2026-09-20",
+        exerciseTrends: [
+          {
+            exerciseId: "ex-cal",
+            exerciseName: "Carry drill",
+            unit: "yd",
+            valueType: "MEASUREMENT",
+            interpretation: "CALIBRATION",
+            currentActual: 74,
+            previousActual: 70,
+            trendDirection: "UP",
+          },
+        ],
+      },
+    });
+    const html = renderWithHistory(
+      createElement(AthleteExercisePerformanceContent, {
+        exerciseTrends: parsed.exerciseTrends,
+      }),
+      [
+        week({
+          exerciseTrends: [
+            {
+              exerciseId: "ex-cal",
+              exerciseName: "Carry drill",
+              unit: "yd",
+              valueType: "MEASUREMENT",
+              interpretation: "CALIBRATION",
+              currentActual: 71,
+              previousActual: 68,
+              trendDirection: "DOWN",
+            },
+          ],
+        }),
+      ],
+    );
+    expect(html).toContain("Current measurement");
+    expect(html).toContain("Calibration value");
+    expect(html).toContain("74 yd");
+    expect(html).toContain("71 yd");
+    expect(html).toContain("3 yd");
+    expect(html).not.toContain("↑ 3 yd");
+    expect(html).not.toContain("↓ 3 yd");
+    expect(html).not.toContain("Higher is better");
+    expect(html).not.toContain("Improving ↑");
+    expect(html).not.toContain("Declining ↓");
+  });
+
   it("compares taxonomy scoreOutOf100 and shows dash when the area is missing historically", () => {
     const parsed = currentWeek();
     const html = renderWithHistory(

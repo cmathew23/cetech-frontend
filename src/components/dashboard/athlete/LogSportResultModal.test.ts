@@ -833,6 +833,9 @@ describe("measurementEntryContract-driven result logging", () => {
     expect(modalSource).toContain('field.type === "ENUM"');
     expect(modalSource).toContain('field.type === "STRING"');
     expect(modalSource).toContain("hasMeasurementEntryContractPayload");
+    expect(modalSource).toContain("measurementEntryFieldDisplayLabel");
+    expect(modalSource).toContain("measurementEntryFieldHelperText");
+    expect(modalSource).toContain("isGripPressureMetricField");
     expect(modalSource).not.toContain("targetCarryDistance");
     expect(modalSource).not.toContain("puttDistanceFeet");
     expect(modalSource).not.toContain("throughWindow");

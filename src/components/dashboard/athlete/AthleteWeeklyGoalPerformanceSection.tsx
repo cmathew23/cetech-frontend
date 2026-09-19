@@ -29,6 +29,7 @@ import {
   findMatchingHistoricalTaxonomy,
   golfHistoryUnitsCompatible,
   hasSportMetricsGolfEvidence,
+  isGolfCalibrationMeasurement,
   postGolfCoachPracticeRating,
   releasedPlanTaxonomyAreaKeys,
   submitGolfCoachPracticeRatingThenRefetch,
@@ -248,6 +249,9 @@ function ExerciseHistoryComparison({
       currentValue={currentValue}
       historicalValue={historicalValue}
       unit={current?.unit ?? null}
+      directionalDifference={
+        current ? !isGolfCalibrationMeasurement(current) : true
+      }
     />
   );
 }
@@ -268,9 +272,14 @@ export function AthleteExercisePerformanceContent({
       ) : (
         <div className={athletePerformanceGridClass(exerciseTrends.length)}>
           {exerciseTrends.map((item, index) => {
-            const trendLabel = formatAthleteTrendLabel(item.trendDirection);
+            const calibration = isGolfCalibrationMeasurement(item);
+            const trendLabel = calibration
+              ? ""
+              : formatAthleteTrendLabel(item.trendDirection);
             const taxonomyLabel = formatTaxonomyAreaLabel(item.taxonomyAreaKey);
-            const directionLabel = formatGoalMetricDirection(item.direction);
+            const directionLabel = calibration
+              ? "Calibration value"
+              : formatGoalMetricDirection(item.direction);
             const current =
               item.currentActual === null
                 ? "NO RESULT YET"
@@ -285,7 +294,13 @@ export function AthleteExercisePerformanceContent({
                 key={`${item.exerciseId ?? "exercise"}-${index}`}
                 title={item.exerciseName?.trim() || "Exercise"}
                 value={current}
-                caption={item.currentActual === null ? undefined : "Current performance"}
+                caption={
+                  item.currentActual === null
+                    ? undefined
+                    : calibration
+                      ? "Current measurement"
+                      : "Current performance"
+                }
                 supporting={
                   <>
                     {directionLabel ? <p>{directionLabel}</p> : null}

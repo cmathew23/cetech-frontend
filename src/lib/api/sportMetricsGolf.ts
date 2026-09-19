@@ -166,6 +166,8 @@ export type SportMetricExerciseTrend = {
   metricKey: string | null;
   metricName: string | null;
   unit: string | null;
+  valueType: string | null;
+  interpretation: string | null;
   direction: string | null;
   exerciseType: string | null;
   currentActual: number | null;
@@ -579,6 +581,8 @@ function parseExerciseTrend(raw: unknown): SportMetricExerciseTrend | null {
     metricKey: pickString(record, ["metricKey"]),
     metricName: pickString(record, ["metricName"]),
     unit: pickString(record, ["unit"]),
+    valueType: pickString(record, ["valueType"]),
+    interpretation: pickString(record, ["interpretation"]),
     direction: pickString(record, ["direction"]),
     exerciseType: pickString(record, ["exerciseType"]),
     currentActual: readFiniteNumber(record.currentActual),
@@ -1256,6 +1260,15 @@ function normalizeGolfUnit(unit: string | null | undefined): string {
   return upper;
 }
 
+export function isGolfCalibrationMeasurement(item: {
+  valueType?: string | null;
+  interpretation?: string | null;
+}): boolean {
+  return (
+    item.valueType === "MEASUREMENT" && item.interpretation === "CALIBRATION"
+  );
+}
+
 export function golfHistoryUnitsCompatible(
   currentUnit: string | null | undefined,
   historicalUnit: string | null | undefined,
@@ -1368,10 +1381,12 @@ export function formatGolfHistoryDifferenceLabel(
   current: number | null,
   historical: number | null,
   unit: string | null,
+  directional = true,
 ): string {
   if (current === null || historical === null) return "—";
   const raw = current - historical;
   const amount = roundGolfHistoryAmount(raw);
+  if (!directional) return formatGolfHistoryAmount(raw, unit);
   if (amount === 0) return `→ ${formatGolfHistoryAmount(0, unit)}`;
   const arrow = raw > 0 ? "↑" : "↓";
   return `${arrow} ${formatGolfHistoryAmount(raw, unit)}`;

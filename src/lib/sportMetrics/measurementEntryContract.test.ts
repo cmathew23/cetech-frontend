@@ -4,6 +4,12 @@ import {
   formatMeasurementEntryFieldLabel,
   formatMeasurementMetricSource,
   groupMeasurementEntryFields,
+  GRIP_PRESSURE_DISPLAY_LABEL,
+  GRIP_PRESSURE_HELPER_TEXT,
+  GRIP_PRESSURE_SUCCESSES_HELPER_TEXT,
+  isGripPressureMetricField,
+  measurementEntryFieldDisplayLabel,
+  measurementEntryFieldHelperText,
   readMeasurementEntryContract,
   validateMeasurementEntryForm,
   type MeasurementEntryContract,
@@ -117,6 +123,116 @@ describe("display label and metric source formatting", () => {
     expect(formatMeasurementMetricSource("PEAKFLOW_ASSIGNED")).toBe("PeakFlow Assigned");
   });
 
+  it("overlays Grip Pressure copy only for the grip-pressure metric", () => {
+    const selectedPressure = { key: "selectedPressure", label: "Selected pressure" };
+    const gripPressure = { key: "gripPressure", label: "Grip pressure" };
+    const circlePressure = { key: "circlePressure", label: "Circle pressure" };
+    const scramblingSuccesses = {
+      key: "successes",
+      label: "Successes",
+      type: "INTEGER" as const,
+      unit: null,
+      required: true,
+      options: [],
+    };
+    const gripFields = [
+      {
+        key: "selectedPressure",
+        label: "Selected pressure",
+        type: "INTEGER" as const,
+        unit: null,
+        required: true,
+        options: [],
+      },
+      scramblingSuccesses,
+    ];
+
+    expect(isGripPressureMetricField(selectedPressure)).toBe(true);
+    expect(isGripPressureMetricField(gripPressure)).toBe(true);
+    expect(isGripPressureMetricField(circlePressure)).toBe(false);
+    expect(measurementEntryFieldDisplayLabel(gripFields[0]!)).toBe(GRIP_PRESSURE_DISPLAY_LABEL);
+    expect(measurementEntryFieldDisplayLabel(scramblingSuccesses)).toBe("Successes");
+    expect(measurementEntryFieldHelperText(gripFields[0]!, gripFields)).toBe(
+      GRIP_PRESSURE_HELPER_TEXT,
+    );
+    expect(measurementEntryFieldHelperText(scramblingSuccesses, gripFields)).toBe(
+      GRIP_PRESSURE_SUCCESSES_HELPER_TEXT,
+    );
+    expect(
+      measurementEntryFieldHelperText(scramblingSuccesses, [scramblingSuccesses]),
+    ).toBeNull();
+  });
+
+});
+
+describe("grip pressure metric validation", () => {
+  const gripPressureContract = {
+    INDIVIDUAL: {
+      fields: [{ key: "selectedPressure", label: "Selected pressure", type: "INTEGER" }],
+    },
+    CUMULATIVE: {
+      fields: [
+        { key: "selectedPressure", label: "Selected pressure", type: "INTEGER" },
+        { key: "attempts", label: "Attempts", type: "INTEGER" },
+        { key: "successes", label: "Successes", type: "INTEGER" },
+      ],
+    },
+  };
+
+  it("accepts integers 1–10 and keeps selectedPressure in the payload", () => {
+    const contract = requireContract(gripPressureContract);
+    const result = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{ selectedPressure: "4" }],
+      cumulative: { selectedPressure: "7", attempts: "12", successes: "9" },
+      notes: "",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.valueJson).toEqual({
+      entryMode: "CUMULATIVE",
+      selectedPressure: 7,
+      attempts: 12,
+      successes: 9,
+    });
+    expect(Object.keys(result.valueJson)).not.toContain("gripPressure");
+  });
+
+  it("rejects values outside 1–10 and non-integers without renaming the field key", () => {
+    const contract = requireContract(gripPressureContract);
+    const tooLow = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{}],
+      cumulative: { selectedPressure: "0", attempts: "12", successes: "9" },
+      notes: "",
+    });
+    const tooHigh = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{}],
+      cumulative: { selectedPressure: "11", attempts: "12", successes: "9" },
+      notes: "",
+    });
+    const notInteger = validateMeasurementEntryForm({
+      contract,
+      entryMode: "CUMULATIVE",
+      attempts: [{}],
+      cumulative: { selectedPressure: "4.5", attempts: "12", successes: "9" },
+      notes: "",
+    });
+    expect(tooLow.ok).toBe(false);
+    expect(tooHigh.ok).toBe(false);
+    expect(notInteger.ok).toBe(false);
+    if (!tooLow.ok) {
+      expect(tooLow.error).toContain(GRIP_PRESSURE_DISPLAY_LABEL);
+      expect(tooLow.error).toContain("1 to 10");
+    }
+  });
+});
+
+describe("display label passthrough for unlabeled keys", () => {
   it("uses formatted labels when backend fields have no separate label, keeping keys", () => {
     const contract = requireContract({
       INDIVIDUAL: {

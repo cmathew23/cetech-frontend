@@ -20,6 +20,7 @@ import {
   findMatchingHistoricalTaxonomy,
   formatGolfHistoryDifferenceLabel,
   golfHistoryUnitsCompatible,
+  isGolfCalibrationMeasurement,
   formatSportMetricsStatusLabel,
   hasSportMetricsGolfEvidence,
   parseSportMetricsGolfComparisonPayload,
@@ -619,6 +620,8 @@ describe("sport metrics golf weekly summary Step 4A", () => {
 
     expect(parsed.exerciseTrends).toHaveLength(2);
     expect(parsed.exerciseTrends[0]?.exerciseType).toBe("Y");
+    expect(parsed.exerciseTrends[0]?.valueType).toBeNull();
+    expect(parsed.exerciseTrends[0]?.interpretation).toBeNull();
     expect(parsed.exerciseTrends[0]?.currentActual).toBe(75);
     expect(parsed.exerciseTrends[0]?.previousActual).toBe(70);
     expect(parsed.exerciseTrends[0]?.trendDirection).toBe("UP");
@@ -673,6 +676,48 @@ describe("sport metrics golf weekly summary Step 4A", () => {
     expect(parsed.taxonomyScores[1]?.scoreOutOf100).toBe(0);
     expect(parsed.strongestTaxonomy).toBeNull();
     expect(parsed.weakestTaxonomy).toBeNull();
+  });
+
+  it("parses additive Exercise Performance valueType, interpretation, and direction", () => {
+    const parsed = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: {
+        exerciseTrends: [
+          {
+            exerciseId: "ex-cal",
+            exerciseName: "Carry drill",
+            unit: "YARDS",
+            valueType: "MEASUREMENT",
+            interpretation: "CALIBRATION",
+            direction: null,
+            currentActual: 74,
+            trendDirection: "UP",
+          },
+          {
+            exerciseId: "ex-perf",
+            exerciseName: "Pressure drill",
+            unit: "PERCENTAGE",
+            valueType: "PERFORMANCE",
+            interpretation: "DIRECTIONAL",
+            direction: "HIGHER_IS_BETTER",
+            currentActual: 100,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.exerciseTrends[0]).toMatchObject({
+      valueType: "MEASUREMENT",
+      interpretation: "CALIBRATION",
+      direction: null,
+    });
+    expect(parsed.exerciseTrends[1]).toMatchObject({
+      valueType: "PERFORMANCE",
+      interpretation: "DIRECTIONAL",
+      direction: "HIGHER_IS_BETTER",
+    });
+    expect(isGolfCalibrationMeasurement(parsed.exerciseTrends[0]!)).toBe(true);
+    expect(isGolfCalibrationMeasurement(parsed.exerciseTrends[1]!)).toBe(false);
   });
 
   it("does not introduce Step 4A scoring or ranking calculations", () => {
@@ -1431,7 +1476,19 @@ describe("sport metrics golf weekly summary history", () => {
                   exerciseId: "ex-1",
                   exerciseName: "9-shot",
                   unit: "PERCENTAGE",
+                  valueType: "PERFORMANCE",
+                  interpretation: "DIRECTIONAL",
+                  direction: "HIGHER_IS_BETTER",
                   currentActual: 62,
+                },
+                {
+                  exerciseId: "ex-cal",
+                  exerciseName: "Carry drill",
+                  unit: "YARDS",
+                  valueType: "MEASUREMENT",
+                  interpretation: "CALIBRATION",
+                  direction: null,
+                  currentActual: 71.7,
                 },
               ],
             },
@@ -1452,6 +1509,20 @@ describe("sport metrics golf weekly summary history", () => {
     expect(weeks[0]?.goalEvidence[0]?.goalId).toBe("goal-1");
     expect(weeks[0]?.goalEvidence[0]?.weeklyActual?.value).toBe(16.2);
     expect(weeks[0]?.exerciseTrends[0]?.currentActual).toBe(62);
+    expect(weeks[0]?.exerciseTrends[0]).toMatchObject({
+      valueType: "PERFORMANCE",
+      interpretation: "DIRECTIONAL",
+      direction: "HIGHER_IS_BETTER",
+    });
+    expect(weeks[0]?.exerciseTrends[1]).toMatchObject({
+      valueType: "MEASUREMENT",
+      interpretation: "CALIBRATION",
+      direction: null,
+      currentActual: 71.7,
+    });
+    expect(isGolfCalibrationMeasurement(weeks[0]!.exerciseTrends[1]!)).toBe(
+      true,
+    );
     expect(weeks[0]?.taxonomyScores[0]?.scoreOutOf100).toBe(70);
     expect(weeks[0]?.practiceScoreOutOf100).toBe(48);
     expect(weeks[0]?.competitionPerformance).toBe(55);
@@ -1569,5 +1640,8 @@ describe("sport metrics golf weekly summary history", () => {
       "→ 0 points",
     );
     expect(formatGolfHistoryDifferenceLabel(80, null, "points")).toBe("—");
+    expect(formatGolfHistoryDifferenceLabel(74, 71, "yd", false)).toBe("3 yd");
+    expect(formatGolfHistoryDifferenceLabel(71, 74, "yd", false)).toBe("3 yd");
+    expect(formatGolfHistoryDifferenceLabel(74, 74, "yd", false)).toBe("0 yd");
   });
 });

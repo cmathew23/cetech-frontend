@@ -564,6 +564,65 @@ describe("Athlete Sports Metrics Step 4A", () => {
     expect(html).not.toContain("100 PERCENTAGE");
   });
 
+  it("renders calibration measurements from backend semantics without directional labels", () => {
+    const html = renderToStaticMarkup(
+      createElement(AthleteExercisePerformanceContent, {
+        exerciseTrends: parseSportMetricsGolfWeeklySummaryPayload({
+          success: true,
+          data: {
+            exerciseTrends: [
+              {
+                exerciseName: "Wedge Carry Matrix Calibration Drill",
+                unit: "YARDS",
+                valueType: "MEASUREMENT",
+                interpretation: "CALIBRATION",
+                direction: "HIGHER_IS_BETTER",
+                currentActual: 74,
+                previousActual: 70,
+                trendDirection: "UP",
+              },
+              {
+                exerciseName: "Clock System Wedge Drill",
+                unit: "yd",
+                valueType: "MEASUREMENT",
+                interpretation: "CALIBRATION",
+                direction: null,
+                currentActual: 71.7,
+                previousActual: null,
+                trendDirection: "DOWN",
+              },
+              {
+                exerciseName: "Grip Pressure Awareness",
+                unit: "PERCENTAGE",
+                valueType: "PERFORMANCE",
+                interpretation: "DIRECTIONAL",
+                direction: "HIGHER_IS_BETTER",
+                currentActual: 100,
+                previousActual: 90,
+                trendDirection: "UP",
+              },
+            ],
+          },
+        }).exerciseTrends,
+      }),
+    );
+
+    expect(html).toContain("74 yd");
+    expect(html).toContain("71.7 yd");
+    expect(html).toContain("100%");
+    expect(html).toContain("Current measurement");
+    expect(html).toContain("Calibration value");
+    expect(html).toContain("Current performance");
+    expect(html).toContain("Higher is better");
+    expect(html).toContain("Improving ↑");
+    expect(html).not.toContain("Lower is better");
+    expect(html).not.toContain("Declining ↓");
+    expect(html.split("Current measurement").length - 1).toBe(2);
+    expect(html.split("Calibration value").length - 1).toBe(2);
+    expect(html.split("Current performance").length - 1).toBe(1);
+    expect(html.split("Higher is better").length - 1).toBe(1);
+  });
+
   it("adds linked Goal context on coach exercise cards without report fields", () => {
     const html = renderToStaticMarkup(
       createElement(AthleteExercisePerformanceContent, {

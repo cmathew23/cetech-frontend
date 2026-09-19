@@ -265,10 +265,12 @@ export function SkillsGolfScalarHistoryComparison({
   currentValue,
   historicalValue,
   unit,
+  directionalDifference = true,
 }: {
   currentValue: number | null;
   historicalValue: number | null;
   unit: string | null;
+  directionalDifference?: boolean;
 }) {
   const comparison = useSkillsGolfHistoryComparison();
   if (!comparison?.hasHistory) return null;
@@ -281,6 +283,7 @@ export function SkillsGolfScalarHistoryComparison({
         currentValue,
         historicalValue,
         unit,
+        directionalDifference,
       )}
     />
   );
@@ -295,6 +298,7 @@ export function SkillsGolfItemHistoryComparison({
   currentValue,
   historicalValue,
   unit,
+  directionalDifference = true,
 }: {
   selectId: string;
   selectLabel: string;
@@ -304,6 +308,7 @@ export function SkillsGolfItemHistoryComparison({
   currentValue: number | null;
   historicalValue: number | null;
   unit: string | null;
+  directionalDifference?: boolean;
 }) {
   const comparison = useSkillsGolfHistoryComparison();
   if (!comparison?.hasHistory || items.length === 0) return null;
@@ -331,6 +336,7 @@ export function SkillsGolfItemHistoryComparison({
         currentValue={currentValue}
         historicalValue={historicalValue}
         unit={unit}
+        directionalDifference={directionalDifference}
       />
     </div>
   );

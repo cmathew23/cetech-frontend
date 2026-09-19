@@ -25,6 +25,9 @@ import {
   formatMeasurementMetricSource,
   groupMeasurementEntryFields,
   hasMeasurementEntryContractPayload,
+  isGripPressureMetricField,
+  measurementEntryFieldDisplayLabel,
+  measurementEntryFieldHelperText,
   readMeasurementEntryContract,
   validateMeasurementEntryForm,
   type MeasurementEntryField,
@@ -797,17 +800,25 @@ function MeasurementEntryFields({
   return (
     <div className="space-y-3">
       {groups.map((group) => {
-        const label = group[0]?.label ?? "";
+        const primary = group[0];
+        const label = primary ? measurementEntryFieldDisplayLabel(primary) : "";
+        const helperText = primary
+          ? measurementEntryFieldHelperText(primary, fields)
+          : null;
         return (
           <div key={`${idPrefix}-${group.map((field) => field.key).join("-")}`} className="space-y-1">
             <p className="text-xs font-medium text-textSecondary">
               {label}
               {group.some((field) => field.required) ? " *" : null}
             </p>
+            {helperText ? (
+              <p className="text-xs text-textSecondary">{helperText}</p>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
               {group.map((field) => {
                 const id = `${idPrefix}-${field.key}`;
                 const value = values[field.key] ?? "";
+                const displayLabel = measurementEntryFieldDisplayLabel(field);
                 if (field.type === "BOOLEAN") {
                   return (
                     <div key={field.key} className="flex items-center gap-3">
@@ -840,7 +851,7 @@ function MeasurementEntryFields({
                         onChange(field.key, event.target.value)
                       }
                       required={field.required}
-                      aria-label={field.label}
+                      aria-label={displayLabel}
                     >
                       <option value="">Select</option>
                       {field.options.map((option) => (
@@ -862,17 +873,22 @@ function MeasurementEntryFields({
                         onChange(field.key, event.target.value)
                       }
                       required={field.required}
-                      aria-label={field.label}
+                      aria-label={displayLabel}
                     />
                   );
                 }
+                const gripPressure = isGripPressureMetricField(field);
                 return (
                   <div key={field.key} className="flex min-w-0 items-center gap-2">
                     <Input
                       id={id}
                       type="number"
-                      step={field.type === "INTEGER" ? 1 : "any"}
-                      inputMode={field.type === "INTEGER" ? "numeric" : "decimal"}
+                      step={gripPressure || field.type === "INTEGER" ? 1 : "any"}
+                      min={gripPressure ? 1 : undefined}
+                      max={gripPressure ? 10 : undefined}
+                      inputMode={
+                        gripPressure || field.type === "INTEGER" ? "numeric" : "decimal"
+                      }
                       value={value}
                       onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                         onChange(field.key, event.target.value)
@@ -880,7 +896,7 @@ function MeasurementEntryFields({
                       required={field.required}
                       className="w-24"
                       aria-label={
-                        field.unit ? `${field.label} (${field.unit})` : field.label
+                        field.unit ? `${displayLabel} (${field.unit})` : displayLabel
                       }
                     />
                     {field.unit ? (

@@ -58,6 +58,45 @@ export function formatMeasurementMetricSource(raw: string): string {
   return raw;
 }
 
+export const GRIP_PRESSURE_DISPLAY_LABEL = "Grip Pressure (1–10)";
+export const GRIP_PRESSURE_HELPER_TEXT =
+  "1 = very light grip · 10 = maximum grip pressure";
+export const GRIP_PRESSURE_SUCCESSES_HELPER_TEXT =
+  "Shots that met the drill's success criteria";
+
+function normalizeMetricFieldKey(key: string): string {
+  return key.replace(/[_-]/g, "").toLowerCase();
+}
+
+export function isGripPressureMetricField(
+  field: Pick<MeasurementEntryField, "key" | "label">,
+): boolean {
+  const key = normalizeMetricFieldKey(field.key);
+  if (
+    key === "selectedpressure" ||
+    key === "grippressure" ||
+    key === "selectedgrippressure"
+  ) {
+    return true;
+  }
+  return field.label.trim().toLowerCase() === "selected pressure";
+}
+
+export function measurementEntryFieldDisplayLabel(field: MeasurementEntryField): string {
+  return isGripPressureMetricField(field) ? GRIP_PRESSURE_DISPLAY_LABEL : field.label;
+}
+
+export function measurementEntryFieldHelperText(
+  field: MeasurementEntryField,
+  fields: MeasurementEntryField[],
+): string | null {
+  if (isGripPressureMetricField(field)) return GRIP_PRESSURE_HELPER_TEXT;
+  if (field.key === "successes" && fields.some(isGripPressureMetricField)) {
+    return GRIP_PRESSURE_SUCCESSES_HELPER_TEXT;
+  }
+  return null;
+}
+
 function readFieldType(value: unknown): MeasurementEntryFieldType | null {
   const raw = readString(value);
   if (!raw) return null;
@@ -247,9 +286,10 @@ function parseFieldValue(
   | { ok: false; error: string }
   | { ok: true; omit: true } {
   const trimmed = raw.trim();
+  const label = measurementEntryFieldDisplayLabel(field);
   if (trimmed === "") {
     if (field.required) {
-      return { ok: false, error: `${field.label} is required.` };
+      return { ok: false, error: `${label} is required.` };
     }
     return { ok: true, omit: true };
   }
@@ -257,14 +297,14 @@ function parseFieldValue(
   if (field.type === "BOOLEAN") {
     if (trimmed === "true") return { ok: true, value: true };
     if (trimmed === "false") return { ok: true, value: false };
-    return { ok: false, error: `${field.label} must be Yes or No.` };
+    return { ok: false, error: `${label} must be Yes or No.` };
   }
 
   if (field.type === "ENUM") {
     if (field.options.some((option) => option.value === trimmed)) {
       return { ok: true, value: trimmed };
     }
-    return { ok: false, error: `${field.label} must be one of the provided options.` };
+    return { ok: false, error: `${label} must be one of the provided options.` };
   }
 
   if (field.type === "STRING") {
@@ -273,10 +313,18 @@ function parseFieldValue(
 
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed)) {
-    return { ok: false, error: `${field.label} must be a number.` };
+    return { ok: false, error: `${label} must be a number.` };
   }
   if (field.type === "INTEGER" && !Number.isInteger(parsed)) {
-    return { ok: false, error: `${field.label} must be a whole number.` };
+    return { ok: false, error: `${label} must be a whole number.` };
+  }
+  if (isGripPressureMetricField(field)) {
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+      return {
+        ok: false,
+        error: `${label} must be a whole number from 1 to 10.`,
+      };
+    }
   }
   return { ok: true, value: parsed };
 }

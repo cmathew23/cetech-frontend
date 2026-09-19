@@ -314,6 +314,7 @@ export function CoachAthletePerformancePageContent() {
                 athleteId={selectedAthleteId}
                 trainingPlanVersionId={trainingPlanVersionId}
                 titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                audience="coach"
               />
             </SkillsGolfHistoryComparisonProvider>
           ) : null}

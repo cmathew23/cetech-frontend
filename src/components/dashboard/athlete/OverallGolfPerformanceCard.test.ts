@@ -155,6 +155,7 @@ describe("OverallGolfPerformanceCard", () => {
     expect(html).toContain("Overall Golfer Performance");
     expect(html).toContain("77.3");
     expect(html).toContain("Your trend will appear after another comparable week.");
+    expect(html).toContain("Coach rating: Pending");
   });
 
   it("stays visible when Competition and Overall are unavailable", () => {
@@ -185,6 +186,7 @@ describe("OverallGolfPerformanceCard", () => {
     expect(source).not.toContain("/ 2");
     expect(source).toContain("summary?.overallGolferPerformance");
     expect(source).toContain("overallGolferPerformanceHistory");
+    expect(source).toContain("AthletePracticePerformanceContent");
   });
 });
 
@@ -206,6 +208,12 @@ describe("Overall Golf Performance dashboard mounts", () => {
       "utf8",
     );
     expect(page).toContain("<OverallGolfPerformanceSection");
+    expect(
+      page.slice(
+        page.indexOf("<OverallGolfPerformanceSection"),
+        page.indexOf("<OverallGolfPerformanceSection") + 400,
+      ),
+    ).toContain('audience="coach"');
     expect(page.indexOf("<OverallGolfPerformanceSection")).toBeLessThan(
       page.indexOf("<WearableSummarySection"),
     );

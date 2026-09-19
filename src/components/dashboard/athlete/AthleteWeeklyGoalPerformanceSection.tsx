@@ -1,10 +1,10 @@
 "use client";
 
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
-import { displayedPracticePerformanceScore } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import {
   AthletePerformanceStat,
   athletePerformanceGridClass,
+  displayedPracticePerformanceScore,
   formatAthleteMetricValue,
   formatAthleteTrendLabel,
   formatScoreOutOf100,
@@ -463,9 +463,11 @@ function coachPracticeRatingMeaning(rating: number): string | null {
 export function AthletePracticePerformanceContent({
   summary,
   audience = "athlete",
+  framed = true,
 }: {
   summary: SportMetricsGolfWeeklySummary;
   audience?: "athlete" | "coach";
+  framed?: boolean;
 }) {
   const historyComparison = useSkillsGolfHistoryComparison();
   const hasScore = summary.practiceScoreOutOf100 !== null;
@@ -481,8 +483,8 @@ export function AthletePracticePerformanceContent({
     (row) => row.rating !== null && (row.taxonomyAreaKey?.trim() ?? "") !== "",
   );
 
-  return (
-    <MetricsSectionCard title="Practice Performance">
+  const body = (
+    <>
       <AthletePerformanceStat
         title="Practice Performance"
         value={
@@ -563,7 +565,13 @@ export function AthletePracticePerformanceContent({
         historicalValue={historicalScore}
         unit="points"
       />
-    </MetricsSectionCard>
+    </>
+  );
+
+  if (!framed) return <div className="min-w-0">{body}</div>;
+
+  return (
+    <MetricsSectionCard title="Practice Performance">{body}</MetricsSectionCard>
   );
 }
 

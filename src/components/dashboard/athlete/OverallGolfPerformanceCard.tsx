@@ -1,9 +1,11 @@
 "use client";
 
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
+import { AthletePracticePerformanceContent } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import {
   AthletePerformanceStat,
   athletePerformanceGridClass,
+  displayedPracticePerformanceScore,
   formatAthleteMetricValue,
 } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
@@ -23,12 +25,7 @@ const NOT_AVAILABLE_YET = "Not available yet";
 const TREND_AFTER_COMPARABLE =
   "Your trend will appear after another comparable week.";
 
-export function displayedPracticePerformanceScore(
-  summary: SportMetricsGolfWeeklySummary | null,
-): number | null {
-  if (!summary) return null;
-  return summary.practiceScoreOutOf100 ?? summary.coachPracticeScoreOutOf100;
-}
+export { displayedPracticePerformanceScore };
 
 function formatMetricOrUnavailable(value: number | null): string {
   return value !== null
@@ -88,10 +85,12 @@ export function OverallGolfPerformanceCard({
   summary,
   titleClassName,
   className,
+  audience = "athlete",
 }: {
   summary: SportMetricsGolfWeeklySummary | null;
   titleClassName?: string;
   className?: string;
+  audience?: "athlete" | "coach";
 }) {
   const values = resolveOverallGolfPerformanceDisplay(summary);
   const historicalOverall =
@@ -111,10 +110,18 @@ export function OverallGolfPerformanceCard({
       titleClassName={titleClassName}
     >
       <div className={athletePerformanceGridClass(3)}>
-        <AthletePerformanceStat
-          title="Practice Performance"
-          value={values.practiceValue}
-        />
+        {summary ? (
+          <AthletePracticePerformanceContent
+            summary={summary}
+            audience={audience}
+            framed={false}
+          />
+        ) : (
+          <AthletePerformanceStat
+            title="Practice Performance"
+            value={values.practiceValue}
+          />
+        )}
         <AthletePerformanceStat
           title="Competition Performance"
           value={values.competitionValue}
@@ -149,11 +156,13 @@ export function OverallGolfPerformanceSection({
   athleteId,
   trainingPlanVersionId,
   titleClassName = ATHLETE_DASHBOARD_CARD_TITLE_CLASS,
+  audience = "athlete",
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   titleClassName?: string;
+  audience?: "athlete" | "coach";
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -190,6 +199,7 @@ export function OverallGolfPerformanceSection({
     <OverallGolfPerformanceCard
       summary={summary}
       titleClassName={titleClassName}
+      audience={audience}
     />
   );
 }

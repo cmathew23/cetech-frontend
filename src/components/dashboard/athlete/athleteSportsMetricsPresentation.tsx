@@ -1,5 +1,6 @@
 import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
 import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
+import type { SportMetricsGolfWeeklySummary } from "@/lib/api/sportMetricsGolf";
 import type { ReactNode } from "react";
 
 export type SportsMetricsPresentation = "dashboard" | "detail";
@@ -47,6 +48,13 @@ export function formatAthleteMetricValue(
 
 export function formatScoreOutOf100(value: number): string {
   return `${value} / 100`;
+}
+
+export function displayedPracticePerformanceScore(
+  summary: SportMetricsGolfWeeklySummary | null,
+): number | null {
+  if (!summary) return null;
+  return summary.practiceScoreOutOf100 ?? summary.coachPracticeScoreOutOf100;
 }
 
 export function formatTaxonomyAreaLabel(value: string | null): string {

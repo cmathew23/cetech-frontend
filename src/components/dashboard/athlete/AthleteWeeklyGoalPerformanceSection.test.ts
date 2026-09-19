@@ -1095,16 +1095,24 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(skillsCoachHtml).toContain("Coach form");
   });
 
-  it("keeps Overall Golf Performance Practice value 50 for the same current dataset", () => {
+  it("reuses the Practice Performance card on Overall Golf Performance for coaches", () => {
     const html = renderToStaticMarkup(
       createElement(OverallGolfPerformanceCard, {
+        audience: "coach",
         summary: currentCoachPracticeSummary(),
       }),
     );
     expect(html).toContain("Overall Golf Performance");
     expect(html).toContain("Practice Performance");
     expect(html).toContain(">50<");
-    expect(html).not.toContain("50 / 100");
+    expect(html).not.toMatch(/text-3xl font-bold[^>]*>BASELINE WEEK</);
+    expect(html).toContain("BASELINE WEEK");
+    expect(html).toContain("Trend available after comparable results");
+    expect(html).toContain("Exercise evidence recorded");
+    expect(html).toContain("Coach Practice Performance 50 / 100");
+    expect(html).toContain("Putting: 3");
+    expect(html).toContain("Competition Performance");
+    expect(html).toContain("Overall Golfer Performance");
   });
 
   it("uses dashboard practice cards for coaches and keeps rating actions", () => {

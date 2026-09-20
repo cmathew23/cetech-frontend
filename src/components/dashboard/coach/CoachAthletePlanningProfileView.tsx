@@ -6,6 +6,7 @@ import {
 } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { DashboardStatusNotice } from "@/components/dashboard/shared/DashboardStatusNotice";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
+import { formatDisplayUnit } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { SkillGoalAttributionText } from "@/components/dashboard/SkillGoalAttribution";
 import { SandCExerciseDemonstrationVideos } from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos";
 import { DASHBOARD_DETAIL_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
@@ -42,6 +43,7 @@ import {
   type GoalLibraryAthleteLevel,
   type GoalLibraryCategory,
   type GoalLibraryItem,
+  type GoalLibraryPrimaryMetric,
   type GoalPriority,
   type GoalSummary,
   type SeasonCycleSummary,
@@ -10922,13 +10924,38 @@ export function isGoalTargetDateOutsidePhaseWindow(
   return date < phaseStartYmd || date > phaseEndYmd;
 }
 
+export function formatGoalLibraryMetricDirection(direction: string | null | undefined): string {
+  if (direction === "HIGHER_IS_BETTER") return "Higher is better";
+  if (direction === "LOWER_IS_BETTER") return "Lower is better";
+  return direction?.trim() ?? "";
+}
+
+export function goalLibraryNumericTargetHint(input: {
+  targetMetricName?: string | null;
+  primaryMetric?: GoalLibraryPrimaryMetric | null;
+}): { unitLabel: string; caption: string } {
+  const unitLabel = formatDisplayUnit(input.primaryMetric?.unit ?? null);
+  const name = input.targetMetricName?.trim() ?? "";
+  const direction = formatGoalLibraryMetricDirection(input.primaryMetric?.direction);
+  const caption = [name, direction].filter((part) => part !== "").join(" · ");
+  return { unitLabel, caption };
+}
+
 function GoalDraftMetadataFields({
   draft,
   onChange,
+  targetMetricName,
+  primaryMetric,
 }: {
   draft: GoalDraftFields;
   onChange: (patch: Partial<GoalDraftFields>) => void;
+  targetMetricName?: string | null;
+  primaryMetric?: GoalLibraryPrimaryMetric | null;
 }) {
+  const numericTargetHint = goalLibraryNumericTargetHint({
+    targetMetricName,
+    primaryMetric,
+  });
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <label className="space-y-1 text-sm text-textPrimary">
@@ -10947,12 +10974,31 @@ function GoalDraftMetadataFields({
       </label>
       <label className="space-y-1 text-sm text-textPrimary">
         <span className="font-medium">Numeric Target Value (Optional)</span>
-        <input
-          type="number"
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-          value={draft.targetValue}
-          onChange={(event) => onChange({ targetValue: event.target.value })}
-        />
+        {numericTargetHint.unitLabel ? (
+          <span className="flex items-center gap-2">
+            <input
+              type="number"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+              value={draft.targetValue}
+              onChange={(event) => onChange({ targetValue: event.target.value })}
+            />
+            <span className="shrink-0 text-sm font-normal text-textSecondary">
+              {numericTargetHint.unitLabel}
+            </span>
+          </span>
+        ) : (
+          <input
+            type="number"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+            value={draft.targetValue}
+            onChange={(event) => onChange({ targetValue: event.target.value })}
+          />
+        )}
+        {numericTargetHint.caption ? (
+          <span className="block font-normal text-textSecondary">
+            {numericTargetHint.caption}
+          </span>
+        ) : null}
       </label>
       <label className="space-y-1 text-sm text-textPrimary">
         <span className="font-medium">Target Date</span>
@@ -27813,6 +27859,8 @@ export function CoachAthletePlanningProfileView({
                                           <div className="ml-6">
                                             <GoalDraftMetadataFields
                                               draft={draft}
+                                              targetMetricName={goal.targetMetricName}
+                                              primaryMetric={goal.primaryMetric}
                                               onChange={(patch) =>
                                                 setLibraryGoalDrafts((current) =>
                                                   patchGoalDraftFields(

@@ -148,6 +148,7 @@ import {
   patchCustomGoalEntry,
   patchGoalDraftFields,
   pruneLibraryGoalDrafts,
+  goalLibraryNumericTargetHint,
   removeCustomGoalEntry,
   resolveCompetitionSeasonPhaseForDate,
   detectCurrentPhase,
@@ -17720,6 +17721,62 @@ describe("season create display state", () => {
     });
     expect(parseOptionalGoalTargetValue("")).toEqual({ ok: true });
     expect(isGoalTargetDateOutsidePhaseWindow("", "2026-01-01", "2026-06-30")).toBe(false);
+  });
+
+  it("displays Goal Library numeric target metric unit and direction without changing targetValue", () => {
+    expect(
+      goalLibraryNumericTargetHint({
+        targetMetricName: "Approach Putt Performance",
+        primaryMetric: {
+          key: "APPROACH_PUTT_PERFORMANCE",
+          unit: "FEET",
+          direction: "LOWER_IS_BETTER",
+        },
+      }),
+    ).toEqual({
+      unitLabel: "ft",
+      caption: "Approach Putt Performance · Lower is better",
+    });
+    expect(
+      goalLibraryNumericTargetHint({
+        targetMetricName: "Target/Window Success Rate",
+        primaryMetric: {
+          key: "TARGET_WINDOW_SUCCESS_RATE",
+          unit: "PERCENT",
+          direction: "HIGHER_IS_BETTER",
+        },
+      }),
+    ).toEqual({
+      unitLabel: "%",
+      caption: "Target/Window Success Rate · Higher is better",
+    });
+    expect(goalLibraryNumericTargetHint({})).toEqual({ unitLabel: "", caption: "" });
+
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const libraryFieldsStart = source.indexOf(
+      "<GoalDraftMetadataFields\n                                              draft={draft}",
+    );
+    const libraryFields = source.slice(libraryFieldsStart, libraryFieldsStart + 900);
+    expect(libraryFields).toContain("targetMetricName={goal.targetMetricName}");
+    expect(libraryFields).toContain("primaryMetric={goal.primaryMetric}");
+
+    const customFieldsStart = source.indexOf(
+      "<GoalDraftMetadataFields\n                            draft={entry}",
+    );
+    const customFields = source.slice(customFieldsStart, customFieldsStart + 500);
+    expect(customFields).not.toContain("targetMetricName=");
+    expect(customFields).not.toContain("primaryMetric=");
+
+    const createStart = source.indexOf("for (const goal of selectedLibraryGoals)");
+    const createEnd = source.indexOf("for (const entry of customGoalEntries)", createStart);
+    const libraryCreate = source.slice(createStart, createEnd);
+    expect(libraryCreate).toContain("targetValue: parsedTarget.value");
+    expect(libraryCreate).not.toContain("primaryMetric:");
+    expect(libraryCreate).not.toContain("targetMetricName:");
+    expect(libraryCreate).not.toContain("measurementEntryContract");
   });
 
   it("keeps selected existing season read-only until Edit Season, then patches and returns to view", () => {

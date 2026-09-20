@@ -71,6 +71,98 @@ describe("fetchGoalLibrary", () => {
     expect(result.categories[0]?.levels.BEGINNER[0]?.libraryGoalId).toBe(
       "golf_putting_beginner_xxx_v1",
     );
+    expect(result.categories[0]?.levels.BEGINNER[0]?.targetMetricName).toBeNull();
+    expect(result.categories[0]?.levels.BEGINNER[0]?.primaryMetric).toBeNull();
+  });
+
+  it("preserves targetMetricName and primaryMetric from Goal Library items", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        sportCode: "GOLF",
+        providerKey: "golf",
+        version: "v1",
+        categories: [
+          {
+            categoryKey: "approach_shots",
+            categoryLabel: "Approach Shots",
+            levels: {
+              BEGINNER: [],
+              INTERMEDIATE: [
+                {
+                  libraryGoalId: "golf_approach_intermediate_putt_v1",
+                  goalName: "Manage approach proximity and miss patterns in scoring rounds",
+                  goalType: "PERFORMANCE",
+                  goalCategory: "TRAINING",
+                  domain: "SKILLS",
+                  categoryKey: "approach_shots",
+                  categoryLabel: "Approach Shots",
+                  taxonomyAreaKey: "approach_shots",
+                  athleteLevel: "INTERMEDIATE",
+                  seasonPhases: ["IN_SEASON"],
+                  successCriteria: ["Reduce short-sided misses during tracked rounds"],
+                  metricsToWatch: ["Approach proximity"],
+                  capabilityCodes: ["STRIKE"],
+                  targetMetricName: "Approach Putt Performance",
+                  primaryMetric: {
+                    key: "APPROACH_PUTT_PERFORMANCE",
+                    unit: "FEET",
+                    direction: "LOWER_IS_BETTER",
+                  },
+                },
+                {
+                  libraryGoalId: "golf_approach_intermediate_window_v1",
+                  goalName: "Improve target window success on approach shots",
+                  goalType: "PERFORMANCE",
+                  goalCategory: "TRAINING",
+                  domain: "SKILLS",
+                  categoryKey: "approach_shots",
+                  categoryLabel: "Approach Shots",
+                  taxonomyAreaKey: "approach_shots",
+                  athleteLevel: "INTERMEDIATE",
+                  seasonPhases: ["IN_SEASON"],
+                  successCriteria: ["Increase target window success rate"],
+                  metricsToWatch: ["Target window %"],
+                  capabilityCodes: ["STRIKE"],
+                  targetMetricName: "Target/Window Success Rate",
+                  primaryMetric: {
+                    key: "TARGET_WINDOW_SUCCESS_RATE",
+                    unit: "PERCENT",
+                    direction: "HIGHER_IS_BETTER",
+                  },
+                },
+              ],
+              ADVANCED: [],
+              ELITE: [],
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchGoalLibrary({
+      sport: "GOLF",
+      seasonPhase: "IN_SEASON",
+      level: "INTERMEDIATE",
+    });
+    const items = result.categories[0]?.levels.INTERMEDIATE ?? [];
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      targetMetricName: "Approach Putt Performance",
+      primaryMetric: {
+        key: "APPROACH_PUTT_PERFORMANCE",
+        unit: "FEET",
+        direction: "LOWER_IS_BETTER",
+      },
+    });
+    expect(items[1]).toMatchObject({
+      targetMetricName: "Target/Window Success Rate",
+      primaryMetric: {
+        key: "TARGET_WINDOW_SUCCESS_RATE",
+        unit: "PERCENT",
+        direction: "HIGHER_IS_BETTER",
+      },
+    });
   });
 });
 

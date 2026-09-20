@@ -77,6 +77,12 @@ export type GoalLibraryAthleteLevel =
 export type GoalLibraryDomain = "SKILLS" | "S_AND_C" | "NUTRITION";
 export type GoalSourceType = "CUSTOM" | "LIBRARY";
 
+export type GoalLibraryPrimaryMetric = {
+  key: string | null;
+  unit: string | null;
+  direction: string | null;
+};
+
 export type GoalLibraryItem = {
   libraryGoalId: string;
   goalName: string;
@@ -93,6 +99,8 @@ export type GoalLibraryItem = {
   metricsToWatch: string[];
   capabilityCodes: string[];
   recommendedDomains?: GoalLibraryDomain[];
+  targetMetricName?: string | null;
+  primaryMetric?: GoalLibraryPrimaryMetric | null;
 };
 
 export type GoalLibraryCategory = {
@@ -228,6 +236,16 @@ function parseGoal(value: unknown): GoalSummary | null {
   };
 }
 
+function parseGoalLibraryPrimaryMetric(value: unknown): GoalLibraryPrimaryMetric | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const key = readString(record.key);
+  const unit = readString(record.unit);
+  const direction = readString(record.direction);
+  if (!key && !unit && !direction) return null;
+  return { key, unit, direction };
+}
+
 function parseGoalLibraryItem(value: unknown): GoalLibraryItem | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -268,6 +286,8 @@ function parseGoalLibraryItem(value: unknown): GoalLibraryItem | null {
     metricsToWatch: readStringArray(record.metricsToWatch),
     capabilityCodes: readStringArray(record.capabilityCodes),
     recommendedDomains: readGoalLibraryDomainList(record.recommendedDomains),
+    targetMetricName: readString(record.targetMetricName),
+    primaryMetric: parseGoalLibraryPrimaryMetric(record.primaryMetric),
   };
 }
 

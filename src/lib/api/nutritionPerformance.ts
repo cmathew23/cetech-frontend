@@ -37,6 +37,10 @@ export type NutritionPerformanceWeeklyTotals = {
   carbohydrates: NutritionPerformanceMetric | null;
   fat: NutritionPerformanceMetric | null;
   fiber: NutritionPerformanceMetric | null;
+  calcium: NutritionPerformanceMetric | null;
+  magnesium: NutritionPerformanceMetric | null;
+  sodium: NutritionPerformanceMetric | null;
+  potassium: NutritionPerformanceMetric | null;
 };
 
 export type NutritionPerformanceData = {
@@ -152,6 +156,10 @@ export function parseNutritionPerformancePayload(
       carbohydrates: parseMetric(totals.carbohydrates, "g"),
       fat: parseMetric(totals.fat, "g"),
       fiber: parseMetric(totals.fiber, "g"),
+      calcium: parseMetric(totals.calcium, "mg"),
+      magnesium: parseMetric(totals.magnesium, "mg"),
+      sodium: parseMetric(totals.sodium, "mg"),
+      potassium: parseMetric(totals.potassium, "mg"),
     },
     mealBreakdown: parseMealBreakdown(record.mealBreakdown),
   };
@@ -168,6 +176,10 @@ export function hasNutritionPerformanceData(
     totals.carbohydrates,
     totals.fat,
     totals.fiber,
+    totals.calcium,
+    totals.magnesium,
+    totals.sodium,
+    totals.potassium,
   ].some((metric) => metric != null);
   return hasTotals || data.mealBreakdown.length > 0;
 }

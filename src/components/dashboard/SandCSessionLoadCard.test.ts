@@ -67,8 +67,46 @@ describe("SandCSessionLoadCard", () => {
     expect(zero).toContain("0 AU");
     expect(missing).toContain("—");
     expect(missing).not.toContain("0 AU");
-    expect(withLoad).not.toContain("Session RPE");
+    expect(withLoad).toContain("Avg Session Time: —");
+    expect(withLoad).toContain("Avg Session RPE: —");
     expect(withLoad).not.toContain("completion");
+  });
+
+  it("shows backend avg session time and RPE without frontend calculation", () => {
+    const html = renderToStaticMarkup(
+      createElement(SandCSessionLoadCard, {
+        averageSessionLoad: 275,
+        averageSessionDurationMinutes: 55,
+        averageSessionRpe: 5,
+      }),
+    );
+    const missing = renderToStaticMarkup(
+      createElement(SandCSessionLoadCard, {
+        averageSessionLoad: 275,
+        averageSessionDurationMinutes: null,
+        averageSessionRpe: null,
+      }),
+    );
+    const zero = renderToStaticMarkup(
+      createElement(SandCSessionLoadCard, {
+        averageSessionLoad: 0,
+        averageSessionDurationMinutes: 0,
+        averageSessionRpe: 0,
+      }),
+    );
+
+    expect(html).toContain("275 AU");
+    expect(html).toContain("Avg Session Time: 55 min");
+    expect(html).toContain("Avg Session RPE: 5.0 / 10");
+    expect(missing).toContain("Avg Session Time: —");
+    expect(missing).toContain("Avg Session RPE: —");
+    expect(zero).toContain("Avg Session Time: 0 min");
+    expect(zero).toContain("Avg Session RPE: 0.0 / 10");
+    expect(html).not.toContain("Avg Session Time: 55 min vs");
+    expect(html.indexOf("275 AU")).toBeLessThan(html.indexOf("Avg Session Time"));
+    expect(html.indexOf("Avg Session Time")).toBeLessThan(
+      html.indexOf("Historical Comparison"),
+    );
   });
 
   it("shows the historical empty state when history is []", () => {
@@ -128,6 +166,8 @@ describe("SandCSessionLoadCard", () => {
     expect(html).toContain("Historical week");
     expect(html).not.toContain("text-green");
     expect(html).not.toContain("text-red");
+    expect(html).not.toContain("Historical Week Avg Session Time");
+    expect(html).not.toContain("Historical Week Avg Session RPE");
   });
 
   it("shows — for a missing historical value instead of inventing load", () => {
@@ -193,5 +233,22 @@ describe("SandCSessionLoad dashboard visibility", () => {
     expect(performance.indexOf("<WeeklyTrainingLoadCard")).toBeLessThan(
       performance.indexOf("<SandCSessionLoadSection"),
     );
+  });
+
+  it("passes backend S&C time and RPE through the shared dashboard card", () => {
+    const section = readFileSync(
+      new URL("./SandCSessionLoadSection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(section).toContain(
+      "readStrengthConditioningAverageSessionDurationMinutes",
+    );
+    expect(section).toContain("readStrengthConditioningAverageSessionRpe");
+    expect(section).toContain(
+      "averageSessionDurationMinutes={averageSessionDurationMinutes}",
+    );
+    expect(section).toContain("averageSessionRpe={averageSessionRpe}");
+    expect(section).not.toContain("WORKFLOW_");
+    expect(section).not.toContain("WF1");
   });
 });

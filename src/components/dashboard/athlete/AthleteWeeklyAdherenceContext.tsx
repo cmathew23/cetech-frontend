@@ -5,8 +5,10 @@ import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentif
 import {
   fetchWeeklyAdherenceComparison,
   fetchWeeklyAdherenceSnapshots,
-  fetchWeeklyAdherenceSummary,
   hasNutritionAdherenceDomain,
+  readWeeklyAdherenceSummaryQueryCache,
+  refetchWeeklyAdherenceSummaryQuery,
+  subscribeWeeklyAdherenceSummaryQuery,
   type WeeklyAdherenceComparisonData,
   type WeeklyAdherenceComparisonResponse,
   type WeeklyAdherenceSnapshotOption,
@@ -16,7 +18,8 @@ import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningRea
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   releasedSkillsTrainingPlanVersionId,
-  resolveWeeklyAdherencePlanRangeFromJournal,
+  resolveWeeklyAdherenceSummaryQueryFromJournal,
+  weeklyAdherenceSummaryQueryKey,
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
 import {
@@ -25,6 +28,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -51,7 +55,7 @@ export type AthleteWeeklyAdherenceState = {
   weekStart: string;
   weekEnd: string;
   trainingPlanVersionId: string;
-  reload: () => void;
+  reload: () => Promise<void>;
   comparisonData: WeeklyAdherenceComparisonData | null;
   comparisonLoading: boolean;
   comparisonError: string | null;
@@ -227,7 +231,6 @@ export function WeeklyAdherenceProvider({
   const [planWeekRange, setPlanWeekRange] =
     useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
   const [comparisonData, setComparisonData] =
     useState<WeeklyAdherenceComparisonData | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
@@ -242,6 +245,8 @@ export function WeeklyAdherenceProvider({
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
   const comparisonOwner = `${entityId}:${athleteId}`;
+  const activeQueryKeyRef = useRef("");
+  const loadGenerationRef = useRef(0);
 
   const selectSnapshotA = useCallback(
     (snapshotId: string) => {
@@ -287,12 +292,12 @@ export function WeeklyAdherenceProvider({
     ],
   );
 
-  const reload = useCallback(() => {
-    setReloadKey((k) => k + 1);
-  }, []);
+  const loadCurrentSummaryQuery = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = () => generation === loadGenerationRef.current;
 
-  useEffect(() => {
     if (!loadCurrentSummary) {
+      activeQueryKeyRef.current = "";
       setFetching(false);
       setSummary(null);
       setError(null);
@@ -311,44 +316,47 @@ export function WeeklyAdherenceProvider({
       return;
     }
 
-    let cancelled = false;
     setFetching(true);
     setError(null);
 
-    void (async () => {
-      try {
-        const journal = await fetchAthleteWeeklyPlanJournal(entityId, athleteId);
-        const weekRange = resolveWeeklyAdherencePlanRangeFromJournal(journal);
-        if (weekRange === null) {
-          throw new Error("Could not resolve released plan week.");
-        }
-        const data = await fetchWeeklyAdherenceSummary({
-          entityId,
-          athleteId,
-          weekStart: weekRange.weekStart,
-          weekEnd: weekRange.weekEnd,
-        });
-        if (!cancelled) {
-          setPlanWeekRange(weekRange);
-          setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
-          setSummary(data);
-          setError(null);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setPlanWeekRange(null);
-          setTrainingPlanVersionId("");
-          setSummary(null);
-          setError(formatLoadError(e));
-        }
-      } finally {
-        if (!cancelled) setFetching(false);
+    try {
+      const journal = await fetchAthleteWeeklyPlanJournal(entityId, athleteId);
+      if (!isCurrent()) return;
+      const query = resolveWeeklyAdherenceSummaryQueryFromJournal(journal, {
+        entityId,
+        athleteId,
+      });
+      if (query === null) {
+        throw new Error("Could not resolve released plan week.");
       }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+      activeQueryKeyRef.current = weeklyAdherenceSummaryQueryKey(query);
+      const weekRange: WeeklyAdherencePlanRange = {
+        weekStart: query.weekStart,
+        weekEnd: query.weekEnd,
+      };
+      const cached = readWeeklyAdherenceSummaryQueryCache(query);
+      if (cached) {
+        setPlanWeekRange(weekRange);
+        setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
+        setSummary(cached);
+        setError(null);
+      }
+      const data = await refetchWeeklyAdherenceSummaryQuery(query);
+      if (!isCurrent()) return;
+      setPlanWeekRange(weekRange);
+      setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
+      setSummary(data);
+      setError(null);
+    } catch (e) {
+      if (!isCurrent()) return;
+      activeQueryKeyRef.current = "";
+      setPlanWeekRange(null);
+      setTrainingPlanVersionId("");
+      setSummary(null);
+      setError(formatLoadError(e));
+    } finally {
+      if (isCurrent()) setFetching(false);
+    }
   }, [
     athleteId,
     entityId,
@@ -356,8 +364,31 @@ export function WeeklyAdherenceProvider({
     isGateReady,
     identifiersPhase,
     loadCurrentSummary,
-    reloadKey,
   ]);
+
+  const reload = useCallback(async () => {
+    await loadCurrentSummaryQuery();
+  }, [loadCurrentSummaryQuery]);
+
+  useEffect(() => {
+    void loadCurrentSummaryQuery();
+    return () => {
+      loadGenerationRef.current += 1;
+    };
+  }, [loadCurrentSummaryQuery]);
+
+  useEffect(() => {
+    return subscribeWeeklyAdherenceSummaryQuery((record) => {
+      if (record.key !== activeQueryKeyRef.current) return;
+      setPlanWeekRange({
+        weekStart: record.query.weekStart,
+        weekEnd: record.query.weekEnd,
+      });
+      setSummary(record.summary);
+      setError(null);
+      setFetching(false);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

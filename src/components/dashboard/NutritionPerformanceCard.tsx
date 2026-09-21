@@ -30,12 +30,17 @@ const NUTRIENT_ROWS: Array<{
   key: keyof NutritionPerformanceData["weeklyTotals"];
   title: string;
   kind: "calories" | "grams";
+  fallbackUnit: string;
 }> = [
-  { key: "calories", title: "Calories", kind: "calories" },
-  { key: "protein", title: "Protein", kind: "grams" },
-  { key: "carbohydrates", title: "Carbohydrates", kind: "grams" },
-  { key: "fat", title: "Fat", kind: "grams" },
-  { key: "fiber", title: "Fiber", kind: "grams" },
+  { key: "calories", title: "Calories", kind: "calories", fallbackUnit: "kcal" },
+  { key: "protein", title: "Protein", kind: "grams", fallbackUnit: "g" },
+  { key: "carbohydrates", title: "Carbohydrates", kind: "grams", fallbackUnit: "g" },
+  { key: "fat", title: "Fat", kind: "grams", fallbackUnit: "g" },
+  { key: "fiber", title: "Fiber", kind: "grams", fallbackUnit: "g" },
+  { key: "calcium", title: "Calcium", kind: "grams", fallbackUnit: "mg" },
+  { key: "magnesium", title: "Magnesium", kind: "grams", fallbackUnit: "mg" },
+  { key: "sodium", title: "Sodium", kind: "grams", fallbackUnit: "mg" },
+  { key: "potassium", title: "Potassium", kind: "grams", fallbackUnit: "mg" },
 ];
 
 const MEAL_LABELS: Record<(typeof NUTRITION_PERFORMANCE_MEAL_ORDER)[number], string> = {
@@ -467,7 +472,7 @@ export function NutritionPerformanceCard({
       row.title,
       data.weeklyTotals[row.key],
       row.kind,
-      row.kind === "calories" ? "kcal" : "g",
+      row.fallbackUnit,
     ),
   );
 

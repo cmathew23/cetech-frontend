@@ -395,4 +395,18 @@ describe("S&C session RPE in weekly-plan adherence", () => {
     expect(sessionPanel).toContain('adherenceDomainKey === "S_AND_C" ? (');
     expect(journalSource).toContain('adherenceDomainKey={adherenceDomainKey}');
   });
+
+  it("refreshes Weekly Adherence after SKILL, S&C, and Nutrition adherence on the same path", () => {
+    expect(nutritionPanel).toContain("useRefreshWeeklyAdherenceAfterEvent");
+    expect(sessionPanel).toContain("useRefreshWeeklyAdherenceAfterEvent");
+    expect(nutritionPanel).toContain("await refreshWeeklyAdherenceAfterEvent()");
+    expect(sessionPanel).toContain("await refreshWeeklyAdherenceAfterEvent()");
+    expect(journalSource).toContain("refreshWeeklyAdherenceSummaryAfterAdherence");
+    expect(journalSource).not.toContain("WORKFLOW_1");
+    expect(journalSource).not.toContain("WORKFLOW_2");
+    expect(journalSource).not.toContain("WF1");
+    expect(journalSource).not.toContain("WF2A");
+    expect(journalSource).not.toContain("WF2B");
+    expect(journalSource).not.toContain("WF3");
+  });
 });

@@ -1,6 +1,12 @@
 import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
+import type { AthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
+import {
+  resolveWeeklyAdherenceSummaryQueryFromJournal,
+  weeklyAdherenceSummaryQueryKey,
+  type WeeklyAdherenceSummaryQuery,
+} from "@/lib/weeklyAdherenceWeek";
 
 const WEEKLY_ADHERENCE_SUMMARY_TIMEOUT_MS = 240_000;
 
@@ -75,6 +81,10 @@ export type SessionDomainContext = {
   actualDurationMinutes: number;
   /** Backend weekly average session load (AU). Missing/invalid → null; 0 is 0. */
   averageSessionLoad: number | null;
+  /** Backend weekly average session duration (minutes). Missing/invalid → null; 0 is 0. */
+  averageSessionDurationMinutes: number | null;
+  /** Backend weekly average session RPE. Missing/invalid → null; 0 is 0. */
+  averageSessionRpe: number | null;
 };
 
 export type NutritionDomainContext = {
@@ -476,6 +486,10 @@ function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainC
     averageSessionLoad: readOptionalFiniteNumber(
       raw.averageSessionLoad ?? raw.averageWeeklySessionLoad,
     ),
+    averageSessionDurationMinutes: readOptionalFiniteNumber(
+      raw.averageSessionDurationMinutes,
+    ),
+    averageSessionRpe: readOptionalFiniteNumber(raw.averageSessionRpe),
   };
 }
 
@@ -575,6 +589,8 @@ function sessionContextHasSignal(raw: Record<string, unknown>): boolean {
     "actualDurationMinutes",
     "averageSessionLoad",
     "averageWeeklySessionLoad",
+    "averageSessionDurationMinutes",
+    "averageSessionRpe",
   ] as const;
   return signalKeys.some((key) => key in raw);
 }
@@ -1312,6 +1328,77 @@ export async function fetchWeeklyAdherenceSummary(params: {
   return parsed;
 }
 
+export type WeeklyAdherenceSummaryQueryCacheRecord = {
+  key: string;
+  query: WeeklyAdherenceSummaryQuery;
+  summary: WeeklyAdherenceSummary;
+};
+
+let weeklyAdherenceSummaryQueryCache: WeeklyAdherenceSummaryQueryCacheRecord | null =
+  null;
+const weeklyAdherenceSummaryQueryListeners = new Set<
+  (record: WeeklyAdherenceSummaryQueryCacheRecord) => void
+>();
+
+export function subscribeWeeklyAdherenceSummaryQuery(
+  listener: (record: WeeklyAdherenceSummaryQueryCacheRecord) => void,
+): () => void {
+  weeklyAdherenceSummaryQueryListeners.add(listener);
+  return () => {
+    weeklyAdherenceSummaryQueryListeners.delete(listener);
+  };
+}
+
+export function readWeeklyAdherenceSummaryQueryCache(
+  query: WeeklyAdherenceSummaryQuery,
+): WeeklyAdherenceSummary | null {
+  const key = weeklyAdherenceSummaryQueryKey(query);
+  return weeklyAdherenceSummaryQueryCache?.key === key
+    ? weeklyAdherenceSummaryQueryCache.summary
+    : null;
+}
+
+export function resetWeeklyAdherenceSummaryQueryCacheForTests(): void {
+  weeklyAdherenceSummaryQueryCache = null;
+  weeklyAdherenceSummaryQueryListeners.clear();
+}
+
+/** Invalidate and GET the dashboard Weekly Adherence query, then replace cached state. */
+export async function refetchWeeklyAdherenceSummaryQuery(
+  query: WeeklyAdherenceSummaryQuery,
+): Promise<WeeklyAdherenceSummary> {
+  const summary = await fetchWeeklyAdherenceSummary(query);
+  const record: WeeklyAdherenceSummaryQueryCacheRecord = {
+    key: weeklyAdherenceSummaryQueryKey(query),
+    query,
+    summary,
+  };
+  weeklyAdherenceSummaryQueryCache = record;
+  for (const listener of [...weeklyAdherenceSummaryQueryListeners]) {
+    listener(record);
+  }
+  return summary;
+}
+
+/**
+ * Shared post-adherence refresh for SKILL, S&C, and Nutrition.
+ * Uses the same entityId/athleteId/weekStart/weekEnd as the dashboard GET.
+ */
+export async function refreshWeeklyAdherenceSummaryAfterAdherence(input: {
+  entityId: string;
+  athleteId: string;
+  journal: AthleteWeeklyPlanJournal;
+}): Promise<WeeklyAdherenceSummary> {
+  const query = resolveWeeklyAdherenceSummaryQueryFromJournal(input.journal, {
+    entityId: input.entityId,
+    athleteId: input.athleteId,
+  });
+  if (query === null) {
+    throw new Error("Could not resolve released plan week.");
+  }
+  return refetchWeeklyAdherenceSummaryQuery(query);
+}
+
 export async function fetchWeeklyAdherenceSnapshots(params: {
   entityId: string;
   athleteId: string;
@@ -1420,15 +1507,48 @@ export function isSessionContext(
     ("completedItems" in ctx ||
       "plannedDurationMinutes" in ctx ||
       "actualDurationMinutes" in ctx ||
-      "averageSessionLoad" in ctx)
+      "averageSessionLoad" in ctx ||
+      "averageSessionDurationMinutes" in ctx ||
+      "averageSessionRpe" in ctx)
   );
+}
+
+function readStrengthConditioningSessionContextNumber(
+  summary: WeeklyAdherenceSummary | null | undefined,
+  key:
+    | "averageSessionLoad"
+    | "averageSessionDurationMinutes"
+    | "averageSessionRpe",
+): number | null {
+  const ctx = summary?.domains.STRENGTH_CONDITIONING?.context;
+  if (!isSessionContext(ctx)) return null;
+  const value = ctx[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export function readStrengthConditioningAverageSessionLoad(
   summary: WeeklyAdherenceSummary | null | undefined,
 ): number | null {
-  const ctx = summary?.domains.STRENGTH_CONDITIONING?.context;
-  if (!isSessionContext(ctx)) return null;
-  const value = ctx.averageSessionLoad;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return readStrengthConditioningSessionContextNumber(
+    summary,
+    "averageSessionLoad",
+  );
+}
+
+export function readStrengthConditioningAverageSessionDurationMinutes(
+  summary: WeeklyAdherenceSummary | null | undefined,
+): number | null {
+  return readStrengthConditioningSessionContextNumber(
+    summary,
+    "averageSessionDurationMinutes",
+  );
+}
+
+export function readStrengthConditioningAverageSessionRpe(
+  summary: WeeklyAdherenceSummary | null | undefined,
+): number | null {
+  return readStrengthConditioningSessionContextNumber(
+    summary,
+    "averageSessionRpe",
+  );
 }

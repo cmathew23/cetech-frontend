@@ -1,4 +1,9 @@
-import { releasedSkillsTrainingPlanVersionId } from "@/lib/weeklyAdherenceWeek";
+import type { AthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
+import {
+  releasedSkillsTrainingPlanVersionId,
+  resolveWeeklyAdherenceSummaryQueryFromJournal,
+  weeklyAdherenceSummaryQueryKey,
+} from "@/lib/weeklyAdherenceWeek";
 import { describe, expect, it } from "vitest";
 
 function journalDomains(status: "RELEASED" | "NOT_RELEASED", versionId: string | null) {
@@ -32,5 +37,73 @@ describe("releasedSkillsTrainingPlanVersionId", () => {
     expect(
       releasedSkillsTrainingPlanVersionId(journalDomains("RELEASED", null)),
     ).toBe("");
+  });
+});
+
+function releasedJournal(
+  overrides: Partial<AthleteWeeklyPlanJournal> = {},
+): AthleteWeeklyPlanJournal {
+  return {
+    athleteId: "journal-athlete",
+    entityId: "journal-entity",
+    weekStartDate: "2026-09-21",
+    weekEndDate: "2026-09-27",
+    domains: {
+      SKILLS: { status: "RELEASED", versionId: "skills-v1", planId: "plan-skills" },
+      NUTRITION: { status: "NOT_RELEASED", versionId: null, planId: null },
+      S_AND_C: { status: "RELEASED", versionId: "sandc-v1", planId: "plan-sandc" },
+    },
+    days: [
+      {
+        date: "2020-01-06",
+        dayNumber: 1,
+        skills: [],
+        nutrition: [],
+        sandc: [],
+      },
+    ],
+    raw: {},
+    ...overrides,
+  };
+}
+
+describe("resolveWeeklyAdherenceSummaryQueryFromJournal", () => {
+  it("uses journal entityId, athleteId, weekStart, and weekEnd for the dashboard GET", () => {
+    expect(
+      resolveWeeklyAdherenceSummaryQueryFromJournal(releasedJournal(), {
+        entityId: "fallback-entity",
+        athleteId: "fallback-athlete",
+      }),
+    ).toEqual({
+      entityId: "journal-entity",
+      athleteId: "journal-athlete",
+      weekStart: "2026-09-21",
+      weekEnd: "2026-09-27",
+    });
+  });
+
+  it("falls back to caller identifiers when journal ids are blank", () => {
+    expect(
+      resolveWeeklyAdherenceSummaryQueryFromJournal(
+        releasedJournal({ entityId: "  ", athleteId: "" }),
+        { entityId: "fallback-entity", athleteId: "fallback-athlete" },
+      ),
+    ).toEqual({
+      entityId: "fallback-entity",
+      athleteId: "fallback-athlete",
+      weekStart: "2026-09-21",
+      weekEnd: "2026-09-27",
+    });
+  });
+
+  it("builds a stable query key from the same four params", () => {
+    const query = resolveWeeklyAdherenceSummaryQueryFromJournal(
+      releasedJournal(),
+      { entityId: "fallback-entity", athleteId: "fallback-athlete" },
+    );
+    expect(query).not.toBeNull();
+    expect(weeklyAdherenceSummaryQueryKey(query!)).toBe(
+      "journal-entity|journal-athlete|2026-09-21|2026-09-27",
+    );
   });
 });

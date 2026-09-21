@@ -7,7 +7,9 @@ import {
   type SandCSessionLoadWeek,
 } from "@/lib/api/sessionLoadHistory";
 import {
+  readStrengthConditioningAverageSessionDurationMinutes,
   readStrengthConditioningAverageSessionLoad,
+  readStrengthConditioningAverageSessionRpe,
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -96,6 +98,9 @@ export function SandCSessionLoadSection({
     : "";
   const averageSessionLoad =
     readStrengthConditioningAverageSessionLoad(summary);
+  const averageSessionDurationMinutes =
+    readStrengthConditioningAverageSessionDurationMinutes(summary);
+  const averageSessionRpe = readStrengthConditioningAverageSessionRpe(summary);
 
   useEffect(() => {
     if (historyFetchKey === "") {
@@ -149,6 +154,8 @@ export function SandCSessionLoadSection({
   return (
     <SandCSessionLoadCard
       averageSessionLoad={averageSessionLoad}
+      averageSessionDurationMinutes={averageSessionDurationMinutes}
+      averageSessionRpe={averageSessionRpe}
       weekStart={weekStart}
       weekEnd={weekEnd}
       historyWeeks={historyWeeks}

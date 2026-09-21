@@ -169,8 +169,22 @@ function SandCSessionLoadHistoryComparison({
   );
 }
 
+export function formatAverageSessionDurationMinutes(
+  value: number | null,
+): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  return `${value} min`;
+}
+
+export function formatAverageSessionRpe(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(1)} / 10`;
+}
+
 export function SandCSessionLoadCard({
   averageSessionLoad,
+  averageSessionDurationMinutes = null,
+  averageSessionRpe = null,
   weekStart,
   weekEnd,
   historyWeeks = [],
@@ -180,6 +194,8 @@ export function SandCSessionLoadCard({
   cardClassName,
 }: {
   averageSessionLoad: number | null;
+  averageSessionDurationMinutes?: number | null;
+  averageSessionRpe?: number | null;
   weekStart?: string;
   weekEnd?: string;
   historyWeeks?: SandCSessionLoadWeek[];
@@ -204,9 +220,18 @@ export function SandCSessionLoadCard({
       titleClassName={titleClassName}
     >
       <div className="space-y-5">
-        <p className={DASHBOARD_METRIC_VALUE_CLASS}>
-          {formatAverageSessionLoadAu(averageSessionLoad)}
-        </p>
+        <div className="space-y-1">
+          <p className={DASHBOARD_METRIC_VALUE_CLASS}>
+            {formatAverageSessionLoadAu(averageSessionLoad)}
+          </p>
+          <p className="text-sm text-textSecondary">
+            Avg Session Time:{" "}
+            {formatAverageSessionDurationMinutes(averageSessionDurationMinutes)}
+          </p>
+          <p className="text-sm text-textSecondary">
+            Avg Session RPE: {formatAverageSessionRpe(averageSessionRpe)}
+          </p>
+        </div>
         <SandCSessionLoadHistoryComparison
           currentLoad={averageSessionLoad}
           currentWeekStart={weekStart}

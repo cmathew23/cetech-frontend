@@ -36,6 +36,7 @@ import {
   type AthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournalDay,
 } from "@/lib/api/coachAthletePlanningReadiness";
+import { refreshWeeklyAdherenceSummaryAfterAdherence } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatDateOnly,
@@ -49,7 +50,9 @@ import {
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -63,6 +66,14 @@ type ViewState =
   | { phase: "error"; message: string };
 
 type Scalar = string | number | boolean;
+
+const RefreshWeeklyAdherenceAfterEventContext = createContext<
+  () => Promise<void>
+>(async () => {});
+
+function useRefreshWeeklyAdherenceAfterEvent(): () => Promise<void> {
+  return useContext(RefreshWeeklyAdherenceAfterEventContext);
+}
 
 const DOMAIN_SECTIONS = [
   {
@@ -1683,6 +1694,7 @@ function NutritionSessionAdherencePanel({
     () => collectNutritionAdherenceFoodRows(sessionItem),
     [sessionItem],
   );
+  const refreshWeeklyAdherenceAfterEvent = useRefreshWeeklyAdherenceAfterEvent();
 
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -1771,6 +1783,11 @@ function NutritionSessionAdherencePanel({
         })),
         ...(notes.trim() !== "" ? { notes: notes.trim() } : {}),
       });
+      try {
+        await refreshWeeklyAdherenceAfterEvent();
+      } catch {
+        // Adherence write succeeded; dashboard will refetch on next load if needed.
+      }
       setSubmitMessage({ variant: "success", text: "Nutrition adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
@@ -1791,6 +1808,7 @@ function NutritionSessionAdherencePanel({
     notes,
     portionByOrder,
     plannedSessionId,
+    refreshWeeklyAdherenceAfterEvent,
   ]);
 
   const submitDisabled =
@@ -1997,6 +2015,7 @@ function SessionAdherencePanel({
     variant: "success" | "danger";
     text: string;
   } | null>(null);
+  const refreshWeeklyAdherenceAfterEvent = useRefreshWeeklyAdherenceAfterEvent();
 
   useEffect(() => {
     let cancelled = false;
@@ -2093,6 +2112,11 @@ function SessionAdherencePanel({
         ...(sessionRpeValue !== undefined ? { sessionRpe: sessionRpeValue } : {}),
         ...(athleteNotes.trim() !== "" ? { athleteNotes: athleteNotes.trim() } : {}),
       });
+      try {
+        await refreshWeeklyAdherenceAfterEvent();
+      } catch {
+        // Adherence write succeeded; dashboard will refetch on next load if needed.
+      }
       setSubmitMessage({ variant: "success", text: "Adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
@@ -2115,6 +2139,7 @@ function SessionAdherencePanel({
     plannedSessionId,
     sessionRpe,
     adherenceDomainKey,
+    refreshWeeklyAdherenceAfterEvent,
     totalPrescribedItems,
   ]);
 
@@ -2852,7 +2877,19 @@ export function AthleteWeeklyPlanJournalPageContent() {
         }
       : undefined;
 
+  const refreshWeeklyAdherenceAfterEvent = async () => {
+    if (state.phase !== "ready") return;
+    await refreshWeeklyAdherenceSummaryAfterAdherence({
+      entityId: resolvedJournalEntityId,
+      athleteId: resolvedJournalAthleteId,
+      journal: state.journal,
+    });
+  };
+
   return (
+    <RefreshWeeklyAdherenceAfterEventContext.Provider
+      value={refreshWeeklyAdherenceAfterEvent}
+    >
     <div className="space-y-4">
       <PageHeader
         title="Weekly Plan Journal"
@@ -3035,5 +3072,6 @@ export function AthleteWeeklyPlanJournalPageContent() {
         />
       ) : null}
     </div>
+    </RefreshWeeklyAdherenceAfterEventContext.Provider>
   );
 }

@@ -3,7 +3,9 @@ import {
   hasNutritionAdherenceDomain,
   parseTrainingLoadComparison,
   parseWeeklyAdherenceSummaryPayload,
+  readStrengthConditioningAverageSessionDurationMinutes,
   readStrengthConditioningAverageSessionLoad,
+  readStrengthConditioningAverageSessionRpe,
   shouldShowWeeklyTrainingLoadCard,
   visibleTrainingLoadDomains,
 } from "@/lib/api/weeklyAdherence";
@@ -547,5 +549,75 @@ describe("STRENGTH_CONDITIONING averageSessionLoad", () => {
     expect(missingLoad.domains.SKILL?.context).not.toMatchObject({
       averageSessionLoad: 245,
     });
+  });
+
+  it("reads backend averageSessionDurationMinutes and averageSessionRpe without defaulting missing to 0", () => {
+    const withValues = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: {
+            completedItems: 6,
+            plannedItems: 6,
+            averageSessionLoad: 275,
+            averageSessionDurationMinutes: 55,
+            averageSessionRpe: 5,
+          },
+        },
+      },
+      visibleDomains: ["STRENGTH_CONDITIONING"],
+    });
+    const zeros = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: {
+            completedItems: 1,
+            plannedItems: 1,
+            averageSessionLoad: 0,
+            averageSessionDurationMinutes: 0,
+            averageSessionRpe: 0,
+          },
+        },
+      },
+      visibleDomains: ["STRENGTH_CONDITIONING"],
+    });
+    const missing = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-05-12",
+      weekEnd: "2026-05-18",
+      domains: {
+        STRENGTH_CONDITIONING: {
+          plannedSessions: 1,
+          loggedSessions: 1,
+          adherencePercent: 100,
+          context: {
+            completedItems: 1,
+            plannedItems: 1,
+            averageSessionLoad: 275,
+          },
+        },
+      },
+      visibleDomains: ["STRENGTH_CONDITIONING"],
+    });
+
+    expect(readStrengthConditioningAverageSessionDurationMinutes(withValues)).toBe(
+      55,
+    );
+    expect(readStrengthConditioningAverageSessionRpe(withValues)).toBe(5);
+    expect(readStrengthConditioningAverageSessionDurationMinutes(zeros)).toBe(0);
+    expect(readStrengthConditioningAverageSessionRpe(zeros)).toBe(0);
+    expect(readStrengthConditioningAverageSessionDurationMinutes(missing)).toBeNull();
+    expect(readStrengthConditioningAverageSessionRpe(missing)).toBeNull();
   });
 });

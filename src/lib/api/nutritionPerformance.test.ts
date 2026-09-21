@@ -3,6 +3,7 @@ import {
   fetchNutritionPerformance,
   fetchNutritionPerformanceHistory,
   formatNutritionHistoryChangeLabel,
+  NUTRITION_HISTORY_NUTRIENT_METRICS,
   nutritionDeviationForSelection,
   nutritionDeviationPointChange,
   parseNutritionPerformanceHistoryPayload,
@@ -59,6 +60,34 @@ const CONTRACT_DATA = {
       plannedToDate: 202.039,
       actualToDate: 90.01,
       deviationPercent: -55.45,
+    },
+    calcium: {
+      unit: "mg",
+      weeklyPlanned: 9100.4,
+      plannedToDate: 5200.2,
+      actualToDate: 2710.5,
+      deviationPercent: -47.88,
+    },
+    magnesium: {
+      unit: "mg",
+      weeklyPlanned: 2800,
+      plannedToDate: 1600,
+      actualToDate: 800,
+      deviationPercent: -50,
+    },
+    sodium: {
+      unit: "mg",
+      weeklyPlanned: 16100.3,
+      plannedToDate: 9200.1,
+      actualToDate: 4800.8,
+      deviationPercent: -47.82,
+    },
+    potassium: {
+      unit: "mg",
+      weeklyPlanned: 24500.6,
+      plannedToDate: 14000.4,
+      actualToDate: 7500.2,
+      deviationPercent: -46.43,
     },
   },
   mealBreakdown: [
@@ -167,6 +196,34 @@ describe("nutrition performance API", () => {
       actualToDate: 181.4,
       deviationPercent: -49.11,
     });
+    expectMetric(parsed.weeklyTotals.calcium, {
+      unit: "mg",
+      weeklyPlanned: 9100.4,
+      plannedToDate: 5200.2,
+      actualToDate: 2710.5,
+      deviationPercent: -47.88,
+    });
+    expectMetric(parsed.weeklyTotals.magnesium, {
+      unit: "mg",
+      weeklyPlanned: 2800,
+      plannedToDate: 1600,
+      actualToDate: 800,
+      deviationPercent: -50,
+    });
+    expectMetric(parsed.weeklyTotals.sodium, {
+      unit: "mg",
+      weeklyPlanned: 16100.3,
+      plannedToDate: 9200.1,
+      actualToDate: 4800.8,
+      deviationPercent: -47.82,
+    });
+    expectMetric(parsed.weeklyTotals.potassium, {
+      unit: "mg",
+      weeklyPlanned: 24500.6,
+      plannedToDate: 14000.4,
+      actualToDate: 7500.2,
+      deviationPercent: -46.43,
+    });
     expect(parsed.weeklyTotals.calories?.actualToDate).not.toBe(
       parsed.weeklyTotals.calories?.weeklyPlanned,
     );
@@ -220,6 +277,10 @@ describe("nutrition performance API", () => {
     expect(parsed.weeklyTotals.calories?.actualToDate).toBeNull();
     expect(parsed.weeklyTotals.calories?.deviationPercent).toBeNull();
     expect(parsed.weeklyTotals.protein?.actualToDate).toBe(0);
+    expect(parsed.weeklyTotals.calcium).toBeNull();
+    expect(parsed.weeklyTotals.magnesium).toBeNull();
+    expect(parsed.weeklyTotals.sodium).toBeNull();
+    expect(parsed.weeklyTotals.potassium).toBeNull();
     expect(parsed.mealBreakdown[0]?.actualToDateCaloriesKcal).toBeNull();
     expect(parsed.mealBreakdown[1]?.actualToDateCaloriesKcal).toBe(0);
   });
@@ -358,7 +419,30 @@ describe("nutrition deviation comparison", () => {
     expect(formatNutritionHistoryChangeLabel(
       nutritionDeviationPointChange(-32.4, -32.4),
     )).toBe("→ 0.0 pp");
-    expect(nutritionDeviationPointChange(null, -32.4)).toBeNull();
+    expect(nutritionDeviationForSelection(null, -32.4)).toBeNull();
     expect(formatNutritionHistoryChangeLabel(null)).toBe("—");
+  });
+
+  it("keeps historical nutrient comparison on the original five nutrients", () => {
+    expect([...NUTRITION_HISTORY_NUTRIENT_METRICS]).toEqual([
+      "calories",
+      "protein",
+      "carbohydrates",
+      "fat",
+      "fiber",
+    ]);
+    const current = parseNutritionPerformancePayload(contractEnvelope());
+    expect(
+      nutritionDeviationForSelection(current, "NUTRIENT", "calcium"),
+    ).toBeNull();
+    expect(
+      nutritionDeviationForSelection(current, "NUTRIENT", "magnesium"),
+    ).toBeNull();
+    expect(
+      nutritionDeviationForSelection(current, "NUTRIENT", "sodium"),
+    ).toBeNull();
+    expect(
+      nutritionDeviationForSelection(current, "NUTRIENT", "potassium"),
+    ).toBeNull();
   });
 });

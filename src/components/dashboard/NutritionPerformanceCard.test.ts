@@ -99,6 +99,34 @@ const CONTRACT_PAYLOAD = {
         actualToDate: 90.01,
         deviationPercent: -55.45,
       },
+      calcium: {
+        unit: "mg",
+        weeklyPlanned: 9100.4,
+        plannedToDate: 5200.2,
+        actualToDate: 2710.5,
+        deviationPercent: -47.88,
+      },
+      magnesium: {
+        unit: "mg",
+        weeklyPlanned: 2800,
+        plannedToDate: 1600,
+        actualToDate: 800,
+        deviationPercent: -50,
+      },
+      sodium: {
+        unit: "mg",
+        weeklyPlanned: 16100.3,
+        plannedToDate: 9200.1,
+        actualToDate: 4800.8,
+        deviationPercent: -47.82,
+      },
+      potassium: {
+        unit: "mg",
+        weeklyPlanned: 24500.6,
+        plannedToDate: 14000.4,
+        actualToDate: 7500.2,
+        deviationPercent: -46.43,
+      },
     },
     mealBreakdown: [
       {
@@ -201,6 +229,10 @@ describe("NutritionPerformanceCard", () => {
         "Carbohydrates",
         "Fat",
         "Fiber",
+        "Calcium",
+        "Magnesium",
+        "Sodium",
+        "Potassium",
       ]),
     );
     expect(nutrientHtml).toContain("Weekly Target");
@@ -224,6 +256,21 @@ describe("NutritionPerformanceCard", () => {
     expect(nutrientHtml).toContain("202.0 g");
     expect(nutrientHtml).toContain("90.0 g");
     expect(nutrientHtml).toContain("-55.5%");
+    expect(nutrientHtml).toContain("9,100.4 mg");
+    expect(nutrientHtml).toContain("5,200.2 mg");
+    expect(nutrientHtml).toContain("2,710.5 mg");
+    expect(nutrientHtml).toContain("-47.9%");
+    expect(nutrientHtml).toContain("2,800.0 mg");
+    expect(nutrientHtml).toContain("1,600.0 mg");
+    expect(nutrientHtml).toContain("800.0 mg");
+    expect(nutrientHtml).toContain("-50.0%");
+    expect(nutrientHtml).toContain("16,100.3 mg");
+    expect(nutrientHtml).toContain("9,200.1 mg");
+    expect(nutrientHtml).toContain("4,800.8 mg");
+    expect(nutrientHtml).toContain("24,500.6 mg");
+    expect(nutrientHtml).toContain("14,000.4 mg");
+    expect(nutrientHtml).toContain("7,500.2 mg");
+    expect(nutrientHtml).toContain("-46.4%");
   });
 
   it("renders meal cards in canonical order with the previous table values", () => {
@@ -337,6 +384,9 @@ describe("NutritionPerformanceCard", () => {
     expect(html).toMatch(
       /Lunch<\/h4>[\s\S]*?Actual to Date<\/dt><dd class="[^"]*">0 kcal<\/dd>/,
     );
+    expect(html).toMatch(
+      /Calcium<\/h4>[\s\S]*?Weekly Target<\/dt><dd class="[^"]*">—<\/dd>/,
+    );
   });
 
   it("compares current and historical nutrient deviations without extra tables", () => {
@@ -358,6 +408,10 @@ describe("NutritionPerformanceCard", () => {
             carbohydrates: null,
             fat: null,
             fiber: null,
+            calcium: null,
+            magnesium: null,
+            sodium: null,
+            potassium: null,
           },
           mealBreakdown: [
             {
@@ -385,6 +439,10 @@ describe("NutritionPerformanceCard", () => {
             carbohydrates: null,
             fat: null,
             fiber: null,
+            calcium: null,
+            magnesium: null,
+            sodium: null,
+            potassium: null,
           },
           mealBreakdown: [
             {
@@ -410,6 +468,10 @@ describe("NutritionPerformanceCard", () => {
     expect(html).toContain(">Carbohydrates<");
     expect(html).toContain(">Fat<");
     expect(html).toContain(">Fiber<");
+    expect(html).not.toContain('value="calcium"');
+    expect(html).not.toContain('value="magnesium"');
+    expect(html).not.toContain('value="sodium"');
+    expect(html).not.toContain('value="potassium"');
     expect(html).toContain("Current Week");
     expect(html).toContain("-47.8%");
     expect(html).toContain("-32.4%");
@@ -438,6 +500,10 @@ describe("NutritionPerformanceCard", () => {
             carbohydrates: null,
             fat: null,
             fiber: null,
+            calcium: null,
+            magnesium: null,
+            sodium: null,
+            potassium: null,
           },
           mealBreakdown: [],
         },

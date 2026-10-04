@@ -290,11 +290,29 @@ describe("coach assessment form visibility", () => {
     expect(form).toContain("1 — Very Poor");
     expect(form).toContain("5 — Very Good");
     expect(form).toContain("Save assessment");
+    expect(form).not.toContain("Cancel");
+
+    const formWithCancel = renderToStaticMarkup(
+      createElement(CoachCompetitionAssessmentForm, {
+        onSubmit: () => {},
+        onCancel: () => {},
+      }),
+    );
+    expect(formWithCancel).toContain("Save assessment");
+    expect(formWithCancel).toContain("Cancel");
+    expect(formWithCancel).toContain('type="button"');
 
     const source = readCoachSource();
     expect(source).toContain("canShowCoachCompetitionAssessmentForm(detail)");
     expect(source).toContain("{canAssess ? (");
     expect(source).toContain("Save assessment");
+    expect(source).toContain("onCancel={cancelAssessmentEntry}");
+    expect(source).toContain("setAssessmentEntryOpen(true)");
+    expect(source).toContain("{assessmentEntryOpen ? (");
+    expect(source).toContain("Loading competition assessment…");
+    expect(source).toContain("detail.id === selectedId");
+    expect(source).toContain("scrollIntoView({ block: \"nearest\" })");
+    expect(source).not.toContain("detail && assessmentEntryOpen");
     expect(source).not.toContain("patchGolfCoachCompetitionAssessment");
   });
 });
@@ -380,6 +398,9 @@ describe("no frontend Competition/OGP calculations", () => {
     expect(source).not.toContain("strokes -");
     expect(source).toContain("submitCoachCompetitionAssessmentThenRefetch");
     expect(source).toContain("fetchGolfCompetition");
+    expect(source).toContain("onAssessmentSaved?.()");
+    expect(source).toContain("fetchSportMetricsGolfWeeklySummary({");
+    expect(source).toContain("setWeeklySummary(nextSummary)");
     expect(source).toContain('presentation="dashboard"');
     expect(source).toContain("CoachCompetitionAssessmentForm");
     expect(source).toContain("showRateCompetitionAction");

@@ -87,6 +87,7 @@ import {
   submitReview,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanGenerationJob,
+  type TrainingPlanGenerationJobStatus,
   type CoachAthleteGeneratedDraftItem,
   type CoachAthleteLatestDomainDraft,
   type CoachPersistedTrainingPlanActiveDetail,
@@ -9570,9 +9571,6 @@ export function projectHeadApproveReleaseAvailability(
     return workspace;
   }
   const domainEntry = workspace.domains[domain];
-  const allowedActions = domainEntry.allowedActions.includes("RELEASE")
-    ? domainEntry.allowedActions
-    : [...domainEntry.allowedActions, "RELEASE"];
   const assignment = workspace.assignmentContext;
   const domainAssignment = assignment?.domains[domain];
   const enableHeadCoachApprovalCanRelease =
@@ -9581,6 +9579,10 @@ export function projectHeadApproveReleaseAvailability(
     assignment.releaseMode === "HEAD_COACH_APPROVAL" &&
     domainAssignment.releaseMode === "HEAD_COACH_APPROVAL" &&
     domainAssignment.canApprove === true;
+  const allowedActions =
+    domainEntry.allowedActions.includes("RELEASE") || !enableHeadCoachApprovalCanRelease
+      ? domainEntry.allowedActions
+      : [...domainEntry.allowedActions, "RELEASE"];
 
   if (
     allowedActions === domainEntry.allowedActions &&
@@ -9732,30 +9734,9 @@ export function resolveDomainReleaseVisible(input: {
     (input.versionId?.trim() ?? "") !== "";
   if (!hasPlanIds) return false;
 
-  const assignmentDomainContext = input.assignmentDomainContext;
-  if (
-    input.assignmentReleaseMode === null ||
-    input.assignmentReleaseMode === undefined ||
-    assignmentDomainContext === null ||
-    assignmentDomainContext === undefined
-  ) {
-    return input.legacyCanRelease;
-  }
-
-  const releaseModeMatches =
-    input.requiredReleaseMode !== null && input.requiredReleaseMode !== undefined
-      ? input.assignmentReleaseMode === input.requiredReleaseMode &&
-        assignmentDomainContext.releaseMode === input.requiredReleaseMode
-      : input.assignmentReleaseMode === assignmentDomainContext.releaseMode;
-  const directReleaseDomainOwner =
-    assignmentDomainContext.releaseMode === "DIRECT_DOMAIN_RELEASE" &&
-    assignmentDomainContext.ownerType === "ASSIGNED_DOMAIN_COACH" &&
-    assignmentDomainContext.ownedByCurrentUser === true;
-  const canRelease =
-    assignmentDomainContext.canRelease ||
-    (directReleaseDomainOwner && input.legacyCanRelease);
-
-  return releaseModeMatches && canRelease && input.legacyCanRelease;
+  // Backend allowedActions (legacyCanRelease) is authoritative. Assignment
+  // role/function/releaseMode labels must not hide a backend RELEASE action.
+  return input.legacyCanRelease;
 }
 
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
@@ -11385,6 +11366,53 @@ function readSafeGenerationJobError(job: CoachAthleteTrainingPlanGenerationJob):
   );
 }
 
+export const GENERATION_IN_PROGRESS_LABEL = "Fyn is generating your plan...";
+
+export const DRAFT_READY_PLAN_LOADING_MESSAGE = "Please wait, your plan is loading...";
+
+/** Presentation-only labels for stage strings the generation job UI already receives. */
+const GENERATION_PROGRESS_STAGE_LABELS: Record<string, string> = {
+  QUEUED: "Preparing your plan",
+  VALIDATING: "Preparing your plan",
+  LOADING_CONTEXT: "Preparing your plan",
+  COMPLETENESS_CONFIRMED: "Preparing your plan",
+  BUILDING_DOMAIN_CONTEXT: "Preparing your plan",
+  PREPARING_AI_INPUT: "Preparing your plan",
+  PREPARING_CONTEXT: "Preparing your plan",
+  AI_GENERATING: GENERATION_IN_PROGRESS_LABEL,
+  AI_GENERATING_PLAN: GENERATION_IN_PROGRESS_LABEL,
+  GENERATING: GENERATION_IN_PROGRESS_LABEL,
+  AI_OUTPUT_RECEIVED: "Checking your plan",
+  AI_OUTPUT_REPAIRING: "Fyn is refining your plan...",
+  VALIDATING_OUTPUT: "Checking your plan",
+  NUTRITION_HYDRATED: "Finalizing your plan",
+  DOMAIN_CANDIDATE_FINALIZED: "Finalizing your plan",
+  GENERATION_SNAPSHOT_CREATED: "Finalizing your plan",
+  PERSISTING_DRAFT: "Saving your plan",
+  DRAFT_PERSISTED: "Loading your plan",
+  COMPLETED: "Your plan is ready",
+  FAILED: "Plan generation failed",
+};
+
+export function generationProgressStageLabel(stage: string | null | undefined): string {
+  const trimmed = stage?.trim() ?? "";
+  if (trimmed === "") return GENERATION_IN_PROGRESS_LABEL;
+  const mapped = GENERATION_PROGRESS_STAGE_LABELS[trimmed.toUpperCase()];
+  if (mapped) return mapped;
+  if (/^[A-Z0-9_]+$/.test(trimmed)) return GENERATION_IN_PROGRESS_LABEL;
+  return trimmed;
+}
+
+export function generationProgressDetailMessage(
+  message: string | null | undefined,
+): string | null {
+  const trimmed = message?.trim() ?? "";
+  if (trimmed === "") return null;
+  if (GENERATION_PROGRESS_STAGE_LABELS[trimmed.toUpperCase()]) return null;
+  if (/^[A-Z0-9_]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
 export function renderGenerationJobButtonLabel(
   domain: TrainingPlanGenerationDomain,
   job: Pick<CoachAthleteTrainingPlanGenerationJob, "domain" | "status"> | null,
@@ -11392,16 +11420,100 @@ export function renderGenerationJobButtonLabel(
   if (!job || job.domain !== domain) return generationButtonLabel(domain);
   if (job.status === "COMPLETED") return "Draft ready";
   if (job.status === "FAILED") return generationButtonLabel(domain);
-  return "Generating plan...";
+  return GENERATION_IN_PROGRESS_LABEL;
 }
 
-function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob | null) {
-  if (!isGenerationJobInProgress(job)) return null;
-  const progressPercent = Math.max(0, Math.min(100, job.progressPercent ?? 0));
+export function isDraftReadyPlanLoadPending(input: {
+  domain: TrainingPlanGenerationDomain;
+  job: Pick<CoachAthleteTrainingPlanGenerationJob, "domain" | "status"> | null;
+  draftRequestState: "idle" | "loading" | "success" | "missing" | "error";
+  draftDomain: TrainingPlanGenerationDomain | null;
+  draftPresent: boolean;
+  generationError: string | null;
+  generatedPlanLoaded: boolean;
+}): boolean {
+  if (!input.job || input.job.domain !== input.domain || input.job.status !== "COMPLETED") {
+    return false;
+  }
+  if (input.generationError) return false;
+  if (input.generatedPlanLoaded) return false;
+  if (
+    input.draftDomain === input.domain
+    && input.draftRequestState === "success"
+    && input.draftPresent
+  ) {
+    return false;
+  }
+  if (
+    input.draftDomain === input.domain
+    && (input.draftRequestState === "error" || input.draftRequestState === "missing")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function clampGenerationProgressPercent(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.floor(value)));
+}
+
+/** GET progressPercent is the displayed percent. 100 only when the job is COMPLETED. */
+export function resolveAuthoritativeGenerationProgressPercent(
+  progressPercent: number | null | undefined,
+  status: TrainingPlanGenerationJobStatus | null,
+): number {
+  if (status === "COMPLETED") return 100;
+  return Math.min(clampGenerationProgressPercent(progressPercent), 99);
+}
+
+export function shouldApplyGenerationJobProgressUpdate(
+  current: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "jobId" | "progressPercent" | "status"
+  > | null,
+  incoming: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "jobId" | "progressPercent" | "status"
+  >,
+): boolean {
+  if (!current) return true;
+  const currentId = current.jobId?.trim() ?? "";
+  const incomingId = incoming.jobId?.trim() ?? "";
+  if (currentId === "" || incomingId !== currentId) return true;
+  if (incoming.status === "FAILED" || incoming.status === "COMPLETED") return true;
+  return (
+    clampGenerationProgressPercent(incoming.progressPercent)
+    >= clampGenerationProgressPercent(current.progressPercent)
+  );
+}
+
+function generationJobProgressKey(job: CoachAthleteTrainingPlanGenerationJob): string {
+  const jobId = job.jobId?.trim() ?? "";
+  const domain = job.domain ?? "";
+  return `${jobId}|${domain}`;
+}
+
+function GenerationJobProgress({
+  job,
+}: {
+  job: CoachAthleteTrainingPlanGenerationJob | null;
+}) {
+  const inProgress = isGenerationJobInProgress(job);
+  const progressPercent = resolveAuthoritativeGenerationProgressPercent(
+    job?.progressPercent,
+    job?.status ?? null,
+  );
+
+  if (!job || !inProgress) return null;
+
+  const stageLabel = generationProgressStageLabel(job.progressStage);
+  const detailMessage = generationProgressDetailMessage(job.progressMessage);
+
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
       <div className="flex items-center justify-between gap-3 text-sm text-textPrimary">
-        <span className="font-medium">{job.progressStage?.trim() || "Generating plan"}</span>
+        <span className="font-medium">{stageLabel}</span>
         <span>{progressPercent}%</span>
       </div>
       <div
@@ -11417,11 +11529,16 @@ function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob 
           style={{ width: `${progressPercent}%` }}
         />
       </div>
-      <div className="text-sm text-textSecondary">
-        {job.progressMessage?.trim() || "Training plan generation is in progress."}
-      </div>
+      {detailMessage ? (
+        <div className="text-sm text-textSecondary">{detailMessage}</div>
+      ) : null}
     </div>
   );
+}
+
+function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob | null) {
+  const jobKey = job ? generationJobProgressKey(job) : "none";
+  return <GenerationJobProgress key={jobKey} job={job} />;
 }
 
 export function isGenerationJobInProgress(
@@ -21334,6 +21451,22 @@ export function CoachAthletePlanningProfileView({
     };
   }
 
+  function isDomainDraftReadyPlanLoadPending(
+    domain: TrainingPlanGenerationDomain,
+    job: CoachAthleteTrainingPlanGenerationJob | null,
+  ): boolean {
+    return isDraftReadyPlanLoadPending({
+      domain,
+      job,
+      draftRequestState: latestSkillsDraftRequestState,
+      draftDomain: latestDraftDomain,
+      draftPresent: latestSkillsDraft !== null,
+      generationError: generatePlanError,
+      generatedPlanLoaded:
+        generatePlanSuccess !== null && generatePlanSuccessDomain === domain,
+    });
+  }
+
   function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
     const reviewModel = resolveDomainReviewSurfaceModel(domain);
     const {
@@ -21433,7 +21566,11 @@ export function CoachAthletePlanningProfileView({
                   variant="secondary"
                   disabled={
                     headCoachSkillsCreateDisabled ||
-                    (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
+                    (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null ||
+                    isDomainDraftReadyPlanLoadPending(
+                      "SKILLS",
+                      generatePlanJobsByDomain.SKILLS ?? null,
+                    )
                   }
                   onClick={() => {
                     setHeadCoachSubmittedReviewDomain("SKILLS");
@@ -21445,6 +21582,12 @@ export function CoachAthletePlanningProfileView({
                     generatePlanJobsByDomain.SKILLS ?? null,
                   )}
                 </Button>
+                {isDomainDraftReadyPlanLoadPending(
+                  "SKILLS",
+                  generatePlanJobsByDomain.SKILLS ?? null,
+                ) ? (
+                  <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                ) : null}
               </>
             ) : canOpenReleasedPlanViewer ? (
               <Button
@@ -21590,22 +21733,34 @@ export function CoachAthletePlanningProfileView({
                     <Alert variant="warning">{generatePlanLocalErrorsByDomain.SKILLS}</Alert>
                   ) : null}
                   {renderGenerationJobProgress(generatePlanJobsByDomain.SKILLS ?? null)}
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={
-                      headCoachSkillsCreateDisabled ||
-                      (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
-                    }
-                    onClick={() => {
-                      void handleGenerateTrainingPlan("SKILLS");
-                    }}
-                  >
-                    {renderGenerationJobButtonLabel(
+                  <div className="flex flex-col items-start gap-1">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={
+                        headCoachSkillsCreateDisabled ||
+                        (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null ||
+                        isDomainDraftReadyPlanLoadPending(
+                          "SKILLS",
+                          generatePlanJobsByDomain.SKILLS ?? null,
+                        )
+                      }
+                      onClick={() => {
+                        void handleGenerateTrainingPlan("SKILLS");
+                      }}
+                    >
+                      {renderGenerationJobButtonLabel(
+                        "SKILLS",
+                        generatePlanJobsByDomain.SKILLS ?? null,
+                      )}
+                    </Button>
+                    {isDomainDraftReadyPlanLoadPending(
                       "SKILLS",
                       generatePlanJobsByDomain.SKILLS ?? null,
-                    )}
-                  </Button>
+                    ) ? (
+                      <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
               {canOpenReleasedPlanViewer ? (
@@ -23791,16 +23946,25 @@ export function CoachAthletePlanningProfileView({
           ) : null}
           <div className="flex flex-wrap gap-2">
             {model.workflowStatus === "not_created" && model.canShowGenerateAction ? (
-              <Button
-                type="button"
-                variant="primary"
-                disabled={!model.generationEligibility.canStartGeneration || generationInProgress}
-                onClick={() => {
-                  void handleGenerateTrainingPlan(domain);
-                }}
-              >
-                {renderGenerationJobButtonLabel(domain, domainJob)}
-              </Button>
+              <div className="flex flex-col items-start gap-1">
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={
+                    !model.generationEligibility.canStartGeneration ||
+                    generationInProgress ||
+                    isDomainDraftReadyPlanLoadPending(domain, domainJob)
+                  }
+                  onClick={() => {
+                    void handleGenerateTrainingPlan(domain);
+                  }}
+                >
+                  {renderGenerationJobButtonLabel(domain, domainJob)}
+                </Button>
+                {isDomainDraftReadyPlanLoadPending(domain, domainJob) ? (
+                  <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                ) : null}
+              </div>
             ) : null}
             {canOpenDraft ? (
               <Button
@@ -24561,7 +24725,7 @@ export function CoachAthletePlanningProfileView({
       <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
         <div className="space-y-2 border-b border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
           <div className="space-y-1">
-            <h2 className="text-xl font-normal text-textPrimary">Training Plan</h2>
+            <h2 className="text-xl font-normal text-textPrimary">Athlete Training Plans</h2>
             <p className="text-sm text-textSecondary">
               Locked planning context for your assigned domain.
             </p>
@@ -24678,29 +24842,43 @@ export function CoachAthletePlanningProfileView({
 
             <div className="flex flex-wrap gap-2">
               {showCreateAction ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={
-                    workflow1LockedContextDomainCoachCanCreate
-                      ? false
-                      : resolveLegacyAssistantCreateButtonDisabled({
-                          generatePlanActionDisabled,
-                          localError: createPlanLocalError,
-                        })
-                  }
-                  onClick={() => {
-                    void handleGenerateTrainingPlan(currentCoachGenerationDomain);
-                  }}
-                >
-                  {createPlanLocalError === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
-                    && currentDomainGenerationJob === null
-                      ? PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL
-                      : renderGenerationJobButtonLabel(
+                <div className="flex flex-col items-start gap-1">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={
+                      (workflow1LockedContextDomainCoachCanCreate
+                        ? false
+                        : resolveLegacyAssistantCreateButtonDisabled({
+                            generatePlanActionDisabled,
+                            localError: createPlanLocalError,
+                          })) ||
+                      (currentCoachGenerationDomain !== null &&
+                        isDomainDraftReadyPlanLoadPending(
                           currentCoachGenerationDomain,
                           currentDomainGenerationJob,
-                        )}
-                </Button>
+                        ))
+                    }
+                    onClick={() => {
+                      void handleGenerateTrainingPlan(currentCoachGenerationDomain);
+                    }}
+                  >
+                    {createPlanLocalError === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
+                      && currentDomainGenerationJob === null
+                        ? PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL
+                        : renderGenerationJobButtonLabel(
+                            currentCoachGenerationDomain,
+                            currentDomainGenerationJob,
+                          )}
+                  </Button>
+                  {currentCoachGenerationDomain !== null &&
+                  isDomainDraftReadyPlanLoadPending(
+                    currentCoachGenerationDomain,
+                    currentDomainGenerationJob,
+                  ) ? (
+                    <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                  ) : null}
+                </div>
               ) : null}
 
               {canViewPlan ? (
@@ -26758,10 +26936,14 @@ export function CoachAthletePlanningProfileView({
           ) {
             return;
           }
-          setGeneratePlanJobsByDomain((current) => ({
-            ...current,
-            [domain]: job,
-          }));
+          setGeneratePlanJobsByDomain((current) => {
+            const existing = current[domain] ?? null;
+            if (!shouldApplyGenerationJobProgressUpdate(existing, job)) return current;
+            return {
+              ...current,
+              [domain]: job,
+            };
+          });
         },
       });
       if (
@@ -27123,7 +27305,7 @@ export function CoachAthletePlanningProfileView({
                     <div className="space-y-5">
                 <section className="space-y-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 1</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 1</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season
                     </h3>
@@ -27416,7 +27598,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 2</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 2</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season Phase
                     </h3>
@@ -27603,7 +27785,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 3</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 3</p>
                     <h3 className="text-sm font-medium text-textPrimary">Creation of Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Add competition or custom goals, or choose from the goal library for this
@@ -27986,7 +28168,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 4</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 4</p>
                     <h3 className="text-sm font-medium text-textPrimary">Setting / Selecting Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Choose the active goals that should shape this training plan.
@@ -30282,7 +30464,8 @@ export function CoachAthletePlanningProfileView({
                               disabled={
                                 generatePlanActionDisabled ||
                                 domainGenerationInProgress ||
-                                (generatePlanLocalErrorsByDomain[domain] ?? null) !== null
+                                (generatePlanLocalErrorsByDomain[domain] ?? null) !== null ||
+                                isDomainDraftReadyPlanLoadPending(domain, domainJob)
                               }
                               onClick={() => {
                                 void handleGenerateTrainingPlan(domain);
@@ -30290,6 +30473,11 @@ export function CoachAthletePlanningProfileView({
                             >
                               {renderGenerationJobButtonLabel(domain, domainJob)}
                             </Button>
+                            {isDomainDraftReadyPlanLoadPending(domain, domainJob) ? (
+                              <p className="text-sm text-textSecondary">
+                                {DRAFT_READY_PLAN_LOADING_MESSAGE}
+                              </p>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -30327,7 +30515,7 @@ export function CoachAthletePlanningProfileView({
 
   const trainingPlanPageHeader = (
     <PageHeader
-      title="Training Plan"
+      title="Athlete Training Plans"
       subtitle="Build context, coordinate domain plans, and review athlete plans"
     />
   );

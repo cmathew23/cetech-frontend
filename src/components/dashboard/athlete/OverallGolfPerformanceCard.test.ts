@@ -187,6 +187,8 @@ describe("OverallGolfPerformanceCard", () => {
     expect(source).toContain("summary?.overallGolferPerformance");
     expect(source).toContain("overallGolferPerformanceHistory");
     expect(source).toContain("AthletePracticePerformanceContent");
+    expect(source).toContain("refreshKey");
+    expect(source).toContain("[applicable, athleteId, entityId, versionId, refreshKey]");
   });
 });
 
@@ -197,6 +199,7 @@ describe("Overall Golf Performance dashboard mounts", () => {
       "utf8",
     );
     expect(shell).toContain("<OverallGolfPerformanceSection");
+    expect(shell).not.toContain("refreshKey");
     expect(shell.indexOf("<OverallGolfPerformanceSection")).toBeLessThan(
       shell.indexOf("<AthleteWearableSummaryWithPlanWindow"),
     );

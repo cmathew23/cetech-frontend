@@ -27,7 +27,7 @@ import {
 import { fetchSportMetricsGolfWeeklySummary, type SportMetricsGolfWeeklySummary } from "@/lib/api/sportMetricsGolf";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const COACH_COMPETITION_RATING_OPTIONS: Array<{
   value: GolfCompetitionSatisfactionRating;
@@ -79,10 +79,12 @@ export function CoachCompetitionAssessmentForm({
   disabled,
   submitting,
   onSubmit,
+  onCancel,
 }: {
   disabled?: boolean;
   submitting?: boolean;
   onSubmit: (payload: PostGolfCoachCompetitionAssessmentPayload) => void;
+  onCancel?: () => void;
 }) {
   const [rating, setRating] = useState<"" | GolfCompetitionSatisfactionRating>(
     "",
@@ -135,9 +137,21 @@ export function CoachCompetitionAssessmentForm({
           onChange={(event) => setNotes(event.target.value)}
         />
       </FormField>
-      <Button type="submit" loading={submitting} disabled={disabled || submitting || rating === ""}>
-        Save assessment
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" loading={submitting} disabled={disabled || submitting || rating === ""}>
+          Save assessment
+        </Button>
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={submitting}
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }
@@ -146,10 +160,12 @@ export function CoachCompetitionPerformanceSection({
   entityId,
   athleteId,
   trainingPlanVersionId,
+  onAssessmentSaved,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
+  onAssessmentSaved?: () => void;
 }) {
   const resolvedEntityId = entityId.trim();
   const resolvedAthleteId = athleteId.trim();
@@ -169,6 +185,8 @@ export function CoachCompetitionPerformanceSection({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [assessmentEntryOpen, setAssessmentEntryOpen] = useState(false);
+  const assessmentSectionRef = useRef<HTMLDivElement | null>(null);
   const historicalCompetition =
     useSkillsGolfHistoryComparison()?.selectedWeek?.competitionPerformance ??
     null;
@@ -179,6 +197,7 @@ export function CoachCompetitionPerformanceSection({
     setLoading(true);
     setSelectedId(null);
     setDetail(null);
+    setAssessmentEntryOpen(false);
     void (async () => {
       try {
         const summary = await fetchSportMetricsGolfWeeklySummary({
@@ -248,9 +267,30 @@ export function CoachCompetitionPerformanceSection({
     };
   }, [applicable, resolvedAthleteId, resolvedEntityId, selectedId]);
 
+  useEffect(() => {
+    if (!assessmentEntryOpen) return;
+    assessmentSectionRef.current?.scrollIntoView({ block: "nearest" });
+  }, [assessmentEntryOpen]);
+
   if (!applicable) return null;
 
   const canAssess = canShowCoachCompetitionAssessmentForm(detail);
+
+  function openAssessmentEntry(competitionId: string) {
+    setSelectedId(competitionId);
+    setAssessmentEntryOpen(true);
+  }
+
+  function cancelAssessmentEntry() {
+    const competitionId = selectedId;
+    setAssessmentEntryOpen(false);
+    setSelectedId(null);
+    if (competitionId) {
+      document
+        .getElementById(`competition-performance-${competitionId}`)
+        ?.scrollIntoView({ block: "nearest" });
+    }
+  }
 
   async function onAssess(payload: PostGolfCoachCompetitionAssessmentPayload) {
     if (!detail || submitting || !canAssess) return;
@@ -264,6 +304,37 @@ export function CoachCompetitionPerformanceSection({
         payload,
       });
       setDetail(nextDetail);
+      setHistory((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          competitions: current.competitions.map((item) =>
+            item.id === nextDetail.id
+              ? {
+                  ...item,
+                  coachCompetitionAssessment: nextDetail.coachCompetitionAssessment,
+                  coachCompetitionScore: nextDetail.coachCompetitionScore,
+                  competitionPerformance: nextDetail.competitionPerformance,
+                  overallGolferPerformanceCheckpoint:
+                    nextDetail.overallGolferPerformanceCheckpoint,
+                }
+              : item,
+          ),
+        };
+      });
+      try {
+        const nextSummary = await fetchSportMetricsGolfWeeklySummary({
+          entityId: resolvedEntityId,
+          athleteId: resolvedAthleteId,
+          trainingPlanVersionId: versionId,
+        });
+        setWeeklySummary(nextSummary);
+      } catch {
+        // Assessment already persisted; Overall Golf Performance still refreshes via onAssessmentSaved.
+      }
+      onAssessmentSaved?.();
+      setAssessmentEntryOpen(false);
+      setSelectedId(null);
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -304,29 +375,55 @@ export function CoachCompetitionPerformanceSection({
             items={history.competitions}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onOpenAssessment={openAssessmentEntry}
+            assessmentEntryCompetitionId={
+              assessmentEntryOpen ? selectedId : null
+            }
             presentation="dashboard"
             showRateCompetitionAction
           />
         ) : null}
-        {detail ? (
-          <div className="space-y-4 rounded-md border border-primary/80 bg-card p-4">
-            <AthleteCompetitionSubmittedDetail
-              competition={detail}
-              presentation="dashboard"
-            />
-            {canAssess ? (
-              <div className="space-y-3 rounded-md border border-border p-4">
-                <p className="text-sm font-medium text-textPrimary">
-                  Coach assessment
-                </p>
-                <CoachCompetitionAssessmentForm
-                  submitting={submitting}
-                  onSubmit={(payload) => {
-                    void onAssess(payload);
-                  }}
+        {assessmentEntryOpen ? (
+          <div
+            ref={assessmentSectionRef}
+            className="space-y-4 rounded-md border border-primary/80 bg-card p-4"
+          >
+            {detail !== null && detail.id === selectedId ? (
+              <>
+                <AthleteCompetitionSubmittedDetail
+                  competition={detail}
+                  presentation="dashboard"
                 />
+                {canAssess ? (
+                  <div className="space-y-3 rounded-md border border-border p-4">
+                    <p className="text-sm font-medium text-textPrimary">
+                      Coach assessment
+                    </p>
+                    <CoachCompetitionAssessmentForm
+                      key={detail.id}
+                      submitting={submitting}
+                      onSubmit={(payload) => {
+                        void onAssess(payload);
+                      }}
+                      onCancel={cancelAssessmentEntry}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-textSecondary">
+                  Loading competition assessment…
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={cancelAssessmentEntry}
+                >
+                  Cancel
+                </Button>
               </div>
-            ) : null}
+            )}
           </div>
         ) : null}
         <SkillsGolfScalarHistoryComparison

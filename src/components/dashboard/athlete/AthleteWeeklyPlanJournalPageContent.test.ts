@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADHERENCE_TIMEOUT_NOTICE_MESSAGE,
+  ADHERENCE_TIMEOUT_NOTICE_TITLE,
   buildNutritionWeeklySummaryRows,
   canLogSportResultForDayDate,
   collectDetailRows,
@@ -9,6 +11,7 @@ import {
   formatJournalDomainItemCount,
   formatNutritionMacroInlineClause,
   formatNutritionTotalsCompactLine,
+  isAthleteAdherenceLoggingTimeoutError,
   nutritionTotalsToRows,
 } from "@/components/dashboard/athlete/AthleteWeeklyPlanJournalPageContent";
 import { readFileSync } from "node:fs";
@@ -408,5 +411,81 @@ describe("S&C session RPE in weekly-plan adherence", () => {
     expect(journalSource).not.toContain("WF2A");
     expect(journalSource).not.toContain("WF2B");
     expect(journalSource).not.toContain("WF3");
+  });
+});
+
+describe("Athlete adherence logging timeout notice", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const nutritionPanel = journalSource.slice(
+    journalSource.indexOf("function NutritionSessionAdherencePanel"),
+    journalSource.indexOf("function SessionAdherencePanel"),
+  );
+  const sessionPanel = journalSource.slice(
+    journalSource.indexOf("function SessionAdherencePanel"),
+    journalSource.indexOf("function renderJournalItem("),
+  );
+
+  it("detects only the frontend Request timed out error", () => {
+    expect(
+      isAthleteAdherenceLoggingTimeoutError({
+        message: "Request timed out",
+        status: 0,
+      }),
+    ).toBe(true);
+    expect(
+      isAthleteAdherenceLoggingTimeoutError({
+        message: "Could not save adherence.",
+        status: 500,
+      }),
+    ).toBe(false);
+    expect(isAthleteAdherenceLoggingTimeoutError(new Error("Request timed out"))).toBe(
+      false,
+    );
+  });
+
+  it("uses the existing Modal with exact timeout copy and OK dismiss only", () => {
+    expect(ADHERENCE_TIMEOUT_NOTICE_TITLE).toBe("Taking longer than expected");
+    expect(ADHERENCE_TIMEOUT_NOTICE_MESSAGE).toBe(
+      "Your update may still have been saved. Refresh the page and check the session status before trying again.",
+    );
+    expect(journalSource).toContain('import { Modal } from "@/components/ui/Modal"');
+    expect(journalSource).toContain("AdherenceLoggingTimeoutNoticeModal");
+    expect(journalSource).toContain("OK");
+    const timeoutModal = journalSource.slice(
+      journalSource.indexOf("function AdherenceLoggingTimeoutNoticeModal"),
+      journalSource.indexOf("const DOMAIN_SECTIONS"),
+    );
+    expect(timeoutModal).toContain("onClick={onDismiss}");
+    expect(timeoutModal).not.toContain("handleSubmit");
+    expect(timeoutModal).not.toContain("recordPlannedSessionAdherenceEvent");
+    expect(timeoutModal).not.toContain("recordNutritionPlannedSessionAdherenceEvent");
+    expect(timeoutModal).not.toContain("setReloadKey");
+  });
+
+  it("shows the timeout modal on Skills, Nutrition, and S&C logging without retrying", () => {
+    expect(nutritionPanel).toContain("isAthleteAdherenceLoggingTimeoutError");
+    expect(sessionPanel).toContain("isAthleteAdherenceLoggingTimeoutError");
+    expect(nutritionPanel).toContain("setTimeoutNoticeOpen(true)");
+    expect(sessionPanel).toContain("setTimeoutNoticeOpen(true)");
+    expect(nutritionPanel).toContain("onDismiss={() => setTimeoutNoticeOpen(false)}");
+    expect(sessionPanel).toContain("onDismiss={() => setTimeoutNoticeOpen(false)}");
+    expect(nutritionPanel).toContain("recordNutritionPlannedSessionAdherenceEvent");
+    expect(sessionPanel).toContain("recordPlannedSessionAdherenceEvent");
+    expect(nutritionPanel).not.toContain('text: "Request timed out"');
+    expect(sessionPanel).not.toContain('text: "Request timed out"');
+  });
+
+  it("keeps success and non-timeout error alerts unchanged", () => {
+    expect(nutritionPanel).toContain("Nutrition adherence saved.");
+    expect(sessionPanel).toContain("Adherence saved.");
+    expect(nutritionPanel).toContain("Could not save nutrition adherence.");
+    expect(sessionPanel).toContain("Could not save adherence.");
+    expect(nutritionPanel).toContain("isNormalizedApiError(error)");
+    expect(sessionPanel).toContain("isNormalizedApiError(error)");
   });
 });

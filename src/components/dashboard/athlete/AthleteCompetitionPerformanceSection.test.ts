@@ -535,12 +535,13 @@ describe("athlete dashboard competition presentation", () => {
     expect(html).toContain("COACH ASSESSMENT PENDING");
     expect(html).not.toContain("NO RESULT YET");
     expect(html).not.toContain("Rate Competition");
+    expect(html).not.toContain("Assess Performance");
     expect(html).toContain("Club Championship");
     expect(html).not.toContain("Unavailable");
     expect(html).not.toContain("CHAMPIONSHIP");
   });
 
-  it("shows Rate Competition on a coach pending-assessment card without a second form", () => {
+  it("shows Assess Performance on a coach pending-assessment card without a second form", () => {
     const item: GolfCompetitionHistoryPoint = {
       id: "competition-1",
       name: "KS GOLF 2",
@@ -575,9 +576,75 @@ describe("athlete dashboard competition presentation", () => {
     expect(html).toContain("SCORE TO PAR");
     expect(html).toContain("Athlete score: 66.7 / 100");
     expect(html).toContain("COACH ASSESSMENT PENDING");
-    expect(html).toContain("Rate Competition →");
+    expect(html).toContain("Assess Performance");
+    expect(html).not.toContain("Rate Competition");
     expect(html).not.toContain("NO RESULT YET");
-    expect(html.match(/Rate Competition/g)?.length).toBe(1);
+    expect(html.match(/Assess Performance/g)?.length).toBe(1);
+    const hiddenWhileOpen = renderToStaticMarkup(
+      createElement(AthleteCompetitionHistoryList, {
+        items: [item],
+        selectedId: item.id,
+        onSelect: () => {},
+        onOpenAssessment: () => {},
+        assessmentEntryCompetitionId: item.id,
+        presentation: "dashboard",
+        showRateCompetitionAction: true,
+      }),
+    );
+    expect(hiddenWhileOpen).toContain("COACH ASSESSMENT PENDING");
+    expect(hiddenWhileOpen).not.toContain("Assess Performance");
+  });
+
+  it("keeps assessed competition cards compact with a View Assessment accordion", () => {
+    const item: GolfCompetitionHistoryPoint = {
+      id: "competition-1",
+      name: "FUJI GOLF 1",
+      type: "LOCAL",
+      format: 18,
+      venue: "PeakFlow Golf Club",
+      startDate: "2026-09-12T00:00:00.000Z",
+      numberOfDays: 1,
+      seasonPhase: "IN_SEASON",
+      seasonCycleId: "season-2026",
+      seasonYear: 2026,
+      status: "SUBMITTED",
+      competitionSummary: summary({ scoreToPar: 1 }),
+      athleteAverageSatisfaction: null,
+      athleteCompetitionScore: 47.2,
+      coachCompetitionAssessment: {
+        id: "assessment-1",
+        competitionId: "competition-1",
+        coachProfileId: "coach-1",
+        createdByUserId: "coach-user",
+        rating: 4,
+        notes: "Good decisions",
+        coachCompetitionScore: 50,
+        createdAt: "2026-09-13T10:00:00.000Z",
+        updatedAt: "2026-09-13T10:00:00.000Z",
+      },
+      coachCompetitionScore: 50,
+      competitionPerformance: 48.6,
+      overallGolferPerformanceCheckpoint: null,
+    };
+    const html = renderToStaticMarkup(
+      createElement(AthleteCompetitionHistoryList, {
+        items: [item],
+        selectedId: item.id,
+        onSelect: () => {},
+        presentation: "dashboard",
+        showRateCompetitionAction: true,
+      }),
+    );
+    expect(html).toContain("FUJI GOLF 1");
+    expect(html).toContain("+1");
+    expect(html).toContain("Athlete score: 47.2 / 100");
+    expect(html).toContain("View Assessment");
+    expect(html).toContain("Hide Assessment");
+    expect(html).toContain("Coach rating: 4");
+    expect(html).toContain("Good decisions");
+    expect(html).not.toContain("Assess Performance");
+    expect(html).not.toContain("COACH ASSESSMENT PENDING");
+    expect(html).not.toContain("Rate Competition");
   });
 
   it("titles selected dashboard detail with the competition name", () => {

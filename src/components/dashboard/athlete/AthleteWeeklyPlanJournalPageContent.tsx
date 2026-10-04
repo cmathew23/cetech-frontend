@@ -19,6 +19,7 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Modal } from "@/components/ui/Modal";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
@@ -73,6 +74,54 @@ const RefreshWeeklyAdherenceAfterEventContext = createContext<
 
 function useRefreshWeeklyAdherenceAfterEvent(): () => Promise<void> {
   return useContext(RefreshWeeklyAdherenceAfterEventContext);
+}
+
+export const ADHERENCE_TIMEOUT_NOTICE_TITLE = "Taking longer than expected";
+export const ADHERENCE_TIMEOUT_NOTICE_MESSAGE =
+  "Your update may still have been saved. Refresh the page and check the session status before trying again.";
+
+export function isAthleteAdherenceLoggingTimeoutError(error: unknown): boolean {
+  return (
+    isNormalizedApiError(error) &&
+    error.message.trim().toLowerCase() === "request timed out"
+  );
+}
+
+function AdherenceLoggingTimeoutNoticeModal({
+  open,
+  onDismiss,
+}: {
+  open: boolean;
+  onDismiss: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <Modal
+      className="w-full max-w-[480px] overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
+      aria-labelledby="adherence-timeout-notice-title"
+      aria-describedby="adherence-timeout-notice-message"
+    >
+      <div className="flex flex-col px-4 py-6 sm:px-8 sm:py-8">
+        <h2
+          id="adherence-timeout-notice-title"
+          className="mb-3 text-xl font-semibold tracking-tight text-textPrimary"
+        >
+          {ADHERENCE_TIMEOUT_NOTICE_TITLE}
+        </h2>
+        <p
+          id="adherence-timeout-notice-message"
+          className="mb-6 text-base leading-relaxed text-textSecondary"
+        >
+          {ADHERENCE_TIMEOUT_NOTICE_MESSAGE}
+        </p>
+        <div className="flex justify-end">
+          <Button type="button" variant="primary" onClick={onDismiss}>
+            OK
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 const DOMAIN_SECTIONS = [
@@ -1708,6 +1757,7 @@ function NutritionSessionAdherencePanel({
     variant: "success" | "danger";
     text: string;
   } | null>(null);
+  const [timeoutNoticeOpen, setTimeoutNoticeOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1773,6 +1823,7 @@ function NutritionSessionAdherencePanel({
 
     setSubmitting(true);
     setSubmitMessage(null);
+    setTimeoutNoticeOpen(false);
     try {
       const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
       await recordNutritionPlannedSessionAdherenceEvent(plannedSessionId, {
@@ -1791,6 +1842,10 @@ function NutritionSessionAdherencePanel({
       setSubmitMessage({ variant: "success", text: "Nutrition adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
+      if (isAthleteAdherenceLoggingTimeoutError(error)) {
+        setTimeoutNoticeOpen(true);
+        return;
+      }
       setSubmitMessage({
         variant: "danger",
         text: isNormalizedApiError(error)
@@ -1981,6 +2036,10 @@ function NutritionSessionAdherencePanel({
           {submitMessage.text}
         </Alert>
       ) : null}
+      <AdherenceLoggingTimeoutNoticeModal
+        open={timeoutNoticeOpen}
+        onDismiss={() => setTimeoutNoticeOpen(false)}
+      />
     </div>
   );
 }
@@ -2015,6 +2074,7 @@ function SessionAdherencePanel({
     variant: "success" | "danger";
     text: string;
   } | null>(null);
+  const [timeoutNoticeOpen, setTimeoutNoticeOpen] = useState(false);
   const refreshWeeklyAdherenceAfterEvent = useRefreshWeeklyAdherenceAfterEvent();
 
   useEffect(() => {
@@ -2100,6 +2160,7 @@ function SessionAdherencePanel({
 
     setSubmitting(true);
     setSubmitMessage(null);
+    setTimeoutNoticeOpen(false);
     try {
       const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
       await recordPlannedSessionAdherenceEvent(plannedSessionId, {
@@ -2120,6 +2181,10 @@ function SessionAdherencePanel({
       setSubmitMessage({ variant: "success", text: "Adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
+      if (isAthleteAdherenceLoggingTimeoutError(error)) {
+        setTimeoutNoticeOpen(true);
+        return;
+      }
       setSubmitMessage({
         variant: "danger",
         text: isNormalizedApiError(error)
@@ -2387,6 +2452,10 @@ function SessionAdherencePanel({
           {submitMessage.text}
         </Alert>
       ) : null}
+      <AdherenceLoggingTimeoutNoticeModal
+        open={timeoutNoticeOpen}
+        onDismiss={() => setTimeoutNoticeOpen(false)}
+      />
     </div>
   );
 }

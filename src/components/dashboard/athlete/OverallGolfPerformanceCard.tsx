@@ -157,12 +157,14 @@ export function OverallGolfPerformanceSection({
   trainingPlanVersionId,
   titleClassName = ATHLETE_DASHBOARD_CARD_TITLE_CLASS,
   audience = "athlete",
+  refreshKey = 0,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   titleClassName?: string;
   audience?: "athlete" | "coach";
+  refreshKey?: number;
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -191,7 +193,7 @@ export function OverallGolfPerformanceSection({
     return () => {
       cancelled = true;
     };
-  }, [applicable, athleteId, entityId, versionId]);
+  }, [applicable, athleteId, entityId, versionId, refreshKey]);
 
   if (!applicable) return null;
 

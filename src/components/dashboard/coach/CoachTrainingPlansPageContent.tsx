@@ -245,7 +245,7 @@ export function CoachTrainingPlansPageContent() {
   return (
     <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
       <PageHeader
-        title="Training Plan"
+        title="Athlete Training Plans"
         subtitle="Create and manage athlete training plans."
       />
 

@@ -70,6 +70,13 @@ import {
   shouldBlockWorkflowRenderForWorkspace,
   canGenerateFromLockedPlanningContextForDomain,
   isGenerationJobInProgress,
+  resolveAuthoritativeGenerationProgressPercent,
+  shouldApplyGenerationJobProgressUpdate,
+  generationProgressStageLabel,
+  generationProgressDetailMessage,
+  isDraftReadyPlanLoadPending,
+  DRAFT_READY_PLAN_LOADING_MESSAGE,
+  GENERATION_IN_PROGRESS_LABEL,
   resolveGeneratePlanLocalError,
   resolveWorkflow2SubmittedDomainSkillsSlotProjection,
   shouldClearWorkflow2SkillsSubmitSlotError,
@@ -97,6 +104,7 @@ import {
   resolveDirectReleaseDomainOwnerApproveVisible,
   resolveDirectReleaseSkillsOwnerApproveVisible,
   resolveDomainReleaseVisible,
+  isDirectReleaseDomainOwner,
   resolveDomainReviewDrawerWorkflowActions,
   resolveDomainReviewDrawerLayoutClasses,
   resolveContextBuilderDrawerLayoutClasses,
@@ -12524,7 +12532,7 @@ describe("resolveDomainHeadCoachReviewActionVisible", () => {
           assignmentReleaseMode: "HEAD_COACH_APPROVAL",
           assignmentDomainContext,
           requiredReleaseMode: "HEAD_COACH_APPROVAL",
-          legacyCanRelease: true,
+          legacyCanRelease: false,
           planId: `${domain.toLowerCase()}-plan`,
           versionId: `${domain.toLowerCase()}-version`,
         }),
@@ -18164,7 +18172,7 @@ describe("resolveDomainReleaseVisible", () => {
         planId: "plan-1",
         versionId: "version-1",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("allows direct domain release only when assignment mode and canRelease allow it", () => {
@@ -18212,7 +18220,7 @@ describe("resolveDomainReleaseVisible", () => {
         planId: "plan-1",
         versionId: "version-1",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("hides Workflow 3 non-owned domain release when assignment denies canRelease", () => {
@@ -18233,7 +18241,7 @@ describe("resolveDomainReleaseVisible", () => {
           releaseMode: "DIRECT_DOMAIN_RELEASE",
         },
         requiredReleaseMode: "DIRECT_DOMAIN_RELEASE",
-        legacyCanRelease: true,
+        legacyCanRelease: false,
         planId: "plan-1",
         versionId: "version-1",
       }),
@@ -18285,6 +18293,90 @@ describe("resolveDomainReleaseVisible", () => {
         planId: "plan-1",
         versionId: null,
       }),
+    ).toBe(false);
+  });
+
+  it("shows Head Coach + Skills owner release from backend allowedActions even when assignment.canRelease is false", () => {
+    const allowedActions = new Set(["RELEASE"]);
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "HEAD_COACH_SELF",
+          ownedByCurrentUser: true,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        }),
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: allowedActions.has("RELEASE"),
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainReviewDrawerWorkflowActions({
+        workflowStatus: "approved",
+        canShowViewPlan: false,
+        canShowSubmitForReview: false,
+        canShowReviseAction: false,
+        canShowApproveAction: false,
+        canShowRequestRevisionAction: false,
+        canShowReleaseAction: true,
+        hasViewPlanContext: false,
+      }).canShowReleaseAction,
+    ).toBe(true);
+  });
+
+  it("hides separate Skills specialist release when backend allowedActions excludes RELEASE", () => {
+    const allowedActions = new Set<string>();
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "ASSIGNED_DOMAIN_COACH",
+          ownedByCurrentUser: true,
+          canGenerate: true,
+          canSubmitForReview: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        }),
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: allowedActions.has("RELEASE"),
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides release when the plan is not Head Coach approved and backend excludes RELEASE", () => {
+    expect(
+      resolveDomainReleaseVisible({
+        assignmentReleaseMode: "HEAD_COACH_APPROVAL",
+        assignmentDomainContext: shellAssignmentDomain({
+          ownerType: "HEAD_COACH_SELF",
+          ownedByCurrentUser: true,
+          canApprove: true,
+          canRelease: false,
+          releaseMode: "HEAD_COACH_APPROVAL",
+        }),
+        requiredReleaseMode: "HEAD_COACH_APPROVAL",
+        legacyCanRelease: false,
+        planId: "skills-plan",
+        versionId: "skills-version",
+      }),
+    ).toBe(false);
+    expect(
+      resolveDomainReviewDrawerWorkflowActions({
+        workflowStatus: "submitted_for_review",
+        canShowViewPlan: false,
+        canShowSubmitForReview: false,
+        canShowReviseAction: false,
+        canShowApproveAction: true,
+        canShowRequestRevisionAction: true,
+        canShowReleaseAction: true,
+        hasViewPlanContext: false,
+      }).canShowReleaseAction,
     ).toBe(false);
   });
 });
@@ -18343,11 +18435,19 @@ describe("HEAD_APPROVE local release projection", () => {
     domain: "SKILLS" | "NUTRITION" | "S_AND_C",
     requiredReleaseMode: "HEAD_COACH_APPROVAL" | "DIRECT_DOMAIN_RELEASE" = "HEAD_COACH_APPROVAL",
   ) {
+    const assignmentDomainContext = workspace.assignmentContext?.domains[domain];
+    const directReleaseDomainOwner = isDirectReleaseDomainOwner({
+      domain,
+      assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
+      assignmentDomainContext,
+    });
     return resolveDomainReleaseVisible({
       assignmentReleaseMode: workspace.assignmentContext?.releaseMode,
-      assignmentDomainContext: workspace.assignmentContext?.domains[domain],
+      assignmentDomainContext,
       requiredReleaseMode,
-      legacyCanRelease: workspace.domains[domain].allowedActions.includes("RELEASE"),
+      legacyCanRelease: directReleaseDomainOwner
+        ? true
+        : workspace.domains[domain].allowedActions.includes("RELEASE"),
       planId: planIds.planId,
       versionId: planIds.versionId,
     });
@@ -18423,7 +18523,7 @@ describe("HEAD_APPROVE local release projection", () => {
       action: "HEAD_APPROVE",
       ...planIds,
     })!;
-    expect(afterUnauthorizedApprove.domains.S_AND_C.allowedActions).toContain("RELEASE");
+    expect(afterUnauthorizedApprove.domains.S_AND_C.allowedActions).not.toContain("RELEASE");
     expect(afterUnauthorizedApprove.assignmentContext?.domains.S_AND_C.canRelease).toBe(false);
     expect(releaseVisible(afterUnauthorizedApprove, "S_AND_C")).toBe(false);
   });
@@ -21241,8 +21341,193 @@ describe("Workflow 1 assistant domain action visibility", () => {
       }),
     ).toBe(true);
     expect(renderGenerationJobButtonLabel("SKILLS", skillsGenerationJob)).toBe(
-      "Generating plan...",
+      GENERATION_IN_PROGRESS_LABEL,
     );
+  });
+
+  it("displays authoritative generation progress without interpolating between polls", () => {
+    const reportedPercents = [0, 10, 20, 30, 35, 50, 65, 80, 85, 92, 95, 98];
+    for (const percent of reportedPercents) {
+      expect(resolveAuthoritativeGenerationProgressPercent(percent, "RUNNING")).toBe(percent);
+    }
+    expect(resolveAuthoritativeGenerationProgressPercent(100, "COMPLETED")).toBe(100);
+    expect(resolveAuthoritativeGenerationProgressPercent(100, "RUNNING")).toBe(99);
+    expect(resolveAuthoritativeGenerationProgressPercent(82, "RUNNING")).toBe(82);
+    expect(resolveAuthoritativeGenerationProgressPercent(88, "RUNNING")).toBe(88);
+    expect(resolveAuthoritativeGenerationProgressPercent(90, "RUNNING")).toBe(90);
+    expect(
+      [85, 92].map((percent) => resolveAuthoritativeGenerationProgressPercent(percent, "RUNNING")),
+    ).toEqual([85, 92]);
+    expect(
+      [65, 65, 65, 65].map((percent) =>
+        resolveAuthoritativeGenerationProgressPercent(percent, "RUNNING"),
+      ),
+    ).toEqual([65, 65, 65, 65]);
+    expect(resolveAuthoritativeGenerationProgressPercent(80, "RUNNING")).toBe(80);
+    expect(resolveAuthoritativeGenerationProgressPercent(65, "FAILED")).toBe(65);
+    expect(isGenerationJobInProgress({ status: "FAILED" })).toBe(false);
+    expect(renderGenerationJobButtonLabel("SKILLS", { domain: "SKILLS", status: "FAILED" })).toBe(
+      "Create Skills Plan",
+    );
+    expect(
+      renderGenerationJobButtonLabel("S_AND_C", { domain: "S_AND_C", status: "FAILED" }),
+    ).toBe("Create S&C Plan");
+    expect(
+      renderGenerationJobButtonLabel("NUTRITION", { domain: "NUTRITION", status: "FAILED" }),
+    ).toBe("Create Nutrition Plan");
+
+    const heldJob = {
+      jobId: "job-1",
+      progressPercent: 65,
+      status: "RUNNING" as const,
+    };
+    expect(shouldApplyGenerationJobProgressUpdate(heldJob, { ...heldJob, progressPercent: 65 })).toBe(
+      true,
+    );
+    expect(shouldApplyGenerationJobProgressUpdate(heldJob, { ...heldJob, progressPercent: 80 })).toBe(
+      true,
+    );
+    expect(shouldApplyGenerationJobProgressUpdate(heldJob, { ...heldJob, progressPercent: 64 })).toBe(
+      false,
+    );
+    expect(
+      shouldApplyGenerationJobProgressUpdate(
+        { jobId: "job-1", progressPercent: 80, status: "RUNNING" },
+        { jobId: "job-1", progressPercent: 65, status: "FAILED" },
+      ),
+    ).toBe(true);
+    expect(
+      shouldApplyGenerationJobProgressUpdate(
+        { jobId: "job-1", progressPercent: 98, status: "RUNNING" },
+        { jobId: "job-2", progressPercent: 0, status: "QUEUED" },
+      ),
+    ).toBe(true);
+  });
+
+  it("maps generation stages to readable labels and holds Draft ready while the plan loads", () => {
+    expect(generationProgressStageLabel("QUEUED")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("VALIDATING")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("LOADING_CONTEXT")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("COMPLETENESS_CONFIRMED")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("BUILDING_DOMAIN_CONTEXT")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("PREPARING_AI_INPUT")).toBe("Preparing your plan");
+    expect(generationProgressStageLabel("AI_GENERATING")).toBe(GENERATION_IN_PROGRESS_LABEL);
+    expect(generationProgressStageLabel("AI_OUTPUT_RECEIVED")).toBe("Checking your plan");
+    expect(generationProgressStageLabel("AI_OUTPUT_REPAIRING")).toBe("Fyn is refining your plan...");
+    expect(generationProgressStageLabel("VALIDATING_OUTPUT")).toBe("Checking your plan");
+    expect(generationProgressStageLabel("NUTRITION_HYDRATED")).toBe("Finalizing your plan");
+    expect(generationProgressStageLabel("DOMAIN_CANDIDATE_FINALIZED")).toBe("Finalizing your plan");
+    expect(generationProgressStageLabel("GENERATION_SNAPSHOT_CREATED")).toBe("Finalizing your plan");
+    expect(generationProgressStageLabel("PERSISTING_DRAFT")).toBe("Saving your plan");
+    expect(generationProgressStageLabel("DRAFT_PERSISTED")).toBe("Loading your plan");
+    expect(generationProgressStageLabel("COMPLETED")).toBe("Your plan is ready");
+    expect(generationProgressStageLabel("FAILED")).toBe("Plan generation failed");
+    for (const stage of [
+      "COMPLETENESS_CONFIRMED",
+      "AI_OUTPUT_RECEIVED",
+      "AI_OUTPUT_REPAIRING",
+      "NUTRITION_HYDRATED",
+      "DOMAIN_CANDIDATE_FINALIZED",
+      "GENERATION_SNAPSHOT_CREATED",
+      "DRAFT_PERSISTED",
+      "SOME_NEW_STAGE",
+    ]) {
+      expect(generationProgressStageLabel(stage)).not.toBe(stage);
+      expect(generationProgressStageLabel(stage)).not.toMatch(/_/);
+    }
+    expect(generationProgressDetailMessage("COMPLETENESS_CONFIRMED")).toBeNull();
+    expect(generationProgressDetailMessage("Planner AI is generating the Nutrition plan.")).toBe(
+      "Planner AI is generating the Nutrition plan.",
+    );
+    expect(DRAFT_READY_PLAN_LOADING_MESSAGE).toBe("Please wait, your plan is loading...");
+
+    for (const domain of ["SKILLS", "S_AND_C", "NUTRITION"] as const) {
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "COMPLETED" },
+          draftRequestState: "loading",
+          draftDomain: domain,
+          draftPresent: false,
+          generationError: null,
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(true);
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "COMPLETED" },
+          draftRequestState: "success",
+          draftDomain: domain,
+          draftPresent: false,
+          generationError: null,
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(true);
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "COMPLETED" },
+          draftRequestState: "success",
+          draftDomain: domain,
+          draftPresent: true,
+          generationError: null,
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(false);
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "COMPLETED" },
+          draftRequestState: "loading",
+          draftDomain: domain,
+          draftPresent: true,
+          generationError: null,
+          generatedPlanLoaded: true,
+        }),
+      ).toBe(false);
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "COMPLETED" },
+          draftRequestState: "error",
+          draftDomain: domain,
+          draftPresent: false,
+          generationError: null,
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(false);
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "FAILED" },
+          draftRequestState: "loading",
+          draftDomain: domain,
+          draftPresent: false,
+          generationError: "failed",
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(false);
+      expect(renderGenerationJobButtonLabel(domain, { domain, status: "COMPLETED" })).toBe(
+        "Draft ready",
+      );
+      expect(renderGenerationJobButtonLabel(domain, { domain, status: "RUNNING" })).toBe(
+        GENERATION_IN_PROGRESS_LABEL,
+      );
+      expect(
+        isDraftReadyPlanLoadPending({
+          domain,
+          job: { domain, status: "RUNNING" },
+          draftRequestState: "loading",
+          draftDomain: domain,
+          draftPresent: false,
+          generationError: null,
+          generatedPlanLoaded: false,
+        }),
+      ).toBe(false);
+      expect(resolveAuthoritativeGenerationProgressPercent(98, "RUNNING")).toBe(98);
+      expect(generationProgressStageLabel("DRAFT_PERSISTED")).not.toBe("Draft ready");
+    }
   });
 
   it("shows locked-context missing details instead of season error for incomplete locked context", () => {

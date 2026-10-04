@@ -74,6 +74,7 @@ export function CoachAthletePerformancePageContent() {
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
   const [weekRange, setWeekRange] = useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
+  const [golfWeeklySummaryRefreshKey, setGolfWeeklySummaryRefreshKey] = useState(0);
 
   const wearableViewerContext = resolveCoachWearableViewerContext({
     academyCoachRole: dashboard?.academyCoachRole ?? null,
@@ -308,6 +309,9 @@ export function CoachAthletePerformancePageContent() {
                 entityId={entityId}
                 athleteId={selectedAthleteId}
                 trainingPlanVersionId={trainingPlanVersionId}
+                onAssessmentSaved={() => {
+                  setGolfWeeklySummaryRefreshKey((current) => current + 1);
+                }}
               />
               <OverallGolfPerformanceSection
                 entityId={entityId}
@@ -315,6 +319,7 @@ export function CoachAthletePerformancePageContent() {
                 trainingPlanVersionId={trainingPlanVersionId}
                 titleClassName={DASHBOARD_CARD_TITLE_CLASS}
                 audience="coach"
+                refreshKey={golfWeeklySummaryRefreshKey}
               />
             </SkillsGolfHistoryComparisonProvider>
           ) : null}

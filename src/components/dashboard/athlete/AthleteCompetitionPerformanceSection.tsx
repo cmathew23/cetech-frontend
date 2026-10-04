@@ -15,6 +15,7 @@ import {
 } from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { DASHBOARD_SECTION_HEADING_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import {
   fetchGolfCompetition,
@@ -30,6 +31,7 @@ import { fetchSportMetricsGolfWeeklySummary, type SportMetricsGolfWeeklySummary 
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly, formatDateTime } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const UNAVAILABLE = "Unavailable";
@@ -62,6 +64,34 @@ export function displayScoreToPar(value: number | null): string {
 export function displayAthleteScoreOutOf100(value: number | null): string {
   if (value === null) return UNAVAILABLE;
   return `${displayBackendNumber(value)} / 100`;
+}
+
+function CompetitionAssessmentAccordion({
+  assessment,
+  coachCompetitionScore,
+}: {
+  assessment: NonNullable<GolfCompetitionHistoryPoint["coachCompetitionAssessment"]>;
+  coachCompetitionScore: number | null;
+}) {
+  return (
+    <details className="group mt-2">
+      <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-textPrimary marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="group-open:hidden">View Assessment</span>
+        <span className="hidden group-open:inline">Hide Assessment</span>
+        <ChevronDown
+          className="h-4 w-4 shrink-0 text-textSecondary transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="mt-2 space-y-1 text-sm text-textSecondary">
+        <p>Coach rating: {String(assessment.rating)}</p>
+        {assessment.notes?.trim() ? <p>Coach notes: {assessment.notes}</p> : null}
+        {coachCompetitionScore !== null ? (
+          <p>Coach score: {displayBackendNumber(coachCompetitionScore)}</p>
+        ) : null}
+      </div>
+    </details>
+  );
 }
 
 function hasAthleteCompetitionResult(input: {
@@ -343,12 +373,16 @@ export function AthleteCompetitionHistoryList({
   items,
   selectedId,
   onSelect,
+  onOpenAssessment,
+  assessmentEntryCompetitionId = null,
   presentation = "detail",
   showRateCompetitionAction = false,
 }: {
   items: GolfCompetitionHistoryPoint[];
   selectedId: string | null;
   onSelect: (competitionId: string) => void;
+  onOpenAssessment?: (competitionId: string) => void;
+  assessmentEntryCompetitionId?: string | null;
   presentation?: SportsMetricsPresentation;
   showRateCompetitionAction?: boolean;
 }) {
@@ -374,7 +408,8 @@ export function AthleteCompetitionHistoryList({
           const showRateAction =
             showRateCompetitionAction &&
             item.status === "SUBMITTED" &&
-            assessmentPending;
+            assessmentPending &&
+            assessmentEntryCompetitionId !== item.id;
           const dominantValue =
             item.competitionPerformance !== null
               ? displayBackendNumber(item.competitionPerformance)
@@ -392,49 +427,68 @@ export function AthleteCompetitionHistoryList({
 
           return (
           <li key={item.id}>
-            <button
-              type="button"
-              className={cn(
-                "w-full text-left",
+            <div
+              id={`competition-performance-${item.id}`}
+              className={
                 selectedId === item.id
                   ? "rounded-md ring-2 ring-primary/70"
-                  : "",
-              )}
-              onClick={() => onSelect(item.id)}
+                  : ""
+              }
             >
-              <AthletePerformanceStat
-                title={item.name}
-                value={dominantValue}
-                caption={caption}
-                supporting={
-                  <>
-                    {item.athleteCompetitionScore !== null &&
-                    !(
-                      item.competitionPerformance === null &&
-                      item.competitionSummary.scoreToPar == null
-                    ) ? (
-                      <p>
-                        Athlete score:{" "}
-                        {displayAthleteScoreOutOf100(item.athleteCompetitionScore)}
-                      </p>
-                    ) : null}
-                    {assessmentPending ? (
-                      <p>COACH ASSESSMENT PENDING</p>
-                    ) : item.overallGolferPerformanceCheckpoint
-                        ?.overallGolferPerformance != null ? (
-                      <p>
-                        Overall{" "}
-                        {displayBackendNumber(
-                          item.overallGolferPerformanceCheckpoint
-                            .overallGolferPerformance,
-                        )}
-                      </p>
-                    ) : null}
-                    {showRateAction ? <p>Rate Competition →</p> : null}
-                  </>
-                }
-              />
-            </button>
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={() => onSelect(item.id)}
+              >
+                <AthletePerformanceStat
+                  title={item.name}
+                  value={dominantValue}
+                  caption={caption}
+                  supporting={
+                    <>
+                      {item.athleteCompetitionScore !== null &&
+                      !(
+                        item.competitionPerformance === null &&
+                        item.competitionSummary.scoreToPar == null
+                      ) ? (
+                        <p>
+                          Athlete score:{" "}
+                          {displayAthleteScoreOutOf100(item.athleteCompetitionScore)}
+                        </p>
+                      ) : null}
+                      {assessmentPending ? (
+                        <p>COACH ASSESSMENT PENDING</p>
+                      ) : item.overallGolferPerformanceCheckpoint
+                          ?.overallGolferPerformance != null ? (
+                        <p>
+                          Overall{" "}
+                          {displayBackendNumber(
+                            item.overallGolferPerformanceCheckpoint
+                              .overallGolferPerformance,
+                          )}
+                        </p>
+                      ) : null}
+                    </>
+                  }
+                />
+              </button>
+              {showRateAction ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="mt-2"
+                  onClick={() => (onOpenAssessment ?? onSelect)(item.id)}
+                >
+                  Assess Performance
+                </Button>
+              ) : null}
+              {!assessmentPending && item.coachCompetitionAssessment ? (
+                <CompetitionAssessmentAccordion
+                  assessment={item.coachCompetitionAssessment}
+                  coachCompetitionScore={item.coachCompetitionScore}
+                />
+              ) : null}
+            </div>
           </li>
           );
         })}

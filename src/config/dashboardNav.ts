@@ -38,10 +38,10 @@ export const adminSidebarNavItems: DashboardNavItem[] = [
 export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/coach/athlete-performance", label: "Athlete Performance", icon: Activity },
+  { href: "/coach/training-plans", label: "Athlete Training Plans", icon: Calendar },
   { href: "/coach/athletes", label: "Athletes", icon: Users },
   { href: "/coach/chat", label: "PeakConnect", icon: MessageSquare },
   { href: "/coach/fyn", label: "Fyn Assistant", icon: Sparkles },
-  { href: "/coach/training-plans", label: "Training Plan", icon: Calendar },
   { href: "/coach/dashboard/invitations", label: "Invitations", icon: Mail },
   { href: "/coach/settings", label: "Settings", icon: Settings },
 ];

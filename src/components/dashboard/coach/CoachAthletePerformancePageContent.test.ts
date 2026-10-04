@@ -25,6 +25,8 @@ describe("CoachAthletePerformancePageContent Coach Practice Rating authority", (
 
   it("renders Overall Golf Performance above Wearables for Head Coach and Skills Coach", () => {
     expect(source).toContain("<OverallGolfPerformanceSection");
+    expect(source).toContain("onAssessmentSaved");
+    expect(source).toContain("refreshKey={golfWeeklySummaryRefreshKey}");
     expect(source.indexOf("<OverallGolfPerformanceSection")).toBeLessThan(
       source.indexOf("<WearableSummarySection"),
     );

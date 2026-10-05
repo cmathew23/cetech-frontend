@@ -60,7 +60,7 @@ function collectRecords(value: unknown): AnyRecord[] {
   return out;
 }
 
-function readStringKey(records: AnyRecord[], keys: string[]): string | null {
+function readStringKey(records: AnyRecord[], keys: readonly string[]): string | null {
   for (const key of keys) {
     for (const record of records) {
       const value = record[key];
@@ -72,7 +72,7 @@ function readStringKey(records: AnyRecord[], keys: string[]): string | null {
   return null;
 }
 
-function readNumberKey(records: AnyRecord[], keys: string[]): number | null {
+function readNumberKey(records: AnyRecord[], keys: readonly string[]): number | null {
   for (const key of keys) {
     for (const record of records) {
       const value = record[key];

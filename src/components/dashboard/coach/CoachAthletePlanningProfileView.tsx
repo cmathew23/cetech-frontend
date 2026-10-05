@@ -479,7 +479,6 @@ export function resolveLockedPlanningContextDisplayFields(input: {
     input.upstreamPlanningContext?.season?.phaseName,
     input.upstreamPlanningContext?.phase,
     input.activePhaseForSelectedSeason?.phase,
-    input.activePhaseForSelectedSeason?.phaseName,
   );
   const planStartDate = trimmedNonEmpty(
     workspacePlanningContext?.planStartDate,
@@ -1191,9 +1190,7 @@ export async function runConfirmPlanDatesAction({
   }
 }
 
-function displayValue(
-  value: DisplayableValue,
-): string {
+function displayValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (Array.isArray(value)) {
     const items = value
@@ -1203,6 +1200,7 @@ function displayValue(
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "—";
+  if (typeof value !== "string") return "—";
   const text = value.trim();
   return text === "" ? "—" : text;
 }
@@ -1214,7 +1212,7 @@ function displayLabelTitleCase(value: DisplayableValue): string {
   return toTitleCaseInput(base);
 }
 
-function hasRenderableValue(value: DisplayableValue): boolean {
+function hasRenderableValue(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === "string") return value.trim() !== "";
@@ -2621,9 +2619,13 @@ export function resolveDomainCoachPlanWindowLabel(input: {
       ([startDate, endDate]) =>
         (startDate?.trim() ?? "") !== "" || (endDate?.trim() ?? "") !== "",
     ) ?? null;
+  const latestDraftDates = input.latestDraft as {
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
   const planWindow = firstRenderableWindow(
     [input.activeDetail?.version.startDate, input.activeDetail?.version.endDate],
-    [input.latestDraft?.startDate, input.latestDraft?.endDate],
+    [latestDraftDates?.startDate, latestDraftDates?.endDate],
     [input.lockedStartDate, input.lockedEndDate],
     [input.fallbackStartDate, input.fallbackEndDate],
   );
@@ -7316,7 +7318,7 @@ function renderSummaryValue(value: unknown, key: string | null = null): ReactNod
           value: renderedValue,
         };
       })
-      .filter((row): row is { label: string; value: ReactNode } => row !== null);
+      .filter((row) => row !== null);
     return renderKeyValueList(rows);
   }
   return null;
@@ -8867,7 +8869,7 @@ export function resolveHeadCoachSubmittedReviewCardDomains(input: {
         reviewDomains.add(domain);
         continue;
       }
-      const summary = input.workspace.domains[domain].summary;
+      const summary = input.workspace!.domains[domain].summary;
       const planId = summary.trainingPlanId?.trim() ?? "";
       const versionId = resolveHeadCoachDomainSummaryVersionId(summary);
       if (planId !== "" && (versionId ?? "") !== "") {
@@ -8993,7 +8995,7 @@ function logTrainingPlanViewPlanDiagnostic(input: {
   context: WorkspaceDomainViewPlanContext | null;
   fetchUrl?: string;
   resultStatus?: string | number | null;
-  responseBodyShape?: Record<string, unknown>;
+  responseBodyShape?: Record<string, unknown> | null;
   stateUpdated?: string | null;
   rendererBranch?: string | null;
   error?: unknown;
@@ -14498,6 +14500,7 @@ export function CoachAthletePlanningProfileView({
         coachFunctions: [],
         hasHeadCoachConfigured: false,
         academyCoachRole: "",
+        trainingPlanReleaseMode: "",
       });
       setSelectedSeasonCycleId(null);
       setSelectedGoalIds([]);
@@ -18280,13 +18283,13 @@ export function CoachAthletePlanningProfileView({
         responseBodyShape:
           detail === null
             ? null
-            : {
+            : ({
                 hasPlan: detail.plan !== null,
                 hasVersion: detail.version !== null,
                 days: detail.days.length,
                 sessions: detail.days.reduce((sum, day) => sum + day.sessions.length, 0),
                 allowedActions: detail.allowedActions,
-              },
+              } as Record<string, unknown>),
         stateUpdated:
           detail === null
             ? null
@@ -25539,12 +25542,12 @@ export function CoachAthletePlanningProfileView({
       lockedUpstreamGoals.length > 0
         ? lockedUpstreamGoals
             .map((goal) => goal.goalName ?? goal.goalId)
-            .filter((value) => value.trim() !== "")
+            .filter((value) => (value?.trim() ?? "") !== "")
             .join(", ")
         : selectedActiveGoals.length > 0
           ? selectedActiveGoals
               .map((goal) => goal.goalName ?? goal.goalId)
-              .filter((value) => value.trim() !== "")
+              .filter((value) => (value?.trim() ?? "") !== "")
               .join(", ")
           : null;
     const lockedContextDisplayFields = resolveLockedPlanningContextDisplayFields({
@@ -26551,10 +26554,8 @@ export function CoachAthletePlanningProfileView({
         athleteId: athleteIdTrimmed,
         entityId,
         seasonCycleId: selectedSeasonCycleId,
-        seasonPhaseId: competitionSeasonPhase.phaseId,
         createdByCoachId: coachUserId,
         goalType: "COMPETITION",
-        goalCategory: "TRAINING",
         competitionEventId,
         startDate: `${dateOnly(competitionSeasonPhase.startDate) ?? competitionDate}T00:00:00.000Z`,
         targetDate: `${competitionDate}T00:00:00.000Z`,
@@ -28884,7 +28885,7 @@ export function CoachAthletePlanningProfileView({
       (selectedActiveGoals.length > 0
         ? selectedActiveGoals
             .map((goal) => goal.goalName ?? goal.goalId)
-            .filter((value) => value.trim() !== "")
+            .filter((value) => (value?.trim() ?? "") !== "")
             .join(", ")
         : null);
     const planDurationLabel =
@@ -28897,7 +28898,6 @@ export function CoachAthletePlanningProfileView({
     const currentPhase =
       lockedReadOnlyDisplayFields?.currentPhase ??
       activePhaseForSelectedSeason?.phase ??
-      activePhaseForSelectedSeason?.phaseName ??
       null;
     const planWindowStartDate = lockedReadOnlyDisplayFields?.planStartDate ?? planStartDate;
     const planWindowEndDate = lockedReadOnlyDisplayFields?.planEndDate ?? planEndDate;
@@ -29511,13 +29511,17 @@ export function CoachAthletePlanningProfileView({
                         ) : errorForRenderedDomain({
                             error: persistedSkillsPlanError,
                             errorDomain: persistedPlanErrorDomain,
-                            renderedDomain: persistedPlanDisplayDomain,
+                            renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                           }) ? (
                           <Alert variant="danger">
                             {errorForRenderedDomain({
                               error: persistedSkillsPlanError,
                               errorDomain: persistedPlanErrorDomain,
-                              renderedDomain: persistedPlanDisplayDomain,
+                              renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                             })}
                           </Alert>
                         ) : persistedSkillsPlanLoading ? (
@@ -29526,7 +29530,9 @@ export function CoachAthletePlanningProfileView({
                           </div>
                         ) : shouldRenderPersistedDetailForDomain({
                             detailDomain: persistedDetailDomain,
-                            renderedDomain: persistedPlanDisplayDomain,
+                            renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                             hasDetail: persistedSkillsPlanDetail !== null,
                           }) && !shouldHidePersistedGeneratorPanel && persistedSkillsPlanDetail ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">

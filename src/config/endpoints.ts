@@ -1,12 +1,18 @@
 /**
  * Canonical API origin and path segments for the CETECH backend.
- * Override with NEXT_PUBLIC_API_BASE_URL (no trailing slash).
+ * Set NEXT_PUBLIC_API_BASE_URL (no trailing slash). Required when NODE_ENV is production.
+ * Development falls back to http://localhost:3000.
  */
 
 function readApiBaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
   if (typeof raw === "string" && raw.trim() !== "") {
     return raw.trim().replace(/\/+$/, "");
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXT_PUBLIC_API_BASE_URL is required when NODE_ENV is production.",
+    );
   }
   return "http://localhost:3000";
 }

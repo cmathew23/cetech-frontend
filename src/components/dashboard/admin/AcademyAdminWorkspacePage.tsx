@@ -91,6 +91,104 @@ const LOADING_ACADEMY_CONTEXT = "Loading academy context…";
 const INVITATION_ROLE_COACH = "COACH" as const;
 const INVITATION_ROLE_ATHLETE = "ATHLETE" as const;
 type InvitationRole = typeof INVITATION_ROLE_COACH | typeof INVITATION_ROLE_ATHLETE;
+export const INITIAL_INVITE_ROLE = "";
+
+export function readInvitationSubmit(
+  email: string,
+  role: string,
+): { email: string; role: InvitationRole } | null {
+  const trimmed = email.trim();
+  if (trimmed === "") return null;
+  if (role !== INVITATION_ROLE_COACH && role !== INVITATION_ROLE_ATHLETE) {
+    return null;
+  }
+  return { email: trimmed, role };
+}
+
+type EntityInvitationFormProps = {
+  email: string;
+  role: string;
+  submitting: boolean;
+  onEmailChange: (value: string) => void;
+  onRoleChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent) => void;
+};
+
+export function EntityInvitationForm({
+  email,
+  role,
+  submitting,
+  onEmailChange,
+  onRoleChange,
+  onSubmit,
+}: EntityInvitationFormProps) {
+  const submit = readInvitationSubmit(email, role);
+  return (
+    <form
+      className="grid max-w-3xl gap-3 sm:grid-cols-[1fr_auto_auto]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!submit) return;
+        onSubmit(event);
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="invite-email"
+          className="text-xs font-medium text-textPrimary"
+        >
+          Invite by email
+        </label>
+        <Input
+          id="invite-email"
+          type="email"
+          value={email}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onEmailChange(e.target.value)
+          }
+          placeholder="user@example.com"
+          disabled={submitting}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="invite-role"
+          className="text-xs font-medium text-textPrimary"
+        >
+          Role{" "}
+          <span className="text-danger" aria-hidden>
+            *
+          </span>
+        </label>
+        <Select
+          id="invite-role"
+          value={role}
+          required
+          disabled={submitting}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+            onRoleChange(e.target.value)
+          }
+        >
+          <option value="">Select role</option>
+          <option value={INVITATION_ROLE_COACH}>Coach</option>
+          <option value={INVITATION_ROLE_ATHLETE}>Athlete</option>
+        </Select>
+      </div>
+      <div className="flex flex-col justify-end">
+        <Button
+          type="submit"
+          variant="primary"
+          className="px-4 py-2 text-xs sm:text-sm"
+          loading={submitting}
+          disabled={submitting || submit === null}
+        >
+          Send invite
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 const INVITATION_FILTER_ALL = "ALL" as const;
 type InvitationFilterValue = typeof INVITATION_FILTER_ALL | InvitationStatusFilter;
 const ASSIGNMENT_COACH_FILTER_ALL = "" as const;
@@ -451,8 +549,8 @@ export function AcademyAdminWorkspacePage({
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<InvitationRole>(
-    INVITATION_ROLE_COACH,
+  const [inviteRole, setInviteRole] = useState<InvitationRole | "">(
+    INITIAL_INVITE_ROLE,
   );
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -1115,16 +1213,16 @@ export function AcademyAdminWorkspacePage({
   async function handleCreateInvitation(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedEntityId || inviteSubmitting) return;
-    const email = inviteEmail.trim();
-    if (email === "") return;
+    const submit = readInvitationSubmit(inviteEmail, inviteRole);
+    if (!submit) return;
     setInviteSubmitting(true);
     setInviteError(null);
     setInviteSuccess(null);
     try {
       await createEntityInvitation({
         entityId: selectedEntityId,
-        email,
-        role: inviteRole,
+        email: submit.email,
+        role: submit.role,
       });
       const rows = await fetchEntityInvitations(
         selectedEntityId,
@@ -1134,7 +1232,7 @@ export function AcademyAdminWorkspacePage({
       setCandidatesRefreshKey((key) => key + 1);
       setInviteEmail("");
       setInviteSuccess(
-        inviteRole === INVITATION_ROLE_COACH
+        submit.role === INVITATION_ROLE_COACH
           ? "Coach invitation sent."
           : "Athlete invitation sent.",
       );
@@ -1611,59 +1709,21 @@ export function AcademyAdminWorkspacePage({
                     placeholder="Search invitations"
                   />
                 </div>
-                <form
-                  className="grid max-w-3xl gap-3 sm:grid-cols-[1fr_auto_auto]"
+                <EntityInvitationForm
+                  email={inviteEmail}
+                  role={inviteRole}
+                  submitting={inviteSubmitting}
+                  onEmailChange={setInviteEmail}
+                  onRoleChange={(value) =>
+                    setInviteRole(
+                      value === INVITATION_ROLE_COACH ||
+                        value === INVITATION_ROLE_ATHLETE
+                        ? value
+                        : "",
+                    )
+                  }
                   onSubmit={(e) => void handleCreateInvitation(e)}
-                >
-                  <div className="flex flex-col gap-1">
-                    <label
-                      htmlFor="invite-email"
-                      className="text-xs font-medium text-textPrimary"
-                    >
-                      Invite by email
-                    </label>
-                    <Input
-                      id="invite-email"
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setInviteEmail(e.target.value)
-                      }
-                      placeholder="user@example.com"
-                      disabled={inviteSubmitting}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label
-                      htmlFor="invite-role"
-                      className="text-xs font-medium text-textPrimary"
-                    >
-                      Role
-                    </label>
-                    <Select
-                      id="invite-role"
-                      value={inviteRole}
-                      disabled={inviteSubmitting}
-                      onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                        setInviteRole(e.target.value as InvitationRole)
-                      }
-                    >
-                      <option value={INVITATION_ROLE_COACH}>Coach</option>
-                      <option value={INVITATION_ROLE_ATHLETE}>Athlete</option>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col justify-end">
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      className="px-4 py-2 text-xs sm:text-sm"
-                      loading={inviteSubmitting}
-                      disabled={inviteSubmitting || inviteEmail.trim() === ""}
-                    >
-                      Send invite
-                    </Button>
-                  </div>
-                </form>
+                />
                 <div className="flex flex-col gap-1">
                   <label
                     htmlFor="invitation-filter"

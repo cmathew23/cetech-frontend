@@ -277,6 +277,7 @@ export type TrainingPlanPersistenceContext = {
   startDate: string;
   endDate: string;
   goalIds?: string[];
+  phase?: string;
 };
 
 export type PendingPlanningContextHydrationStatePatch = {
@@ -285,6 +286,7 @@ export type PendingPlanningContextHydrationStatePatch = {
   planStartDate: string;
   durationDays: 7 | 15 | 30;
   planDatesConfirmedForCurrentAthlete: boolean;
+  phase: string | null;
 };
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -657,15 +659,18 @@ export function resolvePendingPlanningContextHydration(
     ...snapshotContexts.map((context) => context.seasonCycleId),
   );
   const startDate = trimmedNonEmpty(
+    planningContext.planWindow?.startDate,
     planningContext.planStartDate,
     planningContext.startDate,
     ...snapshotContexts.map((context) => context.startDate),
   );
   const endDate = trimmedNonEmpty(
+    planningContext.planWindow?.endDate,
     planningContext.planEndDate,
     planningContext.endDate,
     ...snapshotContexts.map((context) => context.endDate),
   );
+  const phase = trimmedNonEmpty(planningContext.phase);
   const goalIds = readLockedWorkspaceGoalIds({
     selectedGoalsSnapshot: planningContext.selectedGoalsSnapshot,
     athletePlanningContextSnapshot: planningContext.athletePlanningContextSnapshot,
@@ -678,7 +683,8 @@ export function resolvePendingPlanningContextHydration(
     seasonCycleId === null &&
     startDate === null &&
     endDate === null &&
-    goalIds.length === 0
+    goalIds.length === 0 &&
+    phase === null
   ) {
     return null;
   }
@@ -688,6 +694,7 @@ export function resolvePendingPlanningContextHydration(
     startDate: startDate ?? "",
     endDate: endDate ?? "",
     ...(goalIds.length > 0 ? { goalIds } : {}),
+    ...(phase !== null ? { phase } : {}),
   };
 }
 
@@ -715,18 +722,21 @@ export function buildPendingPlanningContextHydrationStatePatch(
       planStartDate: fallbackPlanStartDate,
       durationDays: 7,
       planDatesConfirmedForCurrentAthlete: false,
+      phase: null,
     };
   }
 
   const seasonCycleId =
     hydration.seasonCycleId.trim() !== "" ? hydration.seasonCycleId.trim() : null;
-  const startDate =
-    hydration.startDate.trim() !== "" ? hydration.startDate.trim() : fallbackPlanStartDate;
-  const endDate = hydration.endDate.trim();
+  const backendStartDate = hydration.startDate.trim();
+  const backendEndDate = hydration.endDate.trim();
+  const hasBackendPlanDate = backendStartDate !== "" || backendEndDate !== "";
+  const startDate = hasBackendPlanDate ? backendStartDate : fallbackPlanStartDate;
   const durationDays =
-    startDate !== "" && endDate !== ""
-      ? resolvePlanDurationDaysFromWindow(startDate, endDate)
+    backendStartDate !== "" && backendEndDate !== ""
+      ? resolvePlanDurationDaysFromWindow(backendStartDate, backendEndDate)
       : 7;
+  const phase = hydration.phase?.trim() ?? "";
 
   return {
     selectedSeasonCycleId: seasonCycleId,
@@ -734,6 +744,7 @@ export function buildPendingPlanningContextHydrationStatePatch(
     planStartDate: startDate,
     durationDays,
     planDatesConfirmedForCurrentAthlete: false,
+    phase: phase !== "" ? phase : null,
   };
 }
 
@@ -5916,6 +5927,7 @@ export function FynRevisionContextPanel({
   selection,
   onSelectionChange,
   coachRequest,
+  coachRequestResetKey = 0,
   onCoachRequestChange,
   targetOptions,
   selectedTargetKey,
@@ -5944,6 +5956,8 @@ export function FynRevisionContextPanel({
   selection: FynRevisionComposerBatchSelection;
   onSelectionChange: (selection: FynRevisionComposerBatchSelection) => void;
   coachRequest: string;
+  /** Bumped when the parent clears the request so the local field resets without tracking keystrokes. */
+  coachRequestResetKey?: number;
   onCoachRequestChange: (value: string) => void;
   targetOptions: FynRevisionTargetOption[];
   selectedTargetKey: string | null;
@@ -6020,16 +6034,20 @@ export function FynRevisionContextPanel({
       : null;
   const sandCRemoveMinimumNotice =
     sandCRemoveMetadata?.isSoleExercise === true;
+  const [coachRequestDraft, setCoachRequestDraft] = useState(coachRequest);
+  useEffect(() => {
+    setCoachRequestDraft(coachRequest);
+  }, [coachRequest, coachRequestResetKey, domain]);
   const showOptionsDisabled =
     loading ||
     optionsState.loading ||
-    coachRequest.trim() === "" ||
+    coachRequestDraft.trim() === "" ||
     selectedTargetKey === null ||
     selectedTargetKey === "";
   const quickActionDisabled =
     loading ||
     optionsState.loading ||
-    (selectedAction?.requiresBriefRequest === true && coachRequest.trim() === "");
+    (selectedAction?.requiresBriefRequest === true && coachRequestDraft.trim() === "");
   const updateRestDaySelection = (patch: Partial<FynRestDaySelection>) => {
     onRestDaySelectionChange?.({ ...restDaySelectionValue, ...patch });
   };
@@ -6187,8 +6205,12 @@ export function FynRevisionContextPanel({
               <textarea
                 rows={2}
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={coachRequest}
-                onChange={(event) => onCoachRequestChange(event.target.value)}
+                value={coachRequestDraft}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setCoachRequestDraft(next);
+                  onCoachRequestChange(next);
+                }}
                 placeholder={fynRevisionContextPlaceholder(domain, selectedAction.key)}
                 disabled={loading}
               />
@@ -7409,6 +7431,52 @@ export function DomainPlanConstraintComplianceSummarySection({
   );
 }
 
+function IsolatedTypingField({
+  label,
+  committedValue,
+  resetKey,
+  onLiveChange,
+  rows,
+  placeholder,
+  disabled = false,
+  children,
+}: {
+  label: string;
+  committedValue: string;
+  resetKey: number;
+  onLiveChange: (value: string) => void;
+  rows: number;
+  placeholder: string;
+  disabled?: boolean;
+  children?: (draft: string) => ReactNode;
+}) {
+  const [draft, setDraft] = useState(committedValue);
+  useEffect(() => {
+    setDraft(committedValue);
+  }, [committedValue, resetKey]);
+
+  return (
+    <>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">{label}</span>
+        <textarea
+          rows={rows}
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+          value={draft}
+          onChange={(event) => {
+            const next = event.target.value;
+            setDraft(next);
+            onLiveChange(next);
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+      </label>
+      {children?.(draft)}
+    </>
+  );
+}
+
 export function DomainReviewDrawerWorkflowActionButtons({
   drawerWorkflowActions,
   renderApproveBeforeRevise,
@@ -7418,6 +7486,7 @@ export function DomainReviewDrawerWorkflowActionButtons({
   actionContext,
   drawerReviseLoading,
   requestRevisionFeedback,
+  requestRevisionFeedbackResetKey = 0,
   onApprove,
   onRequestRevisionFeedbackChange,
   onRequestChangesSubmit,
@@ -7431,6 +7500,7 @@ export function DomainReviewDrawerWorkflowActionButtons({
   actionContext: GovernedPlanContext | null;
   drawerReviseLoading: boolean;
   requestRevisionFeedback: string;
+  requestRevisionFeedbackResetKey?: number;
   onApprove: () => void;
   onRequestRevisionFeedbackChange: (value: string) => void;
   onRequestChangesSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -7454,28 +7524,30 @@ export function DomainReviewDrawerWorkflowActionButtons({
     drawerWorkflowActions.canShowApproveAction &&
     actionContext !== null ? (
       <form className="w-full space-y-3" onSubmit={onRequestChangesSubmit}>
-        <label className="space-y-1 text-sm text-textPrimary">
-          <span className="font-medium">Request Changes</span>
-          <textarea
-            rows={5}
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-            value={requestRevisionFeedback}
-            onChange={(event) => onRequestRevisionFeedbackChange(event.target.value)}
-            placeholder="Describe the required changes."
-            disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-          />
-        </label>
-        <Button
-          type="submit"
-          variant="secondary"
-          loading={governedPlanActionLoading === "REQUEST_REVISION"}
-          disabled={
-            governedPlanActionLoading === "REQUEST_REVISION" ||
-            requestRevisionFeedback.trim() === ""
-          }
+        <IsolatedTypingField
+          label="Request Changes"
+          committedValue={requestRevisionFeedback}
+          resetKey={requestRevisionFeedbackResetKey}
+          onLiveChange={onRequestRevisionFeedbackChange}
+          rows={5}
+          placeholder="Describe the required changes."
+          disabled={governedPlanActionLoading === "REQUEST_REVISION"}
         >
-          Request Changes
-        </Button>
+          {(draft) => (
+            <Button
+              type="submit"
+              variant="secondary"
+              loading={governedPlanActionLoading === "REQUEST_REVISION"}
+              disabled={
+                governedPlanActionLoading === "REQUEST_REVISION" ||
+                draft.trim() === ""
+              }
+              onClick={() => onRequestRevisionFeedbackChange(draft)}
+            >
+              Request Changes
+            </Button>
+          )}
+        </IsolatedTypingField>
       </form>
     ) : null;
   const drawerReviseButton =
@@ -8023,8 +8095,9 @@ export function shouldShowReleasedPlanViewerCanvas(input: {
 }): boolean {
   if (input.selectedWorkflowTab !== "generate") return false;
   if (input.selectedDomain === null) return false;
-  if (!input.releasedPlanViewerIntentPresent) return false;
-  return input.releasedWorkflowStatus === "released";
+  // Explicit intent is set only after the view button's permission check passes.
+  // Do not veto it with a second workflow-status derivation.
+  return input.releasedPlanViewerIntentPresent;
 }
 
 function workspaceLifecycleStateLabel(
@@ -11162,6 +11235,20 @@ export function detectCurrentPhase(
   );
 }
 
+export function resolvePlanningContextActivePhase(input: {
+  phases: SeasonPhaseSummary[];
+  today: string;
+  authoritativePhase?: string | null;
+  useAuthoritativePhase?: boolean;
+}): SeasonPhaseSummary | null {
+  if (input.useAuthoritativePhase === true) {
+    const phaseCode = input.authoritativePhase?.trim() ?? "";
+    if (phaseCode === "") return null;
+    return input.phases.find((phase) => phase.phase === phaseCode) ?? null;
+  }
+  return detectCurrentPhase(input.phases, input.today);
+}
+
 export function resolveCompetitionSeasonPhaseForDate(input: {
   phases: SeasonPhaseSummary[];
   competitionDate: string;
@@ -11413,6 +11500,51 @@ export function generationProgressDetailMessage(
   if (GENERATION_PROGRESS_STAGE_LABELS[trimmed.toUpperCase()]) return null;
   if (/^[A-Z0-9_]+$/.test(trimmed)) return null;
   return trimmed;
+}
+
+export function resolveDomainIntegrationDraftButtonState(input: {
+  canStartGeneration: boolean;
+  canOpenDraft: boolean;
+  generationInProgress: boolean;
+  loadPending: boolean;
+  domain: TrainingPlanGenerationDomain;
+  job: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "domain" | "status" | "progressStage" | "progressMessage"
+  > | null;
+}): {
+  disabled: boolean;
+  variant: "primary" | "neutral";
+  statusMessage: string | null;
+} {
+  const jobForDomain =
+    input.job !== null && input.job.domain === input.domain ? input.job : null;
+  const awaitingDraftView =
+    !input.canOpenDraft &&
+    jobForDomain !== null &&
+    jobForDomain.status !== "FAILED" &&
+    (input.generationInProgress ||
+      input.loadPending ||
+      jobForDomain.status === "QUEUED" ||
+      jobForDomain.status === "RUNNING" ||
+      jobForDomain.status === "COMPLETED");
+  const detail = generationProgressDetailMessage(jobForDomain?.progressMessage);
+  const stageMessage =
+    jobForDomain === null
+      ? null
+      : generationProgressStageLabel(jobForDomain.progressStage ?? jobForDomain.status);
+  const statusMessage = !awaitingDraftView
+    ? null
+    : detail ??
+      (input.loadPending || jobForDomain?.status === "COMPLETED"
+        ? DRAFT_READY_PLAN_LOADING_MESSAGE
+        : stageMessage);
+
+  return {
+    disabled: !input.canStartGeneration || awaitingDraftView,
+    variant: awaitingDraftView ? "neutral" : "primary",
+    statusMessage,
+  };
 }
 
 export function renderGenerationJobButtonLabel(
@@ -13293,11 +13425,25 @@ export function CoachAthletePlanningProfileView({
   const [requestRevisionDrawerComposerOpen, setRequestRevisionDrawerComposerOpen] =
     useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
+  const requestRevisionFeedbackLiveRef = useRef("");
+  const [requestRevisionFeedbackResetKey, setRequestRevisionFeedbackResetKey] = useState(0);
   const [requestRevisionActionContext, setRequestRevisionActionContext] =
     useState<GovernedPlanContext | null>(null);
   const [assistantRevisePanelDomain, setAssistantRevisePanelDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
   const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
+  const reviseFeedbackLiveRef = useRef<Record<TrainingPlanGenerationDomain, string>>({
+    SKILLS: "",
+    NUTRITION: "",
+    S_AND_C: "",
+  });
+  const [reviseFeedbackResetKey, setReviseFeedbackResetKey] = useState<
+    Record<TrainingPlanGenerationDomain, number>
+  >({
+    SKILLS: 0,
+    NUTRITION: 0,
+    S_AND_C: 0,
+  });
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
   const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
   const [reviseSkillsSuccess, setReviseSkillsSuccess] = useState<string | null>(null);
@@ -13335,6 +13481,12 @@ export function CoachAthletePlanningProfileView({
     NUTRITION: "",
     S_AND_C: "",
   });
+  const fynRevisionRequestLiveRef = useRef<
+    Partial<Record<TrainingPlanGenerationDomain, string>>
+  >({});
+  const [fynRevisionRequestResetKey, setFynRevisionRequestResetKey] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, number>>
+  >({});
   const [fynRevisionTargetKeys, setFynRevisionTargetKeys] = useState<
     Partial<Record<TrainingPlanGenerationDomain, string>>
   >({});
@@ -13605,6 +13757,10 @@ export function CoachAthletePlanningProfileView({
   >({});
   const [planOwnershipLoading, setPlanOwnershipLoading] = useState(false);
   const [selectedSeasonCycleId, setSelectedSeasonCycleId] = useState<string | null>(null);
+  const [hydratedNextCycleContext, setHydratedNextCycleContext] = useState<{
+    seasonCycleId: string | null;
+    phase: string | null;
+  } | null>(null);
   const [seasonCreateFormExplicit, setSeasonCreateFormExplicit] = useState(false);
   const [selectedSeasonEditing, setSelectedSeasonEditing] = useState(false);
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
@@ -14770,7 +14926,15 @@ export function CoachAthletePlanningProfileView({
       .filter((phase) => phase.phase)
       .map((phase) => [phase.phase as SeasonPhaseType, phase]),
   ) as Partial<Record<SeasonPhaseType, SeasonPhaseSummary>>;
-  const activePhaseForSelectedSeason = detectCurrentPhase(selectedSeasonPhases, today);
+  const useHydratedNextCyclePhase =
+    (hydratedNextCycleContext?.phase?.trim() ?? "") !== "" &&
+    hydratedNextCycleContext?.seasonCycleId === selectedSeasonCycleId;
+  const activePhaseForSelectedSeason = resolvePlanningContextActivePhase({
+    phases: selectedSeasonPhases,
+    today,
+    authoritativePhase: hydratedNextCycleContext?.phase ?? null,
+    useAuthoritativePhase: useHydratedNextCyclePhase,
+  });
   const goalLibraryLevel = useMemo(
     () =>
       goalLibraryLevelValue(
@@ -16137,7 +16301,7 @@ export function CoachAthletePlanningProfileView({
       });
     }
     if (lifecycle.clearSelection) {
-      setReviseNutritionFeedback("");
+      commitDomainReviseFeedback("NUTRITION", "");
       resetFynRevisionOptionsFlow("NUTRITION");
       setFynRevisionSelections((current) => ({
         ...current,
@@ -17527,6 +17691,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     knownDomainPlanIdsRef.current = { SKILLS: "", NUTRITION: "", S_AND_C: "" };
     setSelectedSeasonCycleId(null);
+    setHydratedNextCycleContext(null);
     setSelectedGoalIds([]);
     setWorkloadAssessmentResult(null);
     setWorkloadAssessmentCapturedForAthleteId(null);
@@ -17575,7 +17740,7 @@ export function CoachAthletePlanningProfileView({
     setDomainReviewDrawerClosing(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setReleasedPlanViewerIntent(null);
     setReleasedPlanViewerVisibleDetail(null);
     setWorkflowRequestedPlanId(null);
@@ -17657,7 +17822,7 @@ export function CoachAthletePlanningProfileView({
     setHeadCoachDomainSelectionCleared(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setSelectedWorkflowTab("context-app");
     workflowInitialTabResolvedRef.current = false;
     prevWorkflowCompletionRef.current = null;
@@ -17760,6 +17925,20 @@ export function CoachAthletePlanningProfileView({
       upstreamPlanningContext?.endDate ??
       null;
     if (contextStart === null || contextEnd === null) return;
+    const authoritativeWorkspaceStart =
+      workspace?.planningContext.locked === true
+        ? null
+        : trimmedNonEmpty(
+            workspace?.planningContext.planWindow?.startDate,
+            workspace?.planningContext.planStartDate,
+            workspace?.planningContext.startDate,
+          );
+    if (
+      authoritativeWorkspaceStart !== null &&
+      planStartDate === authoritativeWorkspaceStart
+    ) {
+      return;
+    }
     if (contextStart !== planStartDate) {
       setPlanStartDate(contextStart);
     }
@@ -17772,6 +17951,10 @@ export function CoachAthletePlanningProfileView({
     upstreamPlanningContext?.planWindow?.endDate,
     upstreamPlanningContext?.startDate,
     upstreamPlanningContext?.endDate,
+    workspace?.planningContext.locked,
+    workspace?.planningContext.planWindow?.startDate,
+    workspace?.planningContext.planStartDate,
+    workspace?.planningContext.startDate,
   ]);
 
   useEffect(() => {
@@ -18564,6 +18747,10 @@ export function CoachAthletePlanningProfileView({
 
       setSeasonCreateFormExplicit(false);
       setSelectedSeasonCycleId(patch.selectedSeasonCycleId);
+      setHydratedNextCycleContext({
+        seasonCycleId: patch.selectedSeasonCycleId,
+        phase: patch.phase,
+      });
       setSelectedGoalIds(patch.selectedGoalIds);
       setPlanStartDate(patch.planStartDate);
       setDurationDays(patch.durationDays);
@@ -19701,7 +19888,7 @@ export function CoachAthletePlanningProfileView({
     if (isSinglePatch) {
       payload = submission;
     } else {
-      const coachFeedback = reviseSkillsFeedback.trim();
+      const coachFeedback = reviseFeedbackLiveRef.current.SKILLS.trim();
       if (coachFeedback === "") {
         setReviseSkillsError("Enter revision feedback first.");
         setReviseSkillsSuccess(null);
@@ -19767,7 +19954,7 @@ export function CoachAthletePlanningProfileView({
       },
       showSuccess: () => {
         if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
-        setReviseSkillsFeedback("");
+        commitDomainReviseFeedback("SKILLS", "");
         if (isSinglePatch) {
           setFynRevisionSelections((current) => ({
             ...current,
@@ -19840,20 +20027,66 @@ export function CoachAthletePlanningProfileView({
     setReviseSkillsLoading(false);
   }
 
+  function publishRequestRevisionFeedback(value: string): void {
+    requestRevisionFeedbackLiveRef.current = value;
+  }
+
+  function clearRequestRevisionFeedback(): void {
+    requestRevisionFeedbackLiveRef.current = "";
+    setRequestRevisionFeedback("");
+    setRequestRevisionFeedbackResetKey((key) => key + 1);
+  }
+
+  function publishReviseFeedback(
+    domain: TrainingPlanGenerationDomain,
+    value: string,
+  ): void {
+    reviseFeedbackLiveRef.current[domain] = value;
+  }
+
+  function clearDomainReviseNotices(domain: TrainingPlanGenerationDomain): void {
+    if (domain === "SKILLS") {
+      if (reviseSkillsError !== null) setReviseSkillsError(null);
+      if (reviseSkillsSuccess !== null) setReviseSkillsSuccess(null);
+    } else if (domain === "NUTRITION") {
+      if (reviseNutritionError !== null) setReviseNutritionError(null);
+      if (reviseNutritionSuccess !== null) setReviseNutritionSuccess(null);
+    } else if (reviseSandCError !== null || reviseSandCSuccess !== null) {
+      if (reviseSandCError !== null) setReviseSandCError(null);
+      if (reviseSandCSuccess !== null) setReviseSandCSuccess(null);
+    }
+  }
+
+  function commitDomainReviseFeedback(
+    domain: TrainingPlanGenerationDomain,
+    nextFeedback: string,
+  ): void {
+    reviseFeedbackLiveRef.current[domain] = nextFeedback;
+    setReviseFeedbackResetKey((current) => ({
+      ...current,
+      [domain]: current[domain] + 1,
+    }));
+    if (domain === "SKILLS") {
+      setReviseSkillsFeedback(nextFeedback);
+    } else if (domain === "NUTRITION") {
+      setReviseNutritionFeedback(nextFeedback);
+    } else {
+      setReviseSandCFeedback(nextFeedback);
+    }
+  }
+
   function setDomainReviseFeedback(
     domain: TrainingPlanGenerationDomain,
     nextFeedback: string,
   ): void {
+    commitDomainReviseFeedback(domain, nextFeedback);
     if (domain === "SKILLS") {
-      setReviseSkillsFeedback(nextFeedback);
       setReviseSkillsError(null);
       setReviseSkillsSuccess(null);
     } else if (domain === "NUTRITION") {
-      setReviseNutritionFeedback(nextFeedback);
       setReviseNutritionError(null);
       setReviseNutritionSuccess(null);
     } else {
-      setReviseSandCFeedback(nextFeedback);
       setReviseSandCError(null);
       setReviseSandCSuccess(null);
     }
@@ -19878,7 +20111,21 @@ export function CoachAthletePlanningProfileView({
     domain: TrainingPlanGenerationDomain,
     value: string,
   ): void {
-    setFynRevisionRequests((current) => ({ ...current, [domain]: value }));
+    fynRevisionRequestLiveRef.current[domain] = value;
+  }
+
+  function readFynRevisionRequest(domain: TrainingPlanGenerationDomain): string {
+    const live = fynRevisionRequestLiveRef.current[domain];
+    return live !== undefined ? live : (fynRevisionRequests[domain] ?? "");
+  }
+
+  function clearFynRevisionRequest(domain: TrainingPlanGenerationDomain): void {
+    fynRevisionRequestLiveRef.current[domain] = "";
+    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    setFynRevisionRequestResetKey((current) => ({
+      ...current,
+      [domain]: (current[domain] ?? 0) + 1,
+    }));
   }
 
   function handleFynRevisionTargetChange(
@@ -19927,7 +20174,7 @@ export function CoachAthletePlanningProfileView({
       domain === "S_AND_C" &&
       (key === "REMOVE_ITEM" || key === "UPDATE_ITEM")
     ) {
-      setFynRevisionRequests((current) => ({ ...current, S_AND_C: "" }));
+      clearFynRevisionRequest("S_AND_C");
     }
     setFynRevisionActionKeys((current) => ({ ...current, [domain]: key }));
     // Switching action clears stale fetched options from a previous action choice.
@@ -19960,7 +20207,7 @@ export function CoachAthletePlanningProfileView({
   ): void {
     // Deterministic flows use Apply Revision, never the basket.
     if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") return;
-    const coachRequest = fynRevisionRequests[domain] ?? "";
+    const coachRequest = readFynRevisionRequest(domain);
     const changeText = buildFynRevisionActionChangeText(domain, action, target, coachRequest);
     if (changeText === "") return;
     handleFynRevisionSelectionChange(
@@ -19968,7 +20215,7 @@ export function CoachAthletePlanningProfileView({
       addAcceptedFynRevisionChange(fynRevisionSelections[domain], changeText),
     );
     // Clear the composer inputs so the coach can queue the next change cleanly.
-    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    clearFynRevisionRequest(domain);
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
     setFynRevisionActionKeys((current) => {
       const next = { ...current };
@@ -19985,7 +20232,7 @@ export function CoachAthletePlanningProfileView({
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
       delete fynRevisionOptionsRequestRef.current[domain];
     }
-    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    clearFynRevisionRequest(domain);
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
     setFynRevisionActionKeys((current) => {
       const next = { ...current };
@@ -20022,7 +20269,7 @@ export function CoachAthletePlanningProfileView({
       // Every options request defines a new approved set; a prior-set selection is never reusable.
       setSkillsSelectedRevisionOption(null);
     }
-    const coachRequest = fynRevisionRequests[domain] ?? "";
+    const coachRequest = readFynRevisionRequest(domain);
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
     const actionKey = fynRevisionActionKeys[domain] ?? null;
     const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
@@ -20470,7 +20717,7 @@ export function CoachAthletePlanningProfileView({
     setRequestRevisionModalOpen(false);
     setRequestRevisionDrawerComposerOpen(false);
     setRequestRevisionActionContext(null);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setGovernedPlanActionError(null);
   }
 
@@ -20494,7 +20741,7 @@ export function CoachAthletePlanningProfileView({
       selectedVersionId: actionContext.versionId,
       planStatus: reviewModel.planStatusLabel,
       workflowStatus: reviewModel.workflowStatus,
-      currentFreeTextRevisionInstruction: requestRevisionFeedback,
+      currentFreeTextRevisionInstruction: requestRevisionFeedbackLiveRef.current,
     });
     const coachFeedback = revisionContext.currentFreeTextRevisionInstruction;
     if (coachFeedback === "") {
@@ -20531,7 +20778,7 @@ export function CoachAthletePlanningProfileView({
         });
       },
       showMutationSuccess: () => {
-        setRequestRevisionFeedback("");
+        clearRequestRevisionFeedback();
         setRequestRevisionModalOpen(false);
         setRequestRevisionDrawerComposerOpen(false);
         setRequestRevisionActionContext(null);
@@ -21628,7 +21875,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccessFeedback(null);
     setRequestRevisionModalOpen(false);
     setRequestRevisionActionContext(null);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
   }
 
   function renderWorkflow1HeadCoachReviewActionPanel() {
@@ -22625,30 +22872,55 @@ export function CoachAthletePlanningProfileView({
         option: nutritionSelectedOption,
       });
     const handleDrawerReviseFeedbackChange = (nextValue: string) => {
-      if (reviewDomain === "SKILLS") {
-        setReviseSkillsFeedback(nextValue);
-        setReviseSkillsError(null);
-        setReviseSkillsSuccess(null);
-      } else if (reviewDomain === "NUTRITION") {
-        setReviseNutritionFeedback(nextValue);
-        setReviseNutritionError(null);
-        setReviseNutritionSuccess(null);
-      } else {
-        setReviseSandCFeedback(nextValue);
-        setReviseSandCError(null);
-        setReviseSandCSuccess(null);
-      }
+      setDomainReviseFeedback(reviewDomain, nextValue);
     };
     const handleDrawerReviseSubmit = () => {
+      const liveCoachRequest =
+        fynRevisionRequestLiveRef.current[reviewDomain] ?? fynRevisionCoachRequest;
       if (reviewDomain === "SKILLS") {
-        void handleReviseSkillsPlan(skillsRevisionSubmission);
+        void handleReviseSkillsPlan(
+          buildSkillsRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: skillsSelectedOption,
+            coachRequest: liveCoachRequest,
+            durationMinutes: skillsDurationMinutes,
+            reps: skillsReps,
+            restDaySelection: fynRestDaySelection,
+            restDayScheduleDays: fynRestDayScheduleDays,
+          }),
+        );
       } else if (reviewDomain === "NUTRITION") {
-        void handleReviseNutritionPlan(nutritionRevisionSubmission, {
-          target: fynRevisionSelectedTargetOption,
-          actionKey: fynRevisionSelectedActionKey,
-        });
+        void handleReviseNutritionPlan(
+          buildNutritionRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: nutritionSelectedOption,
+            coachRequest: liveCoachRequest,
+            servingTargetQuantity: nutritionServingDisplayQuantity,
+          }),
+          {
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+          },
+        );
       } else {
-        void handleReviseSandCPlan(sandCRevisionSubmission);
+        void handleReviseSandCPlan(
+          buildSandCRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: sandCSelectedOption,
+            coachRequest: liveCoachRequest,
+            durationMinutes: sandCAddItemValues.durationMinutes,
+            sets: sandCAddItemValues.sets,
+            reps: sandCAddItemValues.reps,
+            restDaySelection: fynRestDaySelection,
+            restDayScheduleDays: fynRestDayScheduleDays,
+          }),
+        );
       }
     };
     const drawerPlanDetailLoading =
@@ -22869,15 +23141,18 @@ export function CoachAthletePlanningProfileView({
                       actionContext={actionContext}
                       drawerReviseLoading={drawerReviseLoading}
                       requestRevisionFeedback={requestRevisionFeedback}
+                      requestRevisionFeedbackResetKey={requestRevisionFeedbackResetKey}
                       onApprove={() => {
                         if (actionContext === null) return;
                         void handlePersistedGovernedPlanAction("HEAD_APPROVE", actionContext);
                       }}
                       onRequestRevisionFeedbackChange={(value) => {
-                        setRequestRevisionFeedback(value);
-                        setGovernedPlanActionError(null);
-                        setGovernedPlanActionSuccess(null);
-                        setGovernedPlanActionSuccessFeedback(null);
+                        publishRequestRevisionFeedback(value);
+                        if (governedPlanActionError !== null) setGovernedPlanActionError(null);
+                        if (governedPlanActionSuccess !== null) setGovernedPlanActionSuccess(null);
+                        if (governedPlanActionSuccessFeedback !== null) {
+                          setGovernedPlanActionSuccessFeedback(null);
+                        }
                       }}
                       onRequestChangesSubmit={(event) => {
                         void handleRequestRevisionSubmit(event, actionContext);
@@ -22932,6 +23207,7 @@ export function CoachAthletePlanningProfileView({
                       handleFynRevisionSelectionChange(reviewDomain, selection);
                     }}
                     coachRequest={fynRevisionCoachRequest}
+                    coachRequestResetKey={fynRevisionRequestResetKey[reviewDomain] ?? 0}
                     onCoachRequestChange={(value) => {
                       handleFynRevisionRequestChange(reviewDomain, value);
                     }}
@@ -23159,38 +23435,40 @@ export function CoachAthletePlanningProfileView({
                     className="space-y-3"
                     onSubmit={(event) => void handleRequestRevisionSubmit(event, actionContext)}
                   >
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Revision feedback</span>
-                      <textarea
-                        rows={5}
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                        value={requestRevisionFeedback}
-                        onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                        placeholder="Describe the required changes."
-                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                      />
-                    </label>
-                    <div className="flex flex-wrap justify-end gap-3">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                        onClick={handleCancelRequestRevision}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                        disabled={
-                          governedPlanActionLoading === "REQUEST_REVISION" ||
-                          requestRevisionFeedback.trim() === ""
-                        }
-                      >
-                        Submit Request Changes
-                      </Button>
-                    </div>
+                    <IsolatedTypingField
+                      label="Revision feedback"
+                      committedValue={requestRevisionFeedback}
+                      resetKey={requestRevisionFeedbackResetKey}
+                      onLiveChange={publishRequestRevisionFeedback}
+                      rows={5}
+                      placeholder="Describe the required changes."
+                      disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                    >
+                      {(draft) => (
+                        <div className="flex flex-wrap justify-end gap-3">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                            onClick={handleCancelRequestRevision}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                            disabled={
+                              governedPlanActionLoading === "REQUEST_REVISION" ||
+                              draft.trim() === ""
+                            }
+                            onClick={() => publishRequestRevisionFeedback(draft)}
+                          >
+                            Submit Request Changes
+                          </Button>
+                        </div>
+                      )}
+                    </IsolatedTypingField>
                   </form>
                 </section>
               ) : null}
@@ -23573,26 +23851,28 @@ export function CoachAthletePlanningProfileView({
                 {reviseSkillsSuccess}
               </WorkflowNeutralNotice>
             ) : null}
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Coach Feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={reviseSkillsFeedback}
-                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                placeholder="Describe what should change in the skills plan."
-              />
-            </label>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={reviseSkillsLoading || !skillsReviseIds}
-              onClick={() => {
-                void handleReviseSkillsPlan();
-              }}
+            <IsolatedTypingField
+              label="Coach Feedback"
+              committedValue={reviseSkillsFeedback}
+              resetKey={reviseFeedbackResetKey.SKILLS}
+              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+              rows={4}
+              placeholder="Describe what should change in the skills plan."
             >
-              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-            </Button>
+              {(draft) => (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                  onClick={() => {
+                    publishReviseFeedback("SKILLS", draft);
+                    void handleReviseSkillsPlan();
+                  }}
+                >
+                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                </Button>
+              )}
+            </IsolatedTypingField>
           </div>
         ) : null}
       </div>
@@ -23732,45 +24012,46 @@ export function CoachAthletePlanningProfileView({
           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
             {reviseSkillsError ? <Alert variant="danger">{reviseSkillsError}</Alert> : null}
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Coach Feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={reviseSkillsFeedback}
-                onChange={(event) => {
-                  setReviseSkillsFeedback(event.target.value);
-                  setReviseSkillsError(null);
-                  setReviseSkillsSuccess(null);
-                }}
-                placeholder="Describe what should change in the skills plan."
-              />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={reviseSkillsLoading}
-                onClick={() => {
-                  setAssistantRevisePanelDomain(null);
-                  setReviseSkillsFeedback("");
-                  setReviseSkillsError(null);
-                  setReviseSkillsSuccess(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={reviseSkillsLoading || !skillsReviseIds}
-                onClick={() => {
-                  void handleReviseSkillsPlan();
-                }}
-              >
-                {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-              </Button>
-            </div>
+            <IsolatedTypingField
+              label="Coach Feedback"
+              committedValue={reviseSkillsFeedback}
+              resetKey={reviseFeedbackResetKey.SKILLS}
+              onLiveChange={(value) => {
+                publishReviseFeedback("SKILLS", value);
+                clearDomainReviseNotices("SKILLS");
+              }}
+              rows={4}
+              placeholder="Describe what should change in the skills plan."
+            >
+              {(draft) => (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={reviseSkillsLoading}
+                    onClick={() => {
+                      setAssistantRevisePanelDomain(null);
+                      commitDomainReviseFeedback("SKILLS", "");
+                      setReviseSkillsError(null);
+                      setReviseSkillsSuccess(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={reviseSkillsLoading || !skillsReviseIds}
+                    onClick={() => {
+                      publishReviseFeedback("SKILLS", draft);
+                      void handleReviseSkillsPlan();
+                    }}
+                  >
+                    {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                  </Button>
+                </div>
+              )}
+            </IsolatedTypingField>
           </div>
         ) : null}
         {options.showWorkflowActions === false ? null : renderPlanViewerWorkflowActions()}
@@ -23894,6 +24175,19 @@ export function CoachAthletePlanningProfileView({
         fallbackStartDate: planStartDate,
         fallbackEndDate: planEndDate,
       }) ?? "—";
+    const draftButtonState = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: model.generationEligibility.canStartGeneration,
+      canOpenDraft,
+      generationInProgress,
+      loadPending: isDomainDraftReadyPlanLoadPending(domain, domainJob),
+      domain,
+      job: domainJob,
+    });
+    const showGenerationProgress = shouldShowDomainCoachWorkspaceGenerationProgress({
+      domain,
+      currentDomain: currentCoachGenerationDomain,
+      generationInProgress: step6GenerationInProgress || generationInProgress,
+    });
 
     return (
       <div className="space-y-4">
@@ -23940,32 +24234,23 @@ export function CoachAthletePlanningProfileView({
               {model.generationEligibility.blockerMessage}
             </DashboardStatusNotice>
           ) : null}
-          {shouldShowDomainCoachWorkspaceGenerationProgress({
-            domain,
-            currentDomain: currentCoachGenerationDomain,
-            generationInProgress: step6GenerationInProgress || generationInProgress,
-          }) ? (
-            renderGenerationJobProgress(domainJob)
-          ) : null}
           <div className="flex flex-wrap gap-2">
             {model.workflowStatus === "not_created" && model.canShowGenerateAction ? (
               <div className="flex flex-col items-start gap-1">
                 <Button
                   type="button"
-                  variant="primary"
-                  disabled={
-                    !model.generationEligibility.canStartGeneration ||
-                    generationInProgress ||
-                    isDomainDraftReadyPlanLoadPending(domain, domainJob)
-                  }
+                  variant={draftButtonState.variant}
+                  disabled={draftButtonState.disabled}
                   onClick={() => {
+                    if (draftButtonState.disabled) return;
                     void handleGenerateTrainingPlan(domain);
                   }}
                 >
                   {renderGenerationJobButtonLabel(domain, domainJob)}
                 </Button>
-                {isDomainDraftReadyPlanLoadPending(domain, domainJob) ? (
-                  <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                {showGenerationProgress ? renderGenerationJobProgress(domainJob) : null}
+                {!showGenerationProgress && draftButtonState.statusMessage ? (
+                  <p className="text-sm text-textSecondary">{draftButtonState.statusMessage}</p>
                 ) : null}
               </div>
             ) : null}
@@ -24953,78 +25238,57 @@ export function CoachAthletePlanningProfileView({
                     {assistantReviseSuccess}
                   </WorkflowNeutralNotice>
                 ) : null}
-                <label className="space-y-1 text-sm text-textPrimary">
-                  <span className="font-medium">Coach Feedback</span>
-                  <textarea
-                    rows={4}
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                    value={assistantReviseFeedback}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        setReviseSkillsFeedback(nextValue);
-                        setReviseSkillsError(null);
-                        setReviseSkillsSuccess(null);
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        setReviseNutritionFeedback(nextValue);
-                        setReviseNutritionError(null);
-                        setReviseNutritionSuccess(null);
-                      } else {
-                        setReviseSandCFeedback(nextValue);
-                        setReviseSandCError(null);
-                        setReviseSandCSuccess(null);
-                      }
-                    }}
-                    placeholder={
-                      currentCoachGenerationDomain === "SKILLS"
-                        ? "Describe what should change in the skills plan."
-                        : currentCoachGenerationDomain === "NUTRITION"
-                          ? "Describe what should change in the nutrition plan."
-                          : "Describe what should change in the S&C plan."
-                    }
-                  />
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={assistantReviseLoading}
-                    onClick={() => {
-                      setAssistantRevisePanelDomain(null);
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        setReviseSkillsFeedback("");
-                        setReviseSkillsError(null);
-                        setReviseSkillsSuccess(null);
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        setReviseNutritionFeedback("");
-                        setReviseNutritionError(null);
-                        setReviseNutritionSuccess(null);
-                      } else {
-                        setReviseSandCFeedback("");
-                        setReviseSandCError(null);
-                        setReviseSandCSuccess(null);
-                      }
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={assistantReviseLoading}
-                    onClick={() => {
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        void handleReviseSkillsPlan();
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        void handleReviseNutritionPlan();
-                      } else {
-                        void handleReviseSandCPlan();
-                      }
-                    }}
-                  >
-                    {assistantReviseLoading ? "Revising plan..." : "Revise Plan"}
-                  </Button>
-                </div>
+                <IsolatedTypingField
+                  label="Coach Feedback"
+                  committedValue={assistantReviseFeedback}
+                  resetKey={reviseFeedbackResetKey[currentCoachGenerationDomain]}
+                  onLiveChange={(value) => {
+                    publishReviseFeedback(currentCoachGenerationDomain, value);
+                    clearDomainReviseNotices(currentCoachGenerationDomain);
+                  }}
+                  rows={4}
+                  placeholder={
+                    currentCoachGenerationDomain === "SKILLS"
+                      ? "Describe what should change in the skills plan."
+                      : currentCoachGenerationDomain === "NUTRITION"
+                        ? "Describe what should change in the nutrition plan."
+                        : "Describe what should change in the S&C plan."
+                  }
+                >
+                  {(draft) => (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={assistantReviseLoading}
+                        onClick={() => {
+                          setAssistantRevisePanelDomain(null);
+                          commitDomainReviseFeedback(currentCoachGenerationDomain, "");
+                          clearDomainReviseNotices(currentCoachGenerationDomain);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={assistantReviseLoading}
+                        onClick={() => {
+                          publishReviseFeedback(currentCoachGenerationDomain, draft);
+                          if (currentCoachGenerationDomain === "SKILLS") {
+                            void handleReviseSkillsPlan();
+                          } else if (currentCoachGenerationDomain === "NUTRITION") {
+                            void handleReviseNutritionPlan();
+                          } else {
+                            void handleReviseSandCPlan();
+                          }
+                        }}
+                      >
+                        {assistantReviseLoading ? "Revising plan..." : "Revise Plan"}
+                      </Button>
+                    </div>
+                  )}
+                </IsolatedTypingField>
               </div>
             ) : null}
 
@@ -25836,7 +26100,7 @@ export function CoachAthletePlanningProfileView({
     if (isSinglePatch) {
       payload = submission;
     } else {
-      const coachFeedback = reviseNutritionFeedback.trim();
+      const coachFeedback = reviseFeedbackLiveRef.current.NUTRITION.trim();
       if (coachFeedback === "") {
         setReviseNutritionError("Enter revision feedback first.");
         setReviseNutritionSuccess(null);
@@ -25873,7 +26137,7 @@ export function CoachAthletePlanningProfileView({
       },
       showMutationSuccess: () => {
         if (isSinglePatch) resetFynRevisionOptionsFlow("NUTRITION");
-        setReviseNutritionFeedback("");
+        commitDomainReviseFeedback("NUTRITION", "");
         if (isSinglePatch) {
           setFynRevisionSelections((current) => ({
             ...current,
@@ -25939,7 +26203,7 @@ export function CoachAthletePlanningProfileView({
             ...current,
             NUTRITION: defaultFynRevisionBatchSelection(),
           }));
-          setReviseNutritionFeedback("");
+          commitDomainReviseFeedback("NUTRITION", "");
         }
         if (
           errorOutcome.kind === "INTERRUPTED" &&
@@ -25957,7 +26221,7 @@ export function CoachAthletePlanningProfileView({
           ...current,
           NUTRITION: defaultFynRevisionBatchSelection(),
         }));
-        setReviseNutritionFeedback("");
+        commitDomainReviseFeedback("NUTRITION", "");
       }
       // Show the backend message (or the specific validation/generic copy) in the drawer.
       setReviseNutritionError(errorOutcome.message);
@@ -25984,7 +26248,9 @@ export function CoachAthletePlanningProfileView({
     }
 
     const isSinglePatch = submission != null;
-    const coachFeedback = isSinglePatch ? submission.coachFeedback : reviseSandCFeedback.trim();
+    const coachFeedback = isSinglePatch
+      ? submission.coachFeedback
+      : reviseFeedbackLiveRef.current.S_AND_C.trim();
     if (coachFeedback.trim() === "") {
       setReviseSandCError("Enter revision feedback first.");
       setReviseSandCSuccess(null);
@@ -26070,7 +26336,7 @@ export function CoachAthletePlanningProfileView({
         } else {
           setReviseSandCSuccess("Revised S&C plan version generated.");
         }
-        setReviseSandCFeedback("");
+        commitDomainReviseFeedback("S_AND_C", "");
       },
     });
     if (outcome.kind === "mutation_failed") {
@@ -29809,26 +30075,28 @@ export function CoachAthletePlanningProfileView({
                 {reviseSkillsSuccess}
               </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSkillsFeedback}
-                                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                                placeholder="Describe what should change in the skills plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseSkillsLoading || !skillsReviseIds}
-                              onClick={() => {
-                                void handleReviseSkillsPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSkillsFeedback}
+                              resetKey={reviseFeedbackResetKey.SKILLS}
+                              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the skills plan."
                             >
-                              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("SKILLS", draft);
+                                    void handleReviseSkillsPlan();
+                                  }}
+                                >
+                                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : persistedPlanDisplayDomain === "NUTRITION" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -29843,26 +30111,28 @@ export function CoachAthletePlanningProfileView({
                                 {reviseNutritionSuccess}
                               </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseNutritionFeedback}
-                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
-                                placeholder="Describe what should change in the nutrition plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseNutritionLoading || !nutritionReviseIds}
-                              onClick={() => {
-                                void handleReviseNutritionPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseNutritionFeedback}
+                              resetKey={reviseFeedbackResetKey.NUTRITION}
+                              onLiveChange={(value) => publishReviseFeedback("NUTRITION", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the nutrition plan."
                             >
-                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseNutritionLoading || !nutritionReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("NUTRITION", draft);
+                                    void handleReviseNutritionPlan();
+                                  }}
+                                >
+                                  {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : null}
                       </div>
@@ -30100,26 +30370,28 @@ export function CoachAthletePlanningProfileView({
                 {reviseSkillsSuccess}
               </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSkillsFeedback}
-                                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                                placeholder="Describe what should change in the skills plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseSkillsLoading || !skillsReviseIds}
-                              onClick={() => {
-                                void handleReviseSkillsPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSkillsFeedback}
+                              resetKey={reviseFeedbackResetKey.SKILLS}
+                              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the skills plan."
                             >
-                              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("SKILLS", draft);
+                                    void handleReviseSkillsPlan();
+                                  }}
+                                >
+                                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : latestDraftDisplayDomain === "NUTRITION" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -30134,26 +30406,28 @@ export function CoachAthletePlanningProfileView({
                                 {reviseNutritionSuccess}
                               </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseNutritionFeedback}
-                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
-                                placeholder="Describe what should change in the nutrition plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseNutritionLoading || !nutritionReviseIds}
-                              onClick={() => {
-                                void handleReviseNutritionPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseNutritionFeedback}
+                              resetKey={reviseFeedbackResetKey.NUTRITION}
+                              onLiveChange={(value) => publishReviseFeedback("NUTRITION", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the nutrition plan."
                             >
-                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseNutritionLoading || !nutritionReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("NUTRITION", draft);
+                                    void handleReviseNutritionPlan();
+                                  }}
+                                >
+                                  {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : latestDraftDisplayDomain === "S_AND_C" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -30168,16 +30442,15 @@ export function CoachAthletePlanningProfileView({
                                 {reviseSandCSuccess}
                               </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSandCFeedback}
-                                onChange={(event) => setReviseSandCFeedback(event.target.value)}
-                                placeholder="Describe what should change in the S&C plan."
-                              />
-                            </label>
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSandCFeedback}
+                              resetKey={reviseFeedbackResetKey.S_AND_C}
+                              onLiveChange={(value) => publishReviseFeedback("S_AND_C", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the S&C plan."
+                            >
+                              {(draft) => (
                             <Button
                               type="button"
                               variant="secondary"
@@ -30186,11 +30459,14 @@ export function CoachAthletePlanningProfileView({
                                 !sandCReviseIds
                               }
                               onClick={() => {
+                                publishReviseFeedback("S_AND_C", draft);
                                 void handleReviseSandCPlan();
                               }}
                             >
                               {reviseSandCLoading ? "Revising plan..." : "Revise Plan"}
                             </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : null}
                       </div>
@@ -30289,10 +30565,7 @@ export function CoachAthletePlanningProfileView({
     if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
-    if (
-      shouldRenderReleasedPlanViewerCanvas() &&
-      (workspace?.nextCycleAction ?? "NONE") === "NONE"
-    ) {
+    if (shouldRenderReleasedPlanViewerCanvas()) {
       return renderPlanViewerContent(renderPlanViewerLowerContent());
     }
     return (
@@ -30648,39 +30921,40 @@ export function CoachAthletePlanningProfileView({
                   <Alert variant="danger">{governedPlanActionError}</Alert>
                 ) : null}
 
-                <label className="space-y-1 text-sm text-textPrimary">
-                  <span className="font-medium">Revision feedback</span>
-                  <textarea
-                    rows={5}
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                    value={requestRevisionFeedback}
-                    onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                    placeholder="Describe the required changes."
-                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                  />
-                </label>
-
-                <div className="flex flex-wrap justify-end gap-3 pt-1">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                    onClick={handleCancelRequestRevision}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                    disabled={
-                      governedPlanActionLoading === "REQUEST_REVISION" ||
-                      requestRevisionFeedback.trim() === ""
-                    }
-                  >
-                    Request Revision
-                  </Button>
-                </div>
+                <IsolatedTypingField
+                  label="Revision feedback"
+                  committedValue={requestRevisionFeedback}
+                  resetKey={requestRevisionFeedbackResetKey}
+                  onLiveChange={publishRequestRevisionFeedback}
+                  rows={5}
+                  placeholder="Describe the required changes."
+                  disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                >
+                  {(draft) => (
+                    <div className="flex flex-wrap justify-end gap-3 pt-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                        onClick={handleCancelRequestRevision}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                        disabled={
+                          governedPlanActionLoading === "REQUEST_REVISION" ||
+                          draft.trim() === ""
+                        }
+                        onClick={() => publishRequestRevisionFeedback(draft)}
+                      >
+                        Request Revision
+                      </Button>
+                    </div>
+                  )}
+                </IsolatedTypingField>
               </form>
             </Modal>
           ) : null}

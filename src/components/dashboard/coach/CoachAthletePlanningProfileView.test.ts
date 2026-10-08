@@ -44,6 +44,7 @@ import {
   resolveSkillsOwnedDirectReleaseCurrentStep,
   resolveSkillsOwnedDirectReleasePreContextTab,
   renderGenerationJobButtonLabel,
+  resolveDomainIntegrationDraftButtonState,
   resolveStep6GenerationLifecyclePhase,
   resolveTrainingPlanShellOwnership,
   resolveTrainingPlanPageBootstrapModel,
@@ -334,6 +335,7 @@ import {
   NextCycleWorkspaceAction,
   PlanningContextWorkspaceAction,
   buildPendingPlanningContextHydrationStatePatch,
+  resolvePlanningContextActivePhase,
   resolveAuthoritativePlanWindow,
   resolvePendingPlanningContextHydration,
   resolvePlanDurationDaysFromWindow,
@@ -1246,6 +1248,7 @@ describe("resolvePendingPlanningContextHydration", () => {
       planStartDate: "2027-01-05",
       durationDays: 7,
       planDatesConfirmedForCurrentAthlete: false,
+      phase: null,
     });
   });
 
@@ -1260,6 +1263,7 @@ describe("resolvePendingPlanningContextHydration", () => {
       planStartDate: "2026-08-03",
       durationDays: 7,
       planDatesConfirmedForCurrentAthlete: false,
+      phase: null,
     });
   });
 
@@ -1308,6 +1312,74 @@ describe("resolvePendingPlanningContextHydration", () => {
   it("derives duration days from the pending plan window", () => {
     expect(resolvePlanDurationDaysFromWindow("2026-08-03", "2026-08-09")).toBe(7);
     expect(resolvePlanDurationDaysFromWindow("2026-08-03", "2026-08-17")).toBe(15);
+  });
+
+  it("uses the backend plan window and phase instead of the previous local date", () => {
+    const workspace = {
+      nextCycleAction: "CREATE",
+      planningContext: {
+        locked: false,
+        resolved: true,
+        lockId: null,
+        snapshotId: "snapshot-next",
+        seasonCycleId: "season-2026",
+        phase: "PRE_SEASON",
+        planStartDate: "2026-09-14",
+        planEndDate: "2026-09-20",
+        planWindow: {
+          startDate: "2026-09-21",
+          endDate: "2026-09-27",
+        },
+      },
+    } as TrainingPlanWorkspace;
+
+    const hydration = resolvePendingPlanningContextHydration(workspace);
+    const patch = buildPendingPlanningContextHydrationStatePatch(hydration, {
+      fallbackPlanStartDate: "2026-09-14",
+    });
+
+    expect(hydration).toMatchObject({
+      seasonCycleId: "season-2026",
+      startDate: "2026-09-21",
+      endDate: "2026-09-27",
+      phase: "PRE_SEASON",
+    });
+    expect(patch.planStartDate).toBe("2026-09-21");
+    expect(patch.durationDays).toBe(7);
+    expect(patch.phase).toBe("PRE_SEASON");
+    expect(patch.selectedSeasonCycleId).toBe("season-2026");
+  });
+
+  it("hydrates a new season and phase from the backend planning context", () => {
+    const workspace = {
+      nextCycleAction: "CREATE",
+      planningContext: {
+        locked: false,
+        resolved: true,
+        lockId: null,
+        snapshotId: "snapshot-next",
+        seasonCycleId: "season-2027",
+        phase: "OFF_SEASON",
+        planWindow: {
+          startDate: "2027-01-04",
+          endDate: "2027-01-10",
+        },
+      },
+    } as TrainingPlanWorkspace;
+
+    const patch = buildPendingPlanningContextHydrationStatePatch(
+      resolvePendingPlanningContextHydration(workspace),
+      { fallbackPlanStartDate: "2026-12-28" },
+    );
+
+    expect(patch).toEqual({
+      selectedSeasonCycleId: "season-2027",
+      selectedGoalIds: [],
+      planStartDate: "2027-01-04",
+      durationDays: 7,
+      planDatesConfirmedForCurrentAthlete: false,
+      phase: "OFF_SEASON",
+    });
   });
 });
 
@@ -12004,7 +12076,7 @@ describe("Training Plan Workspace lifecycle display", () => {
     ).toBe(false);
   });
 
-  it("does not open Plan Viewer for unreleased domains even with explicit view intent", () => {
+  it("opens Plan Viewer for an explicit view intent when workspace status is still submitted_for_review", () => {
     expect(
       shouldShowReleasedPlanViewerCanvas({
         selectedWorkflowTab: "generate",
@@ -12013,7 +12085,7 @@ describe("Training Plan Workspace lifecycle display", () => {
         requestedPlanIdPresent: true,
         releasedWorkflowStatus: "submitted_for_review",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps Plan Viewer available, not active, after returning to Domain Plans Integration", () => {
@@ -17963,6 +18035,28 @@ describe("detectCurrentPhase", () => {
   it("detects OFF_SEASON for the planning date before PRE_SEASON starts", () => {
     expect(detectCurrentPhase(planningPhases, "2026-07-29")?.phase).toBe("OFF_SEASON");
   });
+
+  it("keeps today-based detection when no backend phase is authoritative", () => {
+    expect(
+      resolvePlanningContextActivePhase({
+        phases: planningPhases,
+        today: "2026-07-29",
+        authoritativePhase: "PRE_SEASON",
+        useAuthoritativePhase: false,
+      })?.phase,
+    ).toBe("OFF_SEASON");
+  });
+
+  it("uses the backend phase when today is still in the previous phase", () => {
+    expect(
+      resolvePlanningContextActivePhase({
+        phases: planningPhases,
+        today: "2026-07-29",
+        authoritativePhase: "PRE_SEASON",
+        useAuthoritativePhase: true,
+      })?.phase,
+    ).toBe("PRE_SEASON");
+  });
 });
 
 describe("resolvePlanStartDateInputBounds", () => {
@@ -21528,6 +21622,74 @@ describe("Workflow 1 assistant domain action visibility", () => {
       expect(resolveAuthoritativeGenerationProgressPercent(98, "RUNNING")).toBe(98);
       expect(generationProgressStageLabel("DRAFT_PERSISTED")).not.toBe("Draft ready");
     }
+  });
+
+  it("keeps Draft ready disabled until the draft is viewable", () => {
+    const repairing = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: true,
+      canOpenDraft: false,
+      generationInProgress: true,
+      loadPending: false,
+      domain: "NUTRITION",
+      job: {
+        domain: "NUTRITION",
+        status: "RUNNING",
+        progressStage: "AI_OUTPUT_REPAIRING",
+        progressMessage: "Fyn is refining your plan...",
+      },
+    });
+    expect(repairing.disabled).toBe(true);
+    expect(repairing.variant).toBe("neutral");
+    expect(repairing.statusMessage).toBe("Fyn is refining your plan...");
+
+    const completedNotViewable = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: true,
+      canOpenDraft: false,
+      generationInProgress: false,
+      loadPending: false,
+      domain: "NUTRITION",
+      job: {
+        domain: "NUTRITION",
+        status: "COMPLETED",
+        progressStage: "COMPLETED",
+        progressMessage: "Draft ready.",
+      },
+    });
+    expect(completedNotViewable.disabled).toBe(true);
+    expect(completedNotViewable.variant).toBe("neutral");
+    expect(completedNotViewable.statusMessage).toBe("Draft ready.");
+    expect(renderGenerationJobButtonLabel("NUTRITION", { domain: "NUTRITION", status: "COMPLETED" })).toBe(
+      "Draft ready",
+    );
+
+    const viewable = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: true,
+      canOpenDraft: true,
+      generationInProgress: false,
+      loadPending: false,
+      domain: "NUTRITION",
+      job: {
+        domain: "NUTRITION",
+        status: "COMPLETED",
+        progressStage: "COMPLETED",
+        progressMessage: "Draft ready.",
+      },
+    });
+    expect(viewable.disabled).toBe(false);
+    expect(viewable.variant).toBe("primary");
+    expect(viewable.statusMessage).toBeNull();
+
+    const idle = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: true,
+      canOpenDraft: false,
+      generationInProgress: false,
+      loadPending: false,
+      domain: "NUTRITION",
+      job: null,
+    });
+    expect(idle.disabled).toBe(false);
+    expect(idle.variant).toBe("primary");
+    expect(idle.statusMessage).toBeNull();
   });
 
   it("shows locked-context missing details instead of season error for incomplete locked context", () => {

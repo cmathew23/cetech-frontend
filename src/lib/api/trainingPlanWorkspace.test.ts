@@ -348,5 +348,30 @@ describe("parseTrainingPlanWorkspacePayload planWindow", () => {
     expect(workspace.planningContext.endDate).toBe("2026-08-09");
     expect(workspace.planningContext.planStartDate).toBe("2026-08-03");
     expect(workspace.planningContext.planEndDate).toBe("2026-08-09");
+    expect(workspace.planningContext.planWindow).toEqual({
+      startDate: "2026-08-03",
+      endDate: "2026-08-09",
+    });
+  });
+
+  it("keeps planWindow when flat planning dates are also present", () => {
+    const workspace = parseTrainingPlanWorkspacePayload({
+      planningContext: {
+        phase: "IN_SEASON",
+        planStartDate: "2026-09-14",
+        planEndDate: "2026-09-20",
+        planWindow: {
+          startDate: "2026-09-21",
+          endDate: "2026-09-27",
+        },
+      },
+    });
+
+    expect(workspace.planningContext.phase).toBe("IN_SEASON");
+    expect(workspace.planningContext.planWindow).toEqual({
+      startDate: "2026-09-21",
+      endDate: "2026-09-27",
+    });
+    expect(workspace.planningContext.planStartDate).toBe("2026-09-14");
   });
 });

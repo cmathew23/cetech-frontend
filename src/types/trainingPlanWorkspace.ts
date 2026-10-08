@@ -24,6 +24,10 @@ export type TrainingPlanWorkspacePlanningContext = {
   seasonId?: string | null;
   selectedSeasonId?: string | null;
   phase?: string | null;
+  planWindow?: {
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
   startDate?: string | null;
   endDate?: string | null;
   planStartDate?: string | null;

@@ -235,6 +235,8 @@ const ALLOWED_SPORT_COMPETITION_LEVEL_VALUES = new Set([
   "NATIONAL",
   "INTERNATIONAL",
 ]);
+const BASKETBALL_COMPETITION_LEVEL_VALUE = "STATE_CHAMPIONSHIP";
+const BASKETBALL_PRIMARY_SPORT = "BASKETBALL";
 const ALLOWED_INJURY_STATUS_VALUES = new Set(["HEALTHY", "INJURED", "IN_REHAB"]);
 const REQUIRED_PLANNING_FIELDS: Partial<
   Record<PlanningProfileGroupName, Set<string>>
@@ -609,6 +611,26 @@ function isSportPerformanceRankingField(
   return (
     group === "sportPerformance" && field === SPORT_PERFORMANCE_RANKING_FIELD
   );
+}
+
+function isBasketballPlanningDraft(draft: PlanningProfileFormState): boolean {
+  const sport = draft.sportContext.primarySport;
+  return (
+    typeof sport === "string"
+    && sport.trim().toUpperCase() === BASKETBALL_PRIMARY_SPORT
+  );
+}
+
+function allowedCompetitionLevelsForDraft(
+  draft: PlanningProfileFormState,
+): Set<string> {
+  if (!isBasketballPlanningDraft(draft)) {
+    return ALLOWED_SPORT_COMPETITION_LEVEL_VALUES;
+  }
+  return new Set([
+    ...ALLOWED_SPORT_COMPETITION_LEVEL_VALUES,
+    BASKETBALL_COMPETITION_LEVEL_VALUE,
+  ]);
 }
 
 function isBloodGlucoseField(
@@ -1255,7 +1277,7 @@ export function buildPlanningProfileCreateBody(
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
     if (groupName === "derivedPlanningInputs") continue;
-    if (groupName === "sportPerformance") {
+    if (groupName === "sportPerformance" && !isBasketballPlanningDraft(draft)) {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
       const levelTrimmed = valueAsString(
@@ -1276,6 +1298,12 @@ export function buildPlanningProfileCreateBody(
       }
     }
     for (const [field, value] of Object.entries(draft[groupName])) {
+      if (
+        isBasketballPlanningDraft(draft)
+        && isSportPerformanceRankingField(groupName, field)
+      ) {
+        continue;
+      }
       if (!isWritablePlanningField(groupName, field)) continue;
       const type = inferFieldType(groupName, field, record);
       const converted = convertCreateValue(groupName, field, value, type);
@@ -1295,7 +1323,7 @@ export function buildPlanningProfilePatchBody(
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
     if (groupName === "derivedPlanningInputs") continue;
-    if (groupName === "sportPerformance") {
+    if (groupName === "sportPerformance" && !isBasketballPlanningDraft(draft)) {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
       const levelChanged = !formValuesEqual(
@@ -1332,6 +1360,12 @@ export function buildPlanningProfilePatchBody(
       ...Object.keys(draft[groupName]),
     ]);
     for (const field of keys) {
+      if (
+        isBasketballPlanningDraft(draft)
+        && isSportPerformanceRankingField(groupName, field)
+      ) {
+        continue;
+      }
       if (!isWritablePlanningField(groupName, field)) continue;
       const previous = baseline[groupName][field];
       const next = draft[groupName][field];
@@ -1552,6 +1586,8 @@ export function collectPlanningProfileValidationErrors(
     "sportPerformance",
     SPORT_PERFORMANCE_LEVEL_FIELD,
   );
+  const isBasketball = isBasketballPlanningDraft(draft);
+  const allowedCompetitionLevels = allowedCompetitionLevelsForDraft(draft);
   if (
     shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
     && competitionLevel === ""
@@ -1560,31 +1596,35 @@ export function collectPlanningProfileValidationErrors(
       "Highest Competition Level is required.";
   } else if (
     shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
-    && !ALLOWED_SPORT_COMPETITION_LEVEL_VALUES.has(competitionLevel)
+    && !allowedCompetitionLevels.has(competitionLevel)
   ) {
     errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)] =
-      "Competition level must be District, State, National, or International.";
+      isBasketball
+        ? "Competition level must be District, State, State Championship, National, or International."
+        : "Competition level must be District, State, National, or International.";
   }
-  const ranking = readValue("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD);
-  if (
-    shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
-    && ranking === ""
-  ) {
-    errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
-      "Highest Ranking is required.";
-  } else if (
-    shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
-    && competitionLevel === ""
-  ) {
-    errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
-      "Select competition level before entering ranking.";
-  } else if (shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)) {
-    validateNumber("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD, {
-      integer: true,
-      positive: true,
-      allowEmpty: false,
-      message: "Ranking must be a positive integer.",
-    });
+  if (!isBasketball) {
+    const ranking = readValue("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD);
+    if (
+      shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
+      && ranking === ""
+    ) {
+      errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
+        "Highest Ranking is required.";
+    } else if (
+      shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)
+      && competitionLevel === ""
+    ) {
+      errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)] =
+        "Select competition level before entering ranking.";
+    } else if (shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)) {
+      validateNumber("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD, {
+        integer: true,
+        positive: true,
+        allowEmpty: false,
+        message: "Ranking must be a positive integer.",
+      });
+    }
   }
 
   const injuryStatus = readValue("healthStatus", "injuryStatus");

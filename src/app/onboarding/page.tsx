@@ -194,7 +194,11 @@ function AthleteProfileForm({
           >
             <option value="">Select a sport</option>
             {SPORT_VALUES.map((s) => (
-              <option key={s} value={s} disabled={s !== "GOLF"}>
+              <option
+                key={s}
+                value={s}
+                disabled={s !== "GOLF" && s !== "BASKETBALL"}
+              >
                 {s.replace(/_/g, " ")}
               </option>
             ))}

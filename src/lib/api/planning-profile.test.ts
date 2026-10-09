@@ -780,3 +780,95 @@ describe("APP existing and legacy profile editing", () => {
     ).toBe("Injury Status is required.");
   });
 });
+
+describe("Basketball APP sport contract", () => {
+  function basketballDraft(): PlanningProfileFormState {
+    const draft = completedDraft();
+    draft.sportContext.primarySport = "BASKETBALL";
+    draft.sportContext.disciplineOrEvent = "POINT_GUARD";
+    draft.sportPerformance = {
+      highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+      highestRankingAchievedAtThatLevelPast12Months: "",
+    };
+    return draft;
+  }
+
+  it("creates a basketball profile without sending ranking", () => {
+    const draft = basketballDraft();
+
+    expect(collectPlanningProfileValidationErrors(draft)).toEqual({});
+    expect(buildPlanningProfileCreateBody(draft)).toMatchObject({
+      sportContext: {
+        primarySport: "BASKETBALL",
+        disciplineOrEvent: "POINT_GUARD",
+        selfReportedLevel: "ADVANCED",
+      },
+      sportPerformance: {
+        highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+      },
+    });
+    expect(buildPlanningProfileCreateBody(draft).sportPerformance).not.toHaveProperty(
+      "highestRankingAchievedAtThatLevelPast12Months",
+    );
+  });
+
+  it("does not send a leftover basketball ranking value", () => {
+    const draft = basketballDraft();
+    draft.sportPerformance.highestRankingAchievedAtThatLevelPast12Months = "1";
+
+    expect(collectPlanningProfileValidationErrors(draft)).toEqual({});
+    expect(buildPlanningProfileCreateBody(draft).sportPerformance).toEqual({
+      highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+    });
+  });
+
+  it("omits basketball ranking from a patch", () => {
+    const baseline = basketballDraft();
+    baseline.sportContext.disciplineOrEvent = "";
+    const draft = structuredClone(baseline);
+    draft.sportPerformance.highestRankingAchievedAtThatLevelPast12Months = "4";
+    draft.sportContext.disciplineOrEvent = "POINT_GUARD";
+
+    expect(buildPlanningProfilePatchBody(baseline, draft)).toEqual({
+      sportContext: { disciplineOrEvent: "POINT_GUARD" },
+    });
+  });
+
+  it("keeps golf ranking required and rejects STATE_CHAMPIONSHIP", () => {
+    const missingRanking = completedDraft();
+    missingRanking.sportContext.primarySport = "GOLF";
+    missingRanking.sportPerformance.highestRankingAchievedAtThatLevelPast12Months =
+      "   ";
+
+    expect(
+      collectPlanningProfileValidationErrors(missingRanking)[
+        "sportPerformance.highestRankingAchievedAtThatLevelPast12Months"
+      ],
+    ).toBe("Highest Ranking is required.");
+
+    const stateChampionship = completedDraft();
+    stateChampionship.sportContext.primarySport = "GOLF";
+    stateChampionship.sportPerformance.highestCompetitionLevelReachedPast12Months =
+      "STATE_CHAMPIONSHIP";
+
+    expect(
+      collectPlanningProfileValidationErrors(stateChampionship)[
+        "sportPerformance.highestCompetitionLevelReachedPast12Months"
+      ],
+    ).toBe(
+      "Competition level must be District, State, National, or International.",
+    );
+
+    const golf = completedDraft();
+    golf.sportContext.primarySport = "GOLF";
+    golf.sportContext.disciplineOrEvent = "Stroke Play";
+    expect(buildPlanningProfileCreateBody(golf).sportPerformance).toEqual({
+      highestCompetitionLevelReachedPast12Months: "NATIONAL",
+      highestRankingAchievedAtThatLevelPast12Months: 3,
+    });
+    expect(buildPlanningProfileCreateBody(golf).sportContext).toMatchObject({
+      primarySport: "GOLF",
+      disciplineOrEvent: "Stroke Play",
+    });
+  });
+});

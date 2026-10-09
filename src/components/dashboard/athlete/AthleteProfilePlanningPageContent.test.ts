@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   ALLERGY_INTOLERANCE_CHOICES_DISABLED,
   ALLERGY_OPTIONS,
+  BASKETBALL_POSITION_OPTIONS,
+  BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS,
   INTOLERANCE_OPTIONS,
   SPECIAL_SELECTABLE_OPTIONS,
+  SPORT_PERFORMANCE_LEVEL_OPTIONS,
   VISIBLE_DIET_TYPE_OPTIONS,
   VISIBLE_REGIONAL_CUISINE_OPTIONS,
 } from "@/components/dashboard/athlete/AthleteProfilePlanningPageContent";
@@ -116,5 +119,34 @@ describe("APP Allergies / Intolerances MVP disable", () => {
     expect(source).toMatch(
       /checked=\{allergiesValue\.noFoodAllergies\}\s+disabled=\{readOnly\}\s+onChange=\{toggleNoFoodAllergies\}/,
     );
+  });
+});
+
+describe("Basketball APP sport fields", () => {
+  it("keeps golf competition levels and adds basketball position plus state championship", () => {
+    expect(SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => option.value)).toEqual([
+      "",
+      "DISTRICT",
+      "STATE",
+      "NATIONAL",
+      "INTERNATIONAL",
+    ]);
+    expect(
+      BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => option.value),
+    ).toEqual([
+      "",
+      "DISTRICT",
+      "STATE",
+      "STATE_CHAMPIONSHIP",
+      "NATIONAL",
+      "INTERNATIONAL",
+    ]);
+    expect(BASKETBALL_POSITION_OPTIONS.map((option) => option.value)).toEqual([
+      "",
+      "POINT_GUARD",
+    ]);
+    expect(source).toContain('disciplineOrEvent: "Discipline / Event"');
+    expect(source).toContain("if (isBasketball) return null;");
+    expect(source).toContain('value: "POINT_GUARD"');
   });
 });

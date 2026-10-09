@@ -8,12 +8,14 @@ export function RootShell({ children }: { children: React.ReactNode }) {
   const isAuthRoute =
     pathname === "/login" ||
     pathname === "/register" ||
+    pathname === "/create/academy-admin" ||
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
     pathname === "/access/invitation-required" ||
     pathname === "/membership-inactive" ||
     pathname?.startsWith("/login/") ||
     pathname?.startsWith("/register/") ||
+    pathname?.startsWith("/create/academy-admin/") ||
     pathname?.startsWith("/forgot-password/") ||
     pathname?.startsWith("/reset-password/") ||
     pathname?.startsWith("/access/invitation-required/");

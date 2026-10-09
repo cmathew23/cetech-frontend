@@ -26,8 +26,15 @@ describe("AthleteFynAssistantPageContent free-form chat contract", () => {
   it("preserves history loading and post-send refresh", () => {
     expect(source.match(/fetchFynAssistantHistory\(\{/g)).toHaveLength(2);
     expect(source).toContain('role: "athlete"');
+    expect(source).toContain("fynHistoryContainsSubmittedTurn(history.messages, trimmedMessage)");
     expect(source).toContain("setMessages(history.messages)");
-    expect(source).toContain("warnings: response.warnings");
-    expect(source).toContain("usedSources: response.usedSources");
+    expect(source).toContain("appendFynAssistantQueryAnswer(current, response)");
+  });
+
+  it("shows the one-question status message next to the composer", () => {
+    expect(source).toContain('<Alert variant="info" role="status">');
+    expect(source).toContain(
+      "Fyn processes one question at a time. Please wait for a response before sending your next question.",
+    );
   });
 });

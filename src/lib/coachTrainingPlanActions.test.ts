@@ -12,6 +12,7 @@ import {
   headCoachOwnsAssignedDomainGeneration,
   isPlanGenerationBlockedByOwnership,
   mergePlanGenerationOwnershipForDomain,
+  coachHasSkillsPlanGenerationAuthority,
   PLAN_GENERATION_NOT_ASSIGNED_MESSAGE,
   resolveTrainingPlanAction,
   PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL,
@@ -937,6 +938,29 @@ describe("mergePlanGenerationOwnershipForDomain", () => {
       canGeneratePlan: false,
       canGenerateCurrentDomainPlan: false,
     });
+  });
+});
+
+describe("coachHasSkillsPlanGenerationAuthority", () => {
+  it("is true when assigned-athletes ownership allows Skills generation", () => {
+    expect(
+      coachHasSkillsPlanGenerationAuthority({
+        currentGenerationDomain: "SKILLS",
+        canGeneratePlan: true,
+        canGenerateCurrentDomainPlan: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("is false when this coach does not control Skills generation", () => {
+    expect(
+      coachHasSkillsPlanGenerationAuthority({
+        currentGenerationDomain: "SKILLS",
+        canGeneratePlan: false,
+        canGenerateCurrentDomainPlan: false,
+      }),
+    ).toBe(false);
+    expect(coachHasSkillsPlanGenerationAuthority(null)).toBe(false);
   });
 });
 

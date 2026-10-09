@@ -10,8 +10,19 @@ import {
 import { AthleteWeeklyAdherenceSection } from "@/components/dashboard/athlete/AthleteWeeklyAdherenceSection";
 import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/AthletePendingInvitationCard";
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
-import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
+import { AthleteCompetitionPerformanceSection } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
+import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
+import {
+  SkillsGolfHistoryComparisonProvider,
+  SkillsGolfHistoryWeekSelector,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
+// Legacy athlete Sports Metrics UI is isolated pending rebuild. Restore by
+// uncommenting this import and the SportMetricsSection render below.
+// import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
+import { NutritionPerformanceSection } from "@/components/dashboard/NutritionPerformanceSection";
+import { SandCSessionLoadSection } from "@/components/dashboard/SandCSessionLoadSection";
 import { AthleteSidebar } from "@/components/dashboard/athlete/AthleteSidebar";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
@@ -21,6 +32,55 @@ import { useRouter } from "next/navigation";
 
 function isPendingStatus(status: string): boolean {
   return status.trim().toUpperCase() === "PENDING";
+}
+
+function AthleteSandCSessionLoadWithPlanWindow({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { weekStart, weekEnd, phase, summary } = useAthleteWeeklyAdherence();
+  const weekRangePending =
+    phase === "loading" || phase === "awaiting_identifiers";
+
+  return (
+    <SandCSessionLoadSection
+      entityId={entityId}
+      athleteId={athleteId}
+      summary={summary}
+      weekStart={weekStart}
+      weekEnd={weekEnd}
+      weekRangePending={weekRangePending}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+    />
+  );
+}
+
+function AthleteNutritionPerformanceWithPlanWindow({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { weekStart, weekEnd, phase } = useAthleteWeeklyAdherence();
+  const weekRangePending =
+    phase === "loading" || phase === "awaiting_identifiers";
+
+  return (
+    <NutritionPerformanceSection
+      entityId={entityId}
+      athleteId={athleteId}
+      weekStart={weekStart}
+      weekEnd={weekEnd}
+      weekRangePending={weekRangePending}
+      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+    />
+  );
 }
 
 function AthleteWearableSummaryWithPlanWindow({
@@ -56,15 +116,38 @@ function AthleteSportMetricsWithPlanVersion({
   athleteId: string;
 }) {
   const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  // return (
+  //   <SportMetricsSection
+  //     entityId={entityId}
+  //     athleteId={athleteId}
+  //     trainingPlanVersionId={trainingPlanVersionId}
+  //     titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
+  //     cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+  //   />
+  // );
 
   return (
-    <SportMetricsSection
+    <SkillsGolfHistoryComparisonProvider
       entityId={entityId}
       athleteId={athleteId}
-      trainingPlanVersionId={trainingPlanVersionId}
-      titleClassName={ATHLETE_DASHBOARD_CARD_TITLE_CLASS}
-      cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
-    />
+    >
+      <SkillsGolfHistoryWeekSelector />
+      <AthleteWeeklyGoalPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+      <AthleteCompetitionPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+      <OverallGolfPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+      />
+    </SkillsGolfHistoryComparisonProvider>
   );
 }
 
@@ -108,13 +191,25 @@ export function AthleteDashboardShell() {
             />
           ) : null}
           <AthleteWeeklyAdherenceSection />
-          <AthleteTodayPlanCard />
+          <AthleteSandCSessionLoadWithPlanWindow
+            entityId={entityId}
+            athleteId={athleteId}
+          />
+          <AthleteTodayPlanCard
+            entityId={entityId}
+            athleteId={athleteId}
+            identifiersPhase={planningIds.phase}
+          />
 
           <AthleteSportMetricsWithPlanVersion
             entityId={entityId}
             athleteId={athleteId}
           />
 
+          <AthleteNutritionPerformanceWithPlanWindow
+            entityId={entityId}
+            athleteId={athleteId}
+          />
           <AthleteWearableSummaryWithPlanWindow
             entityId={entityId}
             athleteId={athleteId}

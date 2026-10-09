@@ -13,8 +13,8 @@ function AuthHeroPanel() {
         alt="PEAKFLOW — Plan Better. Coach Better. Perform Better."
         fill
         priority
-        className="object-contain"
-        sizes="(min-width: 768px) 40vw, 0px"
+        className="object-cover object-top md:object-contain md:object-center"
+        sizes="(min-width: 768px) 40vw, 100vw"
       />
     </div>
   );

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  athleteSidebarNavItems,
+  coachSidebarNavItems,
   isCoachSidebarNavItemActive,
   isCoachTrainingPlanRoute,
 } from "@/config/dashboardNav";
@@ -11,6 +13,7 @@ const DASHBOARD = "/coach/dashboard";
 const CHAT = "/coach/chat";
 const FYN = "/coach/fyn";
 const INVITATIONS = "/coach/dashboard/invitations";
+const SETTINGS = "/coach/settings";
 
 describe("isCoachSidebarNavItemActive", () => {
   it("marks Training Plan active on the training plan list", () => {
@@ -90,5 +93,32 @@ describe("isCoachSidebarNavItemActive", () => {
     expect(
       isCoachSidebarNavItemActive("/coach/athletes/athlete-1/planning-profile", CHAT),
     ).toBe(false);
+  });
+
+  it("marks Settings active only on /coach/settings", () => {
+    expect(isCoachSidebarNavItemActive("/coach/settings", SETTINGS)).toBe(true);
+    expect(isCoachSidebarNavItemActive("/coach/settings", DASHBOARD)).toBe(false);
+    expect(isCoachSidebarNavItemActive("/coach/dashboard", SETTINGS)).toBe(false);
+  });
+});
+
+describe("PeakConnect module labels", () => {
+  it("uses PeakConnect for coach and athlete chat sidebar items", () => {
+    expect(
+      coachSidebarNavItems.find((item) => item.href === "/coach/chat")?.label,
+    ).toBe("PeakConnect");
+    expect(
+      athleteSidebarNavItems.find((item) => item.href === "/athlete/chat")?.label,
+    ).toBe("PeakConnect");
+  });
+
+  it("adds a Competitions item to the athlete sidebar", () => {
+    expect(
+      athleteSidebarNavItems.find((item) => item.href === "/athlete/competitions")
+        ?.label,
+    ).toBe("Competitions");
+    expect(
+      coachSidebarNavItems.find((item) => item.href === "/coach/competitions"),
+    ).toBeUndefined();
   });
 });

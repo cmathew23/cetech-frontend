@@ -1,11 +1,16 @@
 "use client";
 
-import type { FynChatMessage } from "@/components/fyn/FynChatThread";
+import {
+  FYN_LOADING_MESSAGE_ID,
+  type FynChatMessage,
+} from "@/components/fyn/FynChatThread";
 import { paths } from "@/config/endpoints";
 import { adaptBackendSuccess } from "@/lib/api/adaptBackendSuccess";
 import { apiRequest } from "@/lib/apiClient";
 
 const FYN_ASSISTANT_TIMEOUT_MS = 60_000;
+/** Sequential backend budget: 15s classifier + context retrieval + 60s PLAN_EXPLANATION + overhead. */
+const FYN_ASSISTANT_QUERY_TIMEOUT_MS = 120_000;
 
 const ATHLETE_FYN_PROMPT_LABELS: Record<string, string> = {
   EXPLAIN_TODAYS_PLAN: "Explain today’s plan",
@@ -155,6 +160,33 @@ export function mapFynHistoryToChatMessages(
   });
 }
 
+export function fynHistoryContainsSubmittedTurn(
+  messages: FynChatMessage[],
+  submittedUserMessage: string,
+): boolean {
+  const text = submittedUserMessage.trim();
+  if (text === "") return false;
+  return messages.some(
+    (message) => message.role === "user" && message.text === text,
+  );
+}
+
+export function appendFynAssistantQueryAnswer(
+  messages: FynChatMessage[],
+  response: FynAssistantResponse,
+): FynChatMessage[] {
+  return messages
+    .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
+    .concat({
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      text: response.answer,
+      createdAt: new Date().toISOString(),
+      warnings: response.warnings,
+      usedSources: response.usedSources,
+    });
+}
+
 function parseFynAssistantResponse(payload: unknown): FynAssistantResponse {
   const data = adaptBackendSuccess(payload);
   const record = asRecord(data);
@@ -287,7 +319,7 @@ export async function queryFynAssistant(
     {
       method: "POST",
       body: JSON.stringify(body),
-      timeoutMs: FYN_ASSISTANT_TIMEOUT_MS,
+      timeoutMs: FYN_ASSISTANT_QUERY_TIMEOUT_MS,
     },
   );
 

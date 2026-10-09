@@ -133,13 +133,13 @@ export function formatDateTime(
   return `${formatDdMmYyyyFromDate(d)}, ${timePart}`;
 }
 
-/** DD/MM/YYYY to DD/MM/YYYY */
+/** DD/MM/YYYY – DD/MM/YYYY */
 export function formatDateRange(
   start: string | Date | null | undefined,
   end: string | Date | null | undefined,
   fallback: string = DATE_DISPLAY_UNAVAILABLE,
 ): string {
-  return `${formatDateOnly(start, fallback)} to ${formatDateOnly(end, fallback)}`;
+  return `${formatDateOnly(start, fallback)} – ${formatDateOnly(end, fallback)}`;
 }
 
 /**

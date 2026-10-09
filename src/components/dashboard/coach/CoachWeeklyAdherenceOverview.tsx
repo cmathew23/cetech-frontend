@@ -3,6 +3,7 @@
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
+import { WeeklyTrainingLoadCard } from "@/components/dashboard/WeeklyTrainingLoadCard";
 import { Card } from "@/components/ui/Card";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import {
@@ -309,12 +310,22 @@ export function CoachWeeklyAdherenceOverview({
                   </div>
                 ) : null}
                 {entry.summary ? (
-                  <WeeklyAdherenceCards
-                    summary={entry.summary}
-                    athleteHeading={heading}
-                    showSectionHeader={false}
-                    cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
-                  />
+                  <div className="space-y-3">
+                    <WeeklyAdherenceCards
+                      summary={entry.summary}
+                      athleteHeading={heading}
+                      showSectionHeader={false}
+                      cardTitleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                    />
+                    <WeeklyTrainingLoadCard
+                      comparison={entry.summary.trainingLoadComparison}
+                      visibleDomains={entry.summary.visibleDomains}
+                      viewerContext={wearableViewerContext}
+                      weekStart={entry.summary.weekStart}
+                      weekEnd={entry.summary.weekEnd}
+                      titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                    />
+                  </div>
                 ) : null}
                 {wearableViewerContext !== "NUTRITION" &&
                   wearableViewerContext !== "S_AND_C" ? (

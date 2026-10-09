@@ -8,7 +8,14 @@
   --font-mono: var(--font-sans);
 }
 
+html {
+  max-width: 100%;
+}
+
 body {
   @apply bg-bg text-textPrimary antialiased font-normal;
   font-family: var(--font-sans);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }

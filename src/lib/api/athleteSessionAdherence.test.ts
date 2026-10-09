@@ -16,6 +16,7 @@ import {
   fetchPlannedSessionAdherenceEvents,
   parsePlannedSessionAdherenceEventsPayload,
   parseRecordPlannedSessionAdherenceEventPayload,
+  parseSessionRpeFormValue,
   recordNutritionPlannedSessionAdherenceEvent,
   recordPlannedSessionAdherenceEvent,
 } from "@/lib/api/athleteSessionAdherence";
@@ -450,5 +451,155 @@ describe("athleteSessionAdherence API", () => {
     expect(body).not.toHaveProperty("generationDomain");
     expect(body).not.toHaveProperty("trainingDayId");
     expect(body).not.toHaveProperty("trainingPlanVersionId");
+    expect(body).not.toHaveProperty("sessionRpe");
+  });
+});
+
+describe("sessionRpe on planned-session adherence", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-19T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("includes integer sessionRpe 1–10 on the existing adherence POST", async () => {
+    apiRequestMock.mockResolvedValue({
+      id: "event-rpe",
+      plannedSessionId: "sandc-session-1",
+      eventType: "RECORDED",
+      adherenceOutcome: "COMPLETED",
+      sessionRpe: 8,
+    });
+
+    await recordPlannedSessionAdherenceEvent("sandc-session-1", {
+      eventType: "RECORDED",
+      adherenceOutcome: "COMPLETED",
+      actualDurationMinutes: 45,
+      sessionRpe: 8,
+    });
+
+    expect(parsePostBody()).toMatchObject({
+      eventType: "RECORDED",
+      adherenceOutcome: "COMPLETED",
+      actualDurationMinutes: 45,
+      sessionRpe: 8,
+    });
+  });
+
+  it("omits sessionRpe when not provided so existing adherence without RPE still works", async () => {
+    apiRequestMock.mockResolvedValue({
+      id: "event-no-rpe",
+      plannedSessionId: "session-3",
+      eventType: "UPDATED",
+      adherenceOutcome: "PARTIAL",
+    });
+
+    await recordPlannedSessionAdherenceEvent("session-3", {
+      eventType: "UPDATED",
+      adherenceOutcome: "PARTIAL",
+      completionPercent: 75,
+      actualDurationMinutes: 52,
+    });
+
+    const body = parsePostBody();
+    expect(body).toMatchObject({
+      eventType: "UPDATED",
+      adherenceOutcome: "PARTIAL",
+      completionPercent: 75,
+      actualDurationMinutes: 52,
+    });
+    expect(body).not.toHaveProperty("sessionRpe");
+  });
+
+  it("rejects invalid sessionRpe values and never defaults to 0", async () => {
+    await expect(
+      recordPlannedSessionAdherenceEvent("sandc-session-1", {
+        eventType: "RECORDED",
+        adherenceOutcome: "COMPLETED",
+        sessionRpe: 0,
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_SESSION_RPE",
+    });
+    await expect(
+      recordPlannedSessionAdherenceEvent("sandc-session-1", {
+        eventType: "RECORDED",
+        adherenceOutcome: "COMPLETED",
+        sessionRpe: 11,
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_SESSION_RPE",
+    });
+    await expect(
+      recordPlannedSessionAdherenceEvent("sandc-session-1", {
+        eventType: "RECORDED",
+        adherenceOutcome: "COMPLETED",
+        sessionRpe: 7.5,
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_SESSION_RPE",
+    });
+    expect(apiRequestMock).not.toHaveBeenCalled();
+    expect(
+      buildRecordSessionAdherenceRequestBody({
+        eventType: "RECORDED",
+        adherenceOutcome: "COMPLETED",
+      }),
+    ).not.toHaveProperty("sessionRpe");
+  });
+
+  it("parses returned sessionRpe and treats 0 as unavailable", () => {
+    const withRpe = parsePlannedSessionAdherenceEventsPayload(
+      [
+        {
+          id: "event-1",
+          plannedSessionId: "session-1",
+          eventType: "RECORDED",
+          adherenceOutcome: "COMPLETED",
+          sessionRpe: 6,
+        },
+      ],
+      "session-1",
+    );
+    const zeroRpe = parsePlannedSessionAdherenceEventsPayload(
+      [
+        {
+          id: "event-2",
+          plannedSessionId: "session-1",
+          eventType: "RECORDED",
+          adherenceOutcome: "COMPLETED",
+          sessionRpe: 0,
+        },
+      ],
+      "session-1",
+    );
+    expect(withRpe[0]?.sessionRpe).toBe(6);
+    expect(zeroRpe[0]?.sessionRpe).toBeNull();
+  });
+
+  it("accepts 1 and 10 in the form parser and rejects invalid values", () => {
+    expect(parseSessionRpeFormValue("1")).toEqual({
+      kind: "value",
+      sessionRpe: 1,
+    });
+    expect(parseSessionRpeFormValue("10")).toEqual({
+      kind: "value",
+      sessionRpe: 10,
+    });
+    expect(parseSessionRpeFormValue("")).toEqual({ kind: "omit" });
+    expect(parseSessionRpeFormValue("0")).toEqual({ kind: "invalid" });
+    expect(parseSessionRpeFormValue("11")).toEqual({ kind: "invalid" });
+    expect(parseSessionRpeFormValue("7.2")).toEqual({ kind: "invalid" });
+  });
+
+  it("does not add sessionRpe to Nutrition adherence requests", () => {
+    const body = buildRecordNutritionSessionAdherenceRequestBody({
+      items: [{ plannedItemOrder: 1, consumedPortionFactor: 1 }],
+    });
+    expect(body).not.toHaveProperty("sessionRpe");
   });
 });

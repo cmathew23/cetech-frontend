@@ -3,11 +3,13 @@
 import { CoachDashboardHeader } from "@/components/dashboard/coach/CoachDashboardHeader";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
 import {
   DASHBOARD_BODY_EMPHASIS_CLASS,
   DASHBOARD_CARD_TITLE_CLASS,
   DASHBOARD_DETAIL_LABEL_CLASS,
   DASHBOARD_SECTION_HEADING_CLASS,
+  dashboardMetricGridClass,
 } from "@/components/dashboard/shared/dashboardTypography";
 import { Alert } from "@/components/ui/Alert";
 import {
@@ -165,42 +167,32 @@ export function CoachDashboardView() {
               Roster and release settings from your coach dashboard context.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="space-y-1">
-              <p className="text-xs font-normal tracking-wide text-textSecondary">
-                Assigned Athletes
-              </p>
-              <p className="text-2xl font-normal tabular-nums text-textPrimary">
-                {formatMetric(
-                  loading,
-                  error,
-                  dash?.assignedAthleteCount ?? null,
-                )}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-normal tracking-wide text-textSecondary">
-                Academy Coach Role
-              </p>
-              <p className={cn("min-w-0 text-lg leading-snug sm:text-2xl", DASHBOARD_BODY_EMPHASIS_CLASS)}>
-                {formatDashboardStringField(
-                  loading,
-                  error,
-                  dash?.academyCoachRole ?? null,
-                  formatEnumeratedLabel,
-                )}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-normal tracking-wide text-textSecondary">
-                Function Slots
-              </p>
-              <p className="text-2xl font-normal tabular-nums text-textPrimary">
-                {loading || error
+          <div className={dashboardMetricGridClass(3)}>
+            <DashboardMetricTile
+              title="Assigned Athletes"
+              value={formatMetric(
+                loading,
+                error,
+                dash?.assignedAthleteCount ?? null,
+              )}
+            />
+            <DashboardMetricTile
+              title="Academy Coach Role"
+              value={formatDashboardStringField(
+                loading,
+                error,
+                dash?.academyCoachRole ?? null,
+                formatEnumeratedLabel,
+              )}
+            />
+            <DashboardMetricTile
+              title="Function Slots"
+              value={
+                loading || error
                   ? formatMetric(loading, error, null)
-                  : String(dash?.functions?.length ?? 0)}
-              </p>
-            </div>
+                  : String(dash?.functions?.length ?? 0)
+              }
+            />
           </div>
         </section>
 
@@ -273,7 +265,7 @@ export function CoachDashboardView() {
               Academy, profile, and configuration from your membership.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <DashboardCardShell
               accent={false}
               majorOuter
@@ -327,7 +319,7 @@ export function CoachDashboardView() {
               majorOuter
               title="Configuration"
               titleClassName={DASHBOARD_CARD_TITLE_CLASS}
-              className="space-y-3 md:col-span-2 lg:col-span-1"
+              className="space-y-3 md:col-span-2 xl:col-span-1"
             >
               <dl className="space-y-2">
                 <DetailRow

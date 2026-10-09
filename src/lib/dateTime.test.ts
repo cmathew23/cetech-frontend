@@ -48,8 +48,10 @@ describe("normalizeDateOnlyKey", () => {
 
 describe("formatDateOnly", () => {
   it("formats plain ISO date as DD/MM/YYYY", () => {
+    expect(formatDateOnly("2026-01-01")).toBe("01/01/2026");
     expect(formatDateOnly("2026-02-16")).toBe("16/02/2026");
     expect(formatDateOnly("2026-04-30")).toBe("30/04/2026");
+    expect(formatDateOnly("2026-08-31")).toBe("31/08/2026");
   });
 
   it("includes no time segment for timestamps", () => {
@@ -68,9 +70,12 @@ describe("formatDateOnly", () => {
 });
 
 describe("formatDateRange", () => {
-  it("joins two dates with ' to '", () => {
+  it("joins two dates as DD/MM/YYYY – DD/MM/YYYY", () => {
     expect(formatDateRange("2026-02-16", "2026-06-30")).toBe(
-      "16/02/2026 to 30/06/2026",
+      "16/02/2026 – 30/06/2026",
+    );
+    expect(formatDateRange("2026-01-01", "2026-08-31")).toBe(
+      "01/01/2026 – 31/08/2026",
     );
   });
 });

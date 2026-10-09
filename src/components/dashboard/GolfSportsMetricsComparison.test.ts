@@ -35,6 +35,19 @@ vi.mock("@/components/ui/Card", async () => {
   };
 });
 
+vi.mock("@/components/ui/Alert", async () => {
+  const { createElement } = await import("react");
+  return {
+    Alert: ({
+      children,
+      variant,
+    }: {
+      children: ReactNode;
+      variant?: string;
+    }) => createElement("div", { "data-alert-variant": variant }, children),
+  };
+});
+
 vi.mock("@/components/ui/StatusBadge", async () => {
   const { createElement } = await import("react");
   return {
@@ -146,26 +159,28 @@ describe("GolfSportsMetricsComparison", () => {
     expect(html).toContain("Golf Sports Metrics Comparison");
     expect(html).not.toContain("plan-earlier");
     expect(html).not.toContain("version-earlier");
-    expect(html).toContain("2026-05-25");
-    expect(html).toContain("2026-05-31");
+    expect(html).toContain("25/05/2026");
+    expect(html).toContain("31/05/2026");
     expect(html).not.toContain("plan-later");
     expect(html).not.toContain("version-later");
-    expect(html).toContain("2026-06-01");
-    expect(html).toContain("2026-06-07");
+    expect(html).toContain("01/06/2026");
+    expect(html).toContain("07/06/2026");
     expect(html).toContain("Distance Control");
     expect(html).not.toContain("Taxonomy area key");
     expect(html).not.toContain("Skill code");
     expect(html).toContain("Comparable");
     expect(html).not.toContain("COMPARABLE");
-    expect(html).toContain("25 May – 31 May");
-    expect(html).toContain("1 Jun – 7 Jun");
+    expect(html).not.toContain("2026-05-25");
+    expect(html).not.toContain("2026-06-01");
+    expect(html).toContain("25/05/2026 – 31/05/2026");
+    expect(html).toContain("01/06/2026 – 07/06/2026");
     expect(html).toContain("Difference");
     expect(html).not.toContain("Backend delta");
     expect(html).not.toContain("Earlier metrics");
     expect(html).not.toContain("Later metrics");
     expect(html).toContain("80%");
     expect(html).toContain("10%");
-    expect(html).toContain('class="bg-zinc-200 text-zinc-900"');
+    expect(html).not.toContain("bg-zinc-200 text-zinc-900");
     expect(html).not.toContain("Drill mix changed");
     expect(html).not.toContain("Classification changed between weeks");
   });
@@ -280,6 +295,7 @@ describe("GolfSportsMetricsComparison", () => {
     expect(html).not.toContain(">true<");
     expect(html).not.toContain(">false<");
     expect(html).toContain("Classification changed between weeks");
+    expect(html).toContain('data-alert-variant="warning"');
     expect(html).toContain("Classification changes");
     expect(html).not.toContain("Skill code");
     expect(html).not.toContain("GOLF_CHIP_001");

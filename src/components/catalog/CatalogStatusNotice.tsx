@@ -30,7 +30,11 @@ export function CatalogStatusNotice({
     return <Alert variant="danger">{error.message}</Alert>;
   }
   if (empty) {
-    return <p className="text-sm text-textSecondary">{emptyMessage}</p>;
+    return (
+      <Alert variant="info" role="status">
+        {emptyMessage}
+      </Alert>
+    );
   }
   return null;
 }

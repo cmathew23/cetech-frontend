@@ -43,6 +43,9 @@ const DOMAIN_CHECK_ORDER: CoachPlanCreationDomain[] = [
 export const MISSING_HEAD_COACH_MESSAGE =
   "Select the Head Coach for this athlete before assigning coaches.";
 
+export const DUPLICATE_SKILLS_PLAN_GENERATOR_MESSAGE =
+  "Only one coach can generate Skills plans for this athlete.";
+
 const ASSIGNMENT_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   ATHLETE_ALREADY_HAS_HEAD_COACH:
     "Only one Head Coach can be assigned to an athlete.",
@@ -241,6 +244,7 @@ export function validateAssignmentSelection(
   }
 
   for (const domain of DOMAIN_CHECK_ORDER) {
+    if (domain === "SKILLS") continue;
     const domainCoachIds = [...finalCoachIds].filter((coachProfileId) =>
       coachHasPlanDomain(lookup.get(coachProfileId), domain),
     );
@@ -251,6 +255,24 @@ export function validateAssignmentSelection(
         message: domainCoachLimitMessage(domain),
       };
     }
+  }
+
+  const canGenerateByCoachId = new Map<string, boolean>();
+  for (const row of activeForAthlete) {
+    const id = row.coachProfileId.trim();
+    if (id === "") continue;
+    canGenerateByCoachId.set(id, row.canGeneratePlan === true);
+  }
+  const skillsGeneratorIds = [...finalCoachIds].filter((coachProfileId) => {
+    if (!coachHasPlanDomain(lookup.get(coachProfileId), "SKILLS")) return false;
+    return canGenerateByCoachId.get(coachProfileId) === true;
+  });
+  if (skillsGeneratorIds.length > 1) {
+    return {
+      ok: false,
+      useModal: true,
+      message: DUPLICATE_SKILLS_PLAN_GENERATOR_MESSAGE,
+    };
   }
 
   const coachesToCreate = [...selectedCoachIds].filter(

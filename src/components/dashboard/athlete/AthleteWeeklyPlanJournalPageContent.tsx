@@ -12,19 +12,23 @@ import {
   normalizeSkillPrimaryGoalName,
   SkillGoalAttributionText,
 } from "@/components/dashboard/SkillGoalAttribution";
+import { SandCExerciseDemonstrationVideos } from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { Modal } from "@/components/ui/Modal";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchPlannedSessionAdherenceEvents,
+  parseSessionRpeFormValue,
   recordNutritionPlannedSessionAdherenceEvent,
   recordPlannedSessionAdherenceEvent,
+  SESSION_RPE_FORM_ERROR,
   type AthleteSessionAdherenceEvent,
   type SessionAdherenceOutcome,
 } from "@/lib/api/athleteSessionAdherence";
@@ -33,9 +37,11 @@ import {
   type AthleteWeeklyPlanJournal,
   type AthleteWeeklyPlanJournalDay,
 } from "@/lib/api/coachAthletePlanningReadiness";
+import { refreshWeeklyAdherenceSummaryAfterAdherence } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
   formatDateOnly,
+  formatDateRange,
   formatDateWithWeekday,
   getLocalDateKey,
   getPlanningDateKey,
@@ -45,7 +51,9 @@ import {
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import { cn } from "@/lib/utils";
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -59,6 +67,62 @@ type ViewState =
   | { phase: "error"; message: string };
 
 type Scalar = string | number | boolean;
+
+const RefreshWeeklyAdherenceAfterEventContext = createContext<
+  () => Promise<void>
+>(async () => {});
+
+function useRefreshWeeklyAdherenceAfterEvent(): () => Promise<void> {
+  return useContext(RefreshWeeklyAdherenceAfterEventContext);
+}
+
+export const ADHERENCE_TIMEOUT_NOTICE_TITLE = "Taking longer than expected";
+export const ADHERENCE_TIMEOUT_NOTICE_MESSAGE =
+  "Your update may still have been saved. Refresh the page and check the session status before trying again.";
+
+export function isAthleteAdherenceLoggingTimeoutError(error: unknown): boolean {
+  return (
+    isNormalizedApiError(error) &&
+    error.message.trim().toLowerCase() === "request timed out"
+  );
+}
+
+function AdherenceLoggingTimeoutNoticeModal({
+  open,
+  onDismiss,
+}: {
+  open: boolean;
+  onDismiss: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <Modal
+      className="w-full max-w-[480px] overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
+      aria-labelledby="adherence-timeout-notice-title"
+      aria-describedby="adherence-timeout-notice-message"
+    >
+      <div className="flex flex-col px-4 py-6 sm:px-8 sm:py-8">
+        <h2
+          id="adherence-timeout-notice-title"
+          className="mb-3 text-xl font-semibold tracking-tight text-textPrimary"
+        >
+          {ADHERENCE_TIMEOUT_NOTICE_TITLE}
+        </h2>
+        <p
+          id="adherence-timeout-notice-message"
+          className="mb-6 text-base leading-relaxed text-textSecondary"
+        >
+          {ADHERENCE_TIMEOUT_NOTICE_MESSAGE}
+        </p>
+        <div className="flex justify-end">
+          <Button type="button" variant="primary" onClick={onDismiss}>
+            OK
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 const DOMAIN_SECTIONS = [
   {
@@ -824,10 +888,10 @@ function renderNutritionDayTotalsPanel(entries: unknown[]) {
     rows.map((row) => (
       <div
         key={`${keyPrefix}-${row.label}-${row.value}`}
-        className="grid grid-cols-[minmax(0,9rem)_1fr] gap-2 text-sm"
+        className="grid min-w-0 grid-cols-[minmax(0,9rem)_1fr] gap-2 text-sm"
       >
         <dt className="font-medium text-textSecondary">{row.label}</dt>
-        <dd className="min-w-0 text-textPrimary">{row.value}</dd>
+        <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
       </div>
     ));
 
@@ -932,6 +996,7 @@ export function collectDetailRows(record: Record<string, unknown>): Array<{ labe
       key === "assignedCoachId" ||
       key === "exerciseCatalogItemId" ||
       key === "nutritionCatalogItemId" ||
+      key === "videos" ||
       JOURNAL_DEFAULT_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
@@ -1092,6 +1157,7 @@ export function collectStructureItemDetailRows(
       key === "id" ||
       key === "exerciseCatalogItemId" ||
       key === "nutritionCatalogItemId" ||
+      key === "videos" ||
       STRUCTURE_ITEM_HIDDEN_DETAIL_KEYS.has(key)
     ) {
       return;
@@ -1236,6 +1302,7 @@ function renderJournalStructureSections(
   options?: {
     nutritionDomain?: boolean;
     skillDomain?: boolean;
+    sandCDomain?: boolean;
     skillsSportMetrics?: SkillsSportMetricsJournalOptions;
   },
 ) {
@@ -1244,6 +1311,7 @@ function renderJournalStructureSections(
 
   const nutritionDomain = options?.nutritionDomain === true;
   const skillDomain = options?.skillDomain === true;
+  const sandCDomain = options?.sandCDomain === true;
 
   return (
     <div className="space-y-3 border-t border-slate-200/80 pt-2">
@@ -1273,17 +1341,27 @@ function renderJournalStructureSections(
                   const mergedSkillItem = mergeJournalRecordCandidateFields(rawItem);
                   const heading = structureItemHeading(rawItem, itemIndex);
                   const itemRows = collectStructureItemDetailRows(rawItem);
+                  const showItemGoalAttribution = skillDomain || sandCDomain;
                   const detailRows = itemRows.filter(
                     (row) =>
                       row.value.trim().toLowerCase() !== heading.trim().toLowerCase() &&
                       !(
-                        skillDomain &&
-                        (row.label === "Primary Goal Id" || row.label === "Primary Goal Name")
+                        showItemGoalAttribution &&
+                        (row.label === "Primary Goal Id" ||
+                          row.label === "Primary Goal Name" ||
+                          row.label === "Success Criteria" ||
+                          row.label === "Target Value")
                       ),
                   );
-                  const primaryGoalName = skillDomain
+                  const primaryGoalName = showItemGoalAttribution
                     ? normalizeSkillPrimaryGoalName(mergedSkillItem.primaryGoalName)
                     : null;
+                  const successCriteria = showItemGoalAttribution
+                    ? mergedSkillItem.successCriteria
+                    : undefined;
+                  const targetValue = showItemGoalAttribution
+                    ? mergedSkillItem.targetValue
+                    : undefined;
                   const hideGenericHeading =
                     /^Item\s+\d+$/i.test(heading.trim()) && detailRows.length > 0;
                   const skillsSportMetrics = options?.skillsSportMetrics;
@@ -1320,6 +1398,8 @@ function renderJournalStructureSections(
                       ) : null}
                       <SkillGoalAttributionText
                         primaryGoalName={primaryGoalName}
+                        successCriteria={successCriteria}
+                        targetValue={targetValue}
                         className={hideGenericHeading ? undefined : "mt-1"}
                       />
                       {detailRows.length > 0 ? (
@@ -1329,7 +1409,7 @@ function renderJournalStructureSections(
                           {detailRows.map((row, rowIdx) => (
                             <div
                               key={`${sectionIdx}-${section.key}-${itemIndex}-r-${rowIdx}`}
-                              className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
+                              className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 gap-y-0.5 text-xs"
                             >
                               <dt className="text-textSecondary">{row.label}</dt>
                               <dd className="min-w-0 break-words text-textPrimary">
@@ -1340,6 +1420,9 @@ function renderJournalStructureSections(
                         </dl>
                       ) : heading.startsWith("Item ") ? (
                         <p className="text-xs text-textSecondary">Structured entry</p>
+                      ) : null}
+                      {sandCDomain ? (
+                        <SandCExerciseDemonstrationVideos videos={mergedSkillItem.videos} />
                       ) : null}
                       {drillLogContext && skillsSportMetrics ? (
                         <div className="mt-2">
@@ -1384,6 +1467,12 @@ function renderJournalStructureSections(
                     className="rounded border border-slate-200/80 bg-white/60 p-2"
                   >
                     {leading}
+                    <SkillGoalAttributionText
+                      primaryGoalName={mergedItem.primaryGoalName}
+                      successCriteria={mergedItem.successCriteria}
+                      targetValue={mergedItem.targetValue}
+                      className={leading ? "mt-1" : undefined}
+                    />
                     {!leading && heading.startsWith("Item ") ? (
                       <p className="text-xs text-textSecondary">Structured entry</p>
                     ) : null}
@@ -1654,6 +1743,7 @@ function NutritionSessionAdherencePanel({
     () => collectNutritionAdherenceFoodRows(sessionItem),
     [sessionItem],
   );
+  const refreshWeeklyAdherenceAfterEvent = useRefreshWeeklyAdherenceAfterEvent();
 
   const [historyPhase, setHistoryPhase] = useState<"loading" | "ready" | "error">(
     "loading",
@@ -1667,6 +1757,7 @@ function NutritionSessionAdherencePanel({
     variant: "success" | "danger";
     text: string;
   } | null>(null);
+  const [timeoutNoticeOpen, setTimeoutNoticeOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1732,6 +1823,7 @@ function NutritionSessionAdherencePanel({
 
     setSubmitting(true);
     setSubmitMessage(null);
+    setTimeoutNoticeOpen(false);
     try {
       const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
       await recordNutritionPlannedSessionAdherenceEvent(plannedSessionId, {
@@ -1742,9 +1834,18 @@ function NutritionSessionAdherencePanel({
         })),
         ...(notes.trim() !== "" ? { notes: notes.trim() } : {}),
       });
+      try {
+        await refreshWeeklyAdherenceAfterEvent();
+      } catch {
+        // Adherence write succeeded; dashboard will refetch on next load if needed.
+      }
       setSubmitMessage({ variant: "success", text: "Nutrition adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
+      if (isAthleteAdherenceLoggingTimeoutError(error)) {
+        setTimeoutNoticeOpen(true);
+        return;
+      }
       setSubmitMessage({
         variant: "danger",
         text: isNormalizedApiError(error)
@@ -1762,6 +1863,7 @@ function NutritionSessionAdherencePanel({
     notes,
     portionByOrder,
     plannedSessionId,
+    refreshWeeklyAdherenceAfterEvent,
   ]);
 
   const submitDisabled =
@@ -1795,14 +1897,14 @@ function NutritionSessionAdherencePanel({
       {historyPhase === "ready" && latestAthleteEvent ? (
         <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
           {latestAthleteEvent.athleteNotes ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Note</dt>
               <dd className="min-w-0 break-words text-textPrimary">
                 {latestAthleteEvent.athleteNotes}
               </dd>
             </div>
           ) : null}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Logged</dt>
             <dd className="text-textPrimary">
               {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
@@ -1926,17 +2028,18 @@ function NutritionSessionAdherencePanel({
       </fieldset>
 
       {submitMessage ? (
-        <p
-          className={cn(
-            "mt-2 text-xs",
-            submitMessage.variant === "success"
-              ? "text-emerald-700"
-              : "text-red-700",
-          )}
+        <Alert
+          variant={submitMessage.variant === "success" ? "success" : "danger"}
+          className="mt-2"
+          dismissible={submitMessage.variant === "success"}
         >
           {submitMessage.text}
-        </p>
+        </Alert>
       ) : null}
+      <AdherenceLoggingTimeoutNoticeModal
+        open={timeoutNoticeOpen}
+        onDismiss={() => setTimeoutNoticeOpen(false)}
+      />
     </div>
   );
 }
@@ -1964,12 +2067,15 @@ function SessionAdherencePanel({
   const [outcome, setOutcome] = useState<SessionAdherenceOutcome | "">("");
   const [partialCompletedItems, setPartialCompletedItems] = useState("");
   const [actualDurationMinutes, setActualDurationMinutes] = useState("");
+  const [sessionRpe, setSessionRpe] = useState("");
   const [athleteNotes, setAthleteNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{
     variant: "success" | "danger";
     text: string;
   } | null>(null);
+  const [timeoutNoticeOpen, setTimeoutNoticeOpen] = useState(false);
+  const refreshWeeklyAdherenceAfterEvent = useRefreshWeeklyAdherenceAfterEvent();
 
   useEffect(() => {
     let cancelled = false;
@@ -2023,6 +2129,22 @@ function SessionAdherencePanel({
       durationValue = parsed;
     }
 
+    const showSessionRpe = adherenceDomainKey === "S_AND_C";
+    let sessionRpeValue: number | undefined;
+    if (showSessionRpe) {
+      const parsedRpe = parseSessionRpeFormValue(sessionRpe);
+      if (parsedRpe.kind === "invalid") {
+        setSubmitMessage({
+          variant: "danger",
+          text: SESSION_RPE_FORM_ERROR,
+        });
+        return;
+      }
+      if (parsedRpe.kind === "value") {
+        sessionRpeValue = parsedRpe.sessionRpe;
+      }
+    }
+
     const completionResult = resolveAdherenceCompletionPercent({
       outcome,
       totalPrescribedItems,
@@ -2038,6 +2160,7 @@ function SessionAdherencePanel({
 
     setSubmitting(true);
     setSubmitMessage(null);
+    setTimeoutNoticeOpen(false);
     try {
       const eventType = latestAthleteEvent ? "UPDATED" : "RECORDED";
       await recordPlannedSessionAdherenceEvent(plannedSessionId, {
@@ -2047,11 +2170,21 @@ function SessionAdherencePanel({
         ...(durationValue !== undefined
           ? { actualDurationMinutes: durationValue }
           : {}),
+        ...(sessionRpeValue !== undefined ? { sessionRpe: sessionRpeValue } : {}),
         ...(athleteNotes.trim() !== "" ? { athleteNotes: athleteNotes.trim() } : {}),
       });
+      try {
+        await refreshWeeklyAdherenceAfterEvent();
+      } catch {
+        // Adherence write succeeded; dashboard will refetch on next load if needed.
+      }
       setSubmitMessage({ variant: "success", text: "Adherence saved." });
       setReloadKey((current) => current + 1);
     } catch (error) {
+      if (isAthleteAdherenceLoggingTimeoutError(error)) {
+        setTimeoutNoticeOpen(true);
+        return;
+      }
       setSubmitMessage({
         variant: "danger",
         text: isNormalizedApiError(error)
@@ -2069,6 +2202,9 @@ function SessionAdherencePanel({
     outcome,
     partialCompletedItems,
     plannedSessionId,
+    sessionRpe,
+    adherenceDomainKey,
+    refreshWeeklyAdherenceAfterEvent,
     totalPrescribedItems,
   ]);
 
@@ -2104,7 +2240,7 @@ function SessionAdherencePanel({
 
       {historyPhase === "ready" && latestAthleteEvent ? (
         <dl className="mt-3 space-y-1 rounded-lg border border-orange-100 bg-white/55 p-2.5 text-xs">
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Status</dt>
             <dd className="text-textPrimary">
               {latestAthleteEvent.adherenceOutcome
@@ -2113,7 +2249,7 @@ function SessionAdherencePanel({
             </dd>
           </div>
           {latestAthleteEvent.completionPercent !== null ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Completion</dt>
               <dd className="text-textPrimary">
                 {Math.round(latestAthleteEvent.completionPercent)}%
@@ -2121,22 +2257,29 @@ function SessionAdherencePanel({
             </div>
           ) : null}
           {latestAthleteEvent.actualDurationMinutes !== null ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Duration</dt>
               <dd className="text-textPrimary">
                 {Math.round(latestAthleteEvent.actualDurationMinutes)} min
               </dd>
             </div>
           ) : null}
+          {adherenceDomainKey === "S_AND_C" &&
+          latestAthleteEvent.sessionRpe !== null ? (
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+              <dt className="text-textSecondary">Session RPE</dt>
+              <dd className="text-textPrimary">{latestAthleteEvent.sessionRpe}</dd>
+            </div>
+          ) : null}
           {latestAthleteEvent.athleteNotes ? (
-            <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
               <dt className="text-textSecondary">Note</dt>
               <dd className="min-w-0 break-words text-textPrimary">
                 {latestAthleteEvent.athleteNotes}
               </dd>
             </div>
           ) : null}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
+          <div className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2">
             <dt className="text-textSecondary">Logged</dt>
             <dd className="text-textPrimary">
               {formatAdherenceOccurredAt(latestAthleteEvent.occurredAt)}
@@ -2216,24 +2359,56 @@ function SessionAdherencePanel({
             </span>
           </div>
         ) : null}
-        <div className="space-y-1">
-          <label
-            htmlFor={`adherence-duration-${plannedSessionId}`}
-            className="text-xs font-medium text-textSecondary"
-          >
-            Actual duration (minutes)
-          </label>
-          <Input
-            id={`adherence-duration-${plannedSessionId}`}
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={actualDurationMinutes}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              setActualDurationMinutes(event.target.value)}
-            className="max-w-[10rem]"
-          />
+        <div className="flex min-w-0 flex-wrap gap-3">
+          <div className="min-w-0 space-y-1">
+            <label
+              htmlFor={`adherence-duration-${plannedSessionId}`}
+              className="text-xs font-medium text-textSecondary"
+            >
+              Actual duration (minutes)
+            </label>
+            <Input
+              id={`adherence-duration-${plannedSessionId}`}
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={actualDurationMinutes}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setActualDurationMinutes(event.target.value)}
+              className="max-w-[10rem]"
+            />
+          </div>
+          {adherenceDomainKey === "S_AND_C" ? (
+            <div className="min-w-0 space-y-1">
+              <label
+                htmlFor={`adherence-session-rpe-${plannedSessionId}`}
+                className="text-xs font-medium text-textSecondary"
+              >
+                Session RPE
+              </label>
+              <p className="text-xs text-textSecondary">1–10</p>
+              <Input
+                id={`adherence-session-rpe-${plannedSessionId}`}
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                inputMode="numeric"
+                value={sessionRpe}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setSessionRpe(event.target.value)}
+                className="max-w-[10rem]"
+                aria-describedby={`adherence-session-rpe-help-${plannedSessionId}`}
+              />
+              <p
+                id={`adherence-session-rpe-help-${plannedSessionId}`}
+                className="text-xs text-textSecondary"
+              >
+                How hard did this session feel?
+              </p>
+            </div>
+          ) : null}
         </div>
         <div className="space-y-1">
           <label
@@ -2269,17 +2444,18 @@ function SessionAdherencePanel({
       </fieldset>
 
       {submitMessage ? (
-        <p
-          className={cn(
-            "mt-2 text-xs",
-            submitMessage.variant === "success"
-              ? "text-emerald-700"
-              : "text-red-700",
-          )}
+        <Alert
+          variant={submitMessage.variant === "success" ? "success" : "danger"}
+          className="mt-2"
+          dismissible={submitMessage.variant === "success"}
         >
           {submitMessage.text}
-        </p>
+        </Alert>
       ) : null}
+      <AdherenceLoggingTimeoutNoticeModal
+        open={timeoutNoticeOpen}
+        onDismiss={() => setTimeoutNoticeOpen(false)}
+      />
     </div>
   );
 }
@@ -2385,7 +2561,7 @@ function renderJournalItem(
             {detailRows.map((row) => (
               <div
                 key={`${row.label}-${row.value}`}
-                className="grid grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm"
+                className="grid min-w-0 grid-cols-[minmax(0,160px)_1fr] gap-2 text-sm"
               >
                 <dt className="font-medium text-textSecondary">{row.label}</dt>
                 <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
@@ -2396,6 +2572,7 @@ function renderJournalItem(
         {renderJournalStructureSections(item, {
           nutritionDomain,
           skillDomain: adherenceDomainKey === "SKILLS",
+          sandCDomain: adherenceDomainKey === "S_AND_C",
           skillsSportMetrics: options?.skillsSportMetrics,
         })}
         {!hasStructuredContent && detailRows.length === 0 ? (
@@ -2747,7 +2924,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
     (planningIds.phase === "ready" && state.phase === "loading");
   const journal = state.phase === "ready" ? state.journal : null;
   const weekSubtitle = journal
-    ? `${formatDateOnly(journal.weekStartDate)} - ${formatDateOnly(journal.weekEndDate)}`
+    ? formatDateRange(journal.weekStartDate, journal.weekEndDate)
     : "Review the released sessions and plan items for your current training week.";
   const allDomainsNotReleased = journal
     ? DOMAIN_SECTIONS.every((domain) => journal.domains[domain.key].status === "NOT_RELEASED")
@@ -2769,13 +2946,28 @@ export function AthleteWeeklyPlanJournalPageContent() {
         }
       : undefined;
 
+  const refreshWeeklyAdherenceAfterEvent = async () => {
+    if (state.phase !== "ready") return;
+    await refreshWeeklyAdherenceSummaryAfterAdherence({
+      entityId: resolvedJournalEntityId,
+      athleteId: resolvedJournalAthleteId,
+      journal: state.journal,
+    });
+  };
+
   return (
+    <RefreshWeeklyAdherenceAfterEventContext.Provider
+      value={refreshWeeklyAdherenceAfterEvent}
+    >
     <div className="space-y-4">
       <PageHeader
         title="Weekly Plan Journal"
         subtitle={weekSubtitle}
         trailing={<AthleteHeaderIdentityMetadata />}
       />
+      <Alert variant="info" role="status">
+        Training reminder: Before and after your Skills and Strength & Conditioning sessions, allow 15–20 minutes for a proper warm-up and cool-down.
+      </Alert>
       {isLoading ? (
         <DashboardCardShell majorOuter title="Weekly Plan Journal" className="min-h-[220px]">
           <div className="flex min-h-[120px] items-center justify-center text-sm text-textSecondary">
@@ -2842,10 +3034,10 @@ export function AthleteWeeklyPlanJournalPageContent() {
                             {weekTotalsRows.map((row) => (
                               <div
                                 key={`week-nut-${row.label}-${row.value}`}
-                                className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 text-xs"
+                                className="grid min-w-0 grid-cols-[minmax(0,7.5rem)_1fr] gap-x-2 text-xs"
                               >
                                 <dt className="text-textSecondary">{row.label}</dt>
-                                <dd className="min-w-0 text-textPrimary">{row.value}</dd>
+                                <dd className="min-w-0 break-words text-textPrimary">{row.value}</dd>
                               </div>
                             ))}
                           </dl>
@@ -2949,5 +3141,6 @@ export function AthleteWeeklyPlanJournalPageContent() {
         />
       ) : null}
     </div>
+    </RefreshWeeklyAdherenceAfterEventContext.Provider>
   );
 }

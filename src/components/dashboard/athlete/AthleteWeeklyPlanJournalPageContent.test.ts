@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADHERENCE_TIMEOUT_NOTICE_MESSAGE,
+  ADHERENCE_TIMEOUT_NOTICE_TITLE,
   buildNutritionWeeklySummaryRows,
   canLogSportResultForDayDate,
   collectDetailRows,
@@ -9,6 +11,7 @@ import {
   formatJournalDomainItemCount,
   formatNutritionMacroInlineClause,
   formatNutritionTotalsCompactLine,
+  isAthleteAdherenceLoggingTimeoutError,
   nutritionTotalsToRows,
 } from "@/components/dashboard/athlete/AthleteWeeklyPlanJournalPageContent";
 import { readFileSync } from "node:fs";
@@ -48,7 +51,7 @@ describe("Log Sport Result planning-date guard", () => {
     expect(modalSource).toContain('"PRACTICE_FACILITY"');
     expect(modalSource).toContain('"SIMULATOR"');
     expect(modalSource).toContain('"ACTUAL_ROUND"');
-    expect(modalSource).toContain("On Course");
+    expect(modalSource).toContain("On Golf Course");
     expect(modalSource).not.toContain("canLogSportResult");
   });
 
@@ -227,5 +230,262 @@ describe("Athlete weekly plan Nutrition presentation", () => {
       { label: "Intensity", value: "Low" },
       { label: "Notes", value: "Balance tall." },
     ]);
+  });
+
+  it("does not flatten videos URLs into generic exercise detail rows", () => {
+    const rows = collectStructureItemDetailRows({
+      label: "Back squat",
+      sets: 3,
+      reps: "5",
+      videos: [
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://youtu.be/abcdefghijk",
+      ],
+    });
+    expect(rows).toEqual([
+      { label: "Sets", value: "3" },
+      { label: "Reps", value: "5" },
+    ]);
+    expect(rows.some((row) => row.label === "Videos")).toBe(false);
+    expect(JSON.stringify(rows)).not.toContain("youtube.com");
+    expect(JSON.stringify(rows)).not.toContain("youtu.be");
+  });
+
+  it("does not flatten measurementContract into structured item detail rows", () => {
+    const rows = collectStructureItemDetailRows({
+      label: "Start line drill",
+      reps: "12",
+      measurementContract: {
+        metricKey: "start_line_consistency",
+        requiredResultFields: ["attempts", "targetHits"],
+      },
+    });
+    expect(rows).toEqual([{ label: "Reps", value: "12" }]);
+    expect(JSON.stringify(rows)).not.toContain("measurementContract");
+    expect(JSON.stringify(rows)).not.toContain("requiredResultFields");
+  });
+
+  it("does not flatten videos URLs into session-level detail rows", () => {
+    const rows = collectDetailRows({
+      name: "Lower body",
+      objective: "Strength",
+      videos: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    });
+    expect(rows.some((row) => row.label === "Videos")).toBe(false);
+    expect(JSON.stringify(rows)).not.toContain("youtube.com");
+  });
+});
+
+describe("S&C demonstration video journal wiring", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  it("shows demonstration videos only on S&C structured exercises", () => {
+    expect(journalSource).toContain('sandCDomain: adherenceDomainKey === "S_AND_C"');
+    expect(journalSource).toContain("{sandCDomain ? (");
+    expect(journalSource).toContain(
+      "<SandCExerciseDemonstrationVideos videos={mergedSkillItem.videos} />",
+    );
+    expect(journalSource).toContain(
+      'from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos"',
+    );
+  });
+
+  it("does not add demonstration videos to Skills or Nutrition render branches", () => {
+    expect(journalSource).toContain('skillDomain: adherenceDomainKey === "SKILLS"');
+    expect(journalSource).toContain("nutritionDomain: domain.key === \"NUTRITION\"");
+    expect(journalSource).not.toContain('sandCDomain: adherenceDomainKey === "SKILLS"');
+  });
+});
+
+describe("Skills goal relationship presentation", () => {
+  it("shows goal, success criterion, and target value from the same Skills item path", () => {
+    const journalSource = readFileSync(
+      fileURLToPath(
+        new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+
+    expect(journalSource).toContain("successCriteria={successCriteria}");
+    expect(journalSource).toContain("targetValue={targetValue}");
+    expect(journalSource).toContain('row.label === "Success Criteria"');
+    expect(journalSource).toContain('row.label === "Target Value"');
+    expect(journalSource).toContain("const showItemGoalAttribution = skillDomain || sandCDomain");
+  });
+});
+
+describe("Nutrition and S&C goal attribution presentation", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("reuses SkillGoalAttributionText for S&C structured items when backend fields are present", () => {
+    expect(journalSource).toContain("const showItemGoalAttribution = skillDomain || sandCDomain");
+    expect(journalSource).toContain("sandCDomain: adherenceDomainKey === \"S_AND_C\"");
+  });
+
+  it("renders SkillGoalAttributionText on Nutrition structured items from supplied item fields only", () => {
+    expect(journalSource).toContain("primaryGoalName={mergedItem.primaryGoalName}");
+    expect(journalSource).toContain("successCriteria={mergedItem.successCriteria}");
+    expect(journalSource).toContain("targetValue={mergedItem.targetValue}");
+  });
+});
+
+const WARM_UP_COOL_DOWN_GUIDANCE =
+  "Training reminder: Before and after your Skills and Strength & Conditioning sessions, allow 15–20 minutes for a proper warm-up and cool-down.";
+
+describe("Weekly Training warm-up / cool-down guidance banner", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("renders the guidance once as an info Alert below the page heading", () => {
+    expect(journalSource).toContain("<PageHeader");
+    expect(journalSource).toContain(
+      `<Alert variant="info" role="status">\n        ${WARM_UP_COOL_DOWN_GUIDANCE}\n      </Alert>`,
+    );
+    expect(journalSource.split(WARM_UP_COOL_DOWN_GUIDANCE)).toHaveLength(2);
+    expect(journalSource.indexOf("<PageHeader")).toBeLessThan(
+      journalSource.indexOf(WARM_UP_COOL_DOWN_GUIDANCE),
+    );
+    expect(journalSource).toContain('<Alert variant="info" role="status">');
+    expect(journalSource).not.toContain(
+      `<Alert variant="info" role="status" dismissible>`,
+    );
+  });
+});
+
+describe("S&C session RPE in weekly-plan adherence", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const nutritionPanel = journalSource.slice(
+    journalSource.indexOf("function NutritionSessionAdherencePanel"),
+    journalSource.indexOf("function SessionAdherencePanel"),
+  );
+  const sessionPanel = journalSource.slice(
+    journalSource.indexOf("function SessionAdherencePanel"),
+    journalSource.indexOf("function renderJournalItem("),
+  );
+
+  it("shows Session RPE beside duration for S&C only", () => {
+    expect(sessionPanel).toContain('adherenceDomainKey === "S_AND_C"');
+    expect(sessionPanel).toContain("Session RPE");
+    expect(sessionPanel).toContain("1–10");
+    expect(sessionPanel).toContain("How hard did this session feel?");
+    expect(sessionPanel).toContain("adherence-session-rpe-");
+    expect(sessionPanel).toContain("Actual duration (minutes)");
+    expect(sessionPanel).toContain("parseSessionRpeFormValue");
+    expect(sessionPanel).toContain("sessionRpe:");
+    expect(sessionPanel).not.toContain("sessionRpe: 0");
+  });
+
+  it("does not show Session RPE on Skills or Nutrition adherence forms", () => {
+    expect(nutritionPanel).not.toContain("Session RPE");
+    expect(nutritionPanel).not.toContain("sessionRpe");
+    expect(sessionPanel).toContain('adherenceDomainKey === "S_AND_C" ? (');
+    expect(journalSource).toContain('adherenceDomainKey={adherenceDomainKey}');
+  });
+
+  it("refreshes Weekly Adherence after SKILL, S&C, and Nutrition adherence on the same path", () => {
+    expect(nutritionPanel).toContain("useRefreshWeeklyAdherenceAfterEvent");
+    expect(sessionPanel).toContain("useRefreshWeeklyAdherenceAfterEvent");
+    expect(nutritionPanel).toContain("await refreshWeeklyAdherenceAfterEvent()");
+    expect(sessionPanel).toContain("await refreshWeeklyAdherenceAfterEvent()");
+    expect(journalSource).toContain("refreshWeeklyAdherenceSummaryAfterAdherence");
+    expect(journalSource).not.toContain("WORKFLOW_1");
+    expect(journalSource).not.toContain("WORKFLOW_2");
+    expect(journalSource).not.toContain("WF1");
+    expect(journalSource).not.toContain("WF2A");
+    expect(journalSource).not.toContain("WF2B");
+    expect(journalSource).not.toContain("WF3");
+  });
+});
+
+describe("Athlete adherence logging timeout notice", () => {
+  const journalSource = readFileSync(
+    fileURLToPath(
+      new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const nutritionPanel = journalSource.slice(
+    journalSource.indexOf("function NutritionSessionAdherencePanel"),
+    journalSource.indexOf("function SessionAdherencePanel"),
+  );
+  const sessionPanel = journalSource.slice(
+    journalSource.indexOf("function SessionAdherencePanel"),
+    journalSource.indexOf("function renderJournalItem("),
+  );
+
+  it("detects only the frontend Request timed out error", () => {
+    expect(
+      isAthleteAdherenceLoggingTimeoutError({
+        message: "Request timed out",
+        status: 0,
+      }),
+    ).toBe(true);
+    expect(
+      isAthleteAdherenceLoggingTimeoutError({
+        message: "Could not save adherence.",
+        status: 500,
+      }),
+    ).toBe(false);
+    expect(isAthleteAdherenceLoggingTimeoutError(new Error("Request timed out"))).toBe(
+      false,
+    );
+  });
+
+  it("uses the existing Modal with exact timeout copy and OK dismiss only", () => {
+    expect(ADHERENCE_TIMEOUT_NOTICE_TITLE).toBe("Taking longer than expected");
+    expect(ADHERENCE_TIMEOUT_NOTICE_MESSAGE).toBe(
+      "Your update may still have been saved. Refresh the page and check the session status before trying again.",
+    );
+    expect(journalSource).toContain('import { Modal } from "@/components/ui/Modal"');
+    expect(journalSource).toContain("AdherenceLoggingTimeoutNoticeModal");
+    expect(journalSource).toContain("OK");
+    const timeoutModal = journalSource.slice(
+      journalSource.indexOf("function AdherenceLoggingTimeoutNoticeModal"),
+      journalSource.indexOf("const DOMAIN_SECTIONS"),
+    );
+    expect(timeoutModal).toContain("onClick={onDismiss}");
+    expect(timeoutModal).not.toContain("handleSubmit");
+    expect(timeoutModal).not.toContain("recordPlannedSessionAdherenceEvent");
+    expect(timeoutModal).not.toContain("recordNutritionPlannedSessionAdherenceEvent");
+    expect(timeoutModal).not.toContain("setReloadKey");
+  });
+
+  it("shows the timeout modal on Skills, Nutrition, and S&C logging without retrying", () => {
+    expect(nutritionPanel).toContain("isAthleteAdherenceLoggingTimeoutError");
+    expect(sessionPanel).toContain("isAthleteAdherenceLoggingTimeoutError");
+    expect(nutritionPanel).toContain("setTimeoutNoticeOpen(true)");
+    expect(sessionPanel).toContain("setTimeoutNoticeOpen(true)");
+    expect(nutritionPanel).toContain("onDismiss={() => setTimeoutNoticeOpen(false)}");
+    expect(sessionPanel).toContain("onDismiss={() => setTimeoutNoticeOpen(false)}");
+    expect(nutritionPanel).toContain("recordNutritionPlannedSessionAdherenceEvent");
+    expect(sessionPanel).toContain("recordPlannedSessionAdherenceEvent");
+    expect(nutritionPanel).not.toContain('text: "Request timed out"');
+    expect(sessionPanel).not.toContain('text: "Request timed out"');
+  });
+
+  it("keeps success and non-timeout error alerts unchanged", () => {
+    expect(nutritionPanel).toContain("Nutrition adherence saved.");
+    expect(sessionPanel).toContain("Adherence saved.");
+    expect(nutritionPanel).toContain("Could not save nutrition adherence.");
+    expect(sessionPanel).toContain("Could not save adherence.");
+    expect(nutritionPanel).toContain("isNormalizedApiError(error)");
+    expect(sessionPanel).toContain("isNormalizedApiError(error)");
   });
 });

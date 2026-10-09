@@ -60,6 +60,7 @@ export type AthleteSessionAdherenceEvent = {
   adherenceOutcome: SessionAdherenceOutcome | null;
   completionPercent: number | null;
   actualDurationMinutes: number | null;
+  sessionRpe: number | null;
   athleteNotes: string | null;
   occurredAt: string | null;
   recordedAt: string | null;
@@ -74,6 +75,7 @@ export type RecordSessionAdherenceInput = {
   adherenceOutcome: SessionAdherenceOutcome;
   completionPercent?: number | null;
   actualDurationMinutes?: number | null;
+  sessionRpe?: number | null;
   athleteNotes?: string | null;
   /** ISO-8601 timestamp; omitted values default to `new Date().toISOString()` on POST. */
   occurredAt?: string | null;
@@ -100,6 +102,28 @@ function readString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+function readSessionRpe(value: unknown): number | null {
+  const n = readNumber(value);
+  if (n === null || !Number.isInteger(n) || n < 1 || n > 10) return null;
+  return n;
+}
+
+export const SESSION_RPE_FORM_ERROR =
+  "Session RPE must be a whole number from 1 to 10.";
+
+export function parseSessionRpeFormValue(raw: string): {
+  kind: "omit" | "value" | "invalid";
+  sessionRpe?: number;
+} {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { kind: "omit" };
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+    return { kind: "invalid" };
+  }
+  return { kind: "value", sessionRpe: parsed };
 }
 
 function readNumber(value: unknown): number | null {
@@ -281,6 +305,19 @@ function assertRecordSessionAdherenceInput(
       code: "INVALID_ACTUAL_DURATION_MINUTES",
     };
   }
+  if (input.sessionRpe !== undefined && input.sessionRpe !== null) {
+    if (
+      !Number.isInteger(input.sessionRpe) ||
+      input.sessionRpe < 1 ||
+      input.sessionRpe > 10
+    ) {
+      throw {
+        message: "sessionRpe must be an integer from 1 to 10",
+        status: 400,
+        code: "INVALID_SESSION_RPE",
+      };
+    }
+  }
   if (input.occurredAt !== undefined && input.occurredAt !== null) {
     const occurredAt = input.occurredAt.trim();
     if (occurredAt === "") {
@@ -321,6 +358,7 @@ export function parseAthleteSessionAdherenceEvent(
     adherenceOutcome: readSessionAdherenceOutcome(record.adherenceOutcome),
     completionPercent: readNumber(record.completionPercent),
     actualDurationMinutes: readNumber(record.actualDurationMinutes),
+    sessionRpe: readSessionRpe(record.sessionRpe),
     athleteNotes:
       readString(record.athleteNotes) ??
       readString(record.note) ??
@@ -432,6 +470,10 @@ export function buildRecordSessionAdherenceRequestBody(
     input.actualDurationMinutes !== null
   ) {
     body.actualDurationMinutes = input.actualDurationMinutes;
+  }
+
+  if (input.sessionRpe !== undefined && input.sessionRpe !== null) {
+    body.sessionRpe = input.sessionRpe;
   }
 
   if (input.athleteNotes !== undefined && input.athleteNotes !== null) {

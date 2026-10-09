@@ -95,7 +95,7 @@ function TrainingPlanAthleteRow({
   );
 
   return (
-    <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
+    <div className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:gap-4">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-normal text-slate-900">{displayName}</span>
@@ -113,14 +113,21 @@ function TrainingPlanAthleteRow({
           {row.email}
         </span>
       </div>
-      <div className="flex shrink-0 flex-col items-stretch gap-0 sm:items-end">
+      <div className="flex min-w-0 flex-1 items-center justify-start sm:justify-center">
+        {action.planStatusLabel ? (
+          <p className="max-w-[16rem] text-left text-[11px] leading-snug text-slate-400 sm:text-center">
+            {action.planStatusLabel}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 w-full shrink-0 flex-col items-stretch gap-0 sm:w-auto sm:items-end">
         {action.href && !action.disabled ? (
           <Link href={action.href}>
             <Button
               type="button"
               variant={action.disabled ? "neutral" : "primary"}
               className={cn(
-                "whitespace-nowrap px-4 py-2 text-xs sm:text-sm",
+                "w-full px-4 py-2 text-xs sm:text-sm",
                 action.disabled && TRAINING_PLAN_DISABLED_BUTTON_CLASS,
               )}
               disabled={action.disabled}
@@ -133,7 +140,7 @@ function TrainingPlanAthleteRow({
           type="button"
           variant={action.disabled ? "neutral" : "primary"}
           className={cn(
-            "whitespace-nowrap px-4 py-2 text-xs sm:text-sm",
+            "w-full px-4 py-2 text-xs sm:text-sm",
             action.disabled && TRAINING_PLAN_DISABLED_BUTTON_CLASS,
           )}
           disabled={action.disabled}
@@ -141,11 +148,6 @@ function TrainingPlanAthleteRow({
           {action.buttonLabel}
         </Button>
         )}
-        {action.planStatusLabel ? (
-          <p className="mt-0.5 max-w-[16rem] text-right text-[11px] leading-snug text-slate-400">
-            {action.planStatusLabel}
-          </p>
-        ) : null}
         {action.helperBelowButton ? (
           <p className="mt-0.5 max-w-[16rem] text-right text-[11px] leading-snug text-slate-500">
             {action.helperBelowButton}
@@ -243,7 +245,7 @@ export function CoachTrainingPlansPageContent() {
   return (
     <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
       <PageHeader
-        title="Training Plan"
+        title="Athlete Training Plans"
         subtitle="Create and manage athlete training plans."
       />
 

@@ -32,7 +32,7 @@ export function DashboardLayout({ sidebar, children, className = "" }) {
       <aside
         id="dashboard-mobile-sidebar"
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] -translate-x-full transition-transform duration-200 ease-out lg:hidden",
+          "fixed inset-y-0 left-0 z-50 w-72 max-w-[min(18rem,85vw)] -translate-x-full transition-transform duration-200 ease-out lg:hidden",
           sidebarOpen && "translate-x-0",
         )}
         aria-label="Mobile sidebar"

@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardGate } from "@/components/layout/DashboardGate";
+import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -11,6 +12,7 @@ import {
   getNutritionCatalogItemById,
   mapNutritionDetailToNormalizedFood,
 } from "@/lib/api/nutritionCatalog";
+import { formatDateOrDateTime } from "@/lib/dateTime";
 import { formatEnumeratedLabel, toTitleCaseInput } from "@/lib/textFormat";
 import type { NutritionCatalogDetail } from "@/types/catalog.types";
 import { useParams, useRouter } from "next/navigation";
@@ -31,6 +33,13 @@ const TRACEABILITY_KEYS = [
   "updatedAt",
 ];
 
+const TRACEABILITY_TIMESTAMP_KEYS = new Set([
+  "providerUpdatedAt",
+  "ingestedAt",
+  "createdAt",
+  "updatedAt",
+]);
+
 function qualityBadgeVariant(flag: string): "success" | "warning" | "danger" {
   const key = flag.toLowerCase();
   if (key.includes("error") || key.includes("invalid") || key.includes("reject")) {
@@ -42,7 +51,10 @@ function qualityBadgeVariant(flag: string): "success" | "warning" | "danger" {
   return "success";
 }
 
-function renderValue(value: unknown): string {
+function renderValue(key: string, value: unknown): string {
+  if (typeof value === "string" && TRACEABILITY_TIMESTAMP_KEYS.has(key)) {
+    return formatDateOrDateTime(value);
+  }
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) {
@@ -149,11 +161,11 @@ export default function NutritionCatalogDetailPage() {
 
             {loading ? <p className="text-sm text-textSecondary">Loading...</p> : null}
             {!loading && error ? (
-              <p className={error.status === 401 ? "text-warning" : "text-danger"}>
+              <Alert variant={error.status === 401 ? "warning" : "danger"}>
                 {error.status === 401
                   ? "Unauthorized. Redirecting to login..."
                   : error.message}
-              </p>
+              </Alert>
             ) : null}
 
             {!loading && !error && detail ? (
@@ -284,7 +296,7 @@ export default function NutritionCatalogDetailPage() {
                         <p key={key} className="text-textSecondary">
                           {key}:{" "}
                           <span className="font-medium text-textPrimary">
-                            {renderValue(value)}
+                            {renderValue(key, value)}
                           </span>
                         </p>
                       ))}

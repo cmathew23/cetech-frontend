@@ -10,6 +10,7 @@ import {
   type CoachTrainingPlanDomainHistoryRow,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { formatDateRange } from "@/lib/dateTime";
 import { useEffect, useState, type ChangeEvent } from "react";
 
 export async function fetchGolfSkillsPlanVersionOptions(
@@ -40,7 +41,7 @@ export function isValidGolfPlanVersionPair(
 
 function planVersionLabel(row: CoachTrainingPlanDomainHistoryRow): string {
   if (row.weekStartDate && row.weekEndDate) {
-    return `${row.weekStartDate} – ${row.weekEndDate}`;
+    return formatDateRange(row.weekStartDate, row.weekEndDate);
   }
   if (row.versionNumber !== null) {
     return `Version ${row.versionNumber}`;

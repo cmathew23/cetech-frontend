@@ -1074,7 +1074,7 @@ export async function createAthleteCoachAssignment(
 
 /**
  * PATCH /entities/:entityId/assignments/athlete-coach/:athleteId/:coachId
- * Body uses API field names `athleteId` / `coachId` with **profile** UUIDs.
+ * Path params are profile UUIDs. Body is `{ canGeneratePlan: boolean }` only.
  */
 export async function patchAthleteCoachAssignment(
   entityId: string,

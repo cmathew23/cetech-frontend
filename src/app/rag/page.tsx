@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardGate } from "@/components/layout/DashboardGate";
+import { Alert } from "@/components/ui/Alert";
 import { dashboardPanelClass } from "@/lib/auth-ui";
 import {
   getRagAppAnswer,
@@ -92,7 +93,11 @@ export default function RagPage() {
             </button>
           </form>
 
-          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+          {error ? (
+            <Alert variant="danger" className="mt-4">
+              {error}
+            </Alert>
+          ) : null}
         </section>
 
         {result ? (

@@ -78,5 +78,7 @@ describe("CoachWeeklyAdherenceComparison", () => {
       'import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison"',
     );
     expect(source).toContain("<CoachWeeklyAdherenceComparison");
+    expect(source).toContain('id="athlete-performance-select"');
+    expect(source).toContain('className="min-w-0 max-w-full"');
   });
 });

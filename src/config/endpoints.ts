@@ -1,12 +1,18 @@
 /**
  * Canonical API origin and path segments for the CETECH backend.
- * Override with NEXT_PUBLIC_API_BASE_URL (no trailing slash).
+ * Set NEXT_PUBLIC_API_BASE_URL (no trailing slash). Required when NODE_ENV is production.
+ * Development falls back to http://localhost:3000.
  */
 
 function readApiBaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
   if (typeof raw === "string" && raw.trim() !== "") {
     return raw.trim().replace(/\/+$/, "");
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXT_PUBLIC_API_BASE_URL is required when NODE_ENV is production.",
+    );
   }
   return "http://localhost:3000";
 }
@@ -28,6 +34,7 @@ export const paths = {
     login: "/auth/login",
     logout: "/auth/logout",
     register: "/auth/register",
+    createAcademyAdmin: "/auth/create/academy-admin",
     me: "/auth/me",
     forgotPassword: "/auth/forgot-password",
     resetPassword: "/auth/reset-password",
@@ -104,6 +111,24 @@ export const paths = {
       params.set("snapshotBId", query.snapshotBId);
       return `${base}?${params.toString()}`;
     },
+    nutritionPerformance: (
+      entityId: string,
+      athleteId: string,
+      query: { weekStart: string; weekEnd: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/nutrition-performance`;
+      const params = new URLSearchParams();
+      params.set("weekStart", query.weekStart);
+      params.set("weekEnd", query.weekEnd);
+      return `${base}?${params.toString()}`;
+    },
+    nutritionPerformanceHistory: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/nutrition-performance/history`,
+    athleteStrengthConditioningSessionLoadHistory: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/strength-conditioning/session-load/history`,
     athleteWearableSummary: (
       entityId: string,
       athleteId: string,
@@ -126,6 +151,11 @@ export const paths = {
       params.set("trainingPlanVersionId", query.trainingPlanVersionId);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsGolfWeeklySummaryHistory: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/weekly-summary/history`,
     athleteSportMetricsGolfComparison: (
       entityId: string,
       athleteId: string,
@@ -149,6 +179,53 @@ export const paths = {
     },
     athleteSportMetricsGolfRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
+    athleteSportMetricsGolfCoachPracticeRatings: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/coach-practice-ratings`,
+    athleteSportMetricsGolfCompetitions: (
+      entityId: string,
+      athleteId: string,
+      query?: { seasonCycleId?: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions`;
+      const seasonCycleId = query?.seasonCycleId?.trim() ?? "";
+      if (seasonCycleId === "") return base;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsGolfCompetitionHistory: (
+      entityId: string,
+      athleteId: string,
+      query: { seasonCycleId: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/history`;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", query.seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsGolfCompetition: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}`,
+    athleteSportMetricsGolfCompetitionSubmit: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}/submit`,
+    athleteSportMetricsGolfCompetitionCoachAssessments: (
+      entityId: string,
+      athleteId: string,
+      competitionId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/competitions/${encodeURIComponent(competitionId)}/coach-assessments`,
     athleteWearableProviders: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/wearables/providers`,
     athleteWearableConnections: (entityId: string, athleteId: string) =>

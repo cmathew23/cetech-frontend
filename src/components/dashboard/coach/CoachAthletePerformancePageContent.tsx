@@ -1,8 +1,20 @@
 "use client";
 
+import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
 import { WeeklyAdherenceCards } from "@/components/dashboard/WeeklyAdherenceCards";
+import { WeeklyTrainingLoadCard } from "@/components/dashboard/WeeklyTrainingLoadCard";
+import {
+  NutritionPerformanceSection,
+  coachCanViewNutritionPerformance,
+} from "@/components/dashboard/NutritionPerformanceSection";
+import {
+  SandCSessionLoadSection,
+  coachCanViewSandCSessionLoad,
+} from "@/components/dashboard/SandCSessionLoadSection";
+import { CoachCompetitionPerformanceSection } from "@/components/dashboard/coach/CoachCompetitionPerformanceSection";
 import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -22,8 +34,10 @@ import {
   type WeeklyAdherenceSummary,
 } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
+import { coachHasSkillsPlanGenerationAuthority } from "@/lib/coachTrainingPlanActions";
 import { formatDateOnly } from "@/lib/dateTime";
 import {
+  releasedSkillsTrainingPlanVersionId,
   resolveWeeklyAdherencePlanRangeFromJournal,
   type WeeklyAdherencePlanRange,
 } from "@/lib/weeklyAdherenceWeek";
@@ -31,6 +45,10 @@ import {
   DASHBOARD_MAJOR_OUTER_CARD_CLASS,
   DASHBOARD_PAGE_CONTENT_CLASS,
 } from "@/components/dashboard/shared/dashboardOuterCardStyles";
+import {
+  SkillsGolfHistoryComparisonProvider,
+  SkillsGolfHistoryWeekSelector,
+} from "@/components/dashboard/shared/SkillsGolfHistoryComparison";
 import { DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
@@ -56,6 +74,7 @@ export function CoachAthletePerformancePageContent() {
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
   const [weekRange, setWeekRange] = useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
+  const [golfWeeklySummaryRefreshKey, setGolfWeeklySummaryRefreshKey] = useState(0);
 
   const wearableViewerContext = resolveCoachWearableViewerContext({
     academyCoachRole: dashboard?.academyCoachRole ?? null,
@@ -115,9 +134,7 @@ export function CoachAthletePerformancePageContent() {
         if (range === null) throw new Error("Could not resolve released plan week.");
 
         setWeekRange(range);
-        setTrainingPlanVersionId(
-          journal.domains.SKILLS?.versionId?.trim() ?? null,
-        );
+        setTrainingPlanVersionId(releasedSkillsTrainingPlanVersionId(journal));
 
         const result = await fetchWeeklyAdherenceSummary({
           entityId,
@@ -160,6 +177,14 @@ export function CoachAthletePerformancePageContent() {
 
   const showSportMetrics =
     wearableViewerContext !== "NUTRITION" && wearableViewerContext !== "S_AND_C";
+  const showNutritionPerformance = coachCanViewNutritionPerformance({
+    academyCoachRole: dashboard?.academyCoachRole ?? null,
+    functions: dashboard?.functions ?? null,
+  });
+  const showSandCSessionLoad = coachCanViewSandCSessionLoad({
+    academyCoachRole: dashboard?.academyCoachRole ?? null,
+    functions: dashboard?.functions ?? null,
+  });
 
   return (
     <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
@@ -173,7 +198,7 @@ export function CoachAthletePerformancePageContent() {
         padding="compact"
         className={cn("space-y-4", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
       >
-        <div className="space-y-2">
+        <div className="min-w-0 max-w-full space-y-2">
           <label
             htmlFor="athlete-performance-select"
             className="text-sm font-medium text-textPrimary"
@@ -182,6 +207,7 @@ export function CoachAthletePerformancePageContent() {
           </label>
           <Select
             id="athlete-performance-select"
+            className="min-w-0 max-w-full"
             value={selectedAthleteId}
             disabled={loadingRoster || athletes.length === 0}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>
@@ -231,13 +257,81 @@ export function CoachAthletePerformancePageContent() {
             />
           ) : null}
 
-          {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (
-            <SportMetricsSection
-              entityId={entityId}
-              athleteId={selectedAthleteId}
-              trainingPlanVersionId={trainingPlanVersionId}
+          {summary ? (
+            <WeeklyTrainingLoadCard
+              comparison={summary.trainingLoadComparison}
+              visibleDomains={summary.visibleDomains}
+              viewerContext={wearableViewerContext}
+              weekStart={summary.weekStart}
+              weekEnd={summary.weekEnd}
               cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
               titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+            />
+          ) : null}
+
+          {showSandCSessionLoad && selectedAthleteId !== "" ? (
+            <SandCSessionLoadSection
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+              summary={summary}
+              weekStart={weekRange?.weekStart}
+              weekEnd={weekRange?.weekEnd}
+              weekRangePending={adherenceLoading}
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+            />
+          ) : null}
+
+          {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (
+            <SkillsGolfHistoryComparisonProvider
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+            >
+              <SkillsGolfHistoryWeekSelector />
+              <AthleteWeeklyGoalPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                audience="coach"
+                allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(
+                  selectedAthlete,
+                )}
+              />
+              <SportMetricsSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                hideWeeklyEvidenceCard
+              />
+              <CoachCompetitionPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                onAssessmentSaved={() => {
+                  setGolfWeeklySummaryRefreshKey((current) => current + 1);
+                }}
+              />
+              <OverallGolfPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                audience="coach"
+                refreshKey={golfWeeklySummaryRefreshKey}
+              />
+            </SkillsGolfHistoryComparisonProvider>
+          ) : null}
+
+          {showNutritionPerformance && weekRange ? (
+            <NutritionPerformanceSection
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+              weekStart={weekRange.weekStart}
+              weekEnd={weekRange.weekEnd}
+              titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              cardClassName={DASHBOARD_MAJOR_OUTER_CARD_CLASS}
             />
           ) : null}
 

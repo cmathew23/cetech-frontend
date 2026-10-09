@@ -293,6 +293,10 @@ function parsePlanningContext(value: unknown): TrainingPlanWorkspacePlanningCont
     seasonId: readString(record.seasonId),
     selectedSeasonId: readString(record.selectedSeasonId),
     phase: readString(record.phase),
+    planWindow:
+      planWindowStart !== null || planWindowEnd !== null
+        ? { startDate: planWindowStart, endDate: planWindowEnd }
+        : null,
     startDate: readString(record.startDate) ?? planWindowStart,
     endDate: readString(record.endDate) ?? planWindowEnd,
     planStartDate: readString(record.planStartDate) ?? planWindowStart,

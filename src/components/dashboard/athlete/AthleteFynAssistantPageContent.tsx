@@ -17,6 +17,8 @@ import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentif
 import {
   fetchFynAssistantHistory,
   queryFynAssistant,
+  appendFynAssistantQueryAnswer,
+  fynHistoryContainsSubmittedTurn,
 } from "@/lib/api/fynAssistant";
 import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
 import { isNormalizedApiError } from "@/lib/apiClient";
@@ -127,19 +129,16 @@ export function AthleteFynAssistantPageContent() {
             athleteId,
             role: "athlete",
           });
-          setMessages(history.messages);
+          if (fynHistoryContainsSubmittedTurn(history.messages, trimmedMessage)) {
+            setMessages(history.messages);
+          } else {
+            setMessages((current) =>
+              appendFynAssistantQueryAnswer(current, response),
+            );
+          }
         } catch {
           setMessages((current) =>
-            current
-              .filter((message) => message.id !== FYN_LOADING_MESSAGE_ID)
-              .concat({
-                id: `assistant-${Date.now()}`,
-                role: "assistant",
-                text: response.answer,
-                createdAt: new Date().toISOString(),
-                warnings: response.warnings,
-                usedSources: response.usedSources,
-              }),
+            appendFynAssistantQueryAnswer(current, response),
           );
         }
       } catch (nextError) {
@@ -196,6 +195,9 @@ export function AthleteFynAssistantPageContent() {
           <p className="text-sm text-textSecondary">
             Recent chats from the last 72 hours are shown here.
           </p>
+          <Alert variant="info" role="status">
+            Fyn processes one question at a time. Please wait for a response before sending your next question.
+          </Alert>
           <FynComposer
             disabled={submitting || planningIds.phase !== "ready"}
             placeholder="Ask Fyn a question"

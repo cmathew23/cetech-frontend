@@ -33,7 +33,7 @@ export const designSystem = {
   },
 
   typography: {
-    h1: "mb-4 text-2xl font-medium tracking-tight text-textPrimary",
+    h1: "mb-4 min-w-0 break-words text-2xl font-medium tracking-tight text-textPrimary",
     h2: "mb-4 text-lg font-semibold text-textPrimary sm:text-xl lg:text-2xl",
     h3: "mb-4 text-lg font-semibold text-textPrimary",
     body: "text-base font-normal text-textPrimary",
@@ -64,16 +64,17 @@ export const designSystem = {
   },
 
   layout: {
-    page: "flex min-h-screen min-w-0 bg-bg",
+    page: "flex min-h-screen min-w-0 max-w-full bg-bg",
     main: "min-w-0 flex-1 overflow-y-auto",
 
     /** Root app shell (marketing header + centered content). */
-    rootBody: "min-h-screen font-sans text-textPrimary",
-    outerShell: "min-h-screen bg-bg",
+    rootBody: "min-h-screen min-w-0 max-w-full font-sans text-textPrimary",
+    outerShell: "min-h-screen min-w-0 max-w-full bg-bg",
     centeredColumn:
       "mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-8",
     marketingHeader: "text-center",
-    marketingTitle: "text-4xl font-bold tracking-tight text-textPrimary",
+    marketingTitle:
+      "break-words text-3xl font-bold tracking-tight text-textPrimary sm:text-4xl",
     marketingSubtitle: "mt-1 text-base text-textSecondary",
     mainSlot: "flex flex-1 flex-col items-center justify-center py-8",
     /** Shared athlete / coach / academy-admin dashboard sidebar (single spacing system). */
@@ -126,7 +127,7 @@ export const designSystem = {
 
   button: {
     base:
-      "inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex max-w-full items-center justify-center gap-2 rounded-md px-5 py-2.5 text-center text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
     primary:
       "bg-primary text-white shadow-sm hover:bg-primaryDark hover:-translate-y-px focus:ring-primary/50",
     secondary:
@@ -153,9 +154,9 @@ export const designSystem = {
 
   modal: {
     backdrop:
-      "fixed inset-0 z-[9999] flex items-center justify-center bg-textPrimary/60 p-4 backdrop-blur-sm",
+      "fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-textPrimary/60 p-3 backdrop-blur-sm sm:items-center sm:p-4",
     panel:
-      "relative w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-md",
+      "relative my-auto w-full min-w-0 max-w-lg rounded-xl border border-border bg-card p-4 shadow-md sm:p-6",
   },
 
   table: {
@@ -169,14 +170,20 @@ export const designSystem = {
     },
     cell: {
       head: "border-b border-gray-200 px-4 py-3 text-left text-sm font-semibold text-textPrimary",
-      body: "border-b border-gray-200 px-4 py-4 align-middle text-textSecondary",
+      body: "border-b border-gray-200 px-4 py-4 align-middle break-words text-textSecondary",
     },
   },
 
   alert: {
-    base: "rounded-lg border px-4 py-3 text-sm",
-    success: "border-success/30 bg-successLight text-successDark",
-    warning: "border-warning/30 bg-warning/15 text-warning",
-    danger: "border-danger/30 bg-danger/15 text-danger",
+    base:
+      "flex items-start gap-2.5 rounded-md border border-l-[3px] px-3 py-2.5 text-sm leading-5 shadow-sm",
+    success:
+      "border-success/25 border-l-success bg-successLight text-successDark",
+    warning:
+      "border-warning/30 border-l-warning bg-warning/15 text-[#9A6700]",
+    danger:
+      "border-danger/30 border-l-danger bg-danger/10 text-[#B91C1C]",
+    info:
+      "border-sky-200/80 border-l-sky-600 bg-sky-50 text-slate-800",
   },
 };

@@ -1,12 +1,11 @@
 "use client";
 
+import { DashboardMetricTile } from "@/components/dashboard/shared/DashboardMetricTile";
+import { dashboardMetricGridClass } from "@/components/dashboard/shared/dashboardTypography";
 import { DashboardCardShell } from "@/components/dashboard/shared/DashboardCardShell";
 import { ATHLETE_DASHBOARD_CARD_TITLE_CLASS } from "@/components/dashboard/athlete/athleteDashboardTypography";
-import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
-import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import {
   fetchAthleteTodayPlan,
   fetchAthleteWeeklyPlanJournal,
@@ -18,9 +17,8 @@ import {
   getLocalDateKey,
   normalizeDateOnlyKey,
 } from "@/lib/dateTime";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 type ViewState =
   | { phase: "loading" }
@@ -108,11 +106,15 @@ function summarizeTodayItem(item: unknown): string | null {
   return null;
 }
 
-export function AthleteTodayPlanCard() {
-  const { accessContext, accessGateReady } = useAthleteInvitationGate();
-  const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
-  const entityId = planningIds.ids?.entityId ?? "";
-  const athleteId = planningIds.ids?.athleteId ?? "";
+export function AthleteTodayPlanCard({
+  entityId,
+  athleteId,
+  identifiersPhase,
+}: {
+  entityId: string;
+  athleteId: string;
+  identifiersPhase: "loading" | "ready" | "not_ready";
+}) {
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -122,8 +124,8 @@ export function AthleteTodayPlanCard() {
   }, []);
 
   useEffect(() => {
-    if (planningIds.phase === "loading") return;
-    if (planningIds.phase === "not_ready") return;
+    if (identifiersPhase === "loading") return;
+    if (identifiersPhase === "not_ready") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -152,10 +154,10 @@ export function AthleteTodayPlanCard() {
     return () => {
       cancelled = true;
     };
-  }, [athleteId, entityId, planningIds.phase, reloadKey]);
+  }, [athleteId, entityId, identifiersPhase, reloadKey]);
 
-  const isLoading = planningIds.phase === "loading" ||
-    (planningIds.phase === "ready" && state.phase === "loading");
+  const isLoading = identifiersPhase === "loading" ||
+    (identifiersPhase === "ready" && state.phase === "loading");
   const todayPlan = state.phase === "ready" ? state.todayPlan : null;
   const allDomainsNotReleased = todayPlan
     ? DOMAIN_SUMMARY.every((domain) => todayPlan.domains[domain.key].status === "NOT_RELEASED")
@@ -179,7 +181,7 @@ export function AthleteTodayPlanCard() {
           <div className="flex min-h-[160px] items-center justify-center text-sm text-textSecondary">
             Loading today’s plan…
           </div>
-        ) : planningIds.phase === "not_ready" ? (
+        ) : identifiersPhase === "not_ready" ? (
           <Alert variant="warning">
             Athlete profile not ready
           </Alert>
@@ -199,7 +201,7 @@ export function AthleteTodayPlanCard() {
         ) : todayPlan === null || !hasAnyTodayItems ? (
           <p className="text-sm text-textSecondary">No plan released for today.</p>
         ) : (
-          <div className="space-y-3">
+          <div className={dashboardMetricGridClass(3)}>
             {DOMAIN_SUMMARY.map((domain) => {
               const items =
                 domain.key === "SKILLS"
@@ -213,29 +215,31 @@ export function AthleteTodayPlanCard() {
                 .slice(0, 2);
 
               return (
-                <Card key={domain.key} padding="compact" accent={false} className="bg-bg">
-                  <div className="space-y-1">
-                    <p className="text-[15px] font-medium text-textPrimary">{domain.label}</p>
-                    {items.length === 0 ? (
-                      <p className="text-sm text-textSecondary">{domain.emptyMessage}</p>
-                    ) : (
-                      <>
-                        <p className="text-sm text-textSecondary">
-                          {items.length} released item{items.length === 1 ? "" : "s"} today.
-                        </p>
-                        {preview.length > 0 ? (
-                          <ul className="space-y-1 text-sm text-textPrimary">
-                            {preview.map((line) => (
-                              <li key={`${domain.key}-${line}`} className="truncate">
-                                {line}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                </Card>
+                <DashboardMetricTile
+                  key={domain.key}
+                  title={domain.label}
+                  value={
+                    items.length === 0
+                      ? domain.emptyMessage
+                      : String(items.length)
+                  }
+                  caption={
+                    items.length === 0
+                      ? undefined
+                      : `released item${items.length === 1 ? "" : "s"} today`
+                  }
+                  supporting={
+                    preview.length > 0 ? (
+                      <ul className="space-y-1">
+                        {preview.map((line) => (
+                          <li key={`${domain.key}-${line}`} className="truncate">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null
+                  }
+                />
               );
             })}
           </div>

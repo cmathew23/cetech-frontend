@@ -146,7 +146,7 @@ export function InvitationInboxSection({
       ) : null}
       {actionError ? <Alert variant="danger">{actionError}</Alert> : null}
       {actionSuccess ? (
-        <Alert variant="success" role="status">
+        <Alert variant="success" role="status" dismissible>
           {actionSuccess}
         </Alert>
       ) : null}

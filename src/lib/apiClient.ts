@@ -15,6 +15,7 @@ const PUBLIC_AUTH_PATHS = new Set([
   "/register",
   "/forgot-password",
   "/reset-password",
+  "/create/academy-admin",
 ]);
 
 /** Entity membership deactivated — user is logged in but must leave entity dashboards. */

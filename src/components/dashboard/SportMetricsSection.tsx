@@ -24,6 +24,7 @@ type SportMetricsSectionProps = {
   trainingPlanVersionId?: string | null;
   titleClassName?: string;
   cardClassName?: string;
+  hideWeeklyEvidenceCard?: boolean;
 };
 
 function formatLoadError(e: unknown): string {
@@ -184,17 +185,22 @@ function SportMetricsWeeklySummary({
   );
 }
 
-export function SportMetricsSection(props: SportMetricsSectionProps) {
+export function SportMetricsSection({
+  hideWeeklyEvidenceCard = false,
+  ...weeklyProps
+}: SportMetricsSectionProps) {
   const hasIdentifiers =
-    props.entityId.trim() !== "" && props.athleteId.trim() !== "";
+    weeklyProps.entityId.trim() !== "" && weeklyProps.athleteId.trim() !== "";
 
   return (
     <div className="min-w-0 space-y-4">
-      <SportMetricsWeeklySummary {...props} />
+      {hideWeeklyEvidenceCard ? null : (
+        <SportMetricsWeeklySummary {...weeklyProps} />
+      )}
       {hasIdentifiers ? (
         <GolfSportsMetricsComparisonControls
-          entityId={props.entityId}
-          athleteId={props.athleteId}
+          entityId={weeklyProps.entityId}
+          athleteId={weeklyProps.athleteId}
         />
       ) : null}
     </div>

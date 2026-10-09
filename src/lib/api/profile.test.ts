@@ -23,6 +23,7 @@ describe("fetchMyProfile", () => {
         email: "kendra@example.com",
         first_name: "Kendra",
         last_name: "James",
+        phone: "555-0100",
       },
     });
 
@@ -33,6 +34,7 @@ describe("fetchMyProfile", () => {
       email: "kendra@example.com",
       firstName: "Kendra",
       lastName: "James",
+      phone: "555-0100",
     });
   });
 

@@ -226,7 +226,7 @@ function WearableGroupCard({ group }: { group: WearableMetricGroup }) {
   const hasAnyRowData = rows.some((row) => row.value !== WEARABLE_METRIC_NO_VALUE);
 
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 shadow-sm">
+    <div className="rounded-md border border-border bg-card p-4">
       <div className="space-y-1">
         <p className="text-sm font-normal text-textPrimary">
           {group.key === "bodyHealthMetrics"

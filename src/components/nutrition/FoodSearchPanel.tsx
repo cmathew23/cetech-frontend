@@ -1,5 +1,6 @@
 "use client";
 
+import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { searchFoods } from "@/lib/api/nutrition";
@@ -246,9 +247,11 @@ export function FoodSearchPanel() {
       </div>
 
       {loading ? <p className="text-sm text-textSecondary">Searching…</p> : null}
-      {!loading && error ? <p className="text-sm text-danger">{error}</p> : null}
+      {!loading && error ? <Alert variant="danger">{error}</Alert> : null}
       {!loading && !error && hasSearched && searchResults.length === 0 ? (
-        <p className="text-sm text-textSecondary">No foods found for "{query.trim()}".</p>
+        <Alert variant="info" role="status">
+          {`No foods found for "${query.trim()}".`}
+        </Alert>
       ) : null}
       {!loading && !error && !hasSearched && query.trim().length < MIN_QUERY_LENGTH ? (
         <p className="text-sm text-textSecondary">

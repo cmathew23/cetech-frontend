@@ -22,6 +22,8 @@ import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningRea
 import {
   fetchFynAssistantHistory,
   queryFynAssistant,
+  appendFynAssistantQueryAnswer,
+  fynHistoryContainsSubmittedTurn,
 } from "@/lib/api/fynAssistant";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -198,22 +200,21 @@ export function CoachFynAssistantPageContent() {
           });
 
           if (isCurrentSelection()) {
-            setMessages(history.messages);
-            setHistoryWarning(null);
+            if (
+              fynHistoryContainsSubmittedTurn(history.messages, trimmedMessage)
+            ) {
+              setMessages(history.messages);
+              setHistoryWarning(null);
+            } else {
+              setMessages((current) =>
+                appendFynAssistantQueryAnswer(current, response),
+              );
+            }
           }
         } catch {
           if (isCurrentSelection()) {
             setMessages((current) =>
-              current
-                .filter((entry) => entry.id !== FYN_LOADING_MESSAGE_ID)
-                .concat({
-                  id: `assistant-${Date.now()}`,
-                  role: "assistant",
-                  text: response.answer,
-                  createdAt: new Date().toISOString(),
-                  warnings: response.warnings,
-                  usedSources: response.usedSources,
-                }),
+              appendFynAssistantQueryAnswer(current, response),
             );
           }
         }
@@ -293,6 +294,9 @@ export function CoachFynAssistantPageContent() {
             <p className="text-sm text-textSecondary">
               Recent chats from the last 72 hours are shown for the selected athlete.
             </p>
+            <Alert variant="info" role="status">
+              Fyn processes one question at a time. Please wait for a response before sending your next question.
+            </Alert>
             <FynComposer
               disabled={submitting}
               placeholder="Ask Fyn a question about this athlete"

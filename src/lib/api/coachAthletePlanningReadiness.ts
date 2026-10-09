@@ -60,7 +60,7 @@ function collectRecords(value: unknown): AnyRecord[] {
   return out;
 }
 
-function readStringKey(records: AnyRecord[], keys: string[]): string | null {
+function readStringKey(records: AnyRecord[], keys: readonly string[]): string | null {
   for (const key of keys) {
     for (const record of records) {
       const value = record[key];
@@ -72,7 +72,7 @@ function readStringKey(records: AnyRecord[], keys: string[]): string | null {
   return null;
 }
 
-function readNumberKey(records: AnyRecord[], keys: string[]): number | null {
+function readNumberKey(records: AnyRecord[], keys: readonly string[]): number | null {
   for (const key of keys) {
     for (const record of records) {
       const value = record[key];
@@ -437,6 +437,8 @@ export type CoachAthleteGeneratedDraftItem = {
   reps: string | null;
   intensity: string | null;
   notes: string | null;
+  /** Response-only YouTube URLs on S&C exercises; omit when empty. */
+  videos?: string[];
 };
 
 export type CoachAthleteGeneratedDraftSession = {
@@ -1041,6 +1043,10 @@ export function parseGeneratedDraftItem(value: unknown): CoachAthleteGeneratedDr
     intensity: readStringKey([record], ["intensity"]),
     notes: readStringKey([record], ["notes"]),
   };
+  const videos = readStringListKey([record], ["videos"]).slice(0, 3);
+  if (videos.length > 0) {
+    item.videos = videos;
+  }
   return (
     item.order !== null ||
     item.itemType ||
@@ -2797,6 +2803,7 @@ export async function lockCoachAthletePlanningContext(
     ),
     {
       method: "POST",
+      timeoutMs: 30_000,
       body: JSON.stringify({
         planWindow: { startDate, endDate },
       }),

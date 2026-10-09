@@ -1,6 +1,7 @@
 "use client";
 
 import { AssignmentCoachMultiSelect } from "@/components/dashboard/admin/AssignmentCoachMultiSelect";
+import { AssignmentPlanningWorkflowModal } from "@/components/dashboard/admin/AssignmentPlanningWorkflowModal";
 import { AssignmentValidationModal } from "@/components/dashboard/admin/AssignmentValidationModal";
 import { DeactivateMemberConfirmModal } from "@/components/dashboard/admin/DeactivateMemberConfirmModal";
 import { RevokeInvitationConfirmModal } from "@/components/dashboard/admin/RevokeInvitationConfirmModal";
@@ -32,6 +33,7 @@ import {
   fetchEntityInvitations,
   fetchEntityMembers,
   fetchMyAcademy,
+  getActiveCoachAssignmentsForAthlete,
   INVITATION_STATUS_FILTERS,
   patchAthleteCoachAssignment,
   removeAthleteCoachAssignment,
@@ -50,6 +52,14 @@ import {
   resolveAcademyAssignmentCoachRoster,
   validateAssignmentSelection,
 } from "@/lib/academyAssignmentValidation";
+import { describeAthletePlanningWorkflow } from "@/lib/adminAssignmentPlanningWorkflowDisplay";
+import {
+  shouldShowAssignmentCreateForm,
+  shouldShowAssignmentRows,
+  shouldShowAssignmentsInitialLoading,
+  shouldShowInitialRosterLoading,
+  shouldShowRosterRefreshing,
+} from "@/lib/adminAssignmentRosterUi";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import type {
   AthleteAssignmentOption,
@@ -81,6 +91,104 @@ const LOADING_ACADEMY_CONTEXT = "Loading academy context…";
 const INVITATION_ROLE_COACH = "COACH" as const;
 const INVITATION_ROLE_ATHLETE = "ATHLETE" as const;
 type InvitationRole = typeof INVITATION_ROLE_COACH | typeof INVITATION_ROLE_ATHLETE;
+export const INITIAL_INVITE_ROLE = "";
+
+export function readInvitationSubmit(
+  email: string,
+  role: string,
+): { email: string; role: InvitationRole } | null {
+  const trimmed = email.trim();
+  if (trimmed === "") return null;
+  if (role !== INVITATION_ROLE_COACH && role !== INVITATION_ROLE_ATHLETE) {
+    return null;
+  }
+  return { email: trimmed, role };
+}
+
+type EntityInvitationFormProps = {
+  email: string;
+  role: string;
+  submitting: boolean;
+  onEmailChange: (value: string) => void;
+  onRoleChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent) => void;
+};
+
+export function EntityInvitationForm({
+  email,
+  role,
+  submitting,
+  onEmailChange,
+  onRoleChange,
+  onSubmit,
+}: EntityInvitationFormProps) {
+  const submit = readInvitationSubmit(email, role);
+  return (
+    <form
+      className="grid max-w-3xl gap-3 sm:grid-cols-[1fr_auto_auto]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!submit) return;
+        onSubmit(event);
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="invite-email"
+          className="text-xs font-medium text-textPrimary"
+        >
+          Invite by email
+        </label>
+        <Input
+          id="invite-email"
+          type="email"
+          value={email}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onEmailChange(e.target.value)
+          }
+          placeholder="user@example.com"
+          disabled={submitting}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="invite-role"
+          className="text-xs font-medium text-textPrimary"
+        >
+          Role{" "}
+          <span className="text-danger" aria-hidden>
+            *
+          </span>
+        </label>
+        <Select
+          id="invite-role"
+          value={role}
+          required
+          disabled={submitting}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+            onRoleChange(e.target.value)
+          }
+        >
+          <option value="">Select role</option>
+          <option value={INVITATION_ROLE_COACH}>Coach</option>
+          <option value={INVITATION_ROLE_ATHLETE}>Athlete</option>
+        </Select>
+      </div>
+      <div className="flex flex-col justify-end">
+        <Button
+          type="submit"
+          variant="primary"
+          className="px-4 py-2 text-xs sm:text-sm"
+          loading={submitting}
+          disabled={submitting || submit === null}
+        >
+          Send invite
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 const INVITATION_FILTER_ALL = "ALL" as const;
 type InvitationFilterValue = typeof INVITATION_FILTER_ALL | InvitationStatusFilter;
 const ASSIGNMENT_COACH_FILTER_ALL = "" as const;
@@ -441,8 +549,8 @@ export function AcademyAdminWorkspacePage({
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<InvitationRole>(
-    INVITATION_ROLE_COACH,
+  const [inviteRole, setInviteRole] = useState<InvitationRole | "">(
+    INITIAL_INVITE_ROLE,
   );
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -501,6 +609,8 @@ export function AcademyAdminWorkspacePage({
     useState(false);
   const [assignmentValidationModalMessage, setAssignmentValidationModalMessage] =
     useState("");
+  const [planningWorkflowModalOpen, setPlanningWorkflowModalOpen] =
+    useState(false);
   const [unassignModalOpen, setUnassignModalOpen] = useState(false);
   const [unassignTarget, setUnassignTarget] = useState<{
     athleteProfileId: string;
@@ -644,6 +754,55 @@ export function AcademyAdminWorkspacePage({
     }
     return { byProfileId, byEmail };
   }, [academyCoachRows]);
+
+  const selectedAthletePlanningWorkflow = useMemo(() => {
+    const athleteProfileId = assignmentAthleteProfileId.trim();
+    const activeRows = getActiveCoachAssignmentsForAthlete(
+      athleteProfileId,
+      assignments,
+    );
+    const rosterById = new Map(
+      academyAssignmentCoachRoster.map((row) => [row.coachProfileId.trim(), row]),
+    );
+    return describeAthletePlanningWorkflow(
+      activeRows.map((row) => {
+        const rosterRow = rosterById.get(row.coachProfileId.trim());
+        return {
+          coachProfileId: row.coachProfileId,
+          displayName: row.coachName,
+          role: rosterRow?.role ?? null,
+          functions: rosterRow?.functions ?? [],
+          canGeneratePlan: row.canGeneratePlan,
+        };
+      }),
+    );
+  }, [
+    academyAssignmentCoachRoster,
+    assignmentAthleteProfileId,
+    assignments,
+  ]);
+
+  const selectedAthleteWorkflowLabel = useMemo(() => {
+    const id = assignmentAthleteProfileId.trim();
+    if (id === "") return "";
+    const fromAssignments = assignments.find(
+      (row) => row.athleteProfileId === id,
+    );
+    if (fromAssignments) {
+      return formatAdminPersonLabel(
+        fromAssignments.athleteName,
+        fromAssignments.athleteEmail,
+        id,
+      );
+    }
+    const fromOptions = athleteOptions.find((opt) => opt.athleteProfileId === id);
+    if (!fromOptions) return "";
+    return formatAdminPersonLabel(
+      fromOptions.displayName,
+      fromOptions.displayEmail,
+      id,
+    );
+  }, [assignmentAthleteProfileId, assignments, athleteOptions]);
 
   const assignmentCoachFilterOptions = useMemo(() => {
     const byId = new Map<string, { coachProfileId: string; label: string }>();
@@ -1054,16 +1213,16 @@ export function AcademyAdminWorkspacePage({
   async function handleCreateInvitation(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedEntityId || inviteSubmitting) return;
-    const email = inviteEmail.trim();
-    if (email === "") return;
+    const submit = readInvitationSubmit(inviteEmail, inviteRole);
+    if (!submit) return;
     setInviteSubmitting(true);
     setInviteError(null);
     setInviteSuccess(null);
     try {
       await createEntityInvitation({
         entityId: selectedEntityId,
-        email,
-        role: inviteRole,
+        email: submit.email,
+        role: submit.role,
       });
       const rows = await fetchEntityInvitations(
         selectedEntityId,
@@ -1073,7 +1232,7 @@ export function AcademyAdminWorkspacePage({
       setCandidatesRefreshKey((key) => key + 1);
       setInviteEmail("");
       setInviteSuccess(
-        inviteRole === INVITATION_ROLE_COACH
+        submit.role === INVITATION_ROLE_COACH
           ? "Coach invitation sent."
           : "Athlete invitation sent.",
       );
@@ -1337,7 +1496,7 @@ export function AcademyAdminWorkspacePage({
         {section === "members" ? (
           <div>
             {membersSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {membersSuccess}
               </Alert>
             ) : null}
@@ -1517,7 +1676,7 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {inviteSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {inviteSuccess}
               </Alert>
             ) : null}
@@ -1550,59 +1709,21 @@ export function AcademyAdminWorkspacePage({
                     placeholder="Search invitations"
                   />
                 </div>
-                <form
-                  className="grid max-w-3xl gap-3 sm:grid-cols-[1fr_auto_auto]"
+                <EntityInvitationForm
+                  email={inviteEmail}
+                  role={inviteRole}
+                  submitting={inviteSubmitting}
+                  onEmailChange={setInviteEmail}
+                  onRoleChange={(value) =>
+                    setInviteRole(
+                      value === INVITATION_ROLE_COACH ||
+                        value === INVITATION_ROLE_ATHLETE
+                        ? value
+                        : "",
+                    )
+                  }
                   onSubmit={(e) => void handleCreateInvitation(e)}
-                >
-                  <div className="flex flex-col gap-1">
-                    <label
-                      htmlFor="invite-email"
-                      className="text-xs font-medium text-textPrimary"
-                    >
-                      Invite by email
-                    </label>
-                    <Input
-                      id="invite-email"
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setInviteEmail(e.target.value)
-                      }
-                      placeholder="user@example.com"
-                      disabled={inviteSubmitting}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label
-                      htmlFor="invite-role"
-                      className="text-xs font-medium text-textPrimary"
-                    >
-                      Role
-                    </label>
-                    <Select
-                      id="invite-role"
-                      value={inviteRole}
-                      disabled={inviteSubmitting}
-                      onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                        setInviteRole(e.target.value as InvitationRole)
-                      }
-                    >
-                      <option value={INVITATION_ROLE_COACH}>Coach</option>
-                      <option value={INVITATION_ROLE_ATHLETE}>Athlete</option>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col justify-end">
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      className="px-4 py-2 text-xs sm:text-sm"
-                      loading={inviteSubmitting}
-                      disabled={inviteSubmitting || inviteEmail.trim() === ""}
-                    >
-                      Send invite
-                    </Button>
-                  </div>
-                </form>
+                />
                 <div className="flex flex-col gap-1">
                   <label
                     htmlFor="invitation-filter"
@@ -1732,15 +1853,26 @@ export function AcademyAdminWorkspacePage({
                   />
                 </div>
                 {selectedEntityId ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="px-4 py-2 text-xs sm:text-sm"
-                    disabled={rosterLoading}
-                    onClick={() => setCandidatesRefreshKey((k) => k + 1)}
-                  >
-                    Refresh candidates
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="px-4 py-2 text-xs sm:text-sm"
+                      disabled={rosterLoading}
+                      onClick={() => setCandidatesRefreshKey((k) => k + 1)}
+                    >
+                      Refresh candidates
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="px-4 py-2 text-xs sm:text-sm"
+                      disabled={assignmentAthleteProfileId.trim() === ""}
+                      onClick={() => setPlanningWorkflowModalOpen(true)}
+                    >
+                      View Planning Workflow
+                    </Button>
+                  </>
                 ) : null}
               </div>
               <div className="flex w-full min-w-0 max-w-xs flex-col gap-1">
@@ -1787,7 +1919,7 @@ export function AcademyAdminWorkspacePage({
               </Alert>
             ) : null}
             {assignmentSuccess ? (
-              <Alert variant="success" className="mb-4" role="status">
+              <Alert variant="success" className="mb-4" role="status" dismissible>
                 {assignmentSuccess}
               </Alert>
             ) : null}
@@ -1796,6 +1928,7 @@ export function AcademyAdminWorkspacePage({
                 variant={canGeneratePlanNotice.variant}
                 className="mb-4"
                 role="status"
+                dismissible={canGeneratePlanNotice.variant === "success"}
               >
                 {canGeneratePlanNotice.message}
               </Alert>
@@ -1805,10 +1938,25 @@ export function AcademyAdminWorkspacePage({
                 {assignmentsError}
               </Alert>
             ) : null}
-            {rosterLoading ? (
+            {shouldShowInitialRosterLoading(
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) ? (
               <p className="text-sm text-textSecondary">{LOADING_ROSTER}</p>
             ) : null}
-            {!rosterLoading &&
+            {shouldShowRosterRefreshing(
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) ? (
+              <p className="text-xs text-textSecondary">Refreshing roster…</p>
+            ) : null}
+            {!shouldShowInitialRosterLoading(
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) &&
             selectedEntityId !== null &&
             !hasAthleteOptions &&
             !hasCoachOptions ? (
@@ -1817,7 +1965,11 @@ export function AcademyAdminWorkspacePage({
                 this entity.
               </p>
             ) : null}
-            {!rosterLoading &&
+            {!shouldShowInitialRosterLoading(
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) &&
             selectedEntityId !== null &&
             hasCoachOptions &&
             !hasAthleteOptions ? (
@@ -1826,7 +1978,11 @@ export function AcademyAdminWorkspacePage({
                 this entity are ready for assignment yet.
               </p>
             ) : null}
-            {!rosterLoading &&
+            {!shouldShowInitialRosterLoading(
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) &&
             selectedEntityId !== null &&
             hasAthleteOptions &&
             !hasCoachOptions ? (
@@ -1835,7 +1991,12 @@ export function AcademyAdminWorkspacePage({
                 this entity are ready for assignment yet.
               </p>
             ) : null}
-            {!rosterLoading && selectedEntityId !== null ? (
+            {shouldShowAssignmentCreateForm(
+              selectedEntityId,
+              rosterLoading,
+              athleteOptions.length,
+              coachOptions.length,
+            ) ? (
               <form
                 className="flex max-w-xl flex-col gap-4"
                 onSubmit={(e) => void handleCreateAssignment(e)}
@@ -1932,7 +2093,10 @@ export function AcademyAdminWorkspacePage({
                 </Button>
               </form>
             ) : null}
-            {assignmentsLoading ? (
+            {shouldShowAssignmentsInitialLoading(
+              assignmentsLoading,
+              assignments.length,
+            ) ? (
               <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <p className="px-6 py-6 text-sm text-slate-500">Loading assignments...</p>
               </div>
@@ -1947,10 +2111,9 @@ export function AcademyAdminWorkspacePage({
                 </p>
               </div>
             ) : null}
-            {!assignmentsLoading &&
+            {shouldShowAssignmentRows(assignmentsLoading, assignments.length) &&
             !assignmentsError &&
-            selectedEntityId !== null &&
-            assignments.length > 0 ? (
+            selectedEntityId !== null ? (
               visibleAssignments.length === 0 ? (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                   <p className="px-6 py-6 text-sm text-slate-500">No results found.</p>
@@ -2121,6 +2284,13 @@ export function AcademyAdminWorkspacePage({
             unassignTarget.coachProfileId,
           );
         }}
+      />
+
+      <AssignmentPlanningWorkflowModal
+        open={planningWorkflowModalOpen}
+        athleteLabel={selectedAthleteWorkflowLabel}
+        display={selectedAthletePlanningWorkflow}
+        onClose={() => setPlanningWorkflowModalOpen(false)}
       />
 
       <AssignmentValidationModal

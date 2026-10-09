@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent } from "react";
 
-const ROLES = ["ATHLETE", "COACH", "ACADEMY_ADMIN"] as const;
+const ROLES = ["ATHLETE", "COACH"] as const;
 type Role = (typeof ROLES)[number];
 
 export default function RegisterPage() {

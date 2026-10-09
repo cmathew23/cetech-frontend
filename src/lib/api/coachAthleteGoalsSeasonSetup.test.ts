@@ -9,8 +9,10 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import {
+  createGoal,
   createPhaseAwareGoal,
   fetchGoalLibrary,
+  updateSeasonCycle,
 } from "@/lib/api/coachAthleteGoalsSeasonSetup";
 
 describe("fetchGoalLibrary", () => {
@@ -69,6 +71,98 @@ describe("fetchGoalLibrary", () => {
     expect(result.categories[0]?.levels.BEGINNER[0]?.libraryGoalId).toBe(
       "golf_putting_beginner_xxx_v1",
     );
+    expect(result.categories[0]?.levels.BEGINNER[0]?.targetMetricName).toBeNull();
+    expect(result.categories[0]?.levels.BEGINNER[0]?.primaryMetric).toBeNull();
+  });
+
+  it("preserves targetMetricName and primaryMetric from Goal Library items", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        sportCode: "GOLF",
+        providerKey: "golf",
+        version: "v1",
+        categories: [
+          {
+            categoryKey: "approach_shots",
+            categoryLabel: "Approach Shots",
+            levels: {
+              BEGINNER: [],
+              INTERMEDIATE: [
+                {
+                  libraryGoalId: "golf_approach_intermediate_putt_v1",
+                  goalName: "Manage approach proximity and miss patterns in scoring rounds",
+                  goalType: "PERFORMANCE",
+                  goalCategory: "TRAINING",
+                  domain: "SKILLS",
+                  categoryKey: "approach_shots",
+                  categoryLabel: "Approach Shots",
+                  taxonomyAreaKey: "approach_shots",
+                  athleteLevel: "INTERMEDIATE",
+                  seasonPhases: ["IN_SEASON"],
+                  successCriteria: ["Reduce short-sided misses during tracked rounds"],
+                  metricsToWatch: ["Approach proximity"],
+                  capabilityCodes: ["STRIKE"],
+                  targetMetricName: "Approach Putt Performance",
+                  primaryMetric: {
+                    key: "APPROACH_PUTT_PERFORMANCE",
+                    unit: "FEET",
+                    direction: "LOWER_IS_BETTER",
+                  },
+                },
+                {
+                  libraryGoalId: "golf_approach_intermediate_window_v1",
+                  goalName: "Improve target window success on approach shots",
+                  goalType: "PERFORMANCE",
+                  goalCategory: "TRAINING",
+                  domain: "SKILLS",
+                  categoryKey: "approach_shots",
+                  categoryLabel: "Approach Shots",
+                  taxonomyAreaKey: "approach_shots",
+                  athleteLevel: "INTERMEDIATE",
+                  seasonPhases: ["IN_SEASON"],
+                  successCriteria: ["Increase target window success rate"],
+                  metricsToWatch: ["Target window %"],
+                  capabilityCodes: ["STRIKE"],
+                  targetMetricName: "Target/Window Success Rate",
+                  primaryMetric: {
+                    key: "TARGET_WINDOW_SUCCESS_RATE",
+                    unit: "PERCENT",
+                    direction: "HIGHER_IS_BETTER",
+                  },
+                },
+              ],
+              ADVANCED: [],
+              ELITE: [],
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchGoalLibrary({
+      sport: "GOLF",
+      seasonPhase: "IN_SEASON",
+      level: "INTERMEDIATE",
+    });
+    const items = result.categories[0]?.levels.INTERMEDIATE ?? [];
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      targetMetricName: "Approach Putt Performance",
+      primaryMetric: {
+        key: "APPROACH_PUTT_PERFORMANCE",
+        unit: "FEET",
+        direction: "LOWER_IS_BETTER",
+      },
+    });
+    expect(items[1]).toMatchObject({
+      targetMetricName: "Target/Window Success Rate",
+      primaryMetric: {
+        key: "TARGET_WINDOW_SUCCESS_RATE",
+        unit: "PERCENT",
+        direction: "HIGHER_IS_BETTER",
+      },
+    });
   });
 });
 
@@ -173,5 +267,120 @@ describe("createPhaseAwareGoal", () => {
       goalSourceType: "CUSTOM",
     });
     expect(JSON.parse(String(options.body))).not.toHaveProperty("libraryGoalId");
+  });
+
+  it("uses a 30s timeout on Goal CREATE POST and does not retry", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        goalId: "goal-timeout",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        seasonCycleId: "season-1",
+        seasonPhaseId: "phase-1",
+        domain: "SKILLS",
+        status: "ACTIVE",
+        goalType: "PERFORMANCE",
+        goalName: "Improve putting setup and alignment",
+        goalCategory: "TRAINING",
+      },
+    });
+
+    await createPhaseAwareGoal({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      seasonCycleId: "season-1",
+      seasonPhaseId: "phase-1",
+      goalType: "PERFORMANCE",
+      domain: "SKILLS",
+      goalName: "Improve putting setup and alignment",
+      goalCategory: "TRAINING",
+      createdByCoachId: "coach-1",
+      goalSourceType: "LIBRARY",
+      libraryGoalId: "golf_putting_beginner_xxx_v1",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      "/goals",
+      expect.objectContaining({
+        method: "POST",
+        timeoutMs: 30_000,
+      }),
+    );
+  });
+});
+
+describe("createGoal", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("does not pass an endpoint timeout on competition goal POST (global default)", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        goalId: "goal-comp",
+        athleteId: "athlete-1",
+        entityId: "entity-1",
+        seasonCycleId: "season-1",
+        status: "ACTIVE",
+        goalType: "COMPETITION",
+      },
+    });
+
+    await createGoal({
+      athleteId: "athlete-1",
+      entityId: "entity-1",
+      seasonCycleId: "season-1",
+      createdByCoachId: "coach-1",
+      goalType: "COMPETITION",
+      competitionEventId: "event-1",
+      startDate: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    const options = apiRequestMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(options.method).toBe("POST");
+    expect(options).not.toHaveProperty("timeoutMs");
+  });
+});
+
+describe("updateSeasonCycle", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("PATCHes only name, year, startDate, and endDate for the season id", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        seasonCycleId: "season-1",
+        name: "Updated Season",
+        year: 2027,
+        startDate: "2027-01-15T00:00:00.000Z",
+        endDate: "2027-11-01T00:00:00.000Z",
+      },
+    });
+
+    const result = await updateSeasonCycle("season-1", {
+      name: "Updated Season",
+      year: 2027,
+      startDate: "2027-01-15T00:00:00.000Z",
+      endDate: "2027-11-01T00:00:00.000Z",
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
+    const [path, options] = apiRequestMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe("/season-cycles/season-1");
+    expect(options.method).toBe("PATCH");
+    expect(JSON.parse(String(options.body))).toEqual({
+      name: "Updated Season",
+      year: 2027,
+      startDate: "2027-01-15T00:00:00.000Z",
+      endDate: "2027-11-01T00:00:00.000Z",
+    });
+    expect(result.seasonCycleId).toBe("season-1");
+    expect(result.name).toBe("Updated Season");
   });
 });

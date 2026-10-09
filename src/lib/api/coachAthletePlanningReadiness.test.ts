@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiRequestMock } = vi.hoisted(() => ({
@@ -516,10 +517,12 @@ describe("parseReadinessPayload", () => {
       },
     });
 
+    expect(apiRequestMock).toHaveBeenCalledTimes(1);
     expect(apiRequestMock).toHaveBeenCalledWith(
       "/entities/entity-1/athletes/athlete-1/training-plan-generation/planning-context/lock",
       {
         method: "POST",
+        timeoutMs: 30_000,
         body: JSON.stringify({
           planWindow: {
             startDate: "2026-05-11",
@@ -1614,6 +1617,15 @@ describe("training plan generation timeouts and helpers", () => {
     apiRequestMock.mockReset();
   });
 
+  it("planning context lock uses a 30s timeout and leaves the global default unchanged", () => {
+    const apiClientSource = readFileSync(
+      new URL("../apiClient.ts", import.meta.url),
+      "utf8",
+    );
+    expect(apiClientSource).toContain("const DEFAULT_TIMEOUT_MS = 10_000");
+    expect(apiClientSource).not.toContain("const DEFAULT_TIMEOUT_MS = 30_000");
+  });
+
   it("persist-draft uses extended client timeout", async () => {
     apiRequestMock.mockResolvedValue({
       success: true,
@@ -1930,6 +1942,46 @@ describe("training plan generation timeouts and helpers", () => {
       sets: "3 rounds",
       reps: "To fatigue",
     });
+  });
+
+  it("keeps response-only S&C videos on parsed generated draft items", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-sandc-1",
+        trainingPlanVersionId: "version-sandc-1",
+        days: [
+          {
+            dayIndex: 1,
+            sessions: [
+              {
+                sessionIndex: 1,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-1",
+                    label: "Back squat",
+                    videos: [
+                      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                      "https://youtu.be/abcdefghijk",
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "S_AND_C",
+    );
+
+    expect(result.days[0]?.sessions[0]?.items[0]?.videos).toEqual([
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://youtu.be/abcdefghijk",
+    ]);
   });
 
   it("keeps numeric Skills reps in their prior normalized string form", async () => {

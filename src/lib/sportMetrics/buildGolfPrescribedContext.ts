@@ -159,6 +159,7 @@ export type GolfDrillV2FormValues = {
   context: string;
   attempts: string;
   successes: string;
+  targetHits: string;
   qualityRating: string;
   distanceBand: string;
   targetRadius: string;
@@ -168,6 +169,57 @@ export type GolfDrillV2FormValues = {
   missesLong: string;
   notes: string;
 };
+
+export type DrillMeasurementContract = {
+  metricKey?: string;
+  unit?: string;
+  direction?: string;
+  requiredResultFields: string[];
+  numeratorField?: string;
+  denominatorField?: string;
+};
+
+const ATTEMPTS_TARGET_HITS_FIELDS = ["attempts", "targetHits"] as const;
+
+export function readDrillMeasurementContract(
+  drill: Record<string, unknown>,
+): DrillMeasurementContract | null {
+  const raw = drill.measurementContract;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.requiredResultFields)) return null;
+  const requiredResultFields = record.requiredResultFields
+    .filter((field): field is string => typeof field === "string")
+    .map((field) => field.trim())
+    .filter((field) => field !== "");
+  if (requiredResultFields.length === 0) return null;
+
+  const metricKey = readString(record.metricKey) ?? undefined;
+  const unit = readString(record.unit) ?? undefined;
+  const direction = readString(record.direction) ?? undefined;
+  const numeratorField = readString(record.numeratorField) ?? undefined;
+  const denominatorField = readString(record.denominatorField) ?? undefined;
+
+  return {
+    requiredResultFields,
+    ...(metricKey ? { metricKey } : {}),
+    ...(unit ? { unit } : {}),
+    ...(direction ? { direction } : {}),
+    ...(numeratorField ? { numeratorField } : {}),
+    ...(denominatorField ? { denominatorField } : {}),
+  };
+}
+
+export function isAttemptsTargetHitsContract(
+  contract: DrillMeasurementContract | null | undefined,
+): boolean {
+  if (!contract) return false;
+  const fields = contract.requiredResultFields;
+  return (
+    fields.length === ATTEMPTS_TARGET_HITS_FIELDS.length &&
+    ATTEMPTS_TARGET_HITS_FIELDS.every((field) => fields.includes(field))
+  );
+}
 
 export type GolfSportMetricRoundFormValues = {
   holesPlayed: string;
@@ -382,7 +434,31 @@ export function validateGolfRoundSportMetricForm(
 
 export function validateGolfDrillV2Form(
   values: GolfDrillV2FormValues,
+  measurementContract?: DrillMeasurementContract | null,
 ): { ok: true; valueJson: Record<string, unknown> } | { ok: false; error: string } {
+  if (isAttemptsTargetHitsContract(measurementContract)) {
+    const attempts = parseNonNegativeInt(values.attempts, "Attempts");
+    if (typeof attempts === "object" && "error" in attempts) {
+      return { ok: false, error: attempts.error };
+    }
+
+    const targetHits = parseNonNegativeInt(values.targetHits, "Target Hits");
+    if (typeof targetHits === "object" && "error" in targetHits) {
+      return { ok: false, error: targetHits.error };
+    }
+
+    if (targetHits > attempts) {
+      return { ok: false, error: "Target Hits cannot exceed attempts." };
+    }
+
+    const valueJson: Record<string, unknown> = { attempts, targetHits };
+    const context = parseOptionalString(values.context);
+    if (context) valueJson.context = context;
+    const notes = parseOptionalString(values.notes);
+    if (notes) valueJson.notes = notes;
+    return { ok: true, valueJson };
+  }
+
   const attempts = parseNonNegativeInt(values.attempts, "Attempts");
   if (typeof attempts === "object" && "error" in attempts) {
     return { ok: false, error: attempts.error };

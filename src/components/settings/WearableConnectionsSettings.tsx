@@ -186,7 +186,9 @@ function ProviderCard({
       ) : null}
 
       {actionError ? (
-        <p className="mt-3 text-xs text-danger">{actionError}</p>
+        <Alert variant="danger" className="mt-3">
+          {actionError}
+        </Alert>
       ) : null}
     </div>
   );
@@ -364,7 +366,9 @@ export function WearableConnectionsSettings() {
     >
       <div className="space-y-4">
         {redirectMessage ? (
-          <Alert variant="success">{redirectMessage}</Alert>
+          <Alert variant="success" dismissible>
+            {redirectMessage}
+          </Alert>
         ) : null}
         {providersError ? <Alert variant="danger">{providersError}</Alert> : null}
         {connectionsError ? (

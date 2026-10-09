@@ -6,12 +6,15 @@ import {
 } from "@/components/dashboard/shared/dashboardOuterCardStyles";
 import { DashboardStatusNotice } from "@/components/dashboard/shared/DashboardStatusNotice";
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
+import { formatDisplayUnit } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { SkillGoalAttributionText } from "@/components/dashboard/SkillGoalAttribution";
+import { SandCExerciseDemonstrationVideos } from "@/components/dashboard/shared/SandCExerciseDemonstrationVideos";
 import { DASHBOARD_DETAIL_LABEL_CLASS } from "@/components/dashboard/shared/dashboardTypography";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { GoalDisplayBlock } from "@/components/goals/GoalDisplayBlock";
 import { CoachAthleteLevelValidationModal } from "@/components/dashboard/coach/CoachAthleteLevelValidationModal";
 import { Alert } from "@/components/ui/Alert";
+import { designSystem } from "@/config/design-system";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
@@ -20,8 +23,10 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  Info,
   Loader2,
   LockKeyhole,
+  X,
 } from "lucide-react";
 import { fetchMyAcademyCoaches } from "@/lib/api/academyMeCoaches";
 import {
@@ -30,6 +35,7 @@ import {
   fetchGoalLibrary,
   createSeasonCycle,
   createSeasonCyclePhase,
+  updateSeasonCycle,
   fetchGoalsForAthlete,
   fetchSeasonCyclePhases,
   fetchSeasonCyclesForEntity,
@@ -37,6 +43,7 @@ import {
   type GoalLibraryAthleteLevel,
   type GoalLibraryCategory,
   type GoalLibraryItem,
+  type GoalLibraryPrimaryMetric,
   type GoalPriority,
   type GoalSummary,
   type SeasonCycleSummary,
@@ -80,6 +87,7 @@ import {
   submitReview,
   type CoachAthleteTrainingPlanCompleteness,
   type CoachAthleteTrainingPlanGenerationJob,
+  type TrainingPlanGenerationJobStatus,
   type CoachAthleteGeneratedDraftItem,
   type CoachAthleteLatestDomainDraft,
   type CoachPersistedTrainingPlanActiveDetail,
@@ -253,6 +261,8 @@ const GENERATION_DOMAIN_ORDER: TrainingPlanGenerationDomain[] = [
 ];
 /** Hide competition schedule UI until competition-aware plan generation is end-to-end. */
 const SHOW_COMPETITION_SCHEDULE_UI = false;
+/** Hide custom goal creation UI for Golf MVP; Goal Library remains the creation path. */
+const SHOW_CUSTOM_GOAL_CREATION_UI = false;
 const AI_GENERATION_VALIDATION_ERROR_MESSAGE =
   "Plan generation completed, but the AI output did not match the required system format. Please try again after the generator is updated.";
 // Exact backend message for the deterministic Nutrition stale-version rejection.
@@ -267,6 +277,7 @@ export type TrainingPlanPersistenceContext = {
   startDate: string;
   endDate: string;
   goalIds?: string[];
+  phase?: string;
 };
 
 export type PendingPlanningContextHydrationStatePatch = {
@@ -275,6 +286,7 @@ export type PendingPlanningContextHydrationStatePatch = {
   planStartDate: string;
   durationDays: 7 | 15 | 30;
   planDatesConfirmedForCurrentAthlete: boolean;
+  phase: string | null;
 };
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -469,7 +481,6 @@ export function resolveLockedPlanningContextDisplayFields(input: {
     input.upstreamPlanningContext?.season?.phaseName,
     input.upstreamPlanningContext?.phase,
     input.activePhaseForSelectedSeason?.phase,
-    input.activePhaseForSelectedSeason?.phaseName,
   );
   const planStartDate = trimmedNonEmpty(
     workspacePlanningContext?.planStartDate,
@@ -648,15 +659,18 @@ export function resolvePendingPlanningContextHydration(
     ...snapshotContexts.map((context) => context.seasonCycleId),
   );
   const startDate = trimmedNonEmpty(
+    planningContext.planWindow?.startDate,
     planningContext.planStartDate,
     planningContext.startDate,
     ...snapshotContexts.map((context) => context.startDate),
   );
   const endDate = trimmedNonEmpty(
+    planningContext.planWindow?.endDate,
     planningContext.planEndDate,
     planningContext.endDate,
     ...snapshotContexts.map((context) => context.endDate),
   );
+  const phase = trimmedNonEmpty(planningContext.phase);
   const goalIds = readLockedWorkspaceGoalIds({
     selectedGoalsSnapshot: planningContext.selectedGoalsSnapshot,
     athletePlanningContextSnapshot: planningContext.athletePlanningContextSnapshot,
@@ -669,7 +683,8 @@ export function resolvePendingPlanningContextHydration(
     seasonCycleId === null &&
     startDate === null &&
     endDate === null &&
-    goalIds.length === 0
+    goalIds.length === 0 &&
+    phase === null
   ) {
     return null;
   }
@@ -679,6 +694,7 @@ export function resolvePendingPlanningContextHydration(
     startDate: startDate ?? "",
     endDate: endDate ?? "",
     ...(goalIds.length > 0 ? { goalIds } : {}),
+    ...(phase !== null ? { phase } : {}),
   };
 }
 
@@ -706,18 +722,21 @@ export function buildPendingPlanningContextHydrationStatePatch(
       planStartDate: fallbackPlanStartDate,
       durationDays: 7,
       planDatesConfirmedForCurrentAthlete: false,
+      phase: null,
     };
   }
 
   const seasonCycleId =
     hydration.seasonCycleId.trim() !== "" ? hydration.seasonCycleId.trim() : null;
-  const startDate =
-    hydration.startDate.trim() !== "" ? hydration.startDate.trim() : fallbackPlanStartDate;
-  const endDate = hydration.endDate.trim();
+  const backendStartDate = hydration.startDate.trim();
+  const backendEndDate = hydration.endDate.trim();
+  const hasBackendPlanDate = backendStartDate !== "" || backendEndDate !== "";
+  const startDate = hasBackendPlanDate ? backendStartDate : fallbackPlanStartDate;
   const durationDays =
-    startDate !== "" && endDate !== ""
-      ? resolvePlanDurationDaysFromWindow(startDate, endDate)
+    backendStartDate !== "" && backendEndDate !== ""
+      ? resolvePlanDurationDaysFromWindow(backendStartDate, backendEndDate)
       : 7;
+  const phase = hydration.phase?.trim() ?? "";
 
   return {
     selectedSeasonCycleId: seasonCycleId,
@@ -725,6 +744,7 @@ export function buildPendingPlanningContextHydrationStatePatch(
     planStartDate: startDate,
     durationDays,
     planDatesConfirmedForCurrentAthlete: false,
+    phase: phase !== "" ? phase : null,
   };
 }
 
@@ -1181,9 +1201,7 @@ export async function runConfirmPlanDatesAction({
   }
 }
 
-function displayValue(
-  value: DisplayableValue,
-): string {
+function displayValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (Array.isArray(value)) {
     const items = value
@@ -1193,6 +1211,7 @@ function displayValue(
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "—";
+  if (typeof value !== "string") return "—";
   const text = value.trim();
   return text === "" ? "—" : text;
 }
@@ -1204,7 +1223,7 @@ function displayLabelTitleCase(value: DisplayableValue): string {
   return toTitleCaseInput(base);
 }
 
-function hasRenderableValue(value: DisplayableValue): boolean {
+function hasRenderableValue(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === "string") return value.trim() !== "";
@@ -2161,6 +2180,46 @@ export function shouldRetainOpenDomainReviewPlan(input: {
   );
 }
 
+/**
+ * Workflow 3 specialists are not planning-context owners, so the submitted-domain bootstrap
+ * effect exits early on every workspace change. Never wipe an open review drawer's already-loaded
+ * schedule — approve/release only mutate workspace status and would otherwise leave
+ * contentSource "none" / "Loading generated …" with Release still visible.
+ */
+export function resolveDomainPlanStatesForNonOwnerWorkspaceReset(input: {
+  previous: Record<TrainingPlanGenerationDomain, HeadCoachDomainPlanState>;
+  drawerOpen: boolean;
+  drawerDomain: TrainingPlanGenerationDomain | null;
+}): Record<TrainingPlanGenerationDomain, HeadCoachDomainPlanState> {
+  const empty = createEmptyHeadCoachDomainPlanStates();
+  const resolveDomain = (
+    domain: TrainingPlanGenerationDomain,
+  ): HeadCoachDomainPlanState => {
+    const previous = input.previous[domain];
+    if (
+      shouldRetainOpenDomainReviewPlan({
+        domain,
+        drawerOpen: input.drawerOpen,
+        drawerDomain: input.drawerDomain,
+        activeDetail: previous.activeDetail,
+        latestDraft: previous.latestDraft,
+      })
+    ) {
+      return {
+        ...previous,
+        loading: false,
+        error: null,
+      };
+    }
+    return empty[domain];
+  };
+  return {
+    SKILLS: resolveDomain("SKILLS"),
+    NUTRITION: resolveDomain("NUTRITION"),
+    S_AND_C: resolveDomain("S_AND_C"),
+  };
+}
+
 export function hasPlanningContextSnapshotChanged(
   previousSnapshotId: string | null | undefined,
   nextSnapshotId: string | null,
@@ -2448,6 +2507,38 @@ export function isUsableGeneratedDomainDraft(
   return trainingDays !== null && trainingDays > 0;
 }
 
+/**
+ * View Draft Plan hydrates only when the drawer-stable latest picker and
+ * active/detail graph both lack a usable schedule. Ids-only drafts are not enough.
+ * Uses {@link resolveLatestDraftForDomainReview} and {@link isUsableGeneratedDomainDraft}.
+ */
+export function shouldHydrateDomainReviewOnViewDraft(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  directReleaseSkillsOwner: boolean;
+  latestDraftDisplayDomain: TrainingPlanGenerationDomain | null;
+  globalLatestDraft: CoachAthleteLatestDomainDraft | null;
+  perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+}): boolean {
+  void input.workflowStatus;
+  void input.directReleaseSkillsOwner;
+  const latestDraft = resolveLatestDraftForDomainReview(input.domain, {
+    isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+    headCoachOwnedSkillsDraft: null,
+    latestDraftDisplayDomain: input.latestDraftDisplayDomain,
+    latestSkillsDraft: input.globalLatestDraft,
+    perDomainLatestDraft: input.perDomainLatestDraft,
+  });
+  if (isUsableGeneratedDomainDraft(latestDraft)) return false;
+  const activeTrainingDays = countDomainReviewTrainingDays(input.activeDetail);
+  return !(
+    input.activeDetail !== null &&
+    activeTrainingDays !== null &&
+    activeTrainingDays > 0
+  );
+}
+
 /** S&C-only: skip post-generation active/detail when latest already installed usable content. */
 export function shouldSkipSandCPostGenerationDetailRefresh(input: {
   domain: TrainingPlanGenerationDomain;
@@ -2467,7 +2558,13 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
   workspacePlanId: string | null | undefined;
   workspaceVersionId: string | null | undefined;
 }): boolean {
-  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
+  if (
+    input.domain !== "S_AND_C" &&
+    input.domain !== "NUTRITION" &&
+    input.domain !== "SKILLS"
+  ) {
+    return false;
+  }
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
   const workspacePlanId = input.workspacePlanId?.trim() ?? "";
@@ -2483,6 +2580,16 @@ export function shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve(input: {
 }
 
 /**
+ * Skills approve/release: local projection writes `summary.versionId`. Do not retain against
+ * selectedVersionId/latest/approved/active — those fields can stay stale and false-mismatch.
+ */
+export function resolveSkillsApproveReleaseWorkspaceRetainVersionId(
+  summary: { versionId?: string | null } | null | undefined,
+): string {
+  return summary?.versionId?.trim() ?? "";
+}
+
+/**
  * S&C post-generation / Nutrition post-approve-release: reject stale/null latest writes while an
  * installed draft identity is pinned (Nutrition latest may 404 after approve/release).
  */
@@ -2494,7 +2601,13 @@ export function shouldRejectStaleSandCLatestDraftWrite(input: {
   installedVersionId: string | null | undefined;
   incoming: CoachAthleteLatestDomainDraft | null;
 }): boolean {
-  if (input.domain !== "S_AND_C" && input.domain !== "NUTRITION") return false;
+  if (
+    input.domain !== "S_AND_C" &&
+    input.domain !== "NUTRITION" &&
+    input.domain !== "SKILLS"
+  ) {
+    return false;
+  }
   if (input.requestGeneration !== input.currentGeneration) return true;
   const installedPlanId = input.installedPlanId?.trim() ?? "";
   const installedVersionId = input.installedVersionId?.trim() ?? "";
@@ -2517,9 +2630,13 @@ export function resolveDomainCoachPlanWindowLabel(input: {
       ([startDate, endDate]) =>
         (startDate?.trim() ?? "") !== "" || (endDate?.trim() ?? "") !== "",
     ) ?? null;
+  const latestDraftDates = input.latestDraft as {
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
   const planWindow = firstRenderableWindow(
     [input.activeDetail?.version.startDate, input.activeDetail?.version.endDate],
-    [input.latestDraft?.startDate, input.latestDraft?.endDate],
+    [latestDraftDates?.startDate, latestDraftDates?.endDate],
     [input.lockedStartDate, input.lockedEndDate],
     [input.fallbackStartDate, input.fallbackEndDate],
   );
@@ -2551,6 +2668,23 @@ export function resolveDomainReviewPlanLoadMessage(input: {
   // Drawer opens only after generation. No rendered plan yet means detail is
   // still pending — never show the empty submitted-plan message.
   return `Loading generated ${domainPlanHistoryDomainLabel(input.domain)} plan...`;
+}
+
+/**
+ * Specialist workspace with a resolved plan/version still needs a fetch when
+ * neither downstream active/detail nor direct-release detail hydration applies.
+ * Use the existing latest-domain-draft loader instead of returning without I/O.
+ */
+export function shouldFallbackSpecialistDrawerDetailToLatestDraft(input: {
+  specialistRequestKind: "detail" | "latest" | null;
+  shouldHydrateResolvedDownstreamDrawer: boolean;
+  shouldHydrateDirectReleaseDetail: boolean;
+}): boolean {
+  return (
+    input.specialistRequestKind === "detail" &&
+    !input.shouldHydrateResolvedDownstreamDrawer &&
+    !input.shouldHydrateDirectReleaseDetail
+  );
 }
 
 export function shouldHydrateDirectReleaseDomainDrawerDetail(input: {
@@ -2714,6 +2848,34 @@ export function DomainPlanHistoryTable({
   );
 }
 
+export function historicalPlanDetailMatchesSelection(input: {
+  detail: CoachTrainingPlanDomainHistoryDetail;
+  athleteId: string;
+  row: CoachTrainingPlanDomainHistoryRow;
+}): boolean {
+  const owner = input.detail.planContent.plan.athleteId?.trim() ?? "";
+  const athleteId = input.athleteId.trim();
+  if (owner !== "" && athleteId !== "" && owner !== athleteId) return false;
+
+  const expectedPlanId = input.row.planId?.trim() ?? "";
+  const actualPlanId = input.detail.planContent.plan.id.trim();
+  if (expectedPlanId !== "" && actualPlanId !== "" && expectedPlanId !== actualPlanId) {
+    return false;
+  }
+
+  const expectedVersionId = input.row.versionId?.trim() ?? "";
+  const actualVersionId = input.detail.planContent.version.id.trim();
+  if (
+    expectedVersionId !== "" &&
+    actualVersionId !== "" &&
+    expectedVersionId !== actualVersionId
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function DomainPlanHistoryTabPanel({
   rows,
   loading,
@@ -2767,7 +2929,7 @@ export function DomainPlanHistoryDetailPanel({
   ];
 
   return (
-    <div className="min-w-0 space-y-5 overflow-x-hidden">
+    <div className="min-w-0 space-y-5">
       <dl className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {metadataItems.map((item) => (
           <div
@@ -2786,7 +2948,7 @@ export function DomainPlanHistoryDetailPanel({
           {error}
         </div>
       ) : detail ? (
-        <div className="min-w-0 max-w-full overflow-x-hidden">{children ?? null}</div>
+        <div className="min-w-0 max-w-full">{children ?? null}</div>
       ) : null}
     </div>
   );
@@ -3594,14 +3756,13 @@ function fynRevisionActionIsRestDay(key: FynRevisionActionKey): boolean {
 
 /**
  * Domain- and action-specific example placeholder for the "Tell Fyn what to change" context field.
- * Chosen after the coach has picked an action so the example matches the exact task; falls back to
- * the generic placeholder for actions without a tailored example.
+ * Chosen after the coach has picked an action so the example matches the exact task; otherwise uses
+ * a domain-specific generic example (never another domain's terminology).
  */
 export function fynRevisionContextPlaceholder(
   domain: TrainingPlanGenerationDomain,
   actionKey: FynRevisionActionKey | null,
 ): string {
-  if (actionKey === null) return FYN_REVISION_INPUT_PLACEHOLDER;
   if (domain === "SKILLS") {
     if (actionKey === "ADD_SESSION") {
       return "Example: Add Lag Putting Foundation and keep intensity low.";
@@ -3610,13 +3771,27 @@ export function fynRevisionContextPlaceholder(
     if (actionKey === "UPDATE_SESSION_ITEMS") {
       return "Example: Add one lag putting drill and remove the advanced drill.";
     }
+    return FYN_REVISION_INPUT_PLACEHOLDER;
   }
-  if (domain === "NUTRITION" && actionKey === "ADD_ITEM") {
-    return "Example: Add a lighter carb option to breakfast.";
+  if (domain === "NUTRITION") {
+    if (actionKey === "ADD_ITEM") {
+      return "Example: Add a lighter carb option to breakfast.";
+    }
+    if (actionKey === "REPLACE_ITEM") {
+      return "Example: Replace this food item with a more suitable alternative.";
+    }
+    if (actionKey === "UPDATE_ITEM") {
+      return "Example: Adjust the serving quantity for this food item.";
+    }
+    if (actionKey === "REMOVE_ITEM") {
+      return "Example: Remove this food item from the meal.";
+    }
+    return "Example: Adjust this food item in the meal.";
   }
   if (domain === "S_AND_C") {
     if (actionKey === "ADD_ITEM") return "Example: Add a low-load mobility exercise.";
     if (actionKey === "ADD_SESSION") return "Example: Add a low-load mobility session.";
+    return "Example: Adjust this exercise in the session.";
   }
   return FYN_REVISION_INPUT_PLACEHOLDER;
 }
@@ -3667,9 +3842,51 @@ export function fynRevisionAvailableActions(
 }
 
 /**
- * Builds coach-selectable targets at every level the domain supports, keeping only targets that
- * expose at least one available action. Same source priority as {@link fynRevisionTargetOptions}.
+ * Copies UPDATE preload fields from the currently rendered schedule item onto a revision target
+ * matched by 1-based day/session/item indices. Identity, keys, and indices stay on the original
+ * target so targetMap selection is unchanged.
  */
+function revisionTargetItemMatchKey(target: FynRevisionTargetOption): string | null {
+  if (target.level !== "ITEM") return null;
+  const { dayIndex, sessionIndex, itemIndex } = target.indices;
+  if (dayIndex === null || sessionIndex === null || itemIndex === null) return null;
+  return `${dayIndex}|${sessionIndex}|${itemIndex}`;
+}
+
+export function overlayRevisionTargetParametersFromSchedule(
+  targets: readonly FynRevisionTargetOption[],
+  domain: TrainingPlanGenerationDomain,
+  scheduleDays: readonly unknown[] | null | undefined,
+): FynRevisionTargetOption[] {
+  if (!Array.isArray(scheduleDays) || scheduleDays.length === 0) return [...targets];
+  const renderedItems = fynBuildLeveledTargets(domain, scheduleDays, FYN_ITEM_LEVEL_ONLY);
+  const byIndex = new Map<string, FynRevisionTargetOption>();
+  for (const item of renderedItems) {
+    const key = revisionTargetItemMatchKey(item);
+    if (key !== null) byIndex.set(key, item);
+  }
+  if (byIndex.size === 0) return [...targets];
+  return targets.map((target) => {
+    const key = revisionTargetItemMatchKey(target);
+    if (key === null) return target;
+    const rendered = byIndex.get(key);
+    if (rendered === undefined) return target;
+    return {
+      ...target,
+      serving: rendered.serving,
+      durationMinutes: rendered.durationMinutes,
+      sets: rendered.sets,
+      numericReps: rendered.numericReps,
+      reps: rendered.reps,
+      exerciseCatalogItemId: rendered.exerciseCatalogItemId ?? target.exerciseCatalogItemId,
+      target: {
+        ...target.target,
+        currentId: rendered.target.currentId ?? target.target.currentId,
+      },
+    };
+  });
+}
+
 function fynRestDayCategoryTargetOption(): FynRevisionTargetOption {
   return {
     key: FYN_REST_DAY_TARGET_KEY,
@@ -3698,6 +3915,7 @@ function fynRestDayCategoryTargetOption(): FynRevisionTargetOption {
   };
 }
 
+/** Coach-selectable targets at every level the domain supports; UPDATE fields overlay from scheduleDays. */
 export function fynRevisionLeveledTargetOptions(
   context: CoachAthleteDomainDraftRevisionContext | null,
   options?: {
@@ -3726,6 +3944,8 @@ export function fynRevisionLeveledTargetOptions(
     return [restDayTarget, ...list];
   };
 
+  const overlay = (list: FynRevisionTargetOption[]) =>
+    overlayRevisionTargetParametersFromSchedule(list, domain, options?.scheduleDays);
   const sources: readonly unknown[][] = [
     fynTargetMapCandidateArray(context?.targetMap ?? null),
     [...(options?.scheduleDays ?? [])],
@@ -3735,14 +3955,16 @@ export function fynRevisionLeveledTargetOptions(
     if (days.length === 0) continue;
     // Rest Day category must not mask an empty nested walk — flat targetMap still needs a turn.
     const built = withActions(fynBuildLeveledTargets(domain, days, scheduleLevels));
-    if (built.length > 0) return withRestDayCategory(built);
+    if (built.length > 0) return overlay(withRestDayCategory(built));
   }
   // Flat targetMap fallback: ITEM-level targets only (+ Rest Day category when supported).
-  return withRestDayCategory(
-    withActions(
-      fynTargetOptionsFromFlatList(
-        domain,
-        fynTargetMapCandidateArray(context?.targetMap ?? null),
+  return overlay(
+    withRestDayCategory(
+      withActions(
+        fynTargetOptionsFromFlatList(
+          domain,
+          fynTargetMapCandidateArray(context?.targetMap ?? null),
+        ),
       ),
     ),
   );
@@ -4294,6 +4516,23 @@ export function sandCDraftFromRevisionResult(
   return skillsDraftFromRevisionResult(result);
 }
 
+/**
+ * After a successful S&C revise POST, the canonical latest GET is the displayed draft when it is
+ * usable and not older than the POST candidate. Reload failure keeps the already-applied revision.
+ */
+export function resolveSandCLatestDraftAfterRevisionReload(input: {
+  postRevisionDraft: CoachAthleteLatestDomainDraft;
+  reloadedLatestDraft: CoachAthleteLatestDomainDraft | null;
+}): CoachAthleteLatestDomainDraft {
+  const reloaded = input.reloadedLatestDraft;
+  if (reloaded === null || !isUsableGeneratedDomainDraft(reloaded)) {
+    return input.postRevisionDraft;
+  }
+  return (
+    resolveNewerDomainReviewDraft(input.postRevisionDraft, reloaded) ?? input.postRevisionDraft
+  );
+}
+
 /** S&C reuses the Skills Fyn context projection with domain stamped as S_AND_C. */
 export function projectSandCFynContextAfterRevision(
   context: CoachAthleteDomainDraftRevisionContext | null,
@@ -4368,6 +4607,17 @@ export const EMPTY_SANDC_ADD_ITEM_VALUES: SandCAddItemValues = {
   reps: null,
 };
 
+/** UPDATE_ITEM reps stepper seed: exact numeric reps, else a leading positive integer in descriptive reps. */
+function sandCUpdateItemRepsControlValue(
+  target: FynRevisionTargetOption | null,
+): number | null {
+  if (target?.numericReps != null) return target.numericReps;
+  const match = /^([1-9]\d*)/.exec((target?.reps ?? "").trim());
+  if (match === null) return null;
+  const parsed = Number(match[1]);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export function sandCParameterValuesForAction(
   target: FynRevisionTargetOption | null,
   actionKey: FynRevisionActionKey,
@@ -4376,7 +4626,7 @@ export function sandCParameterValuesForAction(
   return {
     durationMinutes: target?.durationMinutes ?? null,
     sets: target?.sets ?? null,
-    reps: target?.numericReps ?? null,
+    reps: sandCUpdateItemRepsControlValue(target),
   };
 }
 
@@ -4480,7 +4730,10 @@ export function buildSandCRevisionPatch(input: {
       input.target.durationMinutes,
     );
     const sets = changedSandCNumericValue(input.sets, input.target.sets);
-    const reps = changedSandCNumericValue(input.reps, input.target.numericReps);
+    const reps = changedSandCNumericValue(
+      input.reps,
+      sandCUpdateItemRepsControlValue(input.target),
+    );
     if (durationMinutes === undefined && sets === undefined && reps === undefined) return null;
     return {
       type: "UPDATE_ITEM",
@@ -5184,6 +5437,36 @@ export function resolveLatestDraftForDomainReview(
 }
 
 /**
+ * Canonical View Draft Plan / open-drawer content source: the same latest-draft picker the
+ * domain review drawer uses, then {@link resolveDomainReviewDrawerContentSource}.
+ * Global latest is eligible only when `latestDraftDisplayDomain` matches the clicked domain.
+ */
+export function resolveDomainReviewViewDraftContentSource(input: {
+  domain: TrainingPlanGenerationDomain;
+  workflowStatus: AssistantDomainWorkflowStatus;
+  directReleaseSkillsOwner: boolean;
+  latestDraftDisplayDomain: TrainingPlanGenerationDomain | null;
+  globalLatestDraft: CoachAthleteLatestDomainDraft | null;
+  perDomainLatestDraft: CoachAthleteLatestDomainDraft | null;
+  activeDetail: CoachPersistedTrainingPlanActiveDetail | null;
+}): DomainReviewDrawerContentSource {
+  const latestDraft = resolveLatestDraftForDomainReview(input.domain, {
+    isWorkflow2AHeadCoachOwnedSkillsDraft: false,
+    headCoachOwnedSkillsDraft: null,
+    latestDraftDisplayDomain: input.latestDraftDisplayDomain,
+    latestSkillsDraft: input.globalLatestDraft,
+    perDomainLatestDraft: input.perDomainLatestDraft,
+  });
+  return resolveDomainReviewDrawerContentSource({
+    domain: input.domain,
+    workflowStatus: input.workflowStatus,
+    directReleaseSkillsOwner: input.directReleaseSkillsOwner,
+    activeDetail: input.activeDetail,
+    latestDraft,
+  });
+}
+
+/**
  * Runs the Nutrition review-drawer open refresh STRICTLY in order: the latest plan/version load
  * must fully resolve before the revision target dropdown is rebuilt, because the dropdown is built
  * from the newly loaded plan. The two loaders must never run concurrently.
@@ -5644,6 +5927,7 @@ export function FynRevisionContextPanel({
   selection,
   onSelectionChange,
   coachRequest,
+  coachRequestResetKey = 0,
   onCoachRequestChange,
   targetOptions,
   selectedTargetKey,
@@ -5672,6 +5956,8 @@ export function FynRevisionContextPanel({
   selection: FynRevisionComposerBatchSelection;
   onSelectionChange: (selection: FynRevisionComposerBatchSelection) => void;
   coachRequest: string;
+  /** Bumped when the parent clears the request so the local field resets without tracking keystrokes. */
+  coachRequestResetKey?: number;
   onCoachRequestChange: (value: string) => void;
   targetOptions: FynRevisionTargetOption[];
   selectedTargetKey: string | null;
@@ -5748,16 +6034,20 @@ export function FynRevisionContextPanel({
       : null;
   const sandCRemoveMinimumNotice =
     sandCRemoveMetadata?.isSoleExercise === true;
+  const [coachRequestDraft, setCoachRequestDraft] = useState(coachRequest);
+  useEffect(() => {
+    setCoachRequestDraft(coachRequest);
+  }, [coachRequest, coachRequestResetKey, domain]);
   const showOptionsDisabled =
     loading ||
     optionsState.loading ||
-    coachRequest.trim() === "" ||
+    coachRequestDraft.trim() === "" ||
     selectedTargetKey === null ||
     selectedTargetKey === "";
   const quickActionDisabled =
     loading ||
     optionsState.loading ||
-    (selectedAction?.requiresBriefRequest === true && coachRequest.trim() === "");
+    (selectedAction?.requiresBriefRequest === true && coachRequestDraft.trim() === "");
   const updateRestDaySelection = (patch: Partial<FynRestDaySelection>) => {
     onRestDaySelectionChange?.({ ...restDaySelectionValue, ...patch });
   };
@@ -5882,7 +6172,7 @@ export function FynRevisionContextPanel({
                         onChange={() => onSelectAction(action.key)}
                         disabled={disabled}
                       />
-                      <span className="font-medium">{action.label}</span>
+                      <span className="min-w-0 break-words font-medium">{action.label}</span>
                     </label>
                   );
                 })}
@@ -5915,8 +6205,12 @@ export function FynRevisionContextPanel({
               <textarea
                 rows={2}
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={coachRequest}
-                onChange={(event) => onCoachRequestChange(event.target.value)}
+                value={coachRequestDraft}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setCoachRequestDraft(next);
+                  onCoachRequestChange(next);
+                }}
                 placeholder={fynRevisionContextPlaceholder(domain, selectedAction.key)}
                 disabled={loading}
               />
@@ -6073,7 +6367,7 @@ export function FynRevisionContextPanel({
             <div className="space-y-1 text-sm text-textPrimary">
               <span className="font-medium">Adjust serving</span>
               <div
-                className="flex items-center gap-3"
+                className="flex min-w-0 flex-wrap items-center gap-3"
                 data-testid="fyn-nutrition-serving-stepper"
               >
                 <button
@@ -6086,7 +6380,7 @@ export function FynRevisionContextPanel({
                   −
                 </button>
                 <span
-                  className="min-w-[6rem] text-center text-sm font-medium text-textPrimary"
+                  className="min-w-0 break-words text-center text-sm font-medium text-textPrimary"
                   data-testid="fyn-nutrition-serving-value"
                 >
                   {formatNutritionServingValue(servingStepper.quantity, servingStepper.unit)}
@@ -6216,6 +6510,12 @@ export function FynRevisionContextPanel({
                 ] as const
               ).map(([field, label]) => {
                 const value = sandCAddItemValues[field];
+                const descriptiveReps =
+                  field === "reps" &&
+                  value === null &&
+                  selectedAction.key === "UPDATE_ITEM"
+                    ? selectedTargetOption?.reps?.trim() || null
+                    : null;
                 return (
                   <div
                     key={field}
@@ -6237,7 +6537,7 @@ export function FynRevisionContextPanel({
                         className="min-w-12 text-center font-medium"
                         data-testid={`fyn-sandc-${field}-value`}
                       >
-                        {value ?? "Unset"}
+                        {value ?? descriptiveReps ?? "Unset"}
                       </span>
                       <button
                         type="button"
@@ -6775,6 +7075,31 @@ export type DomainReviewDrawerWorkflowActions = {
   hasAuthorizedWorkflowAction: boolean;
 };
 
+export function resolveContextBuilderDrawerLayoutClasses(input: {
+  closing: boolean;
+}): {
+  rootClassName: string;
+  backdropClassName: string;
+  panelClassName: string;
+} {
+  return {
+    rootClassName: "absolute inset-0 z-50",
+    backdropClassName: cn(
+      "absolute inset-0 cursor-default bg-slate-950/25",
+      input.closing
+        ? "motion-safe:animate-[contextBuilderBackdropFadeOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
+    ),
+    panelClassName: cn(
+      "absolute inset-y-0 right-0 flex h-full min-h-0 w-full min-w-0 max-w-3xl flex-col overflow-hidden",
+      "rounded-l-xl border-l border-border bg-bg shadow-2xl max-md:max-w-full max-md:rounded-none",
+      input.closing
+        ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
+        : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
+    ),
+  };
+}
+
 export function resolveDomainReviewDrawerLayoutClasses(input: {
   closing: boolean;
 }): {
@@ -6783,7 +7108,7 @@ export function resolveDomainReviewDrawerLayoutClasses(input: {
   panelClassName: string;
 } {
   return {
-    rootClassName: "fixed inset-0 z-50",
+    rootClassName: "fixed inset-0 z-[60]",
     backdropClassName: cn(
       "absolute inset-0 cursor-default bg-slate-950/25",
       input.closing
@@ -6791,10 +7116,11 @@ export function resolveDomainReviewDrawerLayoutClasses(input: {
         : "motion-safe:animate-[domainReviewBackdropFadeIn_180ms_ease-out]",
     ),
     panelClassName: cn(
-      "domain-review-drawer--workspace-scoped absolute right-0 flex h-auto w-full max-w-3xl flex-col",
+      "domain-review-drawer--workspace-scoped absolute right-0 flex h-auto w-full min-w-0 max-w-3xl flex-col",
       "top-[var(--training-plan-review-drawer-top,5rem)] bottom-[var(--training-plan-review-drawer-bottom,1.5rem)]",
       "overflow-hidden rounded-l-xl border-l border-border bg-bg shadow-2xl",
       "[max-height:calc(100dvh-var(--training-plan-review-drawer-top,5rem)-var(--training-plan-review-drawer-bottom,1.5rem))]",
+      "max-md:inset-0 max-md:max-h-[100dvh] max-md:rounded-none max-md:border-0",
       input.closing
         ? "motion-safe:animate-[domainReviewDrawerSlideOut_220ms_ease-in_forwards]"
         : "motion-safe:animate-[domainReviewDrawerSlideIn_220ms_ease-out]",
@@ -6976,7 +7302,7 @@ function renderKeyValueList(rows: Array<{ label: string; value: ReactNode }>): R
       {rows.map((row, index) => (
         <div key={`${row.label}-${index}`} className="grid gap-1 sm:grid-cols-[12rem_1fr] sm:gap-3">
           <dt className={cn(DASHBOARD_DETAIL_LABEL_CLASS, "text-xs")}>{row.label}</dt>
-          <dd className="min-w-0 text-sm text-textPrimary">{row.value}</dd>
+          <dd className="min-w-0 break-words text-sm text-textPrimary">{row.value}</dd>
         </div>
       ))}
     </dl>
@@ -7014,7 +7340,7 @@ function renderSummaryValue(value: unknown, key: string | null = null): ReactNod
           value: renderedValue,
         };
       })
-      .filter((row): row is { label: string; value: ReactNode } => row !== null);
+      .filter((row) => row !== null);
     return renderKeyValueList(rows);
   }
   return null;
@@ -7105,6 +7431,52 @@ export function DomainPlanConstraintComplianceSummarySection({
   );
 }
 
+function IsolatedTypingField({
+  label,
+  committedValue,
+  resetKey,
+  onLiveChange,
+  rows,
+  placeholder,
+  disabled = false,
+  children,
+}: {
+  label: string;
+  committedValue: string;
+  resetKey: number;
+  onLiveChange: (value: string) => void;
+  rows: number;
+  placeholder: string;
+  disabled?: boolean;
+  children?: (draft: string) => ReactNode;
+}) {
+  const [draft, setDraft] = useState(committedValue);
+  useEffect(() => {
+    setDraft(committedValue);
+  }, [committedValue, resetKey]);
+
+  return (
+    <>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">{label}</span>
+        <textarea
+          rows={rows}
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+          value={draft}
+          onChange={(event) => {
+            const next = event.target.value;
+            setDraft(next);
+            onLiveChange(next);
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+      </label>
+      {children?.(draft)}
+    </>
+  );
+}
+
 export function DomainReviewDrawerWorkflowActionButtons({
   drawerWorkflowActions,
   renderApproveBeforeRevise,
@@ -7114,6 +7486,7 @@ export function DomainReviewDrawerWorkflowActionButtons({
   actionContext,
   drawerReviseLoading,
   requestRevisionFeedback,
+  requestRevisionFeedbackResetKey = 0,
   onApprove,
   onRequestRevisionFeedbackChange,
   onRequestChangesSubmit,
@@ -7127,6 +7500,7 @@ export function DomainReviewDrawerWorkflowActionButtons({
   actionContext: GovernedPlanContext | null;
   drawerReviseLoading: boolean;
   requestRevisionFeedback: string;
+  requestRevisionFeedbackResetKey?: number;
   onApprove: () => void;
   onRequestRevisionFeedbackChange: (value: string) => void;
   onRequestChangesSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -7150,28 +7524,30 @@ export function DomainReviewDrawerWorkflowActionButtons({
     drawerWorkflowActions.canShowApproveAction &&
     actionContext !== null ? (
       <form className="w-full space-y-3" onSubmit={onRequestChangesSubmit}>
-        <label className="space-y-1 text-sm text-textPrimary">
-          <span className="font-medium">Request Changes</span>
-          <textarea
-            rows={5}
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-            value={requestRevisionFeedback}
-            onChange={(event) => onRequestRevisionFeedbackChange(event.target.value)}
-            placeholder="Describe the required changes."
-            disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-          />
-        </label>
-        <Button
-          type="submit"
-          variant="secondary"
-          loading={governedPlanActionLoading === "REQUEST_REVISION"}
-          disabled={
-            governedPlanActionLoading === "REQUEST_REVISION" ||
-            requestRevisionFeedback.trim() === ""
-          }
+        <IsolatedTypingField
+          label="Request Changes"
+          committedValue={requestRevisionFeedback}
+          resetKey={requestRevisionFeedbackResetKey}
+          onLiveChange={onRequestRevisionFeedbackChange}
+          rows={5}
+          placeholder="Describe the required changes."
+          disabled={governedPlanActionLoading === "REQUEST_REVISION"}
         >
-          Request Changes
-        </Button>
+          {(draft) => (
+            <Button
+              type="submit"
+              variant="secondary"
+              loading={governedPlanActionLoading === "REQUEST_REVISION"}
+              disabled={
+                governedPlanActionLoading === "REQUEST_REVISION" ||
+                draft.trim() === ""
+              }
+              onClick={() => onRequestRevisionFeedbackChange(draft)}
+            >
+              Request Changes
+            </Button>
+          )}
+        </IsolatedTypingField>
       </form>
     ) : null;
   const drawerReviseButton =
@@ -7719,8 +8095,9 @@ export function shouldShowReleasedPlanViewerCanvas(input: {
 }): boolean {
   if (input.selectedWorkflowTab !== "generate") return false;
   if (input.selectedDomain === null) return false;
-  if (!input.releasedPlanViewerIntentPresent) return false;
-  return input.releasedWorkflowStatus === "released";
+  // Explicit intent is set only after the view button's permission check passes.
+  // Do not veto it with a second workflow-status derivation.
+  return input.releasedPlanViewerIntentPresent;
 }
 
 function workspaceLifecycleStateLabel(
@@ -8348,14 +8725,43 @@ function WorkflowTabNextButton({
   );
 }
 
-/** Inline status (replaces green Alert success) — orange/neutral workflow only. */
-function WorkflowNeutralNotice({ children }: { children: ReactNode }) {
+/** Inline workflow/status card — PeakFlow info/slate language, not action-success green. */
+function WorkflowNeutralNotice({
+  children,
+  dismissible = false,
+}: {
+  children: ReactNode;
+  dismissible?: boolean;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  const [contentStamp, setContentStamp] = useState(children);
+
+  if (children !== contentStamp) {
+    setContentStamp(children);
+    setDismissed(false);
+  }
+
+  if (dismissed) {
+    return null;
+  }
+
   return (
     <div
-      className="rounded-lg border border-border bg-bg px-4 py-3 text-sm text-textPrimary"
+      className={cn(designSystem.alert.base, designSystem.alert.info)}
       role="status"
     >
-      {children}
+      <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0 flex-1">{children}</div>
+      {dismissible ? (
+        <button
+          type="button"
+          className="-mr-0.5 mt-0.5 shrink-0 rounded p-0.5 text-current/70 transition hover:bg-black/5 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-current/30"
+          aria-label="Dismiss"
+          onClick={() => setDismissed(true)}
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -8536,7 +8942,7 @@ export function resolveHeadCoachSubmittedReviewCardDomains(input: {
         reviewDomains.add(domain);
         continue;
       }
-      const summary = input.workspace.domains[domain].summary;
+      const summary = input.workspace!.domains[domain].summary;
       const planId = summary.trainingPlanId?.trim() ?? "";
       const versionId = resolveHeadCoachDomainSummaryVersionId(summary);
       if (planId !== "" && (versionId ?? "") !== "") {
@@ -8662,7 +9068,7 @@ function logTrainingPlanViewPlanDiagnostic(input: {
   context: WorkspaceDomainViewPlanContext | null;
   fetchUrl?: string;
   resultStatus?: string | number | null;
-  responseBodyShape?: Record<string, unknown>;
+  responseBodyShape?: Record<string, unknown> | null;
   stateUpdated?: string | null;
   rendererBranch?: string | null;
   error?: unknown;
@@ -9194,7 +9600,7 @@ export function projectWorkspaceAfterTrainingPlanMutation(input: {
   if (input.workspace === null) return null;
   const current = input.workspace.domains[input.domain];
   const status = postActionStatus(input.action);
-  return {
+  const projected: TrainingPlanWorkspace = {
     ...input.workspace,
     domains: {
       ...input.workspace.domains,
@@ -9222,6 +9628,66 @@ export function projectWorkspaceAfterTrainingPlanMutation(input: {
         },
       },
     },
+  };
+  if (input.action !== "HEAD_APPROVE") return projected;
+  return projectHeadApproveReleaseAvailability(projected, input.domain);
+}
+
+/**
+ * After a successful Head Coach approval, keep Release available from the same
+ * assignmentContext / allowedActions that resolveDomainReleaseVisible reads.
+ * Does not apply to DIRECT_DOMAIN_RELEASE or users who cannot approve.
+ */
+export function projectHeadApproveReleaseAvailability(
+  workspace: TrainingPlanWorkspace,
+  domain: TrainingPlanGenerationDomain,
+): TrainingPlanWorkspace {
+  if ((workspace.domains[domain].summary.status?.trim() ?? "") !== "HEAD_COACH_APPROVED") {
+    return workspace;
+  }
+  const domainEntry = workspace.domains[domain];
+  const assignment = workspace.assignmentContext;
+  const domainAssignment = assignment?.domains[domain];
+  const enableHeadCoachApprovalCanRelease =
+    assignment !== undefined &&
+    domainAssignment !== undefined &&
+    assignment.releaseMode === "HEAD_COACH_APPROVAL" &&
+    domainAssignment.releaseMode === "HEAD_COACH_APPROVAL" &&
+    domainAssignment.canApprove === true;
+  const allowedActions =
+    domainEntry.allowedActions.includes("RELEASE") || !enableHeadCoachApprovalCanRelease
+      ? domainEntry.allowedActions
+      : [...domainEntry.allowedActions, "RELEASE"];
+
+  if (
+    allowedActions === domainEntry.allowedActions &&
+    (!enableHeadCoachApprovalCanRelease || domainAssignment.canRelease)
+  ) {
+    return workspace;
+  }
+
+  return {
+    ...workspace,
+    domains: {
+      ...workspace.domains,
+      [domain]: {
+        ...domainEntry,
+        allowedActions,
+      },
+    },
+    assignmentContext:
+      enableHeadCoachApprovalCanRelease && assignment !== undefined && domainAssignment !== undefined
+        ? {
+            ...assignment,
+            domains: {
+              ...assignment.domains,
+              [domain]: {
+                ...domainAssignment,
+                canRelease: true,
+              },
+            },
+          }
+        : workspace.assignmentContext,
   };
 }
 
@@ -9343,30 +9809,9 @@ export function resolveDomainReleaseVisible(input: {
     (input.versionId?.trim() ?? "") !== "";
   if (!hasPlanIds) return false;
 
-  const assignmentDomainContext = input.assignmentDomainContext;
-  if (
-    input.assignmentReleaseMode === null ||
-    input.assignmentReleaseMode === undefined ||
-    assignmentDomainContext === null ||
-    assignmentDomainContext === undefined
-  ) {
-    return input.legacyCanRelease;
-  }
-
-  const releaseModeMatches =
-    input.requiredReleaseMode !== null && input.requiredReleaseMode !== undefined
-      ? input.assignmentReleaseMode === input.requiredReleaseMode &&
-        assignmentDomainContext.releaseMode === input.requiredReleaseMode
-      : input.assignmentReleaseMode === assignmentDomainContext.releaseMode;
-  const directReleaseDomainOwner =
-    assignmentDomainContext.releaseMode === "DIRECT_DOMAIN_RELEASE" &&
-    assignmentDomainContext.ownerType === "ASSIGNED_DOMAIN_COACH" &&
-    assignmentDomainContext.ownedByCurrentUser === true;
-  const canRelease =
-    assignmentDomainContext.canRelease ||
-    (directReleaseDomainOwner && input.legacyCanRelease);
-
-  return releaseModeMatches && canRelease && input.legacyCanRelease;
+  // Backend allowedActions (legacyCanRelease) is authoritative. Assignment
+  // role/function/releaseMode labels must not hide a backend RELEASE action.
+  return input.legacyCanRelease;
 }
 
 export function shouldUseSpecialistTrainingPlanWorkspace(input: {
@@ -9912,6 +10357,13 @@ export function shouldRenderEmbeddedPlanViewerInDomainIntegration(
   return shell !== "skills_coach_planning" && shell !== "specialist_domain";
 }
 
+/** W3 Skills uses Domain Integration, not specialist tabs; embed the same Plan History surface. */
+export function shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(
+  shell: TrainingPlanPageShell,
+): boolean {
+  return shell === "skills_coach_planning";
+}
+
 export function resolveDomainIntegrationSkillsCreateVisible(input: {
   shell: TrainingPlanPageShell;
   headCoachFunctionAwareMode: boolean;
@@ -10405,6 +10857,218 @@ function coachFacingGoalTitle(goal: {
   return "Unnamed goal";
 }
 
+export type GoalDraftFields = {
+  priority: GoalPriority;
+  targetValue: string;
+  targetDate: string;
+};
+
+export type CustomGoalEntry = GoalDraftFields & {
+  id: string;
+  goalName: string;
+  successCriteria: string;
+};
+
+export function createDefaultGoalDraftFields(): GoalDraftFields {
+  return { priority: "MEDIUM", targetValue: "", targetDate: "" };
+}
+
+export function createCustomGoalEntry(id: string): CustomGoalEntry {
+  return {
+    id,
+    goalName: "",
+    successCriteria: "",
+    ...createDefaultGoalDraftFields(),
+  };
+}
+
+export function applyLibraryGoalSelection(
+  selectedIds: string[],
+  drafts: Record<string, GoalDraftFields>,
+  libraryGoalId: string,
+  checked: boolean,
+): { selectedIds: string[]; drafts: Record<string, GoalDraftFields> } {
+  if (checked) {
+    if (selectedIds.includes(libraryGoalId)) {
+      return { selectedIds, drafts };
+    }
+    return {
+      selectedIds: [...selectedIds, libraryGoalId],
+      drafts: {
+        ...drafts,
+        [libraryGoalId]: drafts[libraryGoalId] ?? createDefaultGoalDraftFields(),
+      },
+    };
+  }
+  const nextDrafts = { ...drafts };
+  delete nextDrafts[libraryGoalId];
+  return {
+    selectedIds: selectedIds.filter((id) => id !== libraryGoalId),
+    drafts: nextDrafts,
+  };
+}
+
+export function patchGoalDraftFields(
+  drafts: Record<string, GoalDraftFields>,
+  libraryGoalId: string,
+  patch: Partial<GoalDraftFields>,
+): Record<string, GoalDraftFields> {
+  const current = drafts[libraryGoalId] ?? createDefaultGoalDraftFields();
+  return { ...drafts, [libraryGoalId]: { ...current, ...patch } };
+}
+
+export function pruneLibraryGoalDrafts(
+  drafts: Record<string, GoalDraftFields>,
+  selectedIds: string[],
+): Record<string, GoalDraftFields> {
+  const selected = new Set(selectedIds);
+  const next: Record<string, GoalDraftFields> = {};
+  for (const [id, draft] of Object.entries(drafts)) {
+    if (selected.has(id)) next[id] = draft;
+  }
+  return next;
+}
+
+export function patchCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+  patch: Partial<CustomGoalEntry>,
+): CustomGoalEntry[] {
+  return entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry));
+}
+
+export function removeCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+): CustomGoalEntry[] {
+  if (entries.length <= 1) return entries;
+  return entries.filter((entry) => entry.id !== id);
+}
+
+export function appendCustomGoalEntry(
+  entries: CustomGoalEntry[],
+  id: string,
+): CustomGoalEntry[] {
+  return [...entries, createCustomGoalEntry(id)];
+}
+
+export function parseOptionalGoalTargetValue(
+  raw: string,
+): { ok: true; value?: number } | { ok: false } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true };
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return { ok: false };
+  return { ok: true, value: numeric };
+}
+
+export function optionalGoalTargetDatePayload(
+  targetDate: string,
+): { targetDate: string } | Record<string, never> {
+  const trimmed = targetDate.trim();
+  if (trimmed === "") return {};
+  return { targetDate: `${trimmed}T00:00:00.000Z` };
+}
+
+export function isGoalTargetDateOutsidePhaseWindow(
+  targetDate: string,
+  phaseStartYmd: string | null,
+  phaseEndYmd: string | null,
+): boolean {
+  const date = targetDate.trim();
+  if (date === "" || !phaseStartYmd || !phaseEndYmd) return false;
+  return date < phaseStartYmd || date > phaseEndYmd;
+}
+
+export function formatGoalLibraryMetricDirection(direction: string | null | undefined): string {
+  if (direction === "HIGHER_IS_BETTER") return "Higher is better";
+  if (direction === "LOWER_IS_BETTER") return "Lower is better";
+  return direction?.trim() ?? "";
+}
+
+export function goalLibraryNumericTargetHint(input: {
+  targetMetricName?: string | null;
+  primaryMetric?: GoalLibraryPrimaryMetric | null;
+}): { unitLabel: string; caption: string } {
+  const unitLabel = formatDisplayUnit(input.primaryMetric?.unit ?? null);
+  const name = input.targetMetricName?.trim() ?? "";
+  const direction = formatGoalLibraryMetricDirection(input.primaryMetric?.direction);
+  const caption = [name, direction].filter((part) => part !== "").join(" · ");
+  return { unitLabel, caption };
+}
+
+function GoalDraftMetadataFields({
+  draft,
+  onChange,
+  targetMetricName,
+  primaryMetric,
+}: {
+  draft: GoalDraftFields;
+  onChange: (patch: Partial<GoalDraftFields>) => void;
+  targetMetricName?: string | null;
+  primaryMetric?: GoalLibraryPrimaryMetric | null;
+}) {
+  const numericTargetHint = goalLibraryNumericTargetHint({
+    targetMetricName,
+    primaryMetric,
+  });
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Priority</span>
+        <select
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+          value={draft.priority}
+          onChange={(event) =>
+            onChange({ priority: event.target.value as GoalPriority })
+          }
+        >
+          <option value="LOW">LOW</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="HIGH">HIGH</option>
+        </select>
+      </label>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Numeric Target Value (Optional)</span>
+        {numericTargetHint.unitLabel ? (
+          <span className="flex items-center gap-2">
+            <input
+              type="number"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+              value={draft.targetValue}
+              onChange={(event) => onChange({ targetValue: event.target.value })}
+            />
+            <span className="shrink-0 text-sm font-normal text-textSecondary">
+              {numericTargetHint.unitLabel}
+            </span>
+          </span>
+        ) : (
+          <input
+            type="number"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+            value={draft.targetValue}
+            onChange={(event) => onChange({ targetValue: event.target.value })}
+          />
+        )}
+        {numericTargetHint.caption ? (
+          <span className="block font-normal text-textSecondary">
+            {numericTargetHint.caption}
+          </span>
+        ) : null}
+      </label>
+      <label className="space-y-1 text-sm text-textPrimary">
+        <span className="font-medium">Target Date</span>
+        <input
+          type="date"
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+          value={draft.targetDate}
+          onChange={(event) => onChange({ targetDate: event.target.value })}
+        />
+      </label>
+    </div>
+  );
+}
+
 export function formatSeasonOptionLabel(season: SeasonCycleSummary): string {
   if (season.name) return season.name;
   if (season.year !== null && season.sport) {
@@ -10466,6 +11130,69 @@ function toUtcDateTimeString(value: string): string {
   return `${value}T00:00:00.000Z`;
 }
 
+export type SeasonCycleFormFields = {
+  name: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+};
+
+export function resolveSeasonFormFieldsFromCycle(
+  season: SeasonCycleSummary,
+): SeasonCycleFormFields {
+  const startDate = dateOnly(season.startDate) ?? "";
+  const endDate = dateOnly(season.endDate) ?? "";
+  const yearFromStartDate = Number(startDate.slice(0, 4));
+  const year =
+    season.year ??
+    (Number.isFinite(yearFromStartDate) && yearFromStartDate > 0
+      ? yearFromStartDate
+      : new Date().getUTCFullYear());
+  return {
+    name: season.name ?? "",
+    year,
+    startDate,
+    endDate,
+  };
+}
+
+export function isSeasonCycleFormDirty(
+  season: SeasonCycleSummary,
+  form: SeasonCycleFormFields,
+): boolean {
+  const current = resolveSeasonFormFieldsFromCycle(season);
+  return (
+    current.name.trim() !== form.name.trim() ||
+    current.year !== form.year ||
+    current.startDate !== form.startDate ||
+    current.endDate !== form.endDate
+  );
+}
+
+export function buildSeasonCycleUpdatePayload(
+  form: SeasonCycleFormFields,
+): {
+  name: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+} {
+  return {
+    name: form.name.trim(),
+    year: form.year,
+    startDate: toUtcDateTimeString(form.startDate),
+    endDate: toUtcDateTimeString(form.endDate),
+  };
+}
+
+/** Existing selected season is editable only before Planning Context Lock & Share. */
+export function isExistingSeasonEditOpen(input: {
+  editing: boolean;
+  planningContextLocked: boolean;
+}): boolean {
+  return input.editing === true && input.planningContextLocked !== true;
+}
+
 function yearStartDateInput(year: number): string {
   return `${year}-01-01`;
 }
@@ -10506,6 +11233,20 @@ export function detectCurrentPhase(
         return start <= today && today <= end;
       }) ?? null
   );
+}
+
+export function resolvePlanningContextActivePhase(input: {
+  phases: SeasonPhaseSummary[];
+  today: string;
+  authoritativePhase?: string | null;
+  useAuthoritativePhase?: boolean;
+}): SeasonPhaseSummary | null {
+  if (input.useAuthoritativePhase === true) {
+    const phaseCode = input.authoritativePhase?.trim() ?? "";
+    if (phaseCode === "") return null;
+    return input.phases.find((phase) => phase.phase === phaseCode) ?? null;
+  }
+  return detectCurrentPhase(input.phases, input.today);
 }
 
 export function resolveCompetitionSeasonPhaseForDate(input: {
@@ -10714,6 +11455,98 @@ function readSafeGenerationJobError(job: CoachAthleteTrainingPlanGenerationJob):
   );
 }
 
+export const GENERATION_IN_PROGRESS_LABEL = "Fyn is generating your plan...";
+
+export const DRAFT_READY_PLAN_LOADING_MESSAGE = "Please wait, your plan is loading...";
+
+/** Presentation-only labels for stage strings the generation job UI already receives. */
+const GENERATION_PROGRESS_STAGE_LABELS: Record<string, string> = {
+  QUEUED: "Preparing your plan",
+  VALIDATING: "Preparing your plan",
+  LOADING_CONTEXT: "Preparing your plan",
+  COMPLETENESS_CONFIRMED: "Preparing your plan",
+  BUILDING_DOMAIN_CONTEXT: "Preparing your plan",
+  PREPARING_AI_INPUT: "Preparing your plan",
+  PREPARING_CONTEXT: "Preparing your plan",
+  AI_GENERATING: GENERATION_IN_PROGRESS_LABEL,
+  AI_GENERATING_PLAN: GENERATION_IN_PROGRESS_LABEL,
+  GENERATING: GENERATION_IN_PROGRESS_LABEL,
+  AI_OUTPUT_RECEIVED: "Checking your plan",
+  AI_OUTPUT_REPAIRING: "Fyn is refining your plan...",
+  VALIDATING_OUTPUT: "Checking your plan",
+  NUTRITION_HYDRATED: "Finalizing your plan",
+  DOMAIN_CANDIDATE_FINALIZED: "Finalizing your plan",
+  GENERATION_SNAPSHOT_CREATED: "Finalizing your plan",
+  PERSISTING_DRAFT: "Saving your plan",
+  DRAFT_PERSISTED: "Loading your plan",
+  COMPLETED: "Your plan is ready",
+  FAILED: "Plan generation failed",
+};
+
+export function generationProgressStageLabel(stage: string | null | undefined): string {
+  const trimmed = stage?.trim() ?? "";
+  if (trimmed === "") return GENERATION_IN_PROGRESS_LABEL;
+  const mapped = GENERATION_PROGRESS_STAGE_LABELS[trimmed.toUpperCase()];
+  if (mapped) return mapped;
+  if (/^[A-Z0-9_]+$/.test(trimmed)) return GENERATION_IN_PROGRESS_LABEL;
+  return trimmed;
+}
+
+export function generationProgressDetailMessage(
+  message: string | null | undefined,
+): string | null {
+  const trimmed = message?.trim() ?? "";
+  if (trimmed === "") return null;
+  if (GENERATION_PROGRESS_STAGE_LABELS[trimmed.toUpperCase()]) return null;
+  if (/^[A-Z0-9_]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+export function resolveDomainIntegrationDraftButtonState(input: {
+  canStartGeneration: boolean;
+  canOpenDraft: boolean;
+  generationInProgress: boolean;
+  loadPending: boolean;
+  domain: TrainingPlanGenerationDomain;
+  job: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "domain" | "status" | "progressStage" | "progressMessage"
+  > | null;
+}): {
+  disabled: boolean;
+  variant: "primary" | "neutral";
+  statusMessage: string | null;
+} {
+  const jobForDomain =
+    input.job !== null && input.job.domain === input.domain ? input.job : null;
+  const awaitingDraftView =
+    !input.canOpenDraft &&
+    jobForDomain !== null &&
+    jobForDomain.status !== "FAILED" &&
+    (input.generationInProgress ||
+      input.loadPending ||
+      jobForDomain.status === "QUEUED" ||
+      jobForDomain.status === "RUNNING" ||
+      jobForDomain.status === "COMPLETED");
+  const detail = generationProgressDetailMessage(jobForDomain?.progressMessage);
+  const stageMessage =
+    jobForDomain === null
+      ? null
+      : generationProgressStageLabel(jobForDomain.progressStage ?? jobForDomain.status);
+  const statusMessage = !awaitingDraftView
+    ? null
+    : detail ??
+      (input.loadPending || jobForDomain?.status === "COMPLETED"
+        ? DRAFT_READY_PLAN_LOADING_MESSAGE
+        : stageMessage);
+
+  return {
+    disabled: !input.canStartGeneration || awaitingDraftView,
+    variant: awaitingDraftView ? "neutral" : "primary",
+    statusMessage,
+  };
+}
+
 export function renderGenerationJobButtonLabel(
   domain: TrainingPlanGenerationDomain,
   job: Pick<CoachAthleteTrainingPlanGenerationJob, "domain" | "status"> | null,
@@ -10721,16 +11554,100 @@ export function renderGenerationJobButtonLabel(
   if (!job || job.domain !== domain) return generationButtonLabel(domain);
   if (job.status === "COMPLETED") return "Draft ready";
   if (job.status === "FAILED") return generationButtonLabel(domain);
-  return "Generating plan...";
+  return GENERATION_IN_PROGRESS_LABEL;
 }
 
-function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob | null) {
-  if (!isGenerationJobInProgress(job)) return null;
-  const progressPercent = Math.max(0, Math.min(100, job.progressPercent ?? 0));
+export function isDraftReadyPlanLoadPending(input: {
+  domain: TrainingPlanGenerationDomain;
+  job: Pick<CoachAthleteTrainingPlanGenerationJob, "domain" | "status"> | null;
+  draftRequestState: "idle" | "loading" | "success" | "missing" | "error";
+  draftDomain: TrainingPlanGenerationDomain | null;
+  draftPresent: boolean;
+  generationError: string | null;
+  generatedPlanLoaded: boolean;
+}): boolean {
+  if (!input.job || input.job.domain !== input.domain || input.job.status !== "COMPLETED") {
+    return false;
+  }
+  if (input.generationError) return false;
+  if (input.generatedPlanLoaded) return false;
+  if (
+    input.draftDomain === input.domain
+    && input.draftRequestState === "success"
+    && input.draftPresent
+  ) {
+    return false;
+  }
+  if (
+    input.draftDomain === input.domain
+    && (input.draftRequestState === "error" || input.draftRequestState === "missing")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function clampGenerationProgressPercent(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.floor(value)));
+}
+
+/** GET progressPercent is the displayed percent. 100 only when the job is COMPLETED. */
+export function resolveAuthoritativeGenerationProgressPercent(
+  progressPercent: number | null | undefined,
+  status: TrainingPlanGenerationJobStatus | null,
+): number {
+  if (status === "COMPLETED") return 100;
+  return Math.min(clampGenerationProgressPercent(progressPercent), 99);
+}
+
+export function shouldApplyGenerationJobProgressUpdate(
+  current: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "jobId" | "progressPercent" | "status"
+  > | null,
+  incoming: Pick<
+    CoachAthleteTrainingPlanGenerationJob,
+    "jobId" | "progressPercent" | "status"
+  >,
+): boolean {
+  if (!current) return true;
+  const currentId = current.jobId?.trim() ?? "";
+  const incomingId = incoming.jobId?.trim() ?? "";
+  if (currentId === "" || incomingId !== currentId) return true;
+  if (incoming.status === "FAILED" || incoming.status === "COMPLETED") return true;
+  return (
+    clampGenerationProgressPercent(incoming.progressPercent)
+    >= clampGenerationProgressPercent(current.progressPercent)
+  );
+}
+
+function generationJobProgressKey(job: CoachAthleteTrainingPlanGenerationJob): string {
+  const jobId = job.jobId?.trim() ?? "";
+  const domain = job.domain ?? "";
+  return `${jobId}|${domain}`;
+}
+
+function GenerationJobProgress({
+  job,
+}: {
+  job: CoachAthleteTrainingPlanGenerationJob | null;
+}) {
+  const inProgress = isGenerationJobInProgress(job);
+  const progressPercent = resolveAuthoritativeGenerationProgressPercent(
+    job?.progressPercent,
+    job?.status ?? null,
+  );
+
+  if (!job || !inProgress) return null;
+
+  const stageLabel = generationProgressStageLabel(job.progressStage);
+  const detailMessage = generationProgressDetailMessage(job.progressMessage);
+
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
       <div className="flex items-center justify-between gap-3 text-sm text-textPrimary">
-        <span className="font-medium">{job.progressStage?.trim() || "Generating plan"}</span>
+        <span className="font-medium">{stageLabel}</span>
         <span>{progressPercent}%</span>
       </div>
       <div
@@ -10746,11 +11663,16 @@ function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob 
           style={{ width: `${progressPercent}%` }}
         />
       </div>
-      <div className="text-sm text-textSecondary">
-        {job.progressMessage?.trim() || "Training plan generation is in progress."}
-      </div>
+      {detailMessage ? (
+        <div className="text-sm text-textSecondary">{detailMessage}</div>
+      ) : null}
     </div>
   );
+}
+
+function renderGenerationJobProgress(job: CoachAthleteTrainingPlanGenerationJob | null) {
+  const jobKey = job ? generationJobProgressKey(job) : "none";
+  return <GenerationJobProgress key={jobKey} job={job} />;
 }
 
 export function isGenerationJobInProgress(
@@ -12257,6 +13179,14 @@ export function CoachAthletePlanningProfileView({
     planId: string;
     versionId: string;
   } | null>(null);
+  /**
+   * Skills approve/release: pin the retained plan/version so workspace bootstrap / latest 404
+   * cannot clear the already-rendered schedule (same guard as Nutrition retain pin).
+   */
+  const skillsRetainedDraftIdentityRef = useRef<{
+    planId: string;
+    versionId: string;
+  } | null>(null);
   const detailRequestsInFlightRef = useRef(
     new Map<string, Promise<CoachPersistedTrainingPlanActiveDetail>>(),
   );
@@ -12495,11 +13425,25 @@ export function CoachAthletePlanningProfileView({
   const [requestRevisionDrawerComposerOpen, setRequestRevisionDrawerComposerOpen] =
     useState(false);
   const [requestRevisionFeedback, setRequestRevisionFeedback] = useState("");
+  const requestRevisionFeedbackLiveRef = useRef("");
+  const [requestRevisionFeedbackResetKey, setRequestRevisionFeedbackResetKey] = useState(0);
   const [requestRevisionActionContext, setRequestRevisionActionContext] =
     useState<GovernedPlanContext | null>(null);
   const [assistantRevisePanelDomain, setAssistantRevisePanelDomain] =
     useState<TrainingPlanGenerationDomain | null>(null);
   const [reviseSkillsFeedback, setReviseSkillsFeedback] = useState("");
+  const reviseFeedbackLiveRef = useRef<Record<TrainingPlanGenerationDomain, string>>({
+    SKILLS: "",
+    NUTRITION: "",
+    S_AND_C: "",
+  });
+  const [reviseFeedbackResetKey, setReviseFeedbackResetKey] = useState<
+    Record<TrainingPlanGenerationDomain, number>
+  >({
+    SKILLS: 0,
+    NUTRITION: 0,
+    S_AND_C: 0,
+  });
   const [reviseSkillsLoading, setReviseSkillsLoading] = useState(false);
   const [reviseSkillsError, setReviseSkillsError] = useState<string | null>(null);
   const [reviseSkillsSuccess, setReviseSkillsSuccess] = useState<string | null>(null);
@@ -12537,6 +13481,12 @@ export function CoachAthletePlanningProfileView({
     NUTRITION: "",
     S_AND_C: "",
   });
+  const fynRevisionRequestLiveRef = useRef<
+    Partial<Record<TrainingPlanGenerationDomain, string>>
+  >({});
+  const [fynRevisionRequestResetKey, setFynRevisionRequestResetKey] = useState<
+    Partial<Record<TrainingPlanGenerationDomain, number>>
+  >({});
   const [fynRevisionTargetKeys, setFynRevisionTargetKeys] = useState<
     Partial<Record<TrainingPlanGenerationDomain, string>>
   >({});
@@ -12807,7 +13757,12 @@ export function CoachAthletePlanningProfileView({
   >({});
   const [planOwnershipLoading, setPlanOwnershipLoading] = useState(false);
   const [selectedSeasonCycleId, setSelectedSeasonCycleId] = useState<string | null>(null);
+  const [hydratedNextCycleContext, setHydratedNextCycleContext] = useState<{
+    seasonCycleId: string | null;
+    phase: string | null;
+  } | null>(null);
   const [seasonCreateFormExplicit, setSeasonCreateFormExplicit] = useState(false);
+  const [selectedSeasonEditing, setSelectedSeasonEditing] = useState(false);
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
   const [durationDays, setDurationDays] = useState<7 | 15 | 30>(7);
   const [planStartDate, setPlanStartDate] = useState(() =>
@@ -12866,31 +13821,41 @@ export function CoachAthletePlanningProfileView({
   const [competitionImportance, setCompetitionImportance] = useState<"LOW" | "MEDIUM" | "HIGH">(
     "MEDIUM",
   );
-  const [goalCreationMode, setGoalCreationMode] = useState<GoalCreationMode>("CUSTOM");
+  const [goalCreationMode, setGoalCreationMode] = useState<GoalCreationMode>("LIBRARY");
   const [goalLibraryLoading, setGoalLibraryLoading] = useState(false);
   const [goalLibraryError, setGoalLibraryError] = useState<string | null>(null);
   const [goalLibraryCategories, setGoalLibraryCategories] = useState<GoalLibraryCategory[]>([]);
   const [selectedLibraryGoalIds, setSelectedLibraryGoalIds] = useState<string[]>([]);
-  const [goalName, setGoalName] = useState("");
-  const [goalSuccessCriteria, setGoalSuccessCriteria] = useState("");
-  const [goalTargetDate, setGoalTargetDate] = useState("");
-  const [goalPriority, setGoalPriority] = useState<GoalPriority>("MEDIUM");
-  const [goalTargetValue, setGoalTargetValue] = useState("");
+  const [libraryGoalDrafts, setLibraryGoalDrafts] = useState<
+    Record<string, GoalDraftFields>
+  >({});
+  const [customGoalEntries, setCustomGoalEntries] = useState<CustomGoalEntry[]>(() => [
+    createCustomGoalEntry("custom-goal-1"),
+  ]);
+  const customGoalEntrySeqRef = useRef(1);
 
   useEffect(() => {
     if (!athleteSportCode) return;
+    if (selectedSeasonCycleId !== null && !seasonCreateFormExplicit) return;
     if (!seasonNameEdited) {
       setSeasonName(`${seasonYear} ${formatSportLabel(athleteSportCode)} Season`);
     }
-  }, [athleteSportCode, seasonNameEdited, seasonYear]);
+  }, [
+    athleteSportCode,
+    seasonCreateFormExplicit,
+    seasonNameEdited,
+    seasonYear,
+    selectedSeasonCycleId,
+  ]);
 
   useEffect(() => {
+    if (selectedSeasonCycleId !== null && !seasonCreateFormExplicit) return;
     if (seasonStartDate === "") return;
     const nextYear = Number(seasonStartDate.slice(0, 4));
     if (Number.isFinite(nextYear) && nextYear > 0) {
       setSeasonYear((current) => (current === nextYear ? current : nextYear));
     }
-  }, [seasonStartDate]);
+  }, [seasonCreateFormExplicit, seasonStartDate, selectedSeasonCycleId]);
 
   useEffect(() => {
     if (durationDays !== 7) {
@@ -13691,6 +14656,7 @@ export function CoachAthletePlanningProfileView({
         coachFunctions: [],
         hasHeadCoachConfigured: false,
         academyCoachRole: "",
+        trainingPlanReleaseMode: "",
       });
       setSelectedSeasonCycleId(null);
       setSelectedGoalIds([]);
@@ -13926,21 +14892,24 @@ export function CoachAthletePlanningProfileView({
   const selectedSeason = setupState.seasons.find(
     (season) => season.seasonCycleId === selectedSeasonCycleId,
   ) ?? null;
+  const selectedSeasonFormHydrationIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedSeason) {
+      selectedSeasonFormHydrationIdRef.current = null;
+      setSelectedSeasonEditing(false);
       return;
     }
-    const yearFromStartDate = Number(dateOnly(selectedSeason.startDate)?.slice(0, 4));
-    const derivedYear =
-      selectedSeason.year ??
-      (Number.isFinite(yearFromStartDate)
-        ? yearFromStartDate
-        : new Date().getUTCFullYear());
-    setSeasonName(selectedSeason.name ?? "");
-    setSeasonNameEdited(false);
-    setSeasonYear(derivedYear);
-    setSeasonStartDate(dateOnly(selectedSeason.startDate) ?? "");
-    setSeasonEndDate(dateOnly(selectedSeason.endDate) ?? "");
+    if (selectedSeasonFormHydrationIdRef.current === selectedSeason.seasonCycleId) {
+      return;
+    }
+    selectedSeasonFormHydrationIdRef.current = selectedSeason.seasonCycleId;
+    setSelectedSeasonEditing(false);
+    const fields = resolveSeasonFormFieldsFromCycle(selectedSeason);
+    setSeasonName(fields.name);
+    setSeasonNameEdited(true);
+    setSeasonYear(fields.year);
+    setSeasonStartDate(fields.startDate);
+    setSeasonEndDate(fields.endDate);
   }, [selectedSeason]);
   const hasEntitySeasons = setupState.seasons.length > 0;
   const hasSelectedSeasonForPlan =
@@ -13957,10 +14926,21 @@ export function CoachAthletePlanningProfileView({
       .filter((phase) => phase.phase)
       .map((phase) => [phase.phase as SeasonPhaseType, phase]),
   ) as Partial<Record<SeasonPhaseType, SeasonPhaseSummary>>;
-  const activePhaseForSelectedSeason = detectCurrentPhase(selectedSeasonPhases, today);
+  const useHydratedNextCyclePhase =
+    (hydratedNextCycleContext?.phase?.trim() ?? "") !== "" &&
+    hydratedNextCycleContext?.seasonCycleId === selectedSeasonCycleId;
+  const activePhaseForSelectedSeason = resolvePlanningContextActivePhase({
+    phases: selectedSeasonPhases,
+    today,
+    authoritativePhase: hydratedNextCycleContext?.phase ?? null,
+    useAuthoritativePhase: useHydratedNextCyclePhase,
+  });
   const goalLibraryLevel = useMemo(
-    () => goalLibraryLevelValue(lockedPlanningContextCardFields.validatedLevel),
-    [lockedPlanningContextCardFields.validatedLevel],
+    () =>
+      goalLibraryLevelValue(
+        readinessSources.levelValidation?.validatedLevel ?? null,
+      ),
+    [readinessSources.levelValidation?.validatedLevel],
   );
 
   useEffect(() => {
@@ -13969,6 +14949,7 @@ export function CoachAthletePlanningProfileView({
       setGoalLibraryError(null);
       setGoalLibraryLoading(false);
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
       return;
     }
 
@@ -13977,6 +14958,7 @@ export function CoachAthletePlanningProfileView({
       setGoalLibraryError(null);
       setGoalLibraryLoading(false);
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
       return;
     }
 
@@ -14004,6 +14986,7 @@ export function CoachAthletePlanningProfileView({
         if (cancelled) return;
         setGoalLibraryCategories([]);
         setSelectedLibraryGoalIds([]);
+        setLibraryGoalDrafts({});
         setGoalLibraryError(formatApiError(e, "Could not load Goal Library."));
       } finally {
         if (!cancelled) setGoalLibraryLoading(false);
@@ -14020,6 +15003,10 @@ export function CoachAthletePlanningProfileView({
     entityId,
     goalLibraryLevel,
   ]);
+
+  useEffect(() => {
+    setLibraryGoalDrafts((current) => pruneLibraryGoalDrafts(current, selectedLibraryGoalIds));
+  }, [selectedLibraryGoalIds]);
 
   const activeGoals = useMemo(
     () => setupState.goals.filter((goal) => goal.status === "ACTIVE"),
@@ -15314,7 +16301,7 @@ export function CoachAthletePlanningProfileView({
       });
     }
     if (lifecycle.clearSelection) {
-      setReviseNutritionFeedback("");
+      commitDomainReviseFeedback("NUTRITION", "");
       resetFynRevisionOptionsFlow("NUTRITION");
       setFynRevisionSelections((current) => ({
         ...current,
@@ -16653,6 +17640,7 @@ export function CoachAthletePlanningProfileView({
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
     nutritionRetainedDraftIdentityRef.current = null;
+    skillsRetainedDraftIdentityRef.current = null;
     prevUrlPlanForPersistedSyncRef.current = undefined;
     coachDomainStateResetRef.current = null;
     step6WorkflowFetchGenRef.current += 1;
@@ -16703,6 +17691,7 @@ export function CoachAthletePlanningProfileView({
     setSubmittedDomainPlansBootstrapState("idle");
     knownDomainPlanIdsRef.current = { SKILLS: "", NUTRITION: "", S_AND_C: "" };
     setSelectedSeasonCycleId(null);
+    setHydratedNextCycleContext(null);
     setSelectedGoalIds([]);
     setWorkloadAssessmentResult(null);
     setWorkloadAssessmentCapturedForAthleteId(null);
@@ -16751,7 +17740,7 @@ export function CoachAthletePlanningProfileView({
     setDomainReviewDrawerClosing(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setReleasedPlanViewerIntent(null);
     setReleasedPlanViewerVisibleDetail(null);
     setWorkflowRequestedPlanId(null);
@@ -16801,6 +17790,7 @@ export function CoachAthletePlanningProfileView({
     latestSkillsDraftRequestGenRef.current += 1;
     sandCInstalledGeneratedDraftIdentityRef.current = null;
     nutritionRetainedDraftIdentityRef.current = null;
+    skillsRetainedDraftIdentityRef.current = null;
     assistantDomainSummaryHydrationGenRef.current += 1;
     setAssistantDomainSummaryHydrationPending(false);
     step6WorkflowFetchGenRef.current += 1;
@@ -16832,7 +17822,7 @@ export function CoachAthletePlanningProfileView({
     setHeadCoachDomainSelectionCleared(false);
     setAssistantRevisePanelDomain(null);
     setRequestRevisionModalOpen(false);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setSelectedWorkflowTab("context-app");
     workflowInitialTabResolvedRef.current = false;
     prevWorkflowCompletionRef.current = null;
@@ -16935,6 +17925,20 @@ export function CoachAthletePlanningProfileView({
       upstreamPlanningContext?.endDate ??
       null;
     if (contextStart === null || contextEnd === null) return;
+    const authoritativeWorkspaceStart =
+      workspace?.planningContext.locked === true
+        ? null
+        : trimmedNonEmpty(
+            workspace?.planningContext.planWindow?.startDate,
+            workspace?.planningContext.planStartDate,
+            workspace?.planningContext.startDate,
+          );
+    if (
+      authoritativeWorkspaceStart !== null &&
+      planStartDate === authoritativeWorkspaceStart
+    ) {
+      return;
+    }
     if (contextStart !== planStartDate) {
       setPlanStartDate(contextStart);
     }
@@ -16947,6 +17951,10 @@ export function CoachAthletePlanningProfileView({
     upstreamPlanningContext?.planWindow?.endDate,
     upstreamPlanningContext?.startDate,
     upstreamPlanningContext?.endDate,
+    workspace?.planningContext.locked,
+    workspace?.planningContext.planWindow?.startDate,
+    workspace?.planningContext.planStartDate,
+    workspace?.planningContext.startDate,
   ]);
 
   useEffect(() => {
@@ -16956,7 +17964,14 @@ export function CoachAthletePlanningProfileView({
       athleteIdTrimmed === "" ||
       !isHeadCoachPlanningContextOwner
     ) {
-      setHeadCoachDomainPlanStates(createEmptyHeadCoachDomainPlanStates());
+      setHeadCoachDomainPlanStates((previous) => {
+        const drawerSelection = domainReviewDrawerSelectionRef.current;
+        return resolveDomainPlanStatesForNonOwnerWorkspaceReset({
+          previous,
+          drawerOpen: drawerSelection.open,
+          drawerDomain: drawerSelection.domain,
+        });
+      });
       setSubmittedDomainPlansBootstrapState("idle");
       return;
     }
@@ -17227,31 +18242,12 @@ export function CoachAthletePlanningProfileView({
           input.domain === "S_AND_C" ||
           input.domain === "NUTRITION") &&
         (input.action === "HEAD_APPROVE" || input.action === "RELEASE");
-      setWorkspace((current) => {
-        const projected = projectWorkspaceAfterTrainingPlanMutation({
+      setWorkspace((current) =>
+        projectWorkspaceAfterTrainingPlanMutation({
           workspace: current,
           ...input,
-        });
-        if (projected === null || !isStatusOnlyPlanMutation) {
-          return projected;
-        }
-        // Ensure Release remains available from local approve projection without a workspace refetch.
-        if (input.action === "HEAD_APPROVE") {
-          const domainEntry = projected.domains[input.domain];
-          if (domainEntry.allowedActions.includes("RELEASE")) return projected;
-          return {
-            ...projected,
-            domains: {
-              ...projected.domains,
-              [input.domain]: {
-                ...domainEntry,
-                allowedActions: [...domainEntry.allowedActions, "RELEASE"],
-              },
-            },
-          };
-        }
-        return projected;
-      });
+        }),
+      );
       setHeadCoachDomainPlanStates((current) => {
         const domainState = current[input.domain];
         const activeDetail =
@@ -17262,11 +18258,17 @@ export function CoachAthletePlanningProfileView({
                 version: { ...domainState.activeDetail.version, status },
               }
             : domainState.activeDetail;
+        const sourceDraft =
+          domainState.latestDraft ??
+          (input.domain === "SKILLS" &&
+          (latestSkillsDraft?.trainingPlanId?.trim() ?? "") === input.planId
+            ? latestSkillsDraft
+            : null);
         const latestDraft =
           isStatusOnlyPlanMutation &&
-          domainState.latestDraft !== null &&
-          (domainState.latestDraft.trainingPlanId?.trim() ?? "") === input.planId
-            ? { ...domainState.latestDraft, status }
+          sourceDraft !== null &&
+          (sourceDraft.trainingPlanId?.trim() ?? "") === input.planId
+            ? { ...sourceDraft, status }
             : domainState.latestDraft;
         return {
           ...current,
@@ -17292,6 +18294,12 @@ export function CoachAthletePlanningProfileView({
             versionId: input.versionId,
           };
         }
+        if (input.domain === "SKILLS") {
+          skillsRetainedDraftIdentityRef.current = {
+            planId: input.planId,
+            versionId: input.versionId,
+          };
+        }
         setLatestSkillsDraft((current) =>
           current !== null && (current.trainingPlanId?.trim() ?? "") === input.planId
             ? { ...current, status }
@@ -17310,7 +18318,7 @@ export function CoachAthletePlanningProfileView({
           : current,
       );
     },
-    [persistedVerifiedDomain],
+    [latestSkillsDraft, persistedVerifiedDomain],
   );
 
   const reconcileRevisedDomainPlanDetail = useCallback(
@@ -17458,13 +18466,13 @@ export function CoachAthletePlanningProfileView({
         responseBodyShape:
           detail === null
             ? null
-            : {
+            : ({
                 hasPlan: detail.plan !== null,
                 hasVersion: detail.version !== null,
                 days: detail.days.length,
                 sessions: detail.days.reduce((sum, day) => sum + day.sessions.length, 0),
                 allowedActions: detail.allowedActions,
-              },
+              } as Record<string, unknown>),
         stateUpdated:
           detail === null
             ? null
@@ -17739,6 +18747,10 @@ export function CoachAthletePlanningProfileView({
 
       setSeasonCreateFormExplicit(false);
       setSelectedSeasonCycleId(patch.selectedSeasonCycleId);
+      setHydratedNextCycleContext({
+        seasonCycleId: patch.selectedSeasonCycleId,
+        phase: patch.phase,
+      });
       setSelectedGoalIds(patch.selectedGoalIds);
       setPlanStartDate(patch.planStartDate);
       setDurationDays(patch.durationDays);
@@ -18173,7 +19185,9 @@ export function CoachAthletePlanningProfileView({
           ? sandCInstalledGeneratedDraftIdentityRef.current
           : generationDomain === "NUTRITION"
             ? nutritionRetainedDraftIdentityRef.current
-            : null;
+            : generationDomain === "SKILLS"
+              ? skillsRetainedDraftIdentityRef.current
+              : null;
       return shouldRejectStaleSandCLatestDraftWrite({
         domain: generationDomain,
         requestGeneration,
@@ -18216,17 +19230,25 @@ export function CoachAthletePlanningProfileView({
         setLatestSkillsDraftError(null);
         setLatestSkillsDraftErrorDomain(null);
         setGeneratePlanError(null);
-        if (generationDomain === "NUTRITION") {
-          // Atomically replace the drawer's displayed Nutrition draft with this complete full-plan
-          // response. In Head Coach review mode the global `latestSkillsDraft` is cleared, so the
+        if (generationDomain === "NUTRITION" || generationDomain === "SKILLS") {
+          // Atomically replace the drawer's displayed draft with this complete full-plan
+          // response. After approve/release the global `latestSkillsDraft` can be cleared, so the
           // drawer renders the per-domain `state.latestDraft`; both slots must receive the same
           // freshly parsed object so a stale global draft can never shadow a successful reload.
           setHeadCoachDomainPlanStates((prev) => {
-            const current = prev.NUTRITION;
+            const current = prev[generationDomain];
             const nextDraft = resolveNewerDomainReviewDraft(current.latestDraft, result);
             if (nextDraft === null) return prev;
             if (nextDraft === current.latestDraft) return prev;
-            return { ...prev, NUTRITION: { ...current, latestDraft: nextDraft } };
+            return {
+              ...prev,
+              [generationDomain]: {
+                ...current,
+                loading: false,
+                error: null,
+                latestDraft: nextDraft,
+              },
+            };
           });
         }
         if (shouldRenderAssistantDomainWorkspace && !skipDetailHydration) {
@@ -18424,17 +19446,22 @@ export function CoachAthletePlanningProfileView({
             : null;
         const workspacePlanId = workspaceSummary?.trainingPlanId?.trim() ?? "";
         const workspaceVersionId =
-          workspaceSummary !== null
-            ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
-            : "";
+          currentCoachGenerationDomain === "SKILLS"
+            ? resolveSkillsApproveReleaseWorkspaceRetainVersionId(workspaceSummary)
+            : workspaceSummary !== null
+              ? (resolveHeadCoachDomainSummaryVersionId(workspaceSummary) ?? "")
+              : "";
         const sandCInstall = sandCInstalledGeneratedDraftIdentityRef.current;
         const nutritionInstall = nutritionRetainedDraftIdentityRef.current;
+        const skillsInstall = skillsRetainedDraftIdentityRef.current;
         const installedIdentity =
           currentCoachGenerationDomain === "S_AND_C"
             ? sandCInstall
             : currentCoachGenerationDomain === "NUTRITION"
               ? nutritionInstall
-              : null;
+              : currentCoachGenerationDomain === "SKILLS"
+                ? skillsInstall
+                : null;
         if (
           shouldRetainInstalledSandCLatestDraftOnWorkspaceResolve({
             domain: currentCoachGenerationDomain,
@@ -18444,8 +19471,18 @@ export function CoachAthletePlanningProfileView({
             workspaceVersionId,
           })
         ) {
-          // S&C post-generation / Nutrition post-approve-release: workspace same identity —
+          // S&C post-generation / Nutrition+Skills post-approve-release: workspace same identity —
           // keep installed latest authoritative.
+          return;
+        }
+        const drawerSelection = domainReviewDrawerSelectionRef.current;
+        if (
+          currentCoachGenerationDomain !== null &&
+          drawerSelection.open &&
+          drawerSelection.domain === currentCoachGenerationDomain
+        ) {
+          // Open Skills/Nutrition/S&C review already has a usable schedule. Approve/release only
+          // changes workspace status — do not clear it into "Loading generated …".
           return;
         }
         const clearResolvedBootstrapLatestDraft = () => {
@@ -18466,6 +19503,13 @@ export function CoachAthletePlanningProfileView({
         if (currentCoachGenerationDomain === "NUTRITION" && nutritionInstall !== null) {
           // Workspace resolved a different plan/version than the approve/release retained draft.
           nutritionRetainedDraftIdentityRef.current = null;
+          clearResolvedBootstrapLatestDraft();
+          void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
+          return;
+        }
+        if (currentCoachGenerationDomain === "SKILLS" && skillsInstall !== null) {
+          // Workspace resolved a different plan/version than the approve/release retained draft.
+          skillsRetainedDraftIdentityRef.current = null;
           clearResolvedBootstrapLatestDraft();
           void loadLatestSkillsDraft(domainForLatestDomainDraft, false, false, true);
           return;
@@ -18844,7 +19888,7 @@ export function CoachAthletePlanningProfileView({
     if (isSinglePatch) {
       payload = submission;
     } else {
-      const coachFeedback = reviseSkillsFeedback.trim();
+      const coachFeedback = reviseFeedbackLiveRef.current.SKILLS.trim();
       if (coachFeedback === "") {
         setReviseSkillsError("Enter revision feedback first.");
         setReviseSkillsSuccess(null);
@@ -18910,7 +19954,7 @@ export function CoachAthletePlanningProfileView({
       },
       showSuccess: () => {
         if (isSinglePatch) resetFynRevisionOptionsFlow("SKILLS");
-        setReviseSkillsFeedback("");
+        commitDomainReviseFeedback("SKILLS", "");
         if (isSinglePatch) {
           setFynRevisionSelections((current) => ({
             ...current,
@@ -18983,20 +20027,66 @@ export function CoachAthletePlanningProfileView({
     setReviseSkillsLoading(false);
   }
 
+  function publishRequestRevisionFeedback(value: string): void {
+    requestRevisionFeedbackLiveRef.current = value;
+  }
+
+  function clearRequestRevisionFeedback(): void {
+    requestRevisionFeedbackLiveRef.current = "";
+    setRequestRevisionFeedback("");
+    setRequestRevisionFeedbackResetKey((key) => key + 1);
+  }
+
+  function publishReviseFeedback(
+    domain: TrainingPlanGenerationDomain,
+    value: string,
+  ): void {
+    reviseFeedbackLiveRef.current[domain] = value;
+  }
+
+  function clearDomainReviseNotices(domain: TrainingPlanGenerationDomain): void {
+    if (domain === "SKILLS") {
+      if (reviseSkillsError !== null) setReviseSkillsError(null);
+      if (reviseSkillsSuccess !== null) setReviseSkillsSuccess(null);
+    } else if (domain === "NUTRITION") {
+      if (reviseNutritionError !== null) setReviseNutritionError(null);
+      if (reviseNutritionSuccess !== null) setReviseNutritionSuccess(null);
+    } else if (reviseSandCError !== null || reviseSandCSuccess !== null) {
+      if (reviseSandCError !== null) setReviseSandCError(null);
+      if (reviseSandCSuccess !== null) setReviseSandCSuccess(null);
+    }
+  }
+
+  function commitDomainReviseFeedback(
+    domain: TrainingPlanGenerationDomain,
+    nextFeedback: string,
+  ): void {
+    reviseFeedbackLiveRef.current[domain] = nextFeedback;
+    setReviseFeedbackResetKey((current) => ({
+      ...current,
+      [domain]: current[domain] + 1,
+    }));
+    if (domain === "SKILLS") {
+      setReviseSkillsFeedback(nextFeedback);
+    } else if (domain === "NUTRITION") {
+      setReviseNutritionFeedback(nextFeedback);
+    } else {
+      setReviseSandCFeedback(nextFeedback);
+    }
+  }
+
   function setDomainReviseFeedback(
     domain: TrainingPlanGenerationDomain,
     nextFeedback: string,
   ): void {
+    commitDomainReviseFeedback(domain, nextFeedback);
     if (domain === "SKILLS") {
-      setReviseSkillsFeedback(nextFeedback);
       setReviseSkillsError(null);
       setReviseSkillsSuccess(null);
     } else if (domain === "NUTRITION") {
-      setReviseNutritionFeedback(nextFeedback);
       setReviseNutritionError(null);
       setReviseNutritionSuccess(null);
     } else {
-      setReviseSandCFeedback(nextFeedback);
       setReviseSandCError(null);
       setReviseSandCSuccess(null);
     }
@@ -19021,7 +20111,21 @@ export function CoachAthletePlanningProfileView({
     domain: TrainingPlanGenerationDomain,
     value: string,
   ): void {
-    setFynRevisionRequests((current) => ({ ...current, [domain]: value }));
+    fynRevisionRequestLiveRef.current[domain] = value;
+  }
+
+  function readFynRevisionRequest(domain: TrainingPlanGenerationDomain): string {
+    const live = fynRevisionRequestLiveRef.current[domain];
+    return live !== undefined ? live : (fynRevisionRequests[domain] ?? "");
+  }
+
+  function clearFynRevisionRequest(domain: TrainingPlanGenerationDomain): void {
+    fynRevisionRequestLiveRef.current[domain] = "";
+    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    setFynRevisionRequestResetKey((current) => ({
+      ...current,
+      [domain]: (current[domain] ?? 0) + 1,
+    }));
   }
 
   function handleFynRevisionTargetChange(
@@ -19070,7 +20174,7 @@ export function CoachAthletePlanningProfileView({
       domain === "S_AND_C" &&
       (key === "REMOVE_ITEM" || key === "UPDATE_ITEM")
     ) {
-      setFynRevisionRequests((current) => ({ ...current, S_AND_C: "" }));
+      clearFynRevisionRequest("S_AND_C");
     }
     setFynRevisionActionKeys((current) => ({ ...current, [domain]: key }));
     // Switching action clears stale fetched options from a previous action choice.
@@ -19103,7 +20207,7 @@ export function CoachAthletePlanningProfileView({
   ): void {
     // Deterministic flows use Apply Revision, never the basket.
     if (domain === "SKILLS" || domain === "NUTRITION" || domain === "S_AND_C") return;
-    const coachRequest = fynRevisionRequests[domain] ?? "";
+    const coachRequest = readFynRevisionRequest(domain);
     const changeText = buildFynRevisionActionChangeText(domain, action, target, coachRequest);
     if (changeText === "") return;
     handleFynRevisionSelectionChange(
@@ -19111,7 +20215,7 @@ export function CoachAthletePlanningProfileView({
       addAcceptedFynRevisionChange(fynRevisionSelections[domain], changeText),
     );
     // Clear the composer inputs so the coach can queue the next change cleanly.
-    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    clearFynRevisionRequest(domain);
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
     setFynRevisionActionKeys((current) => {
       const next = { ...current };
@@ -19128,7 +20232,7 @@ export function CoachAthletePlanningProfileView({
     if (fynRevisionOptionsUsesStaleResponseGuard(domain)) {
       delete fynRevisionOptionsRequestRef.current[domain];
     }
-    setFynRevisionRequests((current) => ({ ...current, [domain]: "" }));
+    clearFynRevisionRequest(domain);
     setFynRevisionTargetKeys((current) => ({ ...current, [domain]: "" }));
     setFynRevisionActionKeys((current) => {
       const next = { ...current };
@@ -19165,7 +20269,7 @@ export function CoachAthletePlanningProfileView({
       // Every options request defines a new approved set; a prior-set selection is never reusable.
       setSkillsSelectedRevisionOption(null);
     }
-    const coachRequest = fynRevisionRequests[domain] ?? "";
+    const coachRequest = readFynRevisionRequest(domain);
     const targetKey = fynRevisionTargetKeys[domain] ?? null;
     const actionKey = fynRevisionActionKeys[domain] ?? null;
     const optionKind = actionKey !== null ? fynRevisionActionOptionKind(actionKey) : null;
@@ -19613,7 +20717,7 @@ export function CoachAthletePlanningProfileView({
     setRequestRevisionModalOpen(false);
     setRequestRevisionDrawerComposerOpen(false);
     setRequestRevisionActionContext(null);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
     setGovernedPlanActionError(null);
   }
 
@@ -19637,7 +20741,7 @@ export function CoachAthletePlanningProfileView({
       selectedVersionId: actionContext.versionId,
       planStatus: reviewModel.planStatusLabel,
       workflowStatus: reviewModel.workflowStatus,
-      currentFreeTextRevisionInstruction: requestRevisionFeedback,
+      currentFreeTextRevisionInstruction: requestRevisionFeedbackLiveRef.current,
     });
     const coachFeedback = revisionContext.currentFreeTextRevisionInstruction;
     if (coachFeedback === "") {
@@ -19674,7 +20778,7 @@ export function CoachAthletePlanningProfileView({
         });
       },
       showMutationSuccess: () => {
-        setRequestRevisionFeedback("");
+        clearRequestRevisionFeedback();
         setRequestRevisionModalOpen(false);
         setRequestRevisionDrawerComposerOpen(false);
         setRequestRevisionActionContext(null);
@@ -20036,7 +21140,7 @@ export function CoachAthletePlanningProfileView({
     if (planId !== "") {
       knownDomainPlanIdsRef.current[domain] = planId;
     }
-    if (specialistDrawerContentRequest?.kind === "latest") {
+    const loadSpecialistLatestDraftForReview = () => {
       setHeadCoachDomainPlanStates((prev) => ({
         ...prev,
         [domain]: { ...prev[domain], loading: true, error: null },
@@ -20057,6 +21161,9 @@ export function CoachAthletePlanningProfileView({
           },
         }));
       });
+    };
+    if (specialistDrawerContentRequest?.kind === "latest") {
+      loadSpecialistLatestDraftForReview();
       return;
     }
 
@@ -20083,17 +21190,15 @@ export function CoachAthletePlanningProfileView({
       workspaceResolvesDownstreamDomainBootstrap &&
       currentCoachGenerationDomain === domain &&
       specialistDrawerContentRequest?.kind === "detail";
-    if (
-      shouldHydrateResolvedDownstreamDrawer ||
-      shouldHydrateDirectReleaseDomainDrawerDetail({
-        domain,
-        assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
-        assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
-        planId,
-        versionId,
-        activeDetail,
-      })
-    ) {
+    const shouldHydrateDirectReleaseDetail = shouldHydrateDirectReleaseDomainDrawerDetail({
+      domain,
+      assignmentReleaseMode: workspace?.assignmentContext?.releaseMode,
+      assignmentDomainContext: workspace?.assignmentContext?.domains[domain],
+      planId,
+      versionId,
+      activeDetail,
+    });
+    if (shouldHydrateResolvedDownstreamDrawer || shouldHydrateDirectReleaseDetail) {
       setHeadCoachDomainPlanStates((prev) => ({
         ...prev,
         [domain]: { ...prev[domain], loading: true, error: null },
@@ -20154,6 +21259,15 @@ export function CoachAthletePlanningProfileView({
     }
 
     headCoachReviewDetailFetchKeyRef.current = null;
+    if (
+      shouldFallbackSpecialistDrawerDetailToLatestDraft({
+        specialistRequestKind: specialistDrawerContentRequest?.kind ?? null,
+        shouldHydrateResolvedDownstreamDrawer,
+        shouldHydrateDirectReleaseDetail,
+      })
+    ) {
+      loadSpecialistLatestDraftForReview();
+    }
   }
 
   function resolveDomainReviewSurfaceModel(
@@ -20587,6 +21701,22 @@ export function CoachAthletePlanningProfileView({
     };
   }
 
+  function isDomainDraftReadyPlanLoadPending(
+    domain: TrainingPlanGenerationDomain,
+    job: CoachAthleteTrainingPlanGenerationJob | null,
+  ): boolean {
+    return isDraftReadyPlanLoadPending({
+      domain,
+      job,
+      draftRequestState: latestSkillsDraftRequestState,
+      draftDomain: latestDraftDomain,
+      draftPresent: latestSkillsDraft !== null,
+      generationError: generatePlanError,
+      generatedPlanLoaded:
+        generatePlanSuccess !== null && generatePlanSuccessDomain === domain,
+    });
+  }
+
   function renderHeadCoachDomainPlanCard(domain: TrainingPlanGenerationDomain) {
     const reviewModel = resolveDomainReviewSurfaceModel(domain);
     const {
@@ -20686,7 +21816,11 @@ export function CoachAthletePlanningProfileView({
                   variant="secondary"
                   disabled={
                     headCoachSkillsCreateDisabled ||
-                    (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
+                    (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null ||
+                    isDomainDraftReadyPlanLoadPending(
+                      "SKILLS",
+                      generatePlanJobsByDomain.SKILLS ?? null,
+                    )
                   }
                   onClick={() => {
                     setHeadCoachSubmittedReviewDomain("SKILLS");
@@ -20698,6 +21832,12 @@ export function CoachAthletePlanningProfileView({
                     generatePlanJobsByDomain.SKILLS ?? null,
                   )}
                 </Button>
+                {isDomainDraftReadyPlanLoadPending(
+                  "SKILLS",
+                  generatePlanJobsByDomain.SKILLS ?? null,
+                ) ? (
+                  <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                ) : null}
               </>
             ) : canOpenReleasedPlanViewer ? (
               <Button
@@ -20735,7 +21875,7 @@ export function CoachAthletePlanningProfileView({
     setGovernedPlanActionSuccessFeedback(null);
     setRequestRevisionModalOpen(false);
     setRequestRevisionActionContext(null);
-    setRequestRevisionFeedback("");
+    clearRequestRevisionFeedback();
   }
 
   function renderWorkflow1HeadCoachReviewActionPanel() {
@@ -20817,12 +21957,14 @@ export function CoachAthletePlanningProfileView({
 
         {shouldShowSelectedDomainInspectorActionSuccess(governedPlanActionSuccess) &&
         !workflow1HeadCoachReviewActionPanelMode ? (
-          <Alert variant="success">{governedPlanActionSuccess}</Alert>
+          <Alert variant="success" dismissible>
+            {governedPlanActionSuccess}
+          </Alert>
         ) : null}
 
         {!state.loading && !state.error ? (
           <>
-            <dl className="grid gap-2 sm:grid-cols-2">
+            <dl className="grid min-w-0 gap-2 xl:grid-cols-2">
               <DetailRow label="Domain" value={reviewModel.domainLabel} />
               <DetailRow label="Assigned Coach" value={reviewModel.assignedCoachLabel} />
               <DetailRow label="Plan status" value={reviewModel.planStatusLabel} />
@@ -20841,22 +21983,34 @@ export function CoachAthletePlanningProfileView({
                     <Alert variant="warning">{generatePlanLocalErrorsByDomain.SKILLS}</Alert>
                   ) : null}
                   {renderGenerationJobProgress(generatePlanJobsByDomain.SKILLS ?? null)}
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={
-                      headCoachSkillsCreateDisabled ||
-                      (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null
-                    }
-                    onClick={() => {
-                      void handleGenerateTrainingPlan("SKILLS");
-                    }}
-                  >
-                    {renderGenerationJobButtonLabel(
+                  <div className="flex flex-col items-start gap-1">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={
+                        headCoachSkillsCreateDisabled ||
+                        (generatePlanLocalErrorsByDomain.SKILLS ?? null) !== null ||
+                        isDomainDraftReadyPlanLoadPending(
+                          "SKILLS",
+                          generatePlanJobsByDomain.SKILLS ?? null,
+                        )
+                      }
+                      onClick={() => {
+                        void handleGenerateTrainingPlan("SKILLS");
+                      }}
+                    >
+                      {renderGenerationJobButtonLabel(
+                        "SKILLS",
+                        generatePlanJobsByDomain.SKILLS ?? null,
+                      )}
+                    </Button>
+                    {isDomainDraftReadyPlanLoadPending(
                       "SKILLS",
                       generatePlanJobsByDomain.SKILLS ?? null,
-                    )}
-                  </Button>
+                    ) ? (
+                      <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
               {canOpenReleasedPlanViewer ? (
@@ -20928,6 +22082,7 @@ export function CoachAthletePlanningProfileView({
       showSkillsRepsVerbatim?: boolean;
       rawItem?: Record<string, unknown> | null;
       shouldLogNutritionItem?: boolean;
+      showSandCVideos?: boolean;
     } = {},
   ) {
     const title = (item as { title?: DisplayableValue }).title;
@@ -21005,6 +22160,9 @@ export function CoachAthletePlanningProfileView({
           <div className="text-sm text-textSecondary">Notes: {displayValue(item.notes)}</div>
         ) : null}
         <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+        {options.showSandCVideos === true ? (
+          <SandCExerciseDemonstrationVideos videos={item.videos ?? options.rawItem?.videos} />
+        ) : null}
       </li>
     );
   }
@@ -21015,6 +22173,7 @@ export function CoachAthletePlanningProfileView({
     options: {
       showNutritionCalories?: boolean;
       showSkillsRepsVerbatim?: boolean;
+      showSandCVideos?: boolean;
       dayOffset?: number;
     } = {},
   ) {
@@ -21040,13 +22199,13 @@ export function CoachAthletePlanningProfileView({
         <div className="space-y-1">
           <h5 className="text-sm font-medium text-textPrimary">{sessionHeading}</h5>
           {sessionDetails.length > 0 ? (
-            <div className="text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
+            <div className="break-words text-sm text-textSecondary">{sessionDetails.join(" · ")}</div>
           ) : null}
           {hasRenderableValue(session.description) ? (
             <div className="text-sm text-textSecondary">{displayValue(session.description)}</div>
           ) : null}
           {hasRenderableValue(sessionNotes) ? (
-            <div className="text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
+            <div className="break-words text-sm text-textSecondary">Notes: {displayValue(sessionNotes)}</div>
           ) : null}
         </div>
         {session.sessionStructureSections.length > 0 ? (
@@ -21062,6 +22221,7 @@ export function CoachAthletePlanningProfileView({
                       renderDomainReviewDrawerStructureItem(item, itemOffset, {
                         showNutritionCalories: options.showNutritionCalories,
                         showSkillsRepsVerbatim: options.showSkillsRepsVerbatim,
+                        showSandCVideos: options.showSandCVideos,
                         rawItem: readRawPersistedSectionItemAt(section.raw, itemOffset),
                         shouldLogNutritionItem:
                           options.showNutritionCalories === true &&
@@ -21195,6 +22355,7 @@ export function CoachAthletePlanningProfileView({
                         renderDomainReviewDrawerSession(session, sessionOffset, {
                           showNutritionCalories,
                           showSkillsRepsVerbatim: domain === "SKILLS",
+                          showSandCVideos: domain === "S_AND_C",
                           dayOffset,
                         }),
                       )}
@@ -21438,6 +22599,9 @@ export function CoachAthletePlanningProfileView({
                                       </div>
                                     ) : null}
                                     <SkillGoalAttributionText primaryGoalName={item.primaryGoalName} />
+                                    {domain === "S_AND_C" ? (
+                                      <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                    ) : null}
                                   </li>
                                 );
                               })}
@@ -21708,30 +22872,55 @@ export function CoachAthletePlanningProfileView({
         option: nutritionSelectedOption,
       });
     const handleDrawerReviseFeedbackChange = (nextValue: string) => {
-      if (reviewDomain === "SKILLS") {
-        setReviseSkillsFeedback(nextValue);
-        setReviseSkillsError(null);
-        setReviseSkillsSuccess(null);
-      } else if (reviewDomain === "NUTRITION") {
-        setReviseNutritionFeedback(nextValue);
-        setReviseNutritionError(null);
-        setReviseNutritionSuccess(null);
-      } else {
-        setReviseSandCFeedback(nextValue);
-        setReviseSandCError(null);
-        setReviseSandCSuccess(null);
-      }
+      setDomainReviseFeedback(reviewDomain, nextValue);
     };
     const handleDrawerReviseSubmit = () => {
+      const liveCoachRequest =
+        fynRevisionRequestLiveRef.current[reviewDomain] ?? fynRevisionCoachRequest;
       if (reviewDomain === "SKILLS") {
-        void handleReviseSkillsPlan(skillsRevisionSubmission);
+        void handleReviseSkillsPlan(
+          buildSkillsRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: skillsSelectedOption,
+            coachRequest: liveCoachRequest,
+            durationMinutes: skillsDurationMinutes,
+            reps: skillsReps,
+            restDaySelection: fynRestDaySelection,
+            restDayScheduleDays: fynRestDayScheduleDays,
+          }),
+        );
       } else if (reviewDomain === "NUTRITION") {
-        void handleReviseNutritionPlan(nutritionRevisionSubmission, {
-          target: fynRevisionSelectedTargetOption,
-          actionKey: fynRevisionSelectedActionKey,
-        });
+        void handleReviseNutritionPlan(
+          buildNutritionRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: nutritionSelectedOption,
+            coachRequest: liveCoachRequest,
+            servingTargetQuantity: nutritionServingDisplayQuantity,
+          }),
+          {
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+          },
+        );
       } else {
-        void handleReviseSandCPlan(sandCRevisionSubmission);
+        void handleReviseSandCPlan(
+          buildSandCRevisionSubmission({
+            reviseIds: drawerReviseIds,
+            target: fynRevisionSelectedTargetOption,
+            actionKey: fynRevisionSelectedActionKey,
+            option: sandCSelectedOption,
+            coachRequest: liveCoachRequest,
+            durationMinutes: sandCAddItemValues.durationMinutes,
+            sets: sandCAddItemValues.sets,
+            reps: sandCAddItemValues.reps,
+            restDaySelection: fynRestDaySelection,
+            restDayScheduleDays: fynRestDayScheduleDays,
+          }),
+        );
       }
     };
     const drawerPlanDetailLoading =
@@ -21814,12 +23003,12 @@ export function CoachAthletePlanningProfileView({
           onClick={handleCloseDomainReviewDrawer}
         />
         <aside className={drawerLayoutClasses.panelClassName}>
-          <header className="space-y-2 border-b border-border px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
+          <header className="space-y-2 border-b border-border px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
                 <h3
                   id="domain-review-drawer-title"
-                  className="text-lg font-medium text-textPrimary"
+                  className="break-words text-lg font-medium text-textPrimary"
                 >
                   {domainPlanReviewTitle(reviewDomain)}
                 </h3>
@@ -21827,6 +23016,7 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
+                className="shrink-0"
                 disabled={deterministicRevisionSubmitPending}
                 onClick={handleCloseDomainReviewDrawer}
               >
@@ -21834,7 +23024,7 @@ export function CoachAthletePlanningProfileView({
               </Button>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-4 py-5 sm:px-5">
             <div className="space-y-5">
               <section className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
@@ -21886,7 +23076,7 @@ export function CoachAthletePlanningProfileView({
                   <Alert variant="danger">{governedPlanActionError}</Alert>
                 ) : null}
                 {governedPlanActionSuccess ? (
-                  <WorkflowNeutralNotice>
+                  <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
                     <div className="space-y-2">
                       <div>{governedPlanActionSuccess}</div>
                       {governedPlanActionSuccessFeedback ? (
@@ -21951,15 +23141,18 @@ export function CoachAthletePlanningProfileView({
                       actionContext={actionContext}
                       drawerReviseLoading={drawerReviseLoading}
                       requestRevisionFeedback={requestRevisionFeedback}
+                      requestRevisionFeedbackResetKey={requestRevisionFeedbackResetKey}
                       onApprove={() => {
                         if (actionContext === null) return;
                         void handlePersistedGovernedPlanAction("HEAD_APPROVE", actionContext);
                       }}
                       onRequestRevisionFeedbackChange={(value) => {
-                        setRequestRevisionFeedback(value);
-                        setGovernedPlanActionError(null);
-                        setGovernedPlanActionSuccess(null);
-                        setGovernedPlanActionSuccessFeedback(null);
+                        publishRequestRevisionFeedback(value);
+                        if (governedPlanActionError !== null) setGovernedPlanActionError(null);
+                        if (governedPlanActionSuccess !== null) setGovernedPlanActionSuccess(null);
+                        if (governedPlanActionSuccessFeedback !== null) {
+                          setGovernedPlanActionSuccessFeedback(null);
+                        }
                       }}
                       onRequestChangesSubmit={(event) => {
                         void handleRequestRevisionSubmit(event, actionContext);
@@ -22001,7 +23194,9 @@ export function CoachAthletePlanningProfileView({
                   </div>
                   {drawerReviseError ? <Alert variant="danger">{drawerReviseError}</Alert> : null}
                   {drawerReviseSuccess ? (
-                    <WorkflowNeutralNotice>{drawerReviseSuccess}</WorkflowNeutralNotice>
+                    <WorkflowNeutralNotice dismissible>
+                      {drawerReviseSuccess}
+                    </WorkflowNeutralNotice>
                   ) : null}
                   <FynRevisionContextPanel
                     domain={reviewDomain}
@@ -22012,6 +23207,7 @@ export function CoachAthletePlanningProfileView({
                       handleFynRevisionSelectionChange(reviewDomain, selection);
                     }}
                     coachRequest={fynRevisionCoachRequest}
+                    coachRequestResetKey={fynRevisionRequestResetKey[reviewDomain] ?? 0}
                     onCoachRequestChange={(value) => {
                       handleFynRevisionRequestChange(reviewDomain, value);
                     }}
@@ -22239,38 +23435,40 @@ export function CoachAthletePlanningProfileView({
                     className="space-y-3"
                     onSubmit={(event) => void handleRequestRevisionSubmit(event, actionContext)}
                   >
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Revision feedback</span>
-                      <textarea
-                        rows={5}
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                        value={requestRevisionFeedback}
-                        onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                        placeholder="Describe the required changes."
-                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                      />
-                    </label>
-                    <div className="flex flex-wrap justify-end gap-3">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                        onClick={handleCancelRequestRevision}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                        disabled={
-                          governedPlanActionLoading === "REQUEST_REVISION" ||
-                          requestRevisionFeedback.trim() === ""
-                        }
-                      >
-                        Submit Request Changes
-                      </Button>
-                    </div>
+                    <IsolatedTypingField
+                      label="Revision feedback"
+                      committedValue={requestRevisionFeedback}
+                      resetKey={requestRevisionFeedbackResetKey}
+                      onLiveChange={publishRequestRevisionFeedback}
+                      rows={5}
+                      placeholder="Describe the required changes."
+                      disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                    >
+                      {(draft) => (
+                        <div className="flex flex-wrap justify-end gap-3">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                            onClick={handleCancelRequestRevision}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                            disabled={
+                              governedPlanActionLoading === "REQUEST_REVISION" ||
+                              draft.trim() === ""
+                            }
+                            onClick={() => publishRequestRevisionFeedback(draft)}
+                          >
+                            Submit Request Changes
+                          </Button>
+                        </div>
+                      )}
+                    </IsolatedTypingField>
                   </form>
                 </section>
               ) : null}
@@ -22626,6 +23824,9 @@ export function CoachAthletePlanningProfileView({
                                       <SkillGoalAttributionText
                                         primaryGoalName={item.primaryGoalName}
                                       />
+                                      {detail.generationDomain === "S_AND_C" ? (
+                                        <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                      ) : null}
                                     </div>
                                   );
                                 })}
@@ -22646,28 +23847,32 @@ export function CoachAthletePlanningProfileView({
             <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
             {reviseSkillsError ? <Alert variant="danger">{reviseSkillsError}</Alert> : null}
             {reviseSkillsSuccess ? (
-              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
             ) : null}
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Coach Feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={reviseSkillsFeedback}
-                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                placeholder="Describe what should change in the skills plan."
-              />
-            </label>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={reviseSkillsLoading || !skillsReviseIds}
-              onClick={() => {
-                void handleReviseSkillsPlan();
-              }}
+            <IsolatedTypingField
+              label="Coach Feedback"
+              committedValue={reviseSkillsFeedback}
+              resetKey={reviseFeedbackResetKey.SKILLS}
+              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+              rows={4}
+              placeholder="Describe what should change in the skills plan."
             >
-              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-            </Button>
+              {(draft) => (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                  onClick={() => {
+                    publishReviseFeedback("SKILLS", draft);
+                    void handleReviseSkillsPlan();
+                  }}
+                >
+                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                </Button>
+              )}
+            </IsolatedTypingField>
           </div>
         ) : null}
       </div>
@@ -22771,7 +23976,9 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="danger">{persistedSkillsErrorForSkillsPanel}</Alert>
         ) : null}
         {reviseSkillsSuccess ? (
-          <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+          <WorkflowNeutralNotice dismissible>
+            {reviseSkillsSuccess}
+          </WorkflowNeutralNotice>
         ) : null}
         <div className="flex flex-wrap gap-2">
           {headCoachSkillsViewPlanContext !== null ? (
@@ -22805,45 +24012,46 @@ export function CoachAthletePlanningProfileView({
           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <h5 className="text-sm font-normal text-textPrimary">Revise Skills Plan</h5>
             {reviseSkillsError ? <Alert variant="danger">{reviseSkillsError}</Alert> : null}
-            <label className="space-y-1 text-sm text-textPrimary">
-              <span className="font-medium">Coach Feedback</span>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                value={reviseSkillsFeedback}
-                onChange={(event) => {
-                  setReviseSkillsFeedback(event.target.value);
-                  setReviseSkillsError(null);
-                  setReviseSkillsSuccess(null);
-                }}
-                placeholder="Describe what should change in the skills plan."
-              />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={reviseSkillsLoading}
-                onClick={() => {
-                  setAssistantRevisePanelDomain(null);
-                  setReviseSkillsFeedback("");
-                  setReviseSkillsError(null);
-                  setReviseSkillsSuccess(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={reviseSkillsLoading || !skillsReviseIds}
-                onClick={() => {
-                  void handleReviseSkillsPlan();
-                }}
-              >
-                {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-              </Button>
-            </div>
+            <IsolatedTypingField
+              label="Coach Feedback"
+              committedValue={reviseSkillsFeedback}
+              resetKey={reviseFeedbackResetKey.SKILLS}
+              onLiveChange={(value) => {
+                publishReviseFeedback("SKILLS", value);
+                clearDomainReviseNotices("SKILLS");
+              }}
+              rows={4}
+              placeholder="Describe what should change in the skills plan."
+            >
+              {(draft) => (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={reviseSkillsLoading}
+                    onClick={() => {
+                      setAssistantRevisePanelDomain(null);
+                      commitDomainReviseFeedback("SKILLS", "");
+                      setReviseSkillsError(null);
+                      setReviseSkillsSuccess(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={reviseSkillsLoading || !skillsReviseIds}
+                    onClick={() => {
+                      publishReviseFeedback("SKILLS", draft);
+                      void handleReviseSkillsPlan();
+                    }}
+                  >
+                    {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                  </Button>
+                </div>
+              )}
+            </IsolatedTypingField>
           </div>
         ) : null}
         {options.showWorkflowActions === false ? null : renderPlanViewerWorkflowActions()}
@@ -22967,6 +24175,19 @@ export function CoachAthletePlanningProfileView({
         fallbackStartDate: planStartDate,
         fallbackEndDate: planEndDate,
       }) ?? "—";
+    const draftButtonState = resolveDomainIntegrationDraftButtonState({
+      canStartGeneration: model.generationEligibility.canStartGeneration,
+      canOpenDraft,
+      generationInProgress,
+      loadPending: isDomainDraftReadyPlanLoadPending(domain, domainJob),
+      domain,
+      job: domainJob,
+    });
+    const showGenerationProgress = shouldShowDomainCoachWorkspaceGenerationProgress({
+      domain,
+      currentDomain: currentCoachGenerationDomain,
+      generationInProgress: step6GenerationInProgress || generationInProgress,
+    });
 
     return (
       <div className="space-y-4">
@@ -23013,25 +24234,25 @@ export function CoachAthletePlanningProfileView({
               {model.generationEligibility.blockerMessage}
             </DashboardStatusNotice>
           ) : null}
-          {shouldShowDomainCoachWorkspaceGenerationProgress({
-            domain,
-            currentDomain: currentCoachGenerationDomain,
-            generationInProgress: step6GenerationInProgress || generationInProgress,
-          }) ? (
-            renderGenerationJobProgress(domainJob)
-          ) : null}
           <div className="flex flex-wrap gap-2">
             {model.workflowStatus === "not_created" && model.canShowGenerateAction ? (
-              <Button
-                type="button"
-                variant="primary"
-                disabled={!model.generationEligibility.canStartGeneration || generationInProgress}
-                onClick={() => {
-                  void handleGenerateTrainingPlan(domain);
-                }}
-              >
-                {renderGenerationJobButtonLabel(domain, domainJob)}
-              </Button>
+              <div className="flex flex-col items-start gap-1">
+                <Button
+                  type="button"
+                  variant={draftButtonState.variant}
+                  disabled={draftButtonState.disabled}
+                  onClick={() => {
+                    if (draftButtonState.disabled) return;
+                    void handleGenerateTrainingPlan(domain);
+                  }}
+                >
+                  {renderGenerationJobButtonLabel(domain, domainJob)}
+                </Button>
+                {showGenerationProgress ? renderGenerationJobProgress(domainJob) : null}
+                {!showGenerationProgress && draftButtonState.statusMessage ? (
+                  <p className="text-sm text-textSecondary">{draftButtonState.statusMessage}</p>
+                ) : null}
+              </div>
             ) : null}
             {canOpenDraft ? (
               <Button
@@ -23039,7 +24260,23 @@ export function CoachAthletePlanningProfileView({
                 variant="secondary"
                 onClick={() => {
                   handleOpenDomainReviewDrawer(domain);
-                  if (model.actionContext !== null) {
+                  if (
+                    model.actionContext !== null &&
+                    shouldHydrateDomainReviewOnViewDraft({
+                      domain,
+                      workflowStatus: model.workflowStatus,
+                      directReleaseSkillsOwner: isDirectReleaseDomainOwner({
+                        domain,
+                        assignmentReleaseMode:
+                          workspace?.assignmentContext?.releaseMode,
+                        assignmentDomainContext: model.assignmentDomainContext,
+                      }),
+                      latestDraftDisplayDomain,
+                      globalLatestDraft: latestSkillsDraft,
+                      perDomainLatestDraft: model.latestDraft,
+                      activeDetail: model.activeDetail,
+                    })
+                  ) {
                     openHeadCoachDomainPlanReview(model.actionContext);
                   }
                 }}
@@ -23181,6 +24418,16 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  useEffect(() => {
+    if (
+      !shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(trainingPlanShellModel.shell)
+    ) {
+      return;
+    }
+    if (selectedWorkflowTab !== "generate") return;
+    void loadDomainPlanHistory("SKILLS");
+  }, [athleteIdTrimmed, entityId, selectedWorkflowTab, trainingPlanShellModel.shell]);
+
   async function openDomainPlanHistoryDetail(
     row: CoachTrainingPlanDomainHistoryRow,
     fallbackDomain: TrainingPlanGenerationDomain,
@@ -23200,6 +24447,25 @@ export function CoachAthletePlanningProfileView({
         domain,
         domainPlanId,
       );
+      if (
+        !historicalPlanDetailMatchesSelection({
+          detail,
+          athleteId: athleteIdTrimmed,
+          row,
+        })
+      ) {
+        setDomainPlanHistoryDrawer((current) =>
+          current?.row.domainPlanId === row.domainPlanId
+            ? {
+                ...current,
+                detail: null,
+                loading: false,
+                error: "Could not open historical plan because it does not match this athlete.",
+              }
+            : current,
+        );
+        return;
+      }
       setDomainPlanHistoryDrawer((current) =>
         current?.row.domainPlanId === row.domainPlanId
           ? {
@@ -23261,10 +24527,10 @@ export function CoachAthletePlanningProfileView({
     const domain = detail?.domain ?? row.domain;
     return (
       <Modal
-        className="max-h-[90vh] w-full max-w-6xl overflow-x-hidden overflow-y-auto rounded-2xl bg-card p-0 shadow-lg"
+        className="max-h-[min(90dvh,90vh)] w-full min-w-0 max-w-6xl overflow-y-auto rounded-2xl bg-card p-0 shadow-lg"
         aria-labelledby="domain-plan-history-title"
       >
-        <div className="min-w-0 space-y-5 overflow-x-hidden px-6 py-6 sm:px-7 sm:py-7">
+        <div className="min-w-0 space-y-5 px-4 py-5 sm:px-7 sm:py-7">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
               <h2
@@ -23736,6 +25002,7 @@ export function CoachAthletePlanningProfileView({
                   <DetailRow label="Notes" value={displayValue(item.notes)} />
                 ) : null}
               </dl>
+              <SandCExerciseDemonstrationVideos videos={item.videos} />
             </div>
           ))}
         </div>
@@ -23746,12 +25013,12 @@ export function CoachAthletePlanningProfileView({
       <Card accent={false} className={COACH_WORKFLOW_OUTER_CARD_CLASS}>
         <div className="space-y-2 border-b border-border bg-card px-4 py-5 sm:px-6 sm:py-6">
           <div className="space-y-1">
-            <h2 className="text-xl font-normal text-textPrimary">Training Plan</h2>
+            <h2 className="text-xl font-normal text-textPrimary">Athlete Training Plans</h2>
             <p className="text-sm text-textSecondary">
               Locked planning context for your assigned domain.
             </p>
           </div>
-          <dl className="grid gap-2 sm:grid-cols-2">
+          <dl className="grid min-w-0 gap-2 xl:grid-cols-2">
             <DetailRow label="Athlete" value={assistantAthleteDisplay} />
             <DetailRow label="Your Role" value={assistantRoleLabel(currentCoachGenerationDomain)} />
             <DetailRow
@@ -23843,7 +25110,7 @@ export function CoachAthletePlanningProfileView({
             ) : null}
             {governedPlanActionError ? <Alert variant="danger">{governedPlanActionError}</Alert> : null}
             {governedPlanActionSuccess ? (
-              <WorkflowNeutralNotice>
+              <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
                 <div className="space-y-1">
                   <div>{governedPlanActionSuccess}</div>
                   {governedPlanActionSuccessFeedback ? (
@@ -23863,29 +25130,43 @@ export function CoachAthletePlanningProfileView({
 
             <div className="flex flex-wrap gap-2">
               {showCreateAction ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={
-                    workflow1LockedContextDomainCoachCanCreate
-                      ? false
-                      : resolveLegacyAssistantCreateButtonDisabled({
-                          generatePlanActionDisabled,
-                          localError: createPlanLocalError,
-                        })
-                  }
-                  onClick={() => {
-                    void handleGenerateTrainingPlan(currentCoachGenerationDomain);
-                  }}
-                >
-                  {createPlanLocalError === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
-                    && currentDomainGenerationJob === null
-                      ? PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL
-                      : renderGenerationJobButtonLabel(
+                <div className="flex flex-col items-start gap-1">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={
+                      (workflow1LockedContextDomainCoachCanCreate
+                        ? false
+                        : resolveLegacyAssistantCreateButtonDisabled({
+                            generatePlanActionDisabled,
+                            localError: createPlanLocalError,
+                          })) ||
+                      (currentCoachGenerationDomain !== null &&
+                        isDomainDraftReadyPlanLoadPending(
                           currentCoachGenerationDomain,
                           currentDomainGenerationJob,
-                        )}
-                </Button>
+                        ))
+                    }
+                    onClick={() => {
+                      void handleGenerateTrainingPlan(currentCoachGenerationDomain);
+                    }}
+                  >
+                    {createPlanLocalError === UPSTREAM_CONTEXT_NOT_LOCKED_MESSAGE
+                      && currentDomainGenerationJob === null
+                        ? PLANNING_CONTEXT_REQUIRED_BUTTON_LABEL
+                        : renderGenerationJobButtonLabel(
+                            currentCoachGenerationDomain,
+                            currentDomainGenerationJob,
+                          )}
+                  </Button>
+                  {currentCoachGenerationDomain !== null &&
+                  isDomainDraftReadyPlanLoadPending(
+                    currentCoachGenerationDomain,
+                    currentDomainGenerationJob,
+                  ) ? (
+                    <p className="text-sm text-textSecondary">{DRAFT_READY_PLAN_LOADING_MESSAGE}</p>
+                  ) : null}
+                </div>
               ) : null}
 
               {canViewPlan ? (
@@ -23953,80 +25234,61 @@ export function CoachAthletePlanningProfileView({
                 </h4>
                 {assistantReviseError ? <Alert variant="danger">{assistantReviseError}</Alert> : null}
                 {assistantReviseSuccess ? (
-                  <WorkflowNeutralNotice>{assistantReviseSuccess}</WorkflowNeutralNotice>
+                  <WorkflowNeutralNotice dismissible>
+                    {assistantReviseSuccess}
+                  </WorkflowNeutralNotice>
                 ) : null}
-                <label className="space-y-1 text-sm text-textPrimary">
-                  <span className="font-medium">Coach Feedback</span>
-                  <textarea
-                    rows={4}
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                    value={assistantReviseFeedback}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        setReviseSkillsFeedback(nextValue);
-                        setReviseSkillsError(null);
-                        setReviseSkillsSuccess(null);
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        setReviseNutritionFeedback(nextValue);
-                        setReviseNutritionError(null);
-                        setReviseNutritionSuccess(null);
-                      } else {
-                        setReviseSandCFeedback(nextValue);
-                        setReviseSandCError(null);
-                        setReviseSandCSuccess(null);
-                      }
-                    }}
-                    placeholder={
-                      currentCoachGenerationDomain === "SKILLS"
-                        ? "Describe what should change in the skills plan."
-                        : currentCoachGenerationDomain === "NUTRITION"
-                          ? "Describe what should change in the nutrition plan."
-                          : "Describe what should change in the S&C plan."
-                    }
-                  />
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={assistantReviseLoading}
-                    onClick={() => {
-                      setAssistantRevisePanelDomain(null);
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        setReviseSkillsFeedback("");
-                        setReviseSkillsError(null);
-                        setReviseSkillsSuccess(null);
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        setReviseNutritionFeedback("");
-                        setReviseNutritionError(null);
-                        setReviseNutritionSuccess(null);
-                      } else {
-                        setReviseSandCFeedback("");
-                        setReviseSandCError(null);
-                        setReviseSandCSuccess(null);
-                      }
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={assistantReviseLoading}
-                    onClick={() => {
-                      if (currentCoachGenerationDomain === "SKILLS") {
-                        void handleReviseSkillsPlan();
-                      } else if (currentCoachGenerationDomain === "NUTRITION") {
-                        void handleReviseNutritionPlan();
-                      } else {
-                        void handleReviseSandCPlan();
-                      }
-                    }}
-                  >
-                    {assistantReviseLoading ? "Revising plan..." : "Revise Plan"}
-                  </Button>
-                </div>
+                <IsolatedTypingField
+                  label="Coach Feedback"
+                  committedValue={assistantReviseFeedback}
+                  resetKey={reviseFeedbackResetKey[currentCoachGenerationDomain]}
+                  onLiveChange={(value) => {
+                    publishReviseFeedback(currentCoachGenerationDomain, value);
+                    clearDomainReviseNotices(currentCoachGenerationDomain);
+                  }}
+                  rows={4}
+                  placeholder={
+                    currentCoachGenerationDomain === "SKILLS"
+                      ? "Describe what should change in the skills plan."
+                      : currentCoachGenerationDomain === "NUTRITION"
+                        ? "Describe what should change in the nutrition plan."
+                        : "Describe what should change in the S&C plan."
+                  }
+                >
+                  {(draft) => (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={assistantReviseLoading}
+                        onClick={() => {
+                          setAssistantRevisePanelDomain(null);
+                          commitDomainReviseFeedback(currentCoachGenerationDomain, "");
+                          clearDomainReviseNotices(currentCoachGenerationDomain);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={assistantReviseLoading}
+                        onClick={() => {
+                          publishReviseFeedback(currentCoachGenerationDomain, draft);
+                          if (currentCoachGenerationDomain === "SKILLS") {
+                            void handleReviseSkillsPlan();
+                          } else if (currentCoachGenerationDomain === "NUTRITION") {
+                            void handleReviseNutritionPlan();
+                          } else {
+                            void handleReviseSandCPlan();
+                          }
+                        }}
+                      >
+                        {assistantReviseLoading ? "Revising plan..." : "Revise Plan"}
+                      </Button>
+                    </div>
+                  )}
+                </IsolatedTypingField>
               </div>
             ) : null}
 
@@ -24505,7 +25767,7 @@ export function CoachAthletePlanningProfileView({
           <Alert variant="danger">{governedPlanActionError}</Alert>
         ) : null}
         {governedPlanActionSuccess ? (
-          <WorkflowNeutralNotice>
+          <WorkflowNeutralNotice dismissible={!governedPlanActionSuccessFeedback}>
             <div className="space-y-2">
               <div>{governedPlanActionSuccess}</div>
               {governedPlanActionSuccessFeedback ? (
@@ -24544,12 +25806,12 @@ export function CoachAthletePlanningProfileView({
       lockedUpstreamGoals.length > 0
         ? lockedUpstreamGoals
             .map((goal) => goal.goalName ?? goal.goalId)
-            .filter((value) => value.trim() !== "")
+            .filter((value) => (value?.trim() ?? "") !== "")
             .join(", ")
         : selectedActiveGoals.length > 0
           ? selectedActiveGoals
               .map((goal) => goal.goalName ?? goal.goalId)
-              .filter((value) => value.trim() !== "")
+              .filter((value) => (value?.trim() ?? "") !== "")
               .join(", ")
           : null;
     const lockedContextDisplayFields = resolveLockedPlanningContextDisplayFields({
@@ -24575,7 +25837,7 @@ export function CoachAthletePlanningProfileView({
               ? lockedContextSummaryCopy
               : "Context not locked. Lock and share context before domain generation starts."}
           </div>
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+          <dl className="grid min-w-0 gap-2 text-sm xl:grid-cols-2">
             <DetailRow
               label="Plan window"
               value={formatDateRange(contextStartDate, contextEndDate)}
@@ -24838,7 +26100,7 @@ export function CoachAthletePlanningProfileView({
     if (isSinglePatch) {
       payload = submission;
     } else {
-      const coachFeedback = reviseNutritionFeedback.trim();
+      const coachFeedback = reviseFeedbackLiveRef.current.NUTRITION.trim();
       if (coachFeedback === "") {
         setReviseNutritionError("Enter revision feedback first.");
         setReviseNutritionSuccess(null);
@@ -24875,7 +26137,7 @@ export function CoachAthletePlanningProfileView({
       },
       showMutationSuccess: () => {
         if (isSinglePatch) resetFynRevisionOptionsFlow("NUTRITION");
-        setReviseNutritionFeedback("");
+        commitDomainReviseFeedback("NUTRITION", "");
         if (isSinglePatch) {
           setFynRevisionSelections((current) => ({
             ...current,
@@ -24941,7 +26203,7 @@ export function CoachAthletePlanningProfileView({
             ...current,
             NUTRITION: defaultFynRevisionBatchSelection(),
           }));
-          setReviseNutritionFeedback("");
+          commitDomainReviseFeedback("NUTRITION", "");
         }
         if (
           errorOutcome.kind === "INTERRUPTED" &&
@@ -24959,7 +26221,7 @@ export function CoachAthletePlanningProfileView({
           ...current,
           NUTRITION: defaultFynRevisionBatchSelection(),
         }));
-        setReviseNutritionFeedback("");
+        commitDomainReviseFeedback("NUTRITION", "");
       }
       // Show the backend message (or the specific validation/generic copy) in the drawer.
       setReviseNutritionError(errorOutcome.message);
@@ -24986,7 +26248,9 @@ export function CoachAthletePlanningProfileView({
     }
 
     const isSinglePatch = submission != null;
-    const coachFeedback = isSinglePatch ? submission.coachFeedback : reviseSandCFeedback.trim();
+    const coachFeedback = isSinglePatch
+      ? submission.coachFeedback
+      : reviseFeedbackLiveRef.current.S_AND_C.trim();
     if (coachFeedback.trim() === "") {
       setReviseSandCError("Enter revision feedback first.");
       setReviseSandCSuccess(null);
@@ -25072,7 +26336,7 @@ export function CoachAthletePlanningProfileView({
         } else {
           setReviseSandCSuccess("Revised S&C plan version generated.");
         }
-        setReviseSandCFeedback("");
+        commitDomainReviseFeedback("S_AND_C", "");
       },
     });
     if (outcome.kind === "mutation_failed") {
@@ -25122,6 +26386,73 @@ export function CoachAthletePlanningProfileView({
         );
       }
       setReviseSandCSuccess(null);
+    } else {
+      const postRevisionDraft = sandCDraftFromRevisionResult(outcome.result);
+      if (postRevisionDraft !== null) {
+        let reloadedLatestDraft: CoachAthleteLatestDomainDraft | null = null;
+        try {
+          reloadedLatestDraft = await fetchCoalescedLatestDraft("S_AND_C", true);
+        } catch {
+          reloadedLatestDraft = null;
+        }
+        const hydratedDraft = resolveSandCLatestDraftAfterRevisionReload({
+          postRevisionDraft,
+          reloadedLatestDraft,
+        });
+        if (hydratedDraft !== postRevisionDraft) {
+          const nextPlanId =
+            hydratedDraft.trainingPlanId?.trim() ||
+            postRevisionDraft.trainingPlanId?.trim() ||
+            "";
+          const nextVersionId =
+            hydratedDraft.trainingPlanVersionId?.trim() ||
+            postRevisionDraft.trainingPlanVersionId?.trim() ||
+            "";
+          setLatestSkillsDraft(hydratedDraft);
+          setLatestDraftDomain("S_AND_C");
+          setLatestSkillsDraftRequestState("success");
+          setLatestSkillsDraftMissing(false);
+          setLatestSkillsDraftError(null);
+          setLatestSkillsDraftErrorDomain(null);
+          if (nextPlanId !== "" && nextVersionId !== "") {
+            setSandCActiveReviseIds({
+              trainingPlanId: nextPlanId,
+              versionId: nextVersionId,
+            });
+            knownDomainPlanIdsRef.current.S_AND_C = nextPlanId;
+            if (sandCInstalledGeneratedDraftIdentityRef.current !== null) {
+              sandCInstalledGeneratedDraftIdentityRef.current = {
+                planId: nextPlanId,
+                versionId: nextVersionId,
+              };
+            }
+          }
+          setHeadCoachDomainPlanStates((current) => ({
+            ...current,
+            S_AND_C: {
+              ...current.S_AND_C,
+              loading: false,
+              error: null,
+              latestDraft: hydratedDraft,
+              summaryStatus: hydratedDraft.status ?? current.S_AND_C.summaryStatus,
+              summaryPlanId: nextPlanId || current.S_AND_C.summaryPlanId,
+              summaryVersionId: nextVersionId || current.S_AND_C.summaryVersionId,
+            },
+          }));
+          setFynRevisionContexts((current) => ({
+            ...current,
+            S_AND_C: {
+              context: projectSandCFynContextAfterRevision(
+                current.S_AND_C?.context ?? null,
+                outcome.result,
+                hydratedDraft,
+              ),
+              loading: false,
+              error: null,
+            },
+          }));
+        }
+      }
     }
     setReviseSandCLoading(false);
   }
@@ -25129,6 +26460,7 @@ export function CoachAthletePlanningProfileView({
   function beginExplicitSeasonCreateForm() {
     setSeasonCreateFormExplicit(true);
     setSelectedSeasonCycleId(null);
+    setSelectedSeasonEditing(false);
     setSelectedGoalIds([]);
     setSeasonError(null);
     setSeasonSuccess(null);
@@ -25215,6 +26547,69 @@ export function CoachAthletePlanningProfileView({
     }
   }
 
+  function beginSelectedSeasonEdit() {
+    if (planningContextLocked || selectedSeason == null) return;
+    const fields = resolveSeasonFormFieldsFromCycle(selectedSeason);
+    setSeasonName(fields.name);
+    setSeasonNameEdited(true);
+    setSeasonYear(fields.year);
+    setSeasonStartDate(fields.startDate);
+    setSeasonEndDate(fields.endDate);
+    setSeasonError(null);
+    setSelectedSeasonEditing(true);
+  }
+
+  async function handleSaveSelectedSeasonChanges() {
+    if (selectedSeasonCycleId == null || selectedSeason == null) {
+      setSeasonError("Select a season first.");
+      setSeasonSuccess(null);
+      return;
+    }
+    if (seasonName.trim() === "" || seasonStartDate === "" || seasonEndDate === "") {
+      setSeasonError("Season name, start date, and end date are required.");
+      setSeasonSuccess(null);
+      return;
+    }
+    if (seasonStartDate >= seasonEndDate) {
+      setSeasonError("Season start date must be before end date.");
+      setSeasonSuccess(null);
+      return;
+    }
+
+    const form = {
+      name: seasonName,
+      year: seasonYear,
+      startDate: seasonStartDate,
+      endDate: seasonEndDate,
+    };
+    if (!isSeasonCycleFormDirty(selectedSeason, form)) {
+      setSeasonError(null);
+      setSelectedSeasonEditing(false);
+      return;
+    }
+
+    const payload = buildSeasonCycleUpdatePayload(form);
+    setSeasonCreateLoading(true);
+    setSeasonError(null);
+    setSeasonSuccess(null);
+    try {
+      const season = await updateSeasonCycle(selectedSeasonCycleId, payload);
+      setSetupState((current) => resolveSetupStateAfterSeasonCreate(current, season));
+      const nextFields = resolveSeasonFormFieldsFromCycle(season);
+      setSeasonName(nextFields.name !== "" ? nextFields.name : payload.name);
+      setSeasonNameEdited(true);
+      setSeasonYear(nextFields.year);
+      setSeasonStartDate(nextFields.startDate !== "" ? nextFields.startDate : seasonStartDate);
+      setSeasonEndDate(nextFields.endDate !== "" ? nextFields.endDate : seasonEndDate);
+      setSelectedSeasonEditing(false);
+      setSeasonSuccess("Season updated.");
+    } catch (e) {
+      setSeasonError(formatApiError(e, "Failed to update season. Please try again."));
+    } finally {
+      setSeasonCreateLoading(false);
+    }
+  }
+
   async function handleCreatePhase(phase: SeasonPhaseType) {
     if (selectedSeasonCycleId == null) {
       setPhaseError("Create or select a season first.");
@@ -25242,7 +26637,10 @@ export function CoachAthletePlanningProfileView({
         startDate: toUtcDateTimeString(phaseDrafts[phase].startDate),
         endDate: toUtcDateTimeString(phaseDrafts[phase].endDate),
       });
-      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
+      await refreshGoalsSeasonSetup({
+        background: true,
+        forceGoalsRefresh: true,
+      });
       setPhaseSuccess(`${toFieldLabel(phase)} created successfully.`);
     } catch (e) {
       setPhaseError(formatApiError(e, "Could not create season phase."));
@@ -25422,10 +26820,8 @@ export function CoachAthletePlanningProfileView({
         athleteId: athleteIdTrimmed,
         entityId,
         seasonCycleId: selectedSeasonCycleId,
-        seasonPhaseId: competitionSeasonPhase.phaseId,
         createdByCoachId: coachUserId,
         goalType: "COMPETITION",
-        goalCategory: "TRAINING",
         competitionEventId,
         startDate: `${dateOnly(competitionSeasonPhase.startDate) ?? competitionDate}T00:00:00.000Z`,
         targetDate: `${competitionDate}T00:00:00.000Z`,
@@ -25456,41 +26852,39 @@ export function CoachAthletePlanningProfileView({
       setGoalSuccess(null);
       return;
     }
-    if (goalCreationMode === "CUSTOM" && goalName.trim() === "") {
-      setGoalError("Skill goal name is required.");
-      setGoalSuccess(null);
-      return;
+    if (goalCreationMode === "CUSTOM") {
+      for (const entry of customGoalEntries) {
+        if (entry.goalName.trim() === "") {
+          setGoalError("Skill goal name is required.");
+          setGoalSuccess(null);
+          return;
+        }
+      }
     }
     if (goalCreationMode === "LIBRARY" && selectedLibraryGoals.length === 0) {
       setGoalError("Select at least one Goal Library item.");
       setGoalSuccess(null);
       return;
     }
-    if (
-      goalTargetDate.trim() !== "" &&
-      activePhaseForSelectedSeason.startDate &&
-      activePhaseForSelectedSeason.endDate &&
-      (() => {
-        const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
-        const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
-        return phaseStart && phaseEnd
-          ? goalTargetDate < phaseStart || goalTargetDate > phaseEnd
-          : false;
-      })()
-    ) {
-      setGoalError("Goal target date must fall inside the detected current phase.");
-      setGoalSuccess(null);
-      return;
-    }
-    let parsedTargetValue: number | undefined;
-    if (goalTargetValue.trim() !== "") {
-      const numeric = Number(goalTargetValue);
-      if (!Number.isFinite(numeric)) {
+    const draftsToValidate: GoalDraftFields[] =
+      goalCreationMode === "LIBRARY"
+        ? selectedLibraryGoals.map(
+            (goal) => libraryGoalDrafts[goal.libraryGoalId] ?? createDefaultGoalDraftFields(),
+          )
+        : customGoalEntries;
+    const phaseStart = dateOnly(activePhaseForSelectedSeason.startDate);
+    const phaseEnd = dateOnly(activePhaseForSelectedSeason.endDate);
+    for (const draft of draftsToValidate) {
+      if (isGoalTargetDateOutsidePhaseWindow(draft.targetDate, phaseStart, phaseEnd)) {
+        setGoalError("Goal target date must fall inside the detected current phase.");
+        setGoalSuccess(null);
+        return;
+      }
+      if (!parseOptionalGoalTargetValue(draft.targetValue).ok) {
         setGoalError("Target value must be a valid number.");
         setGoalSuccess(null);
         return;
       }
-      parsedTargetValue = numeric;
     }
 
     setGoalCreateLoading(true);
@@ -25500,6 +26894,9 @@ export function CoachAthletePlanningProfileView({
     try {
       if (goalCreationMode === "LIBRARY") {
         for (const goal of selectedLibraryGoals) {
+          const draft =
+            libraryGoalDrafts[goal.libraryGoalId] ?? createDefaultGoalDraftFields();
+          const parsedTarget = parseOptionalGoalTargetValue(draft.targetValue);
           await createPhaseAwareGoal({
             athleteId: athleteIdTrimmed,
             entityId,
@@ -25512,11 +26909,11 @@ export function CoachAthletePlanningProfileView({
               goal.successCriteria.length > 0 ? goal.successCriteria.join("\n") : undefined,
             goalCategory: goal.goalCategory,
             createdByCoachId: coachUserId,
-            priority: goalPriority,
-            ...(parsedTargetValue !== undefined ? { targetValue: parsedTargetValue } : {}),
-            ...(goalTargetDate.trim() !== ""
-              ? { targetDate: `${goalTargetDate}T00:00:00.000Z` }
+            priority: draft.priority,
+            ...(parsedTarget.ok && parsedTarget.value !== undefined
+              ? { targetValue: parsedTarget.value }
               : {}),
+            ...optionalGoalTargetDatePayload(draft.targetDate),
             goalSourceType: "LIBRARY",
             libraryGoalId: goal.libraryGoalId,
             categoryKey: goal.categoryKey,
@@ -25534,37 +26931,43 @@ export function CoachAthletePlanningProfileView({
           });
         }
       } else {
-        await createPhaseAwareGoal({
-          athleteId: athleteIdTrimmed,
-          entityId,
-          seasonCycleId: selectedSeasonCycleId,
-          seasonPhaseId: activePhaseForSelectedSeason.phaseId,
-          goalType: "PERFORMANCE",
-          domain: effectiveCoachGenerationDomain,
-          goalName,
-          successCriteria: goalSuccessCriteria,
-          goalCategory: "TRAINING",
-          createdByCoachId: coachUserId,
-          priority: goalPriority,
-          ...(parsedTargetValue !== undefined ? { targetValue: parsedTargetValue } : {}),
-          ...(goalTargetDate.trim() !== ""
-            ? { targetDate: `${goalTargetDate}T00:00:00.000Z` }
-            : {}),
-          goalSourceType: "CUSTOM",
-        });
+        for (const entry of customGoalEntries) {
+          const parsedTarget = parseOptionalGoalTargetValue(entry.targetValue);
+          await createPhaseAwareGoal({
+            athleteId: athleteIdTrimmed,
+            entityId,
+            seasonCycleId: selectedSeasonCycleId,
+            seasonPhaseId: activePhaseForSelectedSeason.phaseId,
+            goalType: "PERFORMANCE",
+            domain: effectiveCoachGenerationDomain,
+            goalName: entry.goalName,
+            successCriteria: entry.successCriteria,
+            goalCategory: "TRAINING",
+            createdByCoachId: coachUserId,
+            priority: entry.priority,
+            ...(parsedTarget.ok && parsedTarget.value !== undefined
+              ? { targetValue: parsedTarget.value }
+              : {}),
+            ...optionalGoalTargetDatePayload(entry.targetDate),
+            goalSourceType: "CUSTOM",
+          });
+        }
       }
-      await refreshGoalsSeasonSetup({ forceGoalsRefresh: true });
+      await refreshGoalsSeasonSetup({
+        background: true,
+        forceGoalsRefresh: true,
+      });
       setGoalSuccess(
         goalCreationMode === "LIBRARY"
           ? `${selectedLibraryGoals.length} Goal Library goal${selectedLibraryGoals.length === 1 ? "" : "s"} created successfully.`
-          : "Skill goal created successfully.",
+          : customGoalEntries.length === 1
+            ? "Skill goal created successfully."
+            : `${customGoalEntries.length} skill goals created successfully.`,
       );
-      setGoalName("");
-      setGoalSuccessCriteria("");
-      setGoalTargetDate("");
-      setGoalTargetValue("");
-      setGoalPriority("MEDIUM");
+      setCustomGoalEntries([createCustomGoalEntry("custom-goal-1")]);
+      customGoalEntrySeqRef.current = 1;
       setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
     } catch (e) {
       setGoalError(formatApiError(e, "Could not create goal."));
     } finally {
@@ -25800,10 +27203,14 @@ export function CoachAthletePlanningProfileView({
           ) {
             return;
           }
-          setGeneratePlanJobsByDomain((current) => ({
-            ...current,
-            [domain]: job,
-          }));
+          setGeneratePlanJobsByDomain((current) => {
+            const existing = current[domain] ?? null;
+            if (!shouldApplyGenerationJobProgressUpdate(existing, job)) return current;
+            return {
+              ...current,
+              [domain]: job,
+            };
+          });
         },
       });
       if (
@@ -26165,7 +27572,7 @@ export function CoachAthletePlanningProfileView({
                     <div className="space-y-5">
                 <section className="space-y-3 border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 1</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 1</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season
                     </h3>
@@ -26194,13 +27601,19 @@ export function CoachAthletePlanningProfileView({
                           const nextId = event.target.value;
                           if (nextId === "") {
                             setSelectedSeasonCycleId(null);
+                            setSelectedSeasonEditing(false);
                             setSelectedGoalIds([]);
                             setSeasonCreateFormExplicit(false);
+                            setSeasonError(null);
+                            setSeasonSuccess(null);
                             return;
                           }
                           setSeasonCreateFormExplicit(false);
                           setSelectedSeasonCycleId(nextId);
+                          setSelectedSeasonEditing(false);
                           setSelectedGoalIds([]);
+                          setSeasonError(null);
+                          setSeasonSuccess(null);
                         }}
                       >
                         <option value="">Select season</option>
@@ -26230,25 +27643,107 @@ export function CoachAthletePlanningProfileView({
                         />
                       </dl>
                       {selectedSeason ? (
-                        <div className="border-y border-border/70 py-3">
-                          <dl className="space-y-2">
-                            <DetailRow
-                              label="Season Name"
-                              value={displayValue(selectedSeason.name)}
-                            />
-                            <DetailRow
-                              label="Sport"
-                              value={displayValue(selectedSeason.sport)}
-                            />
-                            <DetailRow
-                              label="Year"
-                              value={displayValue(selectedSeason.year)}
-                            />
-                            <DetailRow
-                              label="Season Dates"
-                              value={formatDateRange(selectedSeason.startDate, selectedSeason.endDate)}
-                            />
-                          </dl>
+                        <div className="space-y-3 border-y border-border/70 py-3">
+                          {isExistingSeasonEditOpen({
+                            editing: selectedSeasonEditing,
+                            planningContextLocked,
+                          }) ? (
+                            <>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season Name</span>
+                                  <input
+                                    type="text"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonName}
+                                    onChange={(event) => {
+                                      setSeasonNameEdited(true);
+                                      setSeasonName(event.target.value);
+                                    }}
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Year</span>
+                                  <input
+                                    type="number"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonYear}
+                                    onChange={(event) =>
+                                      setSeasonYear(Number(event.target.value) || seasonYear)
+                                    }
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season Start Date</span>
+                                  <input
+                                    type="date"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonStartDate}
+                                    onChange={(event) => setSeasonStartDate(event.target.value)}
+                                  />
+                                </label>
+                                <label className="space-y-1 text-sm text-textPrimary">
+                                  <span className="font-medium">Season End Date</span>
+                                  <input
+                                    type="date"
+                                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                    value={seasonEndDate}
+                                    onChange={(event) => setSeasonEndDate(event.target.value)}
+                                  />
+                                </label>
+                              </div>
+                              <dl className="space-y-2">
+                                <DetailRow
+                                  label="Sport"
+                                  value={displayValue(selectedSeason.sport)}
+                                />
+                              </dl>
+                              <Button
+                                type="button"
+                                variant="primary"
+                                disabled={seasonCreateLoading}
+                                onClick={() => {
+                                  void handleSaveSelectedSeasonChanges();
+                                }}
+                              >
+                                {seasonCreateLoading ? "Saving Changes..." : "Save Changes"}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <dl className="space-y-2">
+                                <DetailRow
+                                  label="Season Name"
+                                  value={displayValue(selectedSeason.name)}
+                                />
+                                <DetailRow
+                                  label="Year"
+                                  value={displayValue(selectedSeason.year)}
+                                />
+                                <DetailRow
+                                  label="Season Start Date"
+                                  value={formatDateOnly(dateOnly(selectedSeason.startDate), "—")}
+                                />
+                                <DetailRow
+                                  label="Season End Date"
+                                  value={formatDateOnly(dateOnly(selectedSeason.endDate), "—")}
+                                />
+                                <DetailRow
+                                  label="Sport"
+                                  value={displayValue(selectedSeason.sport)}
+                                />
+                              </dl>
+                              {!planningContextLocked ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  onClick={() => beginSelectedSeasonEdit()}
+                                >
+                                  Edit Season
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       ) : null}
                     </>
@@ -26370,7 +27865,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 2</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 2</p>
                     <h3 className="text-sm font-medium text-textPrimary">
                       Setting Season Phase
                     </h3>
@@ -26557,7 +28052,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 3</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 3</p>
                     <h3 className="text-sm font-medium text-textPrimary">Creation of Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Add competition or custom goals, or choose from the goal library for this
@@ -26691,31 +28186,33 @@ export function CoachAthletePlanningProfileView({
                       value={displayValue(activePhaseForSelectedSeason.phase)}
                     />
                   ) : null}
-                  <div className="space-y-3 border-y border-border/70 py-3">
-                    <p className="text-sm font-medium text-textPrimary">Goal creation mode</p>
-                    <div className="flex flex-wrap gap-4">
-                      <label className="flex items-center gap-2 text-sm text-textPrimary">
-                        <input
-                          type="radio"
-                          name="goal-creation-mode"
-                          checked={goalCreationMode === "CUSTOM"}
-                          onChange={() => setGoalCreationMode("CUSTOM")}
-                        />
-                        <span>Custom goal</span>
-                      </label>
-                      <label className="flex items-center gap-2 text-sm text-textPrimary">
-                        <input
-                          type="radio"
-                          name="goal-creation-mode"
-                          checked={goalCreationMode === "LIBRARY"}
-                          onChange={() => setGoalCreationMode("LIBRARY")}
-                        />
-                        <span>Choose from Goal Library</span>
-                      </label>
+                  {SHOW_CUSTOM_GOAL_CREATION_UI ? (
+                    <div className="space-y-3 border-y border-border/70 py-3">
+                      <p className="text-sm font-medium text-textPrimary">Goal creation mode</p>
+                      <div className="flex flex-wrap gap-4">
+                        <label className="flex items-center gap-2 text-sm text-textPrimary">
+                          <input
+                            type="radio"
+                            name="goal-creation-mode"
+                            checked={goalCreationMode === "CUSTOM"}
+                            onChange={() => setGoalCreationMode("CUSTOM")}
+                          />
+                          <span>Custom goal</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-textPrimary">
+                          <input
+                            type="radio"
+                            name="goal-creation-mode"
+                            checked={goalCreationMode === "LIBRARY"}
+                            onChange={() => setGoalCreationMode("LIBRARY")}
+                          />
+                          <span>Choose from Goal Library</span>
+                        </label>
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
 
-                  {goalCreationMode === "LIBRARY" ? (
+                  {!SHOW_CUSTOM_GOAL_CREATION_UI || goalCreationMode === "LIBRARY" ? (
                     <div className="space-y-3 border-y border-border/70 py-3">
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-textPrimary">Goal Library</p>
@@ -26772,32 +28269,62 @@ export function CoachAthletePlanningProfileView({
                                   {category.categoryLabel}
                                 </p>
                                 <div className="space-y-2">
-                                  {categoryGoals.map((goal) => (
-                                    <label
-                                      key={goal.libraryGoalId}
-                                      className="flex items-start gap-2 text-sm text-textPrimary"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedLibraryGoalIds.includes(goal.libraryGoalId)}
-                                        onChange={(event) => {
-                                          setSelectedLibraryGoalIds((current) =>
-                                            event.target.checked
-                                              ? [...current, goal.libraryGoalId]
-                                              : current.filter((id) => id !== goal.libraryGoalId),
-                                          );
-                                        }}
-                                      />
-                                      <div className="space-y-1">
-                                        <p className="font-medium text-textPrimary">{goal.goalName}</p>
-                                        {goal.successCriteria.length > 0 ? (
-                                          <p className="text-textSecondary">
-                                            {goal.successCriteria.join(" ")}
-                                          </p>
+                                  {categoryGoals.map((goal) => {
+                                    const selected = selectedLibraryGoalIds.includes(
+                                      goal.libraryGoalId,
+                                    );
+                                    const draft =
+                                      libraryGoalDrafts[goal.libraryGoalId] ??
+                                      createDefaultGoalDraftFields();
+                                    return (
+                                      <div key={goal.libraryGoalId} className="space-y-2">
+                                        <label className="flex items-start gap-2 text-sm text-textPrimary">
+                                          <input
+                                            type="checkbox"
+                                            checked={selected}
+                                            onChange={(event) => {
+                                              const next = applyLibraryGoalSelection(
+                                                selectedLibraryGoalIds,
+                                                libraryGoalDrafts,
+                                                goal.libraryGoalId,
+                                                event.target.checked,
+                                              );
+                                              setSelectedLibraryGoalIds(next.selectedIds);
+                                              setLibraryGoalDrafts(next.drafts);
+                                            }}
+                                          />
+                                          <div className="space-y-1">
+                                            <p className="font-medium text-textPrimary">
+                                              {goal.goalName}
+                                            </p>
+                                            {goal.successCriteria.length > 0 ? (
+                                              <p className="text-textSecondary">
+                                                {goal.successCriteria.join(" ")}
+                                              </p>
+                                            ) : null}
+                                          </div>
+                                        </label>
+                                        {selected ? (
+                                          <div className="ml-6">
+                                            <GoalDraftMetadataFields
+                                              draft={draft}
+                                              targetMetricName={goal.targetMetricName}
+                                              primaryMetric={goal.primaryMetric}
+                                              onChange={(patch) =>
+                                                setLibraryGoalDrafts((current) =>
+                                                  patchGoalDraftFields(
+                                                    current,
+                                                    goal.libraryGoalId,
+                                                    patch,
+                                                  ),
+                                                )
+                                              }
+                                            />
+                                          </div>
                                         ) : null}
                                       </div>
-                                    </label>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               </div>
                             );
@@ -26806,64 +28333,85 @@ export function CoachAthletePlanningProfileView({
                     </div>
                   ) : null}
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {goalCreationMode === "CUSTOM" ? (
-                      <label className="space-y-1 text-sm text-textPrimary">
-                        <span className="font-medium">
-                          {currentPhaseGoalNameLabel(effectiveCoachGenerationDomain)}
-                        </span>
-                        <input
-                          type="text"
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                          value={goalName}
-                          onChange={(event) => setGoalName(event.target.value)}
-                        />
-                      </label>
-                    ) : null}
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Priority</span>
-                      <select
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalPriority}
-                        onChange={(event) =>
-                          setGoalPriority(event.target.value as GoalPriority)
-                        }
+                  {SHOW_CUSTOM_GOAL_CREATION_UI && goalCreationMode === "CUSTOM" ? (
+                    <div className="space-y-3">
+                      {customGoalEntries.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="space-y-3 border-y border-border/70 py-3 first:border-t-0 first:pt-0"
+                        >
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="space-y-1 text-sm text-textPrimary">
+                              <span className="font-medium">
+                                {currentPhaseGoalNameLabel(effectiveCoachGenerationDomain)}
+                              </span>
+                              <input
+                                type="text"
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
+                                value={entry.goalName}
+                                onChange={(event) =>
+                                  setCustomGoalEntries((current) =>
+                                    patchCustomGoalEntry(current, entry.id, {
+                                      goalName: event.target.value,
+                                    }),
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1 text-sm text-textPrimary md:col-span-2">
+                              <span className="font-medium">Success Criteria / Measurement</span>
+                              <textarea
+                                rows={3}
+                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
+                                value={entry.successCriteria}
+                                onChange={(event) =>
+                                  setCustomGoalEntries((current) =>
+                                    patchCustomGoalEntry(current, entry.id, {
+                                      successCriteria: event.target.value,
+                                    }),
+                                  )
+                                }
+                              />
+                            </label>
+                          </div>
+                          <GoalDraftMetadataFields
+                            draft={entry}
+                            onChange={(patch) =>
+                              setCustomGoalEntries((current) =>
+                                patchCustomGoalEntry(current, entry.id, patch),
+                              )
+                            }
+                          />
+                          {customGoalEntries.length > 1 ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={() =>
+                                setCustomGoalEntries((current) =>
+                                  removeCustomGoalEntry(current, entry.id),
+                                )
+                              }
+                            >
+                              Remove Goal
+                            </Button>
+                          ) : null}
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          customGoalEntrySeqRef.current += 1;
+                          const nextId = `custom-goal-${customGoalEntrySeqRef.current}`;
+                          setCustomGoalEntries((current) =>
+                            appendCustomGoalEntry(current, nextId),
+                          );
+                        }}
                       >
-                        <option value="LOW">LOW</option>
-                        <option value="MEDIUM">MEDIUM</option>
-                        <option value="HIGH">HIGH</option>
-                      </select>
-                    </label>
-                    {goalCreationMode === "CUSTOM" ? (
-                      <label className="space-y-1 text-sm text-textPrimary">
-                        <span className="font-medium">Success Criteria / Measurement</span>
-                        <textarea
-                          rows={3}
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                          value={goalSuccessCriteria}
-                          onChange={(event) => setGoalSuccessCriteria(event.target.value)}
-                        />
-                      </label>
-                    ) : null}
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Numeric Target Value (Optional)</span>
-                      <input
-                        type="number"
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalTargetValue}
-                        onChange={(event) => setGoalTargetValue(event.target.value)}
-                      />
-                    </label>
-                    <label className="space-y-1 text-sm text-textPrimary">
-                      <span className="font-medium">Target Date</span>
-                      <input
-                        type="date"
-                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary"
-                        value={goalTargetDate}
-                        onChange={(event) => setGoalTargetDate(event.target.value)}
-                      />
-                    </label>
-                  </div>
+                        + Add Goal
+                      </Button>
+                    </div>
+                  ) : null}
                   <Button
                     type="button"
                     variant="secondary"
@@ -26887,7 +28435,7 @@ export function CoachAthletePlanningProfileView({
 
                 <section className="space-y-3 border-t border-border/70 pt-4">
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-textMuted">Step 4</p>
+                    <p className="mb-1 text-lg font-semibold uppercase text-primary">Step 4</p>
                     <h3 className="text-sm font-medium text-textPrimary">Setting / Selecting Goals</h3>
                     <p className="text-sm text-textSecondary">
                       Choose the active goals that should shape this training plan.
@@ -27603,7 +29151,7 @@ export function CoachAthletePlanningProfileView({
       (selectedActiveGoals.length > 0
         ? selectedActiveGoals
             .map((goal) => goal.goalName ?? goal.goalId)
-            .filter((value) => value.trim() !== "")
+            .filter((value) => (value?.trim() ?? "") !== "")
             .join(", ")
         : null);
     const planDurationLabel =
@@ -27616,7 +29164,6 @@ export function CoachAthletePlanningProfileView({
     const currentPhase =
       lockedReadOnlyDisplayFields?.currentPhase ??
       activePhaseForSelectedSeason?.phase ??
-      activePhaseForSelectedSeason?.phaseName ??
       null;
     const planWindowStartDate = lockedReadOnlyDisplayFields?.planStartDate ?? planStartDate;
     const planWindowEndDate = lockedReadOnlyDisplayFields?.planEndDate ?? planEndDate;
@@ -27820,8 +29367,11 @@ export function CoachAthletePlanningProfileView({
     const step = contextBuilderDrawerStep;
     const drawerTitle = contextBuilderProgressStepLabel(step);
     const drawerDescription = contextBuilderStepPurpose(step);
+    const drawerLayoutClasses = resolveContextBuilderDrawerLayoutClasses({
+      closing: contextBuilderDrawerClosing,
+    });
     return (
-      <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="context-step-drawer-title">
+      <div className={drawerLayoutClasses.rootClassName} role="dialog" aria-modal="true" aria-labelledby="context-step-drawer-title">
         <style>
           {`
             @keyframes contextBuilderDrawerSlideIn {
@@ -27844,27 +29394,15 @@ export function CoachAthletePlanningProfileView({
         </style>
         <button
           type="button"
-          className={cn(
-            "absolute inset-0 cursor-default bg-slate-950/25",
-            contextBuilderDrawerClosing
-              ? "motion-safe:animate-[contextBuilderBackdropFadeOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[contextBuilderBackdropFadeIn_180ms_ease-out]",
-          )}
+          className={drawerLayoutClasses.backdropClassName}
           aria-label="Close Context Builder drawer"
           onClick={handleCloseContextBuilderDrawer}
         />
-        <aside
-          className={cn(
-            "absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-border bg-bg shadow-2xl",
-            contextBuilderDrawerClosing
-              ? "motion-safe:animate-[contextBuilderDrawerSlideOut_220ms_ease-in_forwards]"
-              : "motion-safe:animate-[contextBuilderDrawerSlideIn_220ms_ease-out]",
-          )}
-        >
-          <header className="space-y-2 border-b border-border px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <h3 id="context-step-drawer-title" className="text-lg font-medium text-textPrimary">
+        <aside className={drawerLayoutClasses.panelClassName}>
+          <header className="shrink-0 space-y-2 border-b border-border px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <h3 id="context-step-drawer-title" className="break-words text-lg font-medium text-textPrimary">
                   {drawerTitle}
                 </h3>
                 <p className="text-sm text-textSecondary">{drawerDescription}</p>
@@ -27872,18 +29410,19 @@ export function CoachAthletePlanningProfileView({
               <Button
                 type="button"
                 variant="secondary"
+                className="shrink-0"
                 onClick={handleCloseContextBuilderDrawer}
               >
                 Close
               </Button>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-4 py-5 sm:px-5">
             <div className="space-y-5 [&_section]:rounded-none [&_section]:border-0 [&_section]:bg-transparent [&_section]:p-0 [&_section]:shadow-none">
               {renderContextBuilderDrawerStepContent(step)}
             </div>
           </div>
-          <footer className="flex justify-end border-t border-border px-5 py-4">
+          <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border px-4 py-4 sm:px-5">
             <Button
               type="button"
               variant="secondary"
@@ -28039,7 +29578,7 @@ export function CoachAthletePlanningProfileView({
         primary={
           <section className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <DashboardStatusNotice type="success" compact className="min-w-[16rem] flex-1">
+              <DashboardStatusNotice type="success" compact className="min-w-0 w-full flex-1 sm:min-w-[16rem]">
                 Planning context is locked. Domain plans are generated from this snapshot.
               </DashboardStatusNotice>
               <Button
@@ -28238,13 +29777,17 @@ export function CoachAthletePlanningProfileView({
                         ) : errorForRenderedDomain({
                             error: persistedSkillsPlanError,
                             errorDomain: persistedPlanErrorDomain,
-                            renderedDomain: persistedPlanDisplayDomain,
+                            renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                           }) ? (
                           <Alert variant="danger">
                             {errorForRenderedDomain({
                               error: persistedSkillsPlanError,
                               errorDomain: persistedPlanErrorDomain,
-                              renderedDomain: persistedPlanDisplayDomain,
+                              renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                             })}
                           </Alert>
                         ) : persistedSkillsPlanLoading ? (
@@ -28253,7 +29796,9 @@ export function CoachAthletePlanningProfileView({
                           </div>
                         ) : shouldRenderPersistedDetailForDomain({
                             detailDomain: persistedDetailDomain,
-                            renderedDomain: persistedPlanDisplayDomain,
+                            renderedDomain: normalizeTrainingPlanGenerationDomain(
+                              persistedPlanDisplayDomain,
+                            ),
                             hasDetail: persistedSkillsPlanDetail !== null,
                           }) && !shouldHidePersistedGeneratorPanel && persistedSkillsPlanDetail ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
@@ -28499,6 +30044,11 @@ export function CoachAthletePlanningProfileView({
                                                   <SkillGoalAttributionText
                                                     primaryGoalName={item.primaryGoalName}
                                                   />
+                                                  {persistedPlanDisplayDomain === "S_AND_C" ? (
+                                                    <SandCExerciseDemonstrationVideos
+                                                      videos={item.videos}
+                                                    />
+                                                  ) : null}
                                                 </div>
                                               ))}
                                             </div>
@@ -28521,28 +30071,32 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSkillsError}</Alert>
                             ) : null}
                             {reviseSkillsSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSkillsFeedback}
-                                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                                placeholder="Describe what should change in the skills plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseSkillsLoading || !skillsReviseIds}
-                              onClick={() => {
-                                void handleReviseSkillsPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSkillsFeedback}
+                              resetKey={reviseFeedbackResetKey.SKILLS}
+                              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the skills plan."
                             >
-                              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("SKILLS", draft);
+                                    void handleReviseSkillsPlan();
+                                  }}
+                                >
+                                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : persistedPlanDisplayDomain === "NUTRITION" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -28553,28 +30107,32 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseNutritionError}</Alert>
                             ) : null}
                             {reviseNutritionSuccess ? (
-                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseNutritionSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseNutritionFeedback}
-                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
-                                placeholder="Describe what should change in the nutrition plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseNutritionLoading || !nutritionReviseIds}
-                              onClick={() => {
-                                void handleReviseNutritionPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseNutritionFeedback}
+                              resetKey={reviseFeedbackResetKey.NUTRITION}
+                              onLiveChange={(value) => publishReviseFeedback("NUTRITION", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the nutrition plan."
                             >
-                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseNutritionLoading || !nutritionReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("NUTRITION", draft);
+                                    void handleReviseNutritionPlan();
+                                  }}
+                                >
+                                  {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : null}
                       </div>
@@ -28789,6 +30347,9 @@ export function CoachAthletePlanningProfileView({
                                           <SkillGoalAttributionText
                                             primaryGoalName={item.primaryGoalName}
                                           />
+                                          {latestDraftDisplayDomain === "S_AND_C" ? (
+                                            <SandCExerciseDemonstrationVideos videos={item.videos} />
+                                          ) : null}
                                         </div>
                                       ))}
                                 </div>
@@ -28805,28 +30366,32 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSkillsError}</Alert>
                             ) : null}
                             {reviseSkillsSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSkillsSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                {reviseSkillsSuccess}
+              </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSkillsFeedback}
-                                onChange={(event) => setReviseSkillsFeedback(event.target.value)}
-                                placeholder="Describe what should change in the skills plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseSkillsLoading || !skillsReviseIds}
-                              onClick={() => {
-                                void handleReviseSkillsPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSkillsFeedback}
+                              resetKey={reviseFeedbackResetKey.SKILLS}
+                              onLiveChange={(value) => publishReviseFeedback("SKILLS", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the skills plan."
                             >
-                              {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseSkillsLoading || !skillsReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("SKILLS", draft);
+                                    void handleReviseSkillsPlan();
+                                  }}
+                                >
+                                  {reviseSkillsLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : latestDraftDisplayDomain === "NUTRITION" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -28837,28 +30402,32 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseNutritionError}</Alert>
                             ) : null}
                             {reviseNutritionSuccess ? (
-                              <WorkflowNeutralNotice>{reviseNutritionSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseNutritionSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseNutritionFeedback}
-                                onChange={(event) => setReviseNutritionFeedback(event.target.value)}
-                                placeholder="Describe what should change in the nutrition plan."
-                              />
-                            </label>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={reviseNutritionLoading || !nutritionReviseIds}
-                              onClick={() => {
-                                void handleReviseNutritionPlan();
-                              }}
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseNutritionFeedback}
+                              resetKey={reviseFeedbackResetKey.NUTRITION}
+                              onLiveChange={(value) => publishReviseFeedback("NUTRITION", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the nutrition plan."
                             >
-                              {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
-                            </Button>
+                              {(draft) => (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={reviseNutritionLoading || !nutritionReviseIds}
+                                  onClick={() => {
+                                    publishReviseFeedback("NUTRITION", draft);
+                                    void handleReviseNutritionPlan();
+                                  }}
+                                >
+                                  {reviseNutritionLoading ? "Revising plan..." : "Revise Plan"}
+                                </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : latestDraftDisplayDomain === "S_AND_C" ? (
                           <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -28869,18 +30438,19 @@ export function CoachAthletePlanningProfileView({
                               <Alert variant="danger">{reviseSandCError}</Alert>
                             ) : null}
                             {reviseSandCSuccess ? (
-                              <WorkflowNeutralNotice>{reviseSandCSuccess}</WorkflowNeutralNotice>
+                              <WorkflowNeutralNotice dismissible>
+                                {reviseSandCSuccess}
+                              </WorkflowNeutralNotice>
                             ) : null}
-                            <label className="space-y-1 text-sm text-textPrimary">
-                              <span className="font-medium">Coach Feedback</span>
-                              <textarea
-                                rows={4}
-                                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                                value={reviseSandCFeedback}
-                                onChange={(event) => setReviseSandCFeedback(event.target.value)}
-                                placeholder="Describe what should change in the S&C plan."
-                              />
-                            </label>
+                            <IsolatedTypingField
+                              label="Coach Feedback"
+                              committedValue={reviseSandCFeedback}
+                              resetKey={reviseFeedbackResetKey.S_AND_C}
+                              onLiveChange={(value) => publishReviseFeedback("S_AND_C", value)}
+                              rows={4}
+                              placeholder="Describe what should change in the S&C plan."
+                            >
+                              {(draft) => (
                             <Button
                               type="button"
                               variant="secondary"
@@ -28889,11 +30459,14 @@ export function CoachAthletePlanningProfileView({
                                 !sandCReviseIds
                               }
                               onClick={() => {
+                                publishReviseFeedback("S_AND_C", draft);
                                 void handleReviseSandCPlan();
                               }}
                             >
                               {reviseSandCLoading ? "Revising plan..." : "Revise Plan"}
                             </Button>
+                              )}
+                            </IsolatedTypingField>
                           </div>
                         ) : null}
                       </div>
@@ -28992,10 +30565,7 @@ export function CoachAthletePlanningProfileView({
     if (shouldShowLockedContextBuilderView()) {
       return renderLockedContextBuilderBackView();
     }
-    if (
-      shouldRenderReleasedPlanViewerCanvas() &&
-      (workspace?.nextCycleAction ?? "NONE") === "NONE"
-    ) {
+    if (shouldRenderReleasedPlanViewerCanvas()) {
       return renderPlanViewerContent(renderPlanViewerLowerContent());
     }
     return (
@@ -29081,6 +30651,14 @@ export function CoachAthletePlanningProfileView({
                           {renderLockedPlanningContextSummaryForDomainIntegration()}
                           {generatePlanError ? <Alert variant="danger">{generatePlanError}</Alert> : null}
                           {renderHeadCoachSubmittedDomainPlansSection()}
+                          {shouldEmbedDomainPlanHistoryInSkillsCoachIntegration(
+                            trainingPlanShellModel.shell,
+                          ) ? (
+                            <>
+                              {renderDomainCoachPlanHistoryTab("SKILLS")}
+                              {renderDomainPlanHistoryDrawer()}
+                            </>
+                          ) : null}
                         </div>
                       ) : (
                         renderHeadCoachReviewWorkspace()
@@ -29165,7 +30743,8 @@ export function CoachAthletePlanningProfileView({
                               disabled={
                                 generatePlanActionDisabled ||
                                 domainGenerationInProgress ||
-                                (generatePlanLocalErrorsByDomain[domain] ?? null) !== null
+                                (generatePlanLocalErrorsByDomain[domain] ?? null) !== null ||
+                                isDomainDraftReadyPlanLoadPending(domain, domainJob)
                               }
                               onClick={() => {
                                 void handleGenerateTrainingPlan(domain);
@@ -29173,6 +30752,11 @@ export function CoachAthletePlanningProfileView({
                             >
                               {renderGenerationJobButtonLabel(domain, domainJob)}
                             </Button>
+                            {isDomainDraftReadyPlanLoadPending(domain, domainJob) ? (
+                              <p className="text-sm text-textSecondary">
+                                {DRAFT_READY_PLAN_LOADING_MESSAGE}
+                              </p>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -29210,7 +30794,7 @@ export function CoachAthletePlanningProfileView({
 
   const trainingPlanPageHeader = (
     <PageHeader
-      title="Training Plan"
+      title="Athlete Training Plans"
       subtitle="Build context, coordinate domain plans, and review athlete plans"
     />
   );
@@ -29337,39 +30921,40 @@ export function CoachAthletePlanningProfileView({
                   <Alert variant="danger">{governedPlanActionError}</Alert>
                 ) : null}
 
-                <label className="space-y-1 text-sm text-textPrimary">
-                  <span className="font-medium">Revision feedback</span>
-                  <textarea
-                    rows={5}
-                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-textPrimary caret-current placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary"
-                    value={requestRevisionFeedback}
-                    onChange={(event) => setRequestRevisionFeedback(event.target.value)}
-                    placeholder="Describe the required changes."
-                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                  />
-                </label>
-
-                <div className="flex flex-wrap justify-end gap-3 pt-1">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={governedPlanActionLoading === "REQUEST_REVISION"}
-                    onClick={handleCancelRequestRevision}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    loading={governedPlanActionLoading === "REQUEST_REVISION"}
-                    disabled={
-                      governedPlanActionLoading === "REQUEST_REVISION" ||
-                      requestRevisionFeedback.trim() === ""
-                    }
-                  >
-                    Request Revision
-                  </Button>
-                </div>
+                <IsolatedTypingField
+                  label="Revision feedback"
+                  committedValue={requestRevisionFeedback}
+                  resetKey={requestRevisionFeedbackResetKey}
+                  onLiveChange={publishRequestRevisionFeedback}
+                  rows={5}
+                  placeholder="Describe the required changes."
+                  disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                >
+                  {(draft) => (
+                    <div className="flex flex-wrap justify-end gap-3 pt-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={governedPlanActionLoading === "REQUEST_REVISION"}
+                        onClick={handleCancelRequestRevision}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        loading={governedPlanActionLoading === "REQUEST_REVISION"}
+                        disabled={
+                          governedPlanActionLoading === "REQUEST_REVISION" ||
+                          draft.trim() === ""
+                        }
+                        onClick={() => publishRequestRevisionFeedback(draft)}
+                      >
+                        Request Revision
+                      </Button>
+                    </div>
+                  )}
+                </IsolatedTypingField>
               </form>
             </Modal>
           ) : null}

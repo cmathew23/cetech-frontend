@@ -32,7 +32,7 @@ export async function fillMandatoryAthletePlanningProfileFields(page: Page) {
     .fill("8");
   await page.getByLabel(/^Injury Status$/i).selectOption("HEALTHY");
   await page.getByLabel(/^Diet Type$/i).selectOption("OMNIVORE");
-  await page.getByLabel("Open to all").check();
+  await page.getByLabel("Indian").check();
   await page.getByLabel("I do not have food allergies").check();
 }
 

@@ -235,8 +235,8 @@ const ALLOWED_SPORT_COMPETITION_LEVEL_VALUES = new Set([
   "NATIONAL",
   "INTERNATIONAL",
 ]);
-const BASKETBALL_COMPETITION_LEVEL_VALUE = "STATE_CHAMPIONSHIP";
 const BASKETBALL_PRIMARY_SPORT = "BASKETBALL";
+const BASKETBALL_POSITION_VALUE = "POINT_GUARD";
 const ALLOWED_INJURY_STATUS_VALUES = new Set(["HEALTHY", "INJURED", "IN_REHAB"]);
 const REQUIRED_PLANNING_FIELDS: Partial<
   Record<PlanningProfileGroupName, Set<string>>
@@ -619,18 +619,6 @@ function isBasketballPlanningDraft(draft: PlanningProfileFormState): boolean {
     typeof sport === "string"
     && sport.trim().toUpperCase() === BASKETBALL_PRIMARY_SPORT
   );
-}
-
-function allowedCompetitionLevelsForDraft(
-  draft: PlanningProfileFormState,
-): Set<string> {
-  if (!isBasketballPlanningDraft(draft)) {
-    return ALLOWED_SPORT_COMPETITION_LEVEL_VALUES;
-  }
-  return new Set([
-    ...ALLOWED_SPORT_COMPETITION_LEVEL_VALUES,
-    BASKETBALL_COMPETITION_LEVEL_VALUE,
-  ]);
 }
 
 function isBloodGlucoseField(
@@ -1587,7 +1575,16 @@ export function collectPlanningProfileValidationErrors(
     SPORT_PERFORMANCE_LEVEL_FIELD,
   );
   const isBasketball = isBasketballPlanningDraft(draft);
-  const allowedCompetitionLevels = allowedCompetitionLevelsForDraft(draft);
+  if (isBasketball) {
+    const position = readValue("sportContext", "disciplineOrEvent");
+    if (position === "") {
+      errors[fieldErrorKey("sportContext", "disciplineOrEvent")] =
+        "Position is required.";
+    } else if (position !== BASKETBALL_POSITION_VALUE) {
+      errors[fieldErrorKey("sportContext", "disciplineOrEvent")] =
+        "Position must be Point Guard.";
+    }
+  }
   if (
     shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
     && competitionLevel === ""
@@ -1596,12 +1593,10 @@ export function collectPlanningProfileValidationErrors(
       "Highest Competition Level is required.";
   } else if (
     shouldValidate("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)
-    && !allowedCompetitionLevels.has(competitionLevel)
+    && !ALLOWED_SPORT_COMPETITION_LEVEL_VALUES.has(competitionLevel)
   ) {
     errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)] =
-      isBasketball
-        ? "Competition level must be District, State, State Championship, National, or International."
-        : "Competition level must be District, State, National, or International.";
+      "Competition level must be District, State, National, or International.";
   }
   if (!isBasketball) {
     const ranking = readValue("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD);

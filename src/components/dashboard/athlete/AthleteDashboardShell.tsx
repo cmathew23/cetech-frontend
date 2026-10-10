@@ -167,6 +167,7 @@ export function AthleteDashboardShell() {
     invitations.find((inv) => isPendingStatus(inv.status)) ?? null;
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
+  const athleteSport = planningIds.ids?.sport ?? null;
 
   return (
     <DashboardLayout sidebar={<AthleteSidebar />}>
@@ -201,10 +202,14 @@ export function AthleteDashboardShell() {
             identifiersPhase={planningIds.phase}
           />
 
-          <AthleteSportMetricsWithPlanVersion
-            entityId={entityId}
-            athleteId={athleteId}
-          />
+          {athleteSport === "GOLF" ? (
+            <AthleteSportMetricsWithPlanVersion
+              entityId={entityId}
+              athleteId={athleteId}
+            />
+          ) : athleteSport === "BASKETBALL" ? (
+            <p className="text-sm text-textSecondary">Basketball</p>
+          ) : null}
 
           <AthleteNutritionPerformanceWithPlanWindow
             entityId={entityId}

@@ -87,6 +87,7 @@ describe("resolveCurrentAthletePlanningIdentifiers", () => {
       expect(resolved.ids).toMatchObject({
         entityId: "05953c37-5808-4390-859a-c1b6df11659a",
         athleteId: "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426",
+        sport: "GOLF",
       });
       expect(resolved.ids.athleteId).not.toBe("f19d2ade-93e1-4074-89ed-ca90f59f5647");
     }
@@ -145,6 +146,7 @@ describe("resolveCurrentAthletePlanningIdentifiers", () => {
         entityId: "05953c37-5808-4390-859a-c1b6df11659a",
         athleteProfileId: "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426",
         athleteId: "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426",
+        sport: null,
       },
     });
   });
@@ -159,7 +161,9 @@ describe("resolveCurrentAthletePlanningIdentifiers", () => {
       expect(resolved.ids).toMatchObject({
         entityId: "entity-from-academy",
         athleteId: "athlete-profile-from-athletes-me",
+        sport: "",
       });
+      expect(resolved.ids.sport).not.toBe("GOLF");
       expect(resolved.ids.athleteId).not.toBe("user-should-not-be-used");
     }
   });
@@ -187,6 +191,23 @@ describe("resolveCurrentAthletePlanningIdentifiers", () => {
     expect(resolved).toEqual({
       status: "not_ready",
       reason: "not_athlete_context",
+    });
+  });
+
+  it("keeps basketball sport from athletes/me and does not default it to golf", () => {
+    const resolved = resolveCurrentAthletePlanningIdentifiers(accessContext(), {
+      athleteProfileId: "athlete-profile-from-athletes-me",
+      sport: "BASKETBALL",
+    });
+
+    expect(resolved).toEqual({
+      status: "ready",
+      ids: {
+        entityId: "entity-from-academy",
+        athleteProfileId: "athlete-profile-from-athletes-me",
+        athleteId: "athlete-profile-from-athletes-me",
+        sport: "BASKETBALL",
+      },
     });
   });
 

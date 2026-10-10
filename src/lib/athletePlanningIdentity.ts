@@ -5,6 +5,12 @@ export type AthletePlanningIdentifiers = {
   entityId: string;
   athleteProfileId: string;
   athleteId: string;
+  /**
+   * Trimmed `GET /athletes/me` sport.
+   * `null` means the profile request has not finished. Empty string means it finished with no sport.
+   * Never defaulted to GOLF.
+   */
+  sport: string | null;
 };
 
 export type AthletePlanningIdentifierResolution =
@@ -21,7 +27,7 @@ function clean(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
 
-function isAthleteAppContext(accessContext: AccessContextPayload | null | undefined): boolean {
+export function isAthleteAppContext(accessContext: AccessContextPayload | null | undefined): boolean {
   if (!accessContext) return false;
   const dashboardType = accessContext.access.dashboardType.trim().toUpperCase();
   const activeRole = accessContext.activeRole?.trim().toUpperCase() ?? "";
@@ -35,9 +41,19 @@ export function shouldLoadAthletesMeForPlanningIdentifiers(
   return clean(accessContext?.athleteProfile?.athleteProfileId) === "";
 }
 
+function readAthleteMeSport(
+  athleteProfile: { sport?: string | null } | null | undefined,
+): string | null {
+  if (!athleteProfile) return null;
+  return typeof athleteProfile.sport === "string" ? clean(athleteProfile.sport) : "";
+}
+
 export function resolveCurrentAthletePlanningIdentifiers(
   accessContext: AccessContextPayload | null | undefined,
-  athleteProfile: Pick<AthleteMeProfile, "athleteProfileId"> | null | undefined,
+  athleteProfile:
+    | (Pick<AthleteMeProfile, "athleteProfileId"> & { sport?: string | null })
+    | null
+    | undefined,
 ): AthletePlanningIdentifierResolution {
   if (!accessContext) {
     return { status: "not_ready", reason: "missing_context" };
@@ -66,6 +82,7 @@ export function resolveCurrentAthletePlanningIdentifiers(
       entityId,
       athleteProfileId,
       athleteId: athleteProfileId,
+      sport: readAthleteMeSport(athleteProfile),
     },
   };
 }

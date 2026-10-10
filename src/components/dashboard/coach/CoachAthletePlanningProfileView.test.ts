@@ -22028,4 +22028,19 @@ describe("Goal Library validated level source", () => {
       'value === "BEGINNER" ||\n    value === "INTERMEDIATE" ||\n    value === "ADVANCED" ||\n    value === "ELITE"',
     );
   });
+
+  it("requests Goal Library with the resolved sport and does not default an unresolved sport to Golf", () => {
+    expect(fetchEffect).toContain("sport: athleteSportCode");
+    expect(fetchEffect).not.toContain('sport: "GOLF"');
+    expect(fetchEffect).not.toContain('sport: "BASKETBALL"');
+    expect(source).toContain(
+      'if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL")',
+    );
+    const guard = source.slice(
+      source.indexOf('if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL")'),
+      source.indexOf("const library = await fetchGoalLibrary({"),
+    );
+    expect(guard).toContain("return;");
+    expect(guard).not.toContain("fetchGoalLibrary");
+  });
 });

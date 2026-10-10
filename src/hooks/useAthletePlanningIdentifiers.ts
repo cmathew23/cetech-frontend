@@ -3,6 +3,7 @@
 import type { AccessContextPayload } from "@/lib/accessContext";
 import { fetchAthleteMeProfile, type AthleteMeProfile } from "@/lib/api/athleteMe";
 import {
+  isAthleteAppContext,
   resolveCurrentAthletePlanningIdentifiers,
   shouldLoadAthletesMeForPlanningIdentifiers,
   type AthletePlanningIdentifiers,
@@ -20,11 +21,11 @@ type AthletePlanningIdentifierState =
   | { phase: "not_ready"; ids: null };
 
 /**
- * Resolves athlete planning identifiers (entityId, athleteId) from the shared
- * auth context provided by AthleteInvitationProvider.
+ * Resolves athlete planning identifiers (entityId, athleteId, sport) from the
+ * shared auth context provided by AthleteInvitationProvider.
  *
- * Callers MUST pass the auth context from the invitation gate to avoid
- * redundant useAuth() bootstraps that cause identity resolution failures.
+ * `sport` comes from GET /athletes/me. Callers MUST pass the auth context from
+ * the invitation gate to avoid redundant useAuth() bootstraps.
  */
 export function useAthletePlanningIdentifiers(
   authCtx: AthletePlanningAuthContext,
@@ -38,24 +39,28 @@ export function useAthletePlanningIdentifiers(
     () => resolveCurrentAthletePlanningIdentifiers(accessContext, athleteProfile),
     [accessContext, athleteProfile],
   );
+  const needsAthleteProfileId = shouldLoadAthletesMeForPlanningIdentifiers(accessContext);
 
   useEffect(() => {
     if (!accessGateReady) return;
-    if (!shouldLoadAthletesMeForPlanningIdentifiers(accessContext)) {
+    if (!isAthleteAppContext(accessContext)) {
       setAthleteProfile(null);
       setProfileLoadAttempted(false);
+      setProfileLoading(false);
       return;
     }
 
     let cancelled = false;
-    setProfileLoading(true);
-    setProfileLoadAttempted(false);
+    if (needsAthleteProfileId) {
+      setProfileLoading(true);
+      setProfileLoadAttempted(false);
+    }
     void (async () => {
       try {
         const profile = await fetchAthleteMeProfile();
         if (!cancelled) setAthleteProfile(profile);
       } catch {
-        if (!cancelled) setAthleteProfile(null);
+        if (!cancelled && needsAthleteProfileId) setAthleteProfile(null);
       } finally {
         if (!cancelled) {
           setProfileLoadAttempted(true);
@@ -66,17 +71,23 @@ export function useAthletePlanningIdentifiers(
     return () => {
       cancelled = true;
     };
-  }, [accessContext, accessGateReady]);
+  }, [accessContext, accessGateReady, needsAthleteProfileId]);
 
   if (
     !accessGateReady ||
     profileLoading ||
-    (shouldLoadAthletesMeForPlanningIdentifiers(accessContext) &&
-      athleteProfile === null &&
-      !profileLoadAttempted)
+    (needsAthleteProfileId && athleteProfile === null && !profileLoadAttempted)
   ) {
     return { phase: "loading", ids: null };
   }
-  if (resolution.status === "ready") return { phase: "ready", ids: resolution.ids };
+  if (resolution.status === "ready") {
+    return {
+      phase: "ready",
+      ids: {
+        ...resolution.ids,
+        sport: profileLoadAttempted ? (resolution.ids.sport ?? "") : null,
+      },
+    };
+  }
   return { phase: "not_ready", ids: null };
 }

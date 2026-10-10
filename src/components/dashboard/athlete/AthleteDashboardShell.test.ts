@@ -40,7 +40,10 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(source).not.toContain("fetchSportMetricsGolfComparison");
     expect(source).not.toContain("GolfSportsMetricsComparison");
     expect(source).not.toContain("SportMetricsEvidenceCards");
-    expect(source).toContain("<AthleteSportMetricsWithPlanVersion");
+    expect(source.match(/<AthleteSportMetricsWithPlanVersion/g)).toHaveLength(1);
+    expect(source).toContain('athleteSport === "GOLF"');
+    expect(source).toContain('athleteSport === "BASKETBALL"');
+    expect(source).toContain(">Basketball</p>");
     expect(source).not.toContain("allowCoachPracticeRating");
   });
 

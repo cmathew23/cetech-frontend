@@ -14962,6 +14962,15 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
+    if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL") {
+      setGoalLibraryCategories([]);
+      setGoalLibraryError(null);
+      setGoalLibraryLoading(false);
+      setSelectedLibraryGoalIds([]);
+      setLibraryGoalDrafts({});
+      return;
+    }
+
     let cancelled = false;
     setGoalLibraryLoading(true);
     setGoalLibraryError(null);
@@ -14969,7 +14978,7 @@ export function CoachAthletePlanningProfileView({
     void (async () => {
       try {
         const library = await fetchGoalLibrary({
-          sport: "GOLF",
+          sport: athleteSportCode,
           seasonPhase: activePhaseForSelectedSeason.phase,
           level: goalLibraryLevel,
         });
@@ -15000,6 +15009,7 @@ export function CoachAthletePlanningProfileView({
     accessGateReady,
     activePhaseForSelectedSeason?.phase,
     athleteIdTrimmed,
+    athleteSportCode,
     entityId,
     goalLibraryLevel,
   ]);

@@ -187,14 +187,6 @@ export const SPORT_PERFORMANCE_LEVEL_OPTIONS = [
   { value: "NATIONAL", label: "National" },
   { value: "INTERNATIONAL", label: "International" },
 ] as const;
-export const BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS = [
-  SPORT_PERFORMANCE_LEVEL_OPTIONS[0],
-  SPORT_PERFORMANCE_LEVEL_OPTIONS[1],
-  SPORT_PERFORMANCE_LEVEL_OPTIONS[2],
-  { value: "STATE_CHAMPIONSHIP", label: "State Championship" },
-  SPORT_PERFORMANCE_LEVEL_OPTIONS[3],
-  SPORT_PERFORMANCE_LEVEL_OPTIONS[4],
-] as const;
 export const BASKETBALL_POSITION_OPTIONS = [
   { value: "", label: "Select position" },
   { value: "POINT_GUARD", label: "Point Guard" },
@@ -821,7 +813,13 @@ export function AthleteProfilePlanningPageContent() {
         : undefined,
     );
     const numberInputLimits = planningNumberInputLimits(group, field);
-    const required = isPlanningProfileFieldRequired(group, field);
+    const required =
+      isPlanningProfileFieldRequired(group, field)
+      || (
+        isBasketball
+        && group === "sportContext"
+        && field === "disciplineOrEvent"
+      );
     const readOnly = !isEditableField(group, field) || formDisabled;
     const fieldKey = `${group}.${field}`;
     const validationError = validationErrors[fieldKey];
@@ -1215,10 +1213,7 @@ export function AthleteProfilePlanningPageContent() {
               }
             }}
           >
-            {(isBasketball
-              ? BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS
-              : SPORT_PERFORMANCE_LEVEL_OPTIONS
-            ).map((option) => (
+            {SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => (
               <option key={option.value || "__empty"} value={option.value}>
                 {option.label}
               </option>

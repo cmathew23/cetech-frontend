@@ -4,7 +4,6 @@ import {
   ALLERGY_INTOLERANCE_CHOICES_DISABLED,
   ALLERGY_OPTIONS,
   BASKETBALL_POSITION_OPTIONS,
-  BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS,
   INTOLERANCE_OPTIONS,
   SPECIAL_SELECTABLE_OPTIONS,
   SPORT_PERFORMANCE_LEVEL_OPTIONS,
@@ -123,7 +122,7 @@ describe("APP Allergies / Intolerances MVP disable", () => {
 });
 
 describe("Basketball APP sport fields", () => {
-  it("keeps golf competition levels and adds basketball position plus state championship", () => {
+  it("keeps shared competition levels and requires basketball point guard", () => {
     expect(SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => option.value)).toEqual([
       "",
       "DISTRICT",
@@ -131,22 +130,16 @@ describe("Basketball APP sport fields", () => {
       "NATIONAL",
       "INTERNATIONAL",
     ]);
-    expect(
-      BASKETBALL_SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => option.value),
-    ).toEqual([
-      "",
-      "DISTRICT",
-      "STATE",
-      "STATE_CHAMPIONSHIP",
-      "NATIONAL",
-      "INTERNATIONAL",
-    ]);
+    expect(source).not.toContain("STATE_CHAMPIONSHIP");
+    expect(source).toContain("{SPORT_PERFORMANCE_LEVEL_OPTIONS.map((option) => (");
     expect(BASKETBALL_POSITION_OPTIONS.map((option) => option.value)).toEqual([
       "",
       "POINT_GUARD",
     ]);
     expect(source).toContain('disciplineOrEvent: "Discipline / Event"');
+    expect(source).toContain('return "Position"');
     expect(source).toContain("if (isBasketball) return null;");
     expect(source).toContain('value: "POINT_GUARD"');
+    expect(source).toContain('field === "disciplineOrEvent"');
   });
 });

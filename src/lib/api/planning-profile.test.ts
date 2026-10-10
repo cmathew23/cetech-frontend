@@ -787,7 +787,7 @@ describe("Basketball APP sport contract", () => {
     draft.sportContext.primarySport = "BASKETBALL";
     draft.sportContext.disciplineOrEvent = "POINT_GUARD";
     draft.sportPerformance = {
-      highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+      highestCompetitionLevelReachedPast12Months: "STATE",
       highestRankingAchievedAtThatLevelPast12Months: "",
     };
     return draft;
@@ -804,7 +804,7 @@ describe("Basketball APP sport contract", () => {
         selfReportedLevel: "ADVANCED",
       },
       sportPerformance: {
-        highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+        highestCompetitionLevelReachedPast12Months: "STATE",
       },
     });
     expect(buildPlanningProfileCreateBody(draft).sportPerformance).not.toHaveProperty(
@@ -818,8 +818,43 @@ describe("Basketball APP sport contract", () => {
 
     expect(collectPlanningProfileValidationErrors(draft)).toEqual({});
     expect(buildPlanningProfileCreateBody(draft).sportPerformance).toEqual({
-      highestCompetitionLevelReachedPast12Months: "STATE_CHAMPIONSHIP",
+      highestCompetitionLevelReachedPast12Months: "STATE",
     });
+  });
+
+  it("requires point guard and keeps state as a valid competition level", () => {
+    const missingPosition = basketballDraft();
+    missingPosition.sportContext.disciplineOrEvent = "";
+    expect(
+      collectPlanningProfileValidationErrors(missingPosition)[
+        "sportContext.disciplineOrEvent"
+      ],
+    ).toBe("Position is required.");
+
+    const otherPosition = basketballDraft();
+    otherPosition.sportContext.disciplineOrEvent = "SHOOTING_GUARD";
+    expect(
+      collectPlanningProfileValidationErrors(otherPosition)[
+        "sportContext.disciplineOrEvent"
+      ],
+    ).toBe("Position must be Point Guard.");
+
+    const stateLevel = basketballDraft();
+    expect(collectPlanningProfileValidationErrors(stateLevel)).toEqual({});
+    expect(buildPlanningProfileCreateBody(stateLevel).sportPerformance).toEqual({
+      highestCompetitionLevelReachedPast12Months: "STATE",
+    });
+
+    const stateChampionship = basketballDraft();
+    stateChampionship.sportPerformance.highestCompetitionLevelReachedPast12Months =
+      "STATE_CHAMPIONSHIP";
+    expect(
+      collectPlanningProfileValidationErrors(stateChampionship)[
+        "sportPerformance.highestCompetitionLevelReachedPast12Months"
+      ],
+    ).toBe(
+      "Competition level must be District, State, National, or International.",
+    );
   });
 
   it("omits basketball ranking from a patch", () => {
@@ -845,6 +880,11 @@ describe("Basketball APP sport contract", () => {
         "sportPerformance.highestRankingAchievedAtThatLevelPast12Months"
       ],
     ).toBe("Highest Ranking is required.");
+    expect(
+      collectPlanningProfileValidationErrors(missingRanking)[
+        "sportContext.disciplineOrEvent"
+      ],
+    ).toBeUndefined();
 
     const stateChampionship = completedDraft();
     stateChampionship.sportContext.primarySport = "GOLF";

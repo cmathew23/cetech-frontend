@@ -1554,7 +1554,12 @@ describe("parseReadinessPayload", () => {
         weekStartDate: "2026-05-04",
         weekEndDate: "2026-05-10",
         domains: {
-          SKILLS: { status: "RELEASED", planId: "plan-s", versionId: "version-s" },
+          SKILLS: {
+            status: "RELEASED",
+            planId: "plan-s",
+            versionId: "version-s",
+            planGeneratorCoachProfileId: "coach-profile-1",
+          },
           NUTRITION: { status: "NOT_RELEASED", planId: null, versionId: null },
           S_AND_C: { status: "RELEASED", planId: "plan-c", versionId: "version-c" },
         },
@@ -1581,6 +1586,7 @@ describe("parseReadinessPayload", () => {
       },
     );
     expect(result.domains.SKILLS.status).toBe("RELEASED");
+    expect(result.domains.SKILLS.planGeneratorCoachProfileId).toBe("coach-profile-1");
     expect(result.days[0]).toMatchObject({
       date: "2026-05-04",
       dayNumber: 1,

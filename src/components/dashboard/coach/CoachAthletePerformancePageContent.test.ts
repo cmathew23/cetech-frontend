@@ -44,6 +44,18 @@ describe("CoachAthletePerformancePageContent Coach Practice Rating authority", (
     );
   });
 
+  it("opens the existing Basketball measurement form from a coach-entry deep link", () => {
+    expect(source).toContain("parseBasketballCoachEntrySearchParams");
+    expect(source).toContain("resolveBasketballCoachEntryExercise");
+    expect(source).toContain('sport: "BASKETBALL"');
+    expect(source).toContain("<LogSportResultModal");
+    expect(source).toContain("This athlete is not in your assigned roster.");
+    expect(source).not.toContain("postGolfSportMetricRecord");
+    expect(source).toContain(
+      "allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(",
+    );
+  });
+
   it("renders Average Weekly Session Load for Head Coach and S&C Coach", () => {
     expect(source).toContain("<SandCSessionLoadSection");
     expect(source).toContain("coachCanViewSandCSessionLoad");

@@ -192,6 +192,41 @@ export async function createOrFindChatConversation(
   return parseChatConversationSummary(data);
 }
 
+export async function sendChatTextMessage(
+  conversationId: string,
+  content: string,
+): Promise<ChatMessage> {
+  const resolvedConversationId = conversationId.trim();
+  const resolvedContent = content.trim();
+  if (resolvedConversationId === "" || resolvedContent === "") {
+    throw {
+      message: "Conversation and message content are required.",
+      status: 400,
+      code: "CHAT_MESSAGE_INVALID",
+    };
+  }
+  const raw = await apiRequest(paths.chat.conversationMessages(resolvedConversationId), {
+    method: "POST",
+    body: JSON.stringify({
+      messageType: "TEXT",
+      content: resolvedContent,
+    }),
+  });
+  const parsed = parseChatMessage(adaptBackendSuccess(raw));
+  if (!parsed) {
+    return {
+      id: "",
+      conversationId: resolvedConversationId,
+      senderUserId: "",
+      senderRoleSnapshot: "",
+      messageType: "TEXT",
+      content: resolvedContent,
+      createdAt: "",
+    };
+  }
+  return parsed;
+}
+
 export async function getChatMessages(
   conversationId: string,
 ): Promise<ChatMessage[]> {

@@ -179,6 +179,8 @@ export const paths = {
     },
     athleteSportMetricsGolfRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
+    athleteSportMetricsBasketballRecords: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/records`,
     athleteSportMetricsGolfCoachPracticeRatings: (
       entityId: string,
       athleteId: string,

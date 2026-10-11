@@ -17,8 +17,11 @@ import {
 import { CoachCompetitionPerformanceSection } from "@/components/dashboard/coach/CoachCompetitionPerformanceSection";
 import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
+import { LogSportResultModal } from "@/components/dashboard/athlete/LogSportResultModal";
+import type { SportMetricsDrillLogContext } from "@/components/dashboard/athlete/LogSportResultModal";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,7 +31,15 @@ import {
   type CoachAssignedAthleteRow,
   type CoachMeDashboardData,
 } from "@/lib/api/coachMe";
-import { fetchAthleteWeeklyPlanJournal } from "@/lib/api/coachAthletePlanningReadiness";
+import {
+  fetchAthleteWeeklyPlanJournal,
+  type AthleteWeeklyPlanJournal,
+} from "@/lib/api/coachAthletePlanningReadiness";
+import { fetchCoachAthletePlanningProfile } from "@/lib/api/coachAthletePlanningProfile";
+import {
+  parseBasketballCoachEntrySearchParams,
+  resolveBasketballCoachEntryExercise,
+} from "@/lib/basketball/coachEntryRequest";
 import {
   fetchWeeklyAdherenceSummary,
   type WeeklyAdherenceSummary,
@@ -59,15 +70,27 @@ function formatLoadError(e: unknown, fallback: string): string {
   return fallback;
 }
 
-export function CoachAthletePerformancePageContent() {
+export function CoachAthletePerformancePageContent({
+  basketballCoachEntrySearch = "",
+}: {
+  basketballCoachEntrySearch?: string;
+} = {}) {
   const { accessContext, accessGateReady } = useAuth();
   const entityId = accessContext?.academy.trainingEntityId?.trim() ?? "";
+  const coachEntryQuery = useMemo(
+    () => parseBasketballCoachEntrySearchParams(new URLSearchParams(basketballCoachEntrySearch)),
+    [basketballCoachEntrySearch],
+  );
 
   const [dashboard, setDashboard] = useState<CoachMeDashboardData | null>(null);
   const [athletes, setAthletes] = useState<CoachAssignedAthleteRow[]>([]);
   const [loadingRoster, setLoadingRoster] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
+  const [selectedAthleteSport, setSelectedAthleteSport] = useState<string | null>(null);
+  const [coachEntryNotice, setCoachEntryNotice] = useState<string | null>(null);
+  const [weeklyJournal, setWeeklyJournal] = useState<AthleteWeeklyPlanJournal | null>(null);
+  const [coachMeasurementOpen, setCoachMeasurementOpen] = useState(false);
 
   const [adherenceLoading, setAdherenceLoading] = useState(false);
   const [adherenceError, setAdherenceError] = useState<string | null>(null);
@@ -97,7 +120,24 @@ export function CoachAthletePerformancePageContent() {
         setDashboard(dash);
         const valid = rows.filter((r) => r.athleteId.trim() !== "");
         setAthletes(valid);
-        if (valid.length > 0) {
+        if (coachEntryQuery) {
+          const requestedAthleteId = coachEntryQuery.athleteId;
+          const assigned = valid.some((row) => row.athleteId === requestedAthleteId);
+          const entityMismatch =
+            coachEntryQuery.entityId !== "" &&
+            entityId !== "" &&
+            coachEntryQuery.entityId !== entityId;
+          if (!assigned) {
+            setSelectedAthleteId("");
+            setCoachEntryNotice("This athlete is not in your assigned roster.");
+          } else if (entityMismatch) {
+            setSelectedAthleteId("");
+            setCoachEntryNotice("This exercise belongs to a different academy.");
+          } else {
+            setSelectedAthleteId(requestedAthleteId);
+            setCoachEntryNotice(null);
+          }
+        } else if (valid.length > 0) {
           setSelectedAthleteId((current) => current || valid[0]!.athleteId);
         }
       } catch (e) {
@@ -112,12 +152,13 @@ export function CoachAthletePerformancePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [accessGateReady]);
+  }, [accessGateReady, coachEntryQuery, entityId]);
 
   useEffect(() => {
     setSummary(null);
     setWeekRange(null);
     setTrainingPlanVersionId(null);
+    setWeeklyJournal(null);
     setAdherenceError(null);
 
     if (entityId === "" || selectedAthleteId.trim() === "") return;
@@ -129,6 +170,7 @@ export function CoachAthletePerformancePageContent() {
       try {
         const journal = await fetchAthleteWeeklyPlanJournal(entityId, selectedAthleteId);
         if (cancelled) return;
+        setWeeklyJournal(journal);
 
         const range = resolveWeeklyAdherencePlanRangeFromJournal(journal);
         if (range === null) throw new Error("Could not resolve released plan week.");
@@ -151,6 +193,31 @@ export function CoachAthletePerformancePageContent() {
         }
       } finally {
         if (!cancelled) setAdherenceLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entityId, selectedAthleteId]);
+
+  useEffect(() => {
+    const athleteId = selectedAthleteId.trim();
+    if (entityId === "" || athleteId === "") {
+      setSelectedAthleteSport(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSelectedAthleteSport(null);
+
+    void (async () => {
+      try {
+        const profile = await fetchCoachAthletePlanningProfile(entityId, athleteId);
+        if (cancelled) return;
+        setSelectedAthleteSport(profile.sportCode?.trim().toUpperCase() ?? "");
+      } catch {
+        if (!cancelled) setSelectedAthleteSport("");
       }
     })();
 
@@ -186,6 +253,41 @@ export function CoachAthletePerformancePageContent() {
     functions: dashboard?.functions ?? null,
   });
 
+  const resolvedCoachEntry = useMemo(() => {
+    if (!coachEntryQuery || !weeklyJournal || coachEntryNotice) return null;
+    if (selectedAthleteId !== coachEntryQuery.athleteId) return null;
+    return resolveBasketballCoachEntryExercise(weeklyJournal, coachEntryQuery);
+  }, [coachEntryNotice, coachEntryQuery, selectedAthleteId, weeklyJournal]);
+
+  const coachEntryContext: SportMetricsDrillLogContext | null =
+    coachEntryQuery && resolvedCoachEntry?.ok
+      ? {
+          entityId,
+          athleteId: coachEntryQuery.athleteId,
+          trainingPlanVersionId: coachEntryQuery.trainingPlanVersionId,
+          plannedSessionId: resolvedCoachEntry.exercise.plannedSessionId,
+          dayDate: resolvedCoachEntry.exercise.dayDate || coachEntryQuery.date || "",
+          sessionTitle: resolvedCoachEntry.exercise.sessionTitle,
+          sectionKey: "skill",
+          sport: "BASKETBALL",
+          drill: resolvedCoachEntry.exercise.drill,
+          itemIndex: resolvedCoachEntry.exercise.itemIndex,
+        }
+      : null;
+
+  const coachEntryOpenKey = coachEntryContext
+    ? [
+        coachEntryContext.athleteId,
+        coachEntryContext.trainingPlanVersionId,
+        coachEntryContext.plannedSessionId,
+        coachEntryContext.itemIndex,
+      ].join(":")
+    : "";
+
+  useEffect(() => {
+    if (coachEntryOpenKey !== "") setCoachMeasurementOpen(true);
+  }, [coachEntryOpenKey]);
+
   return (
     <div className={cn(DASHBOARD_PAGE_CONTENT_CLASS, "space-y-6")}>
       <PageHeader
@@ -217,6 +319,9 @@ export function CoachAthletePerformancePageContent() {
             {athletes.length === 0 ? (
               <option value="">No athletes available</option>
             ) : null}
+            {selectedAthleteId === "" && athletes.length > 0 ? (
+              <option value="">Select an athlete</option>
+            ) : null}
             {athletes.map((athlete) => (
               <option key={athlete.athleteId} value={athlete.athleteId}>
                 {athlete.displayName}
@@ -230,6 +335,35 @@ export function CoachAthletePerformancePageContent() {
         ) : null}
         {rosterError ? <Alert variant="danger">{rosterError}</Alert> : null}
       </Card>
+
+      {coachEntryQuery ? (
+        <Card
+          accent={false}
+          padding="compact"
+          className={cn("space-y-3", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
+        >
+          <p className="text-sm font-medium text-textPrimary">Basketball measurement</p>
+          <p className="text-sm text-textSecondary">
+            {coachEntryQuery.label || coachEntryQuery.skillCode}
+          </p>
+          {coachEntryNotice ? <Alert variant="danger">{coachEntryNotice}</Alert> : null}
+          {resolvedCoachEntry && !resolvedCoachEntry.ok ? (
+            <Alert variant="danger">{resolvedCoachEntry.error}</Alert>
+          ) : null}
+          {!coachEntryNotice && !resolvedCoachEntry && (loadingRoster || adherenceLoading) ? (
+            <p className="text-sm text-textSecondary">Loading the released exercise…</p>
+          ) : null}
+          {coachEntryContext ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setCoachMeasurementOpen(true)}
+            >
+              Enter measurement
+            </Button>
+          ) : null}
+        </Card>
+      ) : null}
 
       {selectedAthleteId !== "" && !loadingRoster ? (
         <div className="space-y-4">
@@ -282,7 +416,10 @@ export function CoachAthletePerformancePageContent() {
             />
           ) : null}
 
-          {!adherenceLoading && showSportMetrics && selectedAthleteId !== "" ? (
+          {!adherenceLoading &&
+          showSportMetrics &&
+          selectedAthleteId !== "" &&
+          selectedAthleteSport === "GOLF" ? (
             <SkillsGolfHistoryComparisonProvider
               entityId={entityId}
               athleteId={selectedAthleteId}
@@ -350,10 +487,21 @@ export function CoachAthletePerformancePageContent() {
         </div>
       ) : null}
 
-      {!loadingRoster && !rosterError && athletes.length === 0 ? (
+      {!loadingRoster && !rosterError && athletes.length === 0 && !coachEntryQuery ? (
         <p className="text-sm text-textSecondary">
           No assigned athletes. Athletes will appear here once assigned to you.
         </p>
+      ) : null}
+
+      {coachEntryContext && weeklyJournal ? (
+        <LogSportResultModal
+          open={coachMeasurementOpen}
+          context={coachEntryContext}
+          weekStartDate={weeklyJournal.weekStartDate}
+          weekEndDate={weeklyJournal.weekEndDate}
+          onClose={() => setCoachMeasurementOpen(false)}
+          onSuccess={() => setCoachMeasurementOpen(false)}
+        />
       ) : null}
     </div>
   );

@@ -8,7 +8,10 @@ import {
   validateGolfRoundSportMetricForm,
   type GolfDrillV2FormValues,
 } from "@/lib/sportMetrics/buildGolfPrescribedContext";
-import { buildLoggedDrillSummary } from "@/components/dashboard/athlete/LogSportResultModal";
+import {
+  buildLoggedDrillSummary,
+  resolveLoggedResultSport,
+} from "@/components/dashboard/athlete/LogSportResultModal";
 
 function drillForm(overrides: Partial<GolfDrillV2FormValues> = {}): GolfDrillV2FormValues {
   return {
@@ -41,6 +44,35 @@ vi.mock("@/lib/api/sportMetricsGolf", async (importOriginal) => {
 });
 
 import { postGolfSportMetricRecord } from "@/lib/api/sportMetricsGolf";
+
+describe("logged result sport routing", () => {
+  it("keeps Golf on the Golf path and refuses an unresolved sport", () => {
+    expect(resolveLoggedResultSport("GOLF")).toBe("GOLF");
+    expect(resolveLoggedResultSport("BASKETBALL")).toBe("BASKETBALL");
+    expect(resolveLoggedResultSport(null)).toBeNull();
+    expect(resolveLoggedResultSport("")).toBeNull();
+    expect(resolveLoggedResultSport("FOOTBALL")).toBeNull();
+
+    const modalSource = readFileSync(
+      new URL("./LogSportResultModal.tsx", import.meta.url),
+      "utf8",
+    );
+    const basketballPost = modalSource.indexOf("await postBasketballSportMetricRecord(");
+    const unresolvedGuard = modalSource.indexOf('if (sport !== "GOLF")');
+    const golfPost = modalSource.indexOf("await postGolfSportMetricRecord(");
+    expect(basketballPost).toBeGreaterThan(-1);
+    expect(unresolvedGuard).toBeGreaterThan(basketballPost);
+    expect(golfPost).toBeGreaterThan(unresolvedGuard);
+    const basketballBranch = modalSource.slice(basketballPost, unresolvedGuard);
+    expect(basketballBranch).toContain('metricType: "DRILL_RESULT"');
+    expect(basketballBranch).not.toContain("postGolfSportMetricRecord");
+    expect(basketballBranch).not.toContain("buildGolfPrescribedContext");
+    expect(basketballBranch).not.toContain("validateGolfDrillV2Form");
+    expect(basketballBranch).not.toContain("validateGolfRoundSportMetricForm");
+    expect(modalSource).toContain("isBasketball ? null");
+    expect(modalSource).toContain("Where are you doing this?");
+  });
+});
 
 describe("LogSportResultModal regression guards", () => {
   it("does not import wearable period helpers", () => {

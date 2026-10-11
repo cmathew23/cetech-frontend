@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Alert } from "@/components/ui/Alert";
+import { postBasketballSportMetricRecord } from "@/lib/api/sportMetricsBasketball";
 import { postGolfSportMetricRecord } from "@/lib/api/sportMetricsGolf";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
@@ -45,9 +46,18 @@ export type SportMetricsDrillLogContext = {
   dayDate: string;
   sessionTitle: string;
   sectionKey: string;
+  sport: string | null;
   drill: Record<string, unknown>;
   itemIndex: number;
 };
+
+export function resolveLoggedResultSport(
+  sport: string | null | undefined,
+): "GOLF" | "BASKETBALL" | null {
+  const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
+  if (normalized === "GOLF" || normalized === "BASKETBALL") return normalized;
+  return null;
+}
 
 export type LoggedDrillResultSummary = {
   attempts: number | null;
@@ -321,6 +331,84 @@ export function LogSportResultModal({
   const handleSubmit = useCallback(async () => {
     if (!context || submitting) return;
 
+    const sport = resolveLoggedResultSport(context.sport);
+    if (sport === "BASKETBALL") {
+      const measurementEntryContract = readMeasurementEntryContract(context.drill);
+      if (hasMeasurementEntryContractPayload(context.drill) && !measurementEntryContract) {
+        setError(
+          "This exercise includes a measurement entry contract, but a required contract property is missing or invalid.",
+        );
+        return;
+      }
+      if (!measurementEntryContract) {
+        setError("This exercise does not include a measurement entry contract.");
+        return;
+      }
+
+      const valueResult = validateMeasurementEntryForm({
+        contract: measurementEntryContract,
+        entryMode,
+        attempts: attemptRows,
+        cumulative: cumulativeValues,
+        notes: drillForm.notes,
+      });
+      if (!valueResult.ok) {
+        setError(valueResult.error);
+        return;
+      }
+
+      const skillCode = pickStringFromDrill(context.drill, ["skillCode"]);
+      if (!skillCode) {
+        setError("This exercise is missing a skill code.");
+        return;
+      }
+      const goalId = pickStringFromDrill(context.drill, ["primaryGoalId", "goalId"]);
+      const notes = drillForm.notes.trim();
+      const rawOrder = context.drill.order;
+      const plannedSkillItemOrder =
+        typeof rawOrder === "number" && Number.isInteger(rawOrder) && rawOrder >= 1
+          ? rawOrder
+          : undefined;
+
+      setSubmitting(true);
+      setError(null);
+      try {
+        const response = await postBasketballSportMetricRecord(
+          context.entityId,
+          context.athleteId,
+          {
+            trainingPlanVersionId: context.trainingPlanVersionId,
+            plannedSessionId: context.plannedSessionId,
+            skillCode,
+            occurredAt,
+            metricType: "DRILL_RESULT",
+            entryMode,
+            valueJson: valueResult.valueJson,
+            ...(goalId ? { goalId } : {}),
+            ...(plannedSkillItemOrder !== undefined ? { plannedSkillItemOrder } : {}),
+            ...(notes ? { notes } : {}),
+          },
+        );
+        const summary = buildLoggedDrillSummary(valueResult.valueJson, response);
+        onSuccess(buildSportMetricsDrillKey(context), summary);
+        onClose();
+      } catch (submitError) {
+        setError(
+          isNormalizedApiError(submitError)
+            ? submitError.message
+            : "Could not log sport result. Please try again.",
+        );
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (sport !== "GOLF") {
+      setError("Sport result logging is not available for this sport.");
+      return;
+    }
+
     const enums = mapGolfSportMetricLogMode(mode);
     const measurementEntryContract = readMeasurementEntryContract(context.drill);
     const measurementContract = readDrillMeasurementContract(context.drill);
@@ -413,6 +501,7 @@ export function LogSportResultModal({
   if (!open || !context) return null;
 
   const drillTitle = drillLabelFromContext(context);
+  const isBasketball = resolveLoggedResultSport(context.sport) === "BASKETBALL";
   const measurementEntryContract = readMeasurementEntryContract(context.drill);
   const contractPayloadPresent = hasMeasurementEntryContractPayload(context.drill);
   const contractUnreadable = contractPayloadPresent && !measurementEntryContract;
@@ -452,6 +541,7 @@ export function LogSportResultModal({
             <DrillClassificationDisplay drill={context.drill} />
           </section>
 
+          {isBasketball ? null : (
           <fieldset className="space-y-2">
             <legend className="text-xs font-semibold text-textPrimary">
               Where are you doing this?
@@ -476,6 +566,7 @@ export function LogSportResultModal({
               </label>
             ))}
           </fieldset>
+          )}
 
           {measurementEntryContract ? (
             <div className="space-y-3">
@@ -584,6 +675,10 @@ export function LogSportResultModal({
               This exercise includes a measurement entry contract, but a required
               contract property is missing or invalid. Result fields cannot be
               shown until the contract is complete.
+            </Alert>
+          ) : isBasketball ? (
+            <Alert variant="danger">
+              This exercise does not include a measurement entry contract.
             </Alert>
           ) : isRound ? (
             <div className="space-y-3">

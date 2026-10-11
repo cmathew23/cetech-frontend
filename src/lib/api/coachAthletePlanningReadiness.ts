@@ -779,6 +779,7 @@ export type AthleteWeeklyPlanJournalDomainEntry = {
   status: WeeklyJournalDomainStatus;
   planId: string | null;
   versionId: string | null;
+  planGeneratorCoachProfileId?: string | null;
 };
 
 export type AthleteWeeklyPlanJournalDay = {
@@ -1938,6 +1939,7 @@ function parseWeeklyJournalDomainEntry(value: unknown): AthleteWeeklyPlanJournal
     status: normalizeWeeklyJournalDomainStatus(record.status),
     planId: readStringLike(record.planId),
     versionId: readStringLike(record.versionId),
+    planGeneratorCoachProfileId: readStringLike(record.planGeneratorCoachProfileId),
   };
 }
 

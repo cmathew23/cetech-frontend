@@ -40,6 +40,11 @@ import {
 import { refreshWeeklyAdherenceSummaryAfterAdherence } from "@/lib/api/weeklyAdherence";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
+  basketballCoachEntryRequestKey,
+  sendBasketballCoachEntryRequest,
+  type BasketballCoachEntryTarget,
+} from "@/lib/basketball/coachEntryRequest";
+import {
   formatDateOnly,
   formatDateRange,
   formatDateWithWeekday,
@@ -1142,6 +1147,8 @@ const STRUCTURE_ITEM_HIDDEN_DETAIL_KEYS = new Set([
   "itemOrder",
   "orderIndex",
   "index",
+  "athleteSelfEntryAllowed",
+  "externalObservationRequired",
 ]);
 
 export function collectStructureItemDetailRows(
@@ -1227,10 +1234,72 @@ type SkillsSportMetricsJournalOptions = {
   plannedSessionId: string;
   dayDate: string;
   sessionTitle: string;
+  sport: string | null;
+  planGeneratorCoachProfileId: string | null;
   loggedDrillKeys: Record<string, LoggedDrillResultSummary>;
+  coachEntryRequestByKey: Record<string, CoachEntryRequestState>;
   canLogSportResult: boolean;
   onOpenLog: (context: SportMetricsDrillLogContext) => void;
+  onRequestCoachEntry: (target: BasketballCoachEntryTarget) => void;
 };
+
+type CoachEntryRequestState = {
+  status: "sending" | "sent" | "error";
+  message?: string;
+};
+
+export function athleteCanOpenLogSportResult(
+  sport: string | null | undefined,
+  drill: Record<string, unknown>,
+): boolean {
+  const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
+  if (normalized === "GOLF") return true;
+  if (normalized !== "BASKETBALL") return false;
+  return (
+    drill.athleteSelfEntryAllowed === true &&
+    drill.externalObservationRequired === false
+  );
+}
+
+export function athleteNeedsCoachEntry(
+  sport: string | null | undefined,
+  drill: Record<string, unknown>,
+): boolean {
+  const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
+  if (normalized !== "BASKETBALL") return false;
+  return (
+    drill.externalObservationRequired === true ||
+    drill.athleteSelfEntryAllowed !== true
+  );
+}
+
+function readCoachEntryTarget(input: {
+  entityId: string;
+  athleteId: string;
+  trainingPlanVersionId: string;
+  plannedSessionId: string;
+  dayDate: string;
+  label: string;
+  drill: Record<string, unknown>;
+}): BasketballCoachEntryTarget {
+  const skillCode = typeof input.drill.skillCode === "string" ? input.drill.skillCode.trim() : "";
+  const primaryGoalId =
+    typeof input.drill.primaryGoalId === "string" ? input.drill.primaryGoalId.trim() : "";
+  const order = input.drill.order;
+  return {
+    entityId: input.entityId,
+    athleteId: input.athleteId,
+    trainingPlanVersionId: input.trainingPlanVersionId,
+    plannedSessionId: input.plannedSessionId,
+    skillCode,
+    ...(typeof order === "number" && Number.isInteger(order) && order >= 1
+      ? { plannedSkillItemOrder: order }
+      : {}),
+    ...(primaryGoalId !== "" ? { primaryGoalId } : {}),
+    label: input.label,
+    date: input.dayDate,
+  };
+}
 
 function LoggedDrillSummaryInline({ summary }: { summary: LoggedDrillResultSummary }) {
   const parts: string[] = [];
@@ -1281,6 +1350,45 @@ function LoggedDrillSummaryInline({ summary }: { summary: LoggedDrillResultSumma
         <p className="text-[11px] text-textSecondary">
           Misses: {missParts.join(" ")}
         </p>
+      ) : null}
+    </div>
+  );
+}
+
+function CoachEntryRequestAction({
+  target,
+  coachProfileId,
+  request,
+  onRequest,
+}: {
+  target: BasketballCoachEntryTarget;
+  coachProfileId: string | null;
+  request: CoachEntryRequestState | undefined;
+  onRequest: (target: BasketballCoachEntryTarget) => void;
+}) {
+  const missingCoach = coachProfileId === null || coachProfileId.trim() === "";
+  return (
+    <div className="mt-2 space-y-1">
+      {request?.status === "sent" ? (
+        <p className="text-xs font-medium text-emerald-700">Request sent</p>
+      ) : (
+        <Button
+          type="button"
+          variant="secondary"
+          className="text-xs"
+          disabled={missingCoach || request?.status === "sending"}
+          onClick={() => onRequest(target)}
+        >
+          {request?.status === "sending" ? "Sending…" : "Request Coach Entry"}
+        </Button>
+      )}
+      {missingCoach ? (
+        <p className="text-xs text-red-700">
+          The released Skills plan does not identify a coach for this request.
+        </p>
+      ) : null}
+      {request?.status === "error" && request.message ? (
+        <p className="text-xs text-red-700">{request.message}</p>
       ) : null}
     </div>
   );
@@ -1376,6 +1484,7 @@ function renderJournalStructureSections(
                           dayDate: skillsSportMetrics.dayDate,
                           sessionTitle: skillsSportMetrics.sessionTitle,
                           sectionKey: "skill",
+                          sport: skillsSportMetrics.sport,
                           drill: mergedSkillItem,
                           itemIndex,
                         }
@@ -1383,6 +1492,20 @@ function renderJournalStructureSections(
                   const drillKey = drillLogContext
                     ? buildSportMetricsDrillKey(drillLogContext)
                     : null;
+                  const coachEntryTarget =
+                    skillsSportMetrics &&
+                    athleteNeedsCoachEntry(skillsSportMetrics.sport, mergedSkillItem)
+                      ? readCoachEntryTarget({
+                          entityId: skillsSportMetrics.entityId,
+                          athleteId: skillsSportMetrics.athleteId,
+                          trainingPlanVersionId:
+                            skillsSportMetrics.trainingPlanVersionId,
+                          plannedSessionId: skillsSportMetrics.plannedSessionId,
+                          dayDate: skillsSportMetrics.dayDate,
+                          label: heading,
+                          drill: mergedSkillItem,
+                        })
+                      : null;
                   const drillSummary =
                     drillKey !== null
                       ? skillsSportMetrics?.loggedDrillKeys[drillKey] ?? null
@@ -1424,7 +1547,12 @@ function renderJournalStructureSections(
                       {sandCDomain ? (
                         <SandCExerciseDemonstrationVideos videos={mergedSkillItem.videos} />
                       ) : null}
-                      {drillLogContext && skillsSportMetrics ? (
+                      {drillLogContext &&
+                      skillsSportMetrics &&
+                      athleteCanOpenLogSportResult(
+                        skillsSportMetrics.sport,
+                        mergedSkillItem,
+                      ) ? (
                         <div className="mt-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <Button
@@ -1441,6 +1569,18 @@ function renderJournalStructureSections(
                             <LoggedDrillSummaryInline summary={drillSummary} />
                           ) : null}
                         </div>
+                      ) : null}
+                      {coachEntryTarget && skillsSportMetrics ? (
+                        <CoachEntryRequestAction
+                          target={coachEntryTarget}
+                          coachProfileId={skillsSportMetrics.planGeneratorCoachProfileId}
+                          request={
+                            skillsSportMetrics.coachEntryRequestByKey[
+                              basketballCoachEntryRequestKey(coachEntryTarget)
+                            ]
+                          }
+                          onRequest={skillsSportMetrics.onRequestCoachEntry}
+                        />
                       ) : null}
                     </div>
                   );
@@ -2860,12 +3000,16 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
+  const athleteSport = planningIds.ids?.sport ?? null;
   const [state, setState] = useState<ViewState>({ phase: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [sportLogContext, setSportLogContext] =
     useState<SportMetricsDrillLogContext | null>(null);
   const [loggedDrillKeys, setLoggedDrillKeys] = useState<Record<string, LoggedDrillResultSummary>>({});
+  const [coachEntryRequestByKey, setCoachEntryRequestByKey] = useState<
+    Record<string, CoachEntryRequestState>
+  >({});
 
   const retryLoadJournal = useCallback(() => {
     setState({ phase: "loading" });
@@ -2933,6 +3077,50 @@ export function AthleteWeeklyPlanJournalPageContent() {
   const resolvedJournalEntityId = journal?.entityId.trim() || entityId;
   const resolvedJournalAthleteId = journal?.athleteId.trim() || athleteId;
   const skillsTrainingPlanVersionId = journal?.domains.SKILLS.versionId?.trim() ?? "";
+  const planGeneratorCoachProfileId =
+    journal?.domains.SKILLS.planGeneratorCoachProfileId?.trim() || null;
+  const requestCoachEntry = useCallback((target: BasketballCoachEntryTarget) => {
+    const requestKey = basketballCoachEntryRequestKey(target);
+    if (planGeneratorCoachProfileId === null) {
+      setCoachEntryRequestByKey((current) => ({
+        ...current,
+        [requestKey]: {
+          status: "error",
+          message: "The released Skills plan does not identify a coach for this request.",
+        },
+      }));
+      return;
+    }
+    setCoachEntryRequestByKey((current) => ({
+      ...current,
+      [requestKey]: { status: "sending" },
+    }));
+    void (async () => {
+      try {
+        await sendBasketballCoachEntryRequest({
+          coachProfileId: planGeneratorCoachProfileId,
+          origin: window.location.origin,
+          target,
+        });
+        setCoachEntryRequestByKey((current) => ({
+          ...current,
+          [requestKey]: { status: "sent" },
+        }));
+      } catch (error) {
+        setCoachEntryRequestByKey((current) => ({
+          ...current,
+          [requestKey]: {
+            status: "error",
+            message: isNormalizedApiError(error)
+              ? error.message
+              : error instanceof Error && error.message.trim() !== ""
+                ? error.message
+                : "Could not send the coach entry request.",
+          },
+        }));
+      }
+    })();
+  }, [planGeneratorCoachProfileId]);
   const skillsSportMetricsBase =
     journal &&
     skillsTrainingPlanVersionId !== "" &&
@@ -2941,8 +3129,12 @@ export function AthleteWeeklyPlanJournalPageContent() {
           entityId: resolvedJournalEntityId,
           athleteId: resolvedJournalAthleteId,
           trainingPlanVersionId: skillsTrainingPlanVersionId,
+          sport: athleteSport,
+          planGeneratorCoachProfileId,
           loggedDrillKeys,
+          coachEntryRequestByKey,
           onOpenLog: setSportLogContext,
+          onRequestCoachEntry: requestCoachEntry,
         }
       : undefined;
 

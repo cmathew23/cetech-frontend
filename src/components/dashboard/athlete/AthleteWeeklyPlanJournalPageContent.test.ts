@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ADHERENCE_TIMEOUT_NOTICE_MESSAGE,
   ADHERENCE_TIMEOUT_NOTICE_TITLE,
+  athleteCanOpenLogSportResult,
+  athleteNeedsCoachEntry,
   buildNutritionWeeklySummaryRows,
   canLogSportResultForDayDate,
   collectDetailRows,
@@ -53,6 +55,71 @@ describe("Log Sport Result planning-date guard", () => {
     expect(modalSource).toContain('"ACTUAL_ROUND"');
     expect(modalSource).toContain("On Golf Course");
     expect(modalSource).not.toContain("canLogSportResult");
+  });
+
+  it("opens Log Sport Result only for Golf and athlete-enterable Basketball", () => {
+    const selfEntry = {
+      athleteSelfEntryAllowed: true,
+      externalObservationRequired: false,
+    };
+    const supervisory = {
+      athleteSelfEntryAllowed: false,
+      externalObservationRequired: true,
+    };
+
+    expect(athleteCanOpenLogSportResult("GOLF", {})).toBe(true);
+    expect(athleteCanOpenLogSportResult("BASKETBALL", selfEntry)).toBe(true);
+    expect(athleteCanOpenLogSportResult("BASKETBALL", supervisory)).toBe(false);
+    expect(athleteCanOpenLogSportResult("BASKETBALL", {})).toBe(false);
+    expect(athleteCanOpenLogSportResult(null, selfEntry)).toBe(false);
+    expect(athleteCanOpenLogSportResult("", selfEntry)).toBe(false);
+    expect(athleteCanOpenLogSportResult("FOOTBALL", selfEntry)).toBe(false);
+
+    const journalSource = readFileSync(
+      fileURLToPath(
+        new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(journalSource).toContain("planningIds.ids?.sport");
+    expect(journalSource).toContain("athleteCanOpenLogSportResult(");
+    expect(journalSource).toContain("onOpenLog(drillLogContext)");
+    const gateIndex = journalSource.indexOf("athleteCanOpenLogSportResult(");
+    const openIndex = journalSource.indexOf("onOpenLog(drillLogContext)");
+    expect(gateIndex).toBeGreaterThan(-1);
+    expect(openIndex).toBeGreaterThan(gateIndex);
+  });
+
+  it("requests coach entry only for Basketball exercises that need observation", () => {
+    const selfEntry = {
+      athleteSelfEntryAllowed: true,
+      externalObservationRequired: false,
+    };
+    const supervisory = {
+      athleteSelfEntryAllowed: false,
+      externalObservationRequired: true,
+    };
+
+    expect(athleteNeedsCoachEntry("BASKETBALL", supervisory)).toBe(true);
+    expect(athleteNeedsCoachEntry("BASKETBALL", { athleteSelfEntryAllowed: false })).toBe(true);
+    expect(athleteNeedsCoachEntry("BASKETBALL", selfEntry)).toBe(false);
+    expect(athleteNeedsCoachEntry("GOLF", supervisory)).toBe(false);
+    expect(athleteNeedsCoachEntry(null, supervisory)).toBe(false);
+    expect(athleteNeedsCoachEntry("", supervisory)).toBe(false);
+    expect(athleteNeedsCoachEntry("FOOTBALL", supervisory)).toBe(false);
+
+    const journalSource = readFileSync(
+      fileURLToPath(
+        new URL("./AthleteWeeklyPlanJournalPageContent.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(journalSource).toContain("Request Coach Entry");
+    expect(journalSource).toContain("planGeneratorCoachProfileId");
+    expect(journalSource).toContain("sendBasketballCoachEntryRequest");
+    expect(journalSource).not.toContain("getAthleteChatCoaches");
+    expect(journalSource).not.toContain("WF1");
+    expect(journalSource).not.toContain("WF2A");
   });
 
   it("disables the journal Log Sport Result button for future plan days", () => {

@@ -21120,7 +21120,7 @@ export function CoachAthletePlanningProfileView({
           >
             {headCoachReviewMode
               ? "Lock & Share Context with Coaches"
-              : "Lock Planning Context"}
+              : "Lock & Share Planning Context"}
           </Button>
         ) : (
           <div className="text-sm font-medium text-green-700">

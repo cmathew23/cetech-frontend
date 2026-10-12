@@ -181,6 +181,36 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
     athleteSportMetricsBasketballRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/records`,
+    athleteSportMetricsBasketballWeeklySummary: (
+      entityId: string,
+      athleteId: string,
+      query: { trainingPlanVersionId: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/weekly-summary`;
+      const params = new URLSearchParams();
+      params.set("trainingPlanVersionId", query.trainingPlanVersionId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsBasketballCompetitionAssessments: (
+      entityId: string,
+      athleteId: string,
+      query?: { seasonCycleId?: string },
+    ) => {
+      const base =
+        `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/competition-assessments`;
+      const seasonCycleId = query?.seasonCycleId?.trim() ?? "";
+      if (seasonCycleId === "") return base;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsBasketballCompetitionAssessmentSubmit: (
+      entityId: string,
+      athleteId: string,
+      assessmentId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/competition-assessments/${encodeURIComponent(assessmentId)}/submit`,
     athleteSportMetricsGolfCoachPracticeRatings: (
       entityId: string,
       athleteId: string,

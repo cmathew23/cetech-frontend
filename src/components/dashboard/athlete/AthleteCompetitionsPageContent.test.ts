@@ -47,6 +47,9 @@ describe("athlete Competitions page list", () => {
     expect(content).not.toContain("<AthleteCompetitionPerformanceSection");
     expect(content).toContain("No competitions recorded for this season.");
     expect(content).toContain("+ Add Competition");
+    expect(content).toContain('planningIds.ids?.sport === "BASKETBALL"');
+    expect(content).toContain("isBasketballAthlete ||");
+    expect(content).toContain("{!isBasketballAthlete && showWorkflow ? (");
   });
 
   it("renders DRAFT and SUBMITTED cards from backend list fields only", () => {

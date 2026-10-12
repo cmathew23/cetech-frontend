@@ -1,5 +1,6 @@
 "use client";
 
+import { BasketballWeeklyPerformanceSection } from "@/components/dashboard/athlete/BasketballWeeklyPerformanceSection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
@@ -14,6 +15,7 @@ import {
   SandCSessionLoadSection,
   coachCanViewSandCSessionLoad,
 } from "@/components/dashboard/SandCSessionLoadSection";
+import { CoachBasketballCompetitionSection } from "@/components/dashboard/coach/CoachBasketballCompetitionSection";
 import { CoachCompetitionPerformanceSection } from "@/components/dashboard/coach/CoachCompetitionPerformanceSection";
 import { CoachWeeklyAdherenceComparison } from "@/components/dashboard/coach/CoachWeeklyAdherenceComparison";
 import { resolveCoachWearableViewerContext } from "@/components/dashboard/coach/CoachWeeklyAdherenceOverview";
@@ -98,6 +100,8 @@ export function CoachAthletePerformancePageContent({
   const [weekRange, setWeekRange] = useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
   const [golfWeeklySummaryRefreshKey, setGolfWeeklySummaryRefreshKey] = useState(0);
+  const [basketballWeeklySummaryRefreshKey, setBasketballWeeklySummaryRefreshKey] =
+    useState(0);
 
   const wearableViewerContext = resolveCoachWearableViewerContext({
     academyCoachRole: dashboard?.academyCoachRole ?? null,
@@ -461,6 +465,29 @@ export function CoachAthletePerformancePageContent({
             </SkillsGolfHistoryComparisonProvider>
           ) : null}
 
+          {!adherenceLoading &&
+          showSportMetrics &&
+          selectedAthleteId !== "" &&
+          selectedAthleteSport === "BASKETBALL" ? (
+            <>
+              <BasketballWeeklyPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                refreshKey={basketballWeeklySummaryRefreshKey}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+              />
+              <CoachBasketballCompetitionSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                onSubmitted={() => {
+                  setBasketballWeeklySummaryRefreshKey((current) => current + 1);
+                }}
+              />
+            </>
+          ) : null}
+
           {showNutritionPerformance && weekRange ? (
             <NutritionPerformanceSection
               entityId={entityId}
@@ -500,7 +527,10 @@ export function CoachAthletePerformancePageContent({
           weekStartDate={weeklyJournal.weekStartDate}
           weekEndDate={weeklyJournal.weekEndDate}
           onClose={() => setCoachMeasurementOpen(false)}
-          onSuccess={() => setCoachMeasurementOpen(false)}
+          onSuccess={() => {
+            setCoachMeasurementOpen(false);
+            setBasketballWeeklySummaryRefreshKey((current) => current + 1);
+          }}
         />
       ) : null}
     </div>

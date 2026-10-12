@@ -12,6 +12,7 @@ import { AthletePendingInvitationCard } from "@/components/dashboard/athlete/Ath
 import { AthleteTodayPlanCard } from "@/components/dashboard/athlete/AthleteTodayPlanCard";
 import { AthleteCompetitionPerformanceSection } from "@/components/dashboard/athlete/AthleteCompetitionPerformanceSection";
 import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import { BasketballWeeklyPerformanceSection } from "@/components/dashboard/athlete/BasketballWeeklyPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import {
   SkillsGolfHistoryComparisonProvider,
@@ -151,6 +152,23 @@ function AthleteSportMetricsWithPlanVersion({
   );
 }
 
+function AthleteBasketballWeeklyPerformance({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  return (
+    <BasketballWeeklyPerformanceSection
+      entityId={entityId}
+      athleteId={athleteId}
+      trainingPlanVersionId={trainingPlanVersionId}
+    />
+  );
+}
+
 export function AthleteDashboardShell() {
   const router = useRouter();
   const {
@@ -208,7 +226,10 @@ export function AthleteDashboardShell() {
               athleteId={athleteId}
             />
           ) : athleteSport === "BASKETBALL" ? (
-            <p className="text-sm text-textSecondary">Basketball</p>
+            <AthleteBasketballWeeklyPerformance
+              entityId={entityId}
+              athleteId={athleteId}
+            />
           ) : null}
 
           <AthleteNutritionPerformanceWithPlanWindow

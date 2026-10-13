@@ -391,7 +391,12 @@ describe("AthleteWeeklyGoalPerformanceSection", () => {
     expect(uncommentedMount).toEqual([]);
     expect(shell).toContain("//   <SportMetricsSection");
     expect(shell).toContain("<AthleteWeeklyGoalPerformanceSection");
-    expect(shell).not.toContain("allowCoachPracticeRating");
+    expect(shell).toContain("allowCoachPracticeRating={false}");
+    const golfAthlete = shell.slice(
+      shell.indexOf("function AthleteSportMetricsWithPlanVersion"),
+      shell.indexOf("function AthleteBasketballWeeklyPerformance"),
+    );
+    expect(golfAthlete).not.toContain("allowCoachPracticeRating");
   });
 
   it("requests weekly-summary only when a released Skills versionId is supplied", () => {

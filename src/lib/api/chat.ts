@@ -227,19 +227,31 @@ export async function sendChatTextMessage(
   return parsed;
 }
 
+export type ChatMessageHistory = {
+  coachName: string;
+  messages: ChatMessage[];
+};
+
+export function parseChatMessageHistory(data: unknown): ChatMessageHistory {
+  const record = asRecord(data);
+  return {
+    coachName: record ? readString(record, ["coachName", "coachDisplayName"]) : "",
+    messages: readList(data).reduce<ChatMessage[]>((acc, item) => {
+      const parsed = parseChatMessage(item);
+      if (parsed) acc.push(parsed);
+      return acc;
+    }, []),
+  };
+}
+
 export async function getChatMessages(
   conversationId: string,
-): Promise<ChatMessage[]> {
+): Promise<ChatMessageHistory> {
   const raw = await apiRequest(paths.chat.conversationMessages(conversationId), {
     method: "GET",
     cache: "no-store",
   });
-  const data = adaptBackendSuccess(raw);
-  return readList(data).reduce<ChatMessage[]>((acc, item) => {
-    const parsed = parseChatMessage(item);
-    if (parsed) acc.push(parsed);
-    return acc;
-  }, []);
+  return parseChatMessageHistory(adaptBackendSuccess(raw));
 }
 
 function readNonNegInt(value: unknown): number {

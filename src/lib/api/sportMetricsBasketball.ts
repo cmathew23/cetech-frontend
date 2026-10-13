@@ -212,6 +212,15 @@ export type BasketballCompetitionTaxonomyScore = {
   taxonomyCompetitionScore: number | null;
 };
 
+export type BasketballCoachPracticeRating = {
+  taxonomyAreaKey: string | null;
+  rating: number | null;
+  coachRatingNormalized: number | null;
+  coachRatingScoreOutOf100: number | null;
+  planStartDate: string | null;
+  planEndDate: string | null;
+};
+
 export type BasketballWeeklySummary = {
   sport: string | null;
   trainingPlanId: string | null;
@@ -224,11 +233,27 @@ export type BasketballWeeklySummary = {
   goalEvidence: BasketballGoalEvidence[];
   exerciseTrends: BasketballExercisePerformance[];
   taxonomyScores: BasketballTaxonomyScore[];
+  coachPracticeRatings: BasketballCoachPracticeRating[];
   practiceNormalizedScore: number | null;
   practiceScoreOutOf100: number | null;
+  coachPracticeNormalized: number | null;
+  coachPracticeScoreOutOf100: number | null;
+  practiceSideNormalized: number | null;
+  practiceSideScoreOutOf100: number | null;
   competitionPerformance: number | null;
   competitionTaxonomyScores: BasketballCompetitionTaxonomyScore[];
   overallPerformance: number | null;
+};
+
+export type BasketballWeeklyHistoryItem = {
+  id: string | null;
+  athleteId: string | null;
+  weekStart: string | null;
+  weekEnd: string | null;
+  trainingPlanId: string | null;
+  trainingPlanVersionId: string | null;
+  seasonCycleId: string | null;
+  performance: BasketballWeeklySummary | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -245,6 +270,16 @@ function readNullableString(value: unknown): string | null {
 function readNullableFiniteNumber(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function readReturnedNumber(value: unknown): number | null {
+  const numeric = readNullableFiniteNumber(value);
+  if (numeric !== null) return numeric;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readNullableBoolean(value: unknown): boolean | null {
@@ -348,6 +383,21 @@ function parseTaxonomyScore(value: unknown): BasketballTaxonomyScore | null {
   };
 }
 
+function parseCoachPracticeRating(
+  value: unknown,
+): BasketballCoachPracticeRating | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    taxonomyAreaKey: readNullableString(record.taxonomyAreaKey),
+    rating: readNullableFiniteNumber(record.rating),
+    coachRatingNormalized: readNullableFiniteNumber(record.coachRatingNormalized),
+    coachRatingScoreOutOf100: readNullableFiniteNumber(record.coachRatingScoreOutOf100),
+    planStartDate: readNullableString(record.planStartDate),
+    planEndDate: readNullableString(record.planEndDate),
+  };
+}
+
 function parseCompetitionTaxonomyScore(
   value: unknown,
 ): BasketballCompetitionTaxonomyScore | null {
@@ -389,8 +439,13 @@ export function parseSportMetricsBasketballWeeklySummaryPayload(
     goalEvidence: mapRecords(record.goalEvidence, parseGoalEvidence),
     exerciseTrends: mapRecords(record.exerciseTrends, parseExercisePerformance),
     taxonomyScores: mapRecords(record.taxonomyScores, parseTaxonomyScore),
+    coachPracticeRatings: mapRecords(record.coachPracticeRatings, parseCoachPracticeRating),
     practiceNormalizedScore: readNullableFiniteNumber(record.practiceNormalizedScore),
     practiceScoreOutOf100: readNullableFiniteNumber(record.practiceScoreOutOf100),
+    coachPracticeNormalized: readNullableFiniteNumber(record.coachPracticeNormalized),
+    coachPracticeScoreOutOf100: readNullableFiniteNumber(record.coachPracticeScoreOutOf100),
+    practiceSideNormalized: readNullableFiniteNumber(record.practiceSideNormalized),
+    practiceSideScoreOutOf100: readNullableFiniteNumber(record.practiceSideScoreOutOf100),
     competitionPerformance: readNullableFiniteNumber(record.competitionPerformance),
     competitionTaxonomyScores: mapRecords(
       record.competitionTaxonomyScores,
@@ -431,6 +486,131 @@ export async function fetchSportMetricsBasketballWeeklySummary(params: {
   return parseSportMetricsBasketballWeeklySummaryPayload(raw);
 }
 
+function parseHistoryList(payload: unknown): unknown[] {
+  const adapted = adaptBackendSuccess(payload);
+  return Array.isArray(adapted) ? adapted : [];
+}
+
+export function parseSportMetricsBasketballWeeklySummaryHistoryPayload(
+  payload: unknown,
+): BasketballWeeklyHistoryItem[] {
+  return parseHistoryList(payload).flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const performanceRecord = asRecord(record.performance);
+    return [
+      {
+        id: readNullableString(record.id),
+        athleteId: readNullableString(record.athleteId),
+        weekStart: readNullableString(record.weekStart),
+        weekEnd: readNullableString(record.weekEnd),
+        trainingPlanId: readNullableString(record.trainingPlanId),
+        trainingPlanVersionId: readNullableString(record.trainingPlanVersionId),
+        seasonCycleId: readNullableString(record.seasonCycleId),
+        performance: performanceRecord
+          ? parseSportMetricsBasketballWeeklySummaryPayload({
+              ...performanceRecord,
+              trainingPlanId: record.trainingPlanId,
+              trainingPlanVersionId: record.trainingPlanVersionId,
+              seasonCycleId: record.seasonCycleId,
+              weekStartDate: record.weekStart,
+              weekEndDate: record.weekEnd,
+            })
+          : null,
+      },
+    ];
+  });
+}
+
+export async function fetchSportMetricsBasketballWeeklySummaryHistory(params: {
+  entityId: string;
+  athleteId: string;
+}): Promise<BasketballWeeklyHistoryItem[]> {
+  const entityId = params.entityId.trim();
+  const athleteId = params.athleteId.trim();
+  if (entityId === "" || athleteId === "") {
+    throw {
+      message: "Entity and athlete identifiers are required.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_IDS_REQUIRED",
+    };
+  }
+
+  const raw = await apiRequest(
+    paths.entities.athleteSportMetricsBasketballWeeklySummaryHistory(
+      entityId,
+      athleteId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: SPORT_METRICS_BASKETBALL_TIMEOUT_MS,
+    },
+  );
+  return parseSportMetricsBasketballWeeklySummaryHistoryPayload(raw);
+}
+
+export type PostBasketballCoachPracticeRatingPayload = {
+  trainingPlanVersionId: string;
+  taxonomyAreaKey: string;
+  rating: number;
+};
+
+export function buildBasketballCoachPracticeRatingRequestBody(
+  payload: PostBasketballCoachPracticeRatingPayload,
+): PostBasketballCoachPracticeRatingPayload {
+  const trainingPlanVersionId = payload.trainingPlanVersionId.trim();
+  const taxonomyAreaKey = payload.taxonomyAreaKey.trim();
+  const rating = payload.rating;
+
+  if (trainingPlanVersionId === "" || taxonomyAreaKey === "") {
+    throw {
+      message: "Training plan version and taxonomyAreaKey are required.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_COACH_PRACTICE_RATING_INVALID",
+    };
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw {
+      message: "rating must be an integer from 1 to 5.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_COACH_PRACTICE_RATING_INVALID",
+    };
+  }
+
+  return { trainingPlanVersionId, taxonomyAreaKey, rating };
+}
+
+export async function postBasketballCoachPracticeRating(
+  entityId: string,
+  athleteId: string,
+  payload: PostBasketballCoachPracticeRatingPayload,
+): Promise<unknown> {
+  const resolvedEntityId = entityId.trim();
+  const resolvedAthleteId = athleteId.trim();
+  if (resolvedEntityId === "" || resolvedAthleteId === "") {
+    throw {
+      message: "Entity and athlete identifiers are required.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_IDS_REQUIRED",
+    };
+  }
+
+  const requestBody = buildBasketballCoachPracticeRatingRequestBody(payload);
+  return apiRequest(
+    paths.entities.athleteSportMetricsBasketballCoachPracticeRatings(
+      resolvedEntityId,
+      resolvedAthleteId,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+      timeoutMs: SPORT_METRICS_BASKETBALL_TIMEOUT_MS,
+    },
+  );
+}
+
 export type BasketballCompetitionAssessment = {
   id: string;
   competitionName: string;
@@ -455,9 +635,10 @@ function parseFiniteScoreMap(value: unknown): Record<string, number> | null {
   if (!record) return null;
   const scores: Record<string, number> = {};
   for (const [key, score] of Object.entries(record)) {
-    const parsed = readNullableFiniteNumber(score);
+    const parsed = readReturnedNumber(score);
     if (parsed !== null) scores[key] = parsed;
   }
+  if (Object.keys(scores).length === 0) return null;
   return scores;
 }
 
@@ -475,7 +656,7 @@ function parseBasketballCompetitionAssessment(
     seasonCycleId: readNullableString(record.seasonCycleId),
     taxonomyRatings: parseFiniteScoreMap(record.taxonomyRatings) ?? {},
     normalizedTaxonomyScores: parseFiniteScoreMap(record.normalizedTaxonomyScores),
-    competitionPerformance: readNullableFiniteNumber(record.competitionPerformance),
+    competitionPerformance: readReturnedNumber(record.competitionPerformance),
     submittedAt: readNullableString(record.submittedAt),
   };
 }
@@ -599,6 +780,36 @@ export async function fetchBasketballCompetitionAssessments(params: {
   return parseBasketballCompetitionAssessmentListPayload(raw);
 }
 
+export async function fetchBasketballCompetitionAssessment(params: {
+  entityId: string;
+  athleteId: string;
+  assessmentId: string;
+}): Promise<BasketballCompetitionAssessment> {
+  const scope = requireBasketballScope(params.entityId, params.athleteId);
+  const assessmentId = params.assessmentId.trim();
+  if (assessmentId === "") {
+    throw {
+      message: "Assessment id is required.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_IDS_REQUIRED",
+    };
+  }
+
+  const raw = await apiRequest(
+    paths.entities.athleteSportMetricsBasketballCompetitionAssessment(
+      scope.entityId,
+      scope.athleteId,
+      assessmentId,
+    ),
+    {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: SPORT_METRICS_BASKETBALL_TIMEOUT_MS,
+    },
+  );
+  return parseBasketballCompetitionAssessmentPayload(raw);
+}
+
 export async function createBasketballCompetitionAssessment(
   entityId: string,
   athleteId: string,
@@ -617,6 +828,46 @@ export async function createBasketballCompetitionAssessment(
     },
   );
   return parseBasketballCompetitionAssessmentPayload(raw);
+}
+
+export async function updateBasketballCompetitionAssessment(params: {
+  entityId: string;
+  athleteId: string;
+  assessmentId: string;
+  payload: {
+    competitionName?: string;
+    competitionDate?: string;
+    taxonomyRatings?: Record<string, number>;
+    notes?: string | null;
+  };
+}): Promise<BasketballCompetitionAssessment> {
+  const scope = requireBasketballScope(params.entityId, params.athleteId);
+  const assessmentId = params.assessmentId.trim();
+  if (assessmentId === "") {
+    throw {
+      message: "Assessment id is required.",
+      status: 400,
+      code: "SPORT_METRICS_BASKETBALL_IDS_REQUIRED",
+    };
+  }
+
+  await apiRequest(
+    paths.entities.athleteSportMetricsBasketballCompetitionAssessment(
+      scope.entityId,
+      scope.athleteId,
+      assessmentId,
+    ),
+    {
+      method: "PATCH",
+      body: JSON.stringify(params.payload),
+      timeoutMs: SPORT_METRICS_BASKETBALL_TIMEOUT_MS,
+    },
+  );
+  return fetchBasketballCompetitionAssessment({
+    entityId: scope.entityId,
+    athleteId: scope.athleteId,
+    assessmentId,
+  });
 }
 
 export async function submitBasketballCompetitionAssessment(params: {

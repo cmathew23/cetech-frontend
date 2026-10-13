@@ -1,7 +1,10 @@
 "use client";
 
 import { BasketballWeeklyPerformanceSection } from "@/components/dashboard/athlete/BasketballWeeklyPerformanceSection";
-import { AthleteWeeklyGoalPerformanceSection } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
+import {
+  AthleteWeeklyGoalPerformanceSection,
+  loadBasketballPracticeHistoryWeeks,
+} from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
 import { WearableSummarySection } from "@/components/dashboard/WearableSummarySection";
@@ -469,13 +472,30 @@ export function CoachAthletePerformancePageContent({
           showSportMetrics &&
           selectedAthleteId !== "" &&
           selectedAthleteSport === "BASKETBALL" ? (
-            <>
+            <SkillsGolfHistoryComparisonProvider
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+              loadHistory={loadBasketballPracticeHistoryWeeks}
+            >
+              <SkillsGolfHistoryWeekSelector />
+              <AthleteWeeklyGoalPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                audience="coach"
+                sportCode="BASKETBALL"
+                refreshKey={basketballWeeklySummaryRefreshKey}
+                allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(
+                  selectedAthlete,
+                )}
+              />
               <BasketballWeeklyPerformanceSection
                 entityId={entityId}
                 athleteId={selectedAthleteId}
                 trainingPlanVersionId={trainingPlanVersionId}
                 refreshKey={basketballWeeklySummaryRefreshKey}
                 titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                sections="overall"
               />
               <CoachBasketballCompetitionSection
                 entityId={entityId}
@@ -485,7 +505,7 @@ export function CoachAthletePerformancePageContent({
                   setBasketballWeeklySummaryRefreshKey((current) => current + 1);
                 }}
               />
-            </>
+            </SkillsGolfHistoryComparisonProvider>
           ) : null}
 
           {showNutritionPerformance && weekRange ? (

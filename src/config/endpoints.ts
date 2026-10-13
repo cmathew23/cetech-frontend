@@ -192,6 +192,16 @@ export const paths = {
       params.set("trainingPlanVersionId", query.trainingPlanVersionId);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsBasketballWeeklySummaryHistory: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/weekly-summary/history`,
+    athleteSportMetricsBasketballCoachPracticeRatings: (
+      entityId: string,
+      athleteId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/coach-practice-ratings`,
     athleteSportMetricsBasketballCompetitionAssessments: (
       entityId: string,
       athleteId: string,
@@ -205,6 +215,12 @@ export const paths = {
       params.set("seasonCycleId", seasonCycleId);
       return `${base}?${params.toString()}`;
     },
+    athleteSportMetricsBasketballCompetitionAssessment: (
+      entityId: string,
+      athleteId: string,
+      assessmentId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/competition-assessments/${encodeURIComponent(assessmentId)}`,
     athleteSportMetricsBasketballCompetitionAssessmentSubmit: (
       entityId: string,
       athleteId: string,

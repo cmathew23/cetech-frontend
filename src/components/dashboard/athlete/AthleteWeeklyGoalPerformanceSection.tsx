@@ -38,10 +38,148 @@ import {
   type SportMetricTaxonomyScore,
   type SportMetricsGolfWeeklySummary,
 } from "@/lib/api/sportMetricsGolf";
+import {
+  fetchSportMetricsBasketballWeeklySummary,
+  fetchSportMetricsBasketballWeeklySummaryHistory,
+  postBasketballCoachPracticeRating,
+  type BasketballWeeklyHistoryItem,
+  type BasketballWeeklySummary,
+} from "@/lib/api/sportMetricsBasketball";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
+
+function basketballSummaryAsPracticeView(
+  summary: BasketballWeeklySummary,
+): SportMetricsGolfWeeklySummary {
+  return {
+    sport: summary.sport ?? "BASKETBALL",
+    weekStartDate: summary.weekStartDate ?? "",
+    weekEndDate: summary.weekEndDate ?? "",
+    status: summary.visibility ?? "",
+    trainingPlanVersionId: summary.trainingPlanVersionId,
+    seasonCycleId: summary.seasonCycleId,
+    seasonYear: summary.seasonYear,
+    contextFields: [],
+    prescribedSkillsCount: null,
+    goalEvidence: summary.goalEvidence.map((group) => {
+      const actual = group.weeklyActual;
+      const comparison = group.targetComparison;
+      return {
+        goalId: group.goalId,
+        goalTitle: group.goal.goalName?.trim() || "Weekly Goal",
+        goalStatus: group.status,
+        successCriteria: null,
+        evidenceStatus: group.status,
+        evidence: [],
+        goal: {
+          goalName: group.goal.goalName,
+          successCriteria: null,
+          targetValue: group.goal.targetValue,
+          primaryMetric: group.goal.primaryMetric,
+          taxonomyAreaKey: group.goal.taxonomyAreaKey,
+        },
+        weeklyActual:
+          actual && typeof actual.value === "number"
+            ? {
+                metricKey: actual.metricKey,
+                unit: actual.unit,
+                direction: actual.direction,
+                value: actual.value,
+                attempts: actual.attempts,
+                successes: actual.successes,
+                total: actual.total,
+                recordCount: actual.recordCount,
+              }
+            : null,
+        targetComparison:
+          comparison && typeof comparison.targetMet === "boolean"
+            ? {
+                targetValue: comparison.targetValue,
+                actualValue: comparison.actualValue,
+                direction: comparison.direction,
+                targetMet: comparison.targetMet,
+              }
+            : null,
+        history: [],
+        raw: null,
+      };
+    }),
+    unlinkedEvidence: [],
+    exerciseTrends: summary.exerciseTrends.map((item) => ({
+      exerciseId: item.exerciseId,
+      skillCode: item.skillCode,
+      exerciseName: item.exerciseName,
+      taxonomyAreaKey: item.taxonomyAreaKey,
+      goalId: item.goalId,
+      linkedGoal: null,
+      metricKey: item.metricKey,
+      metricName: item.metricName,
+      unit: item.unit,
+      valueType: null,
+      interpretation: null,
+      direction: item.direction,
+      exerciseType: null,
+      currentActual: item.currentActual,
+      previousActual: item.previousActual,
+      trendScore: item.trendScore,
+      trendDirection: item.trendDirection,
+      history: [],
+    })),
+    taxonomyScores: summary.taxonomyScores.map((score) => ({
+      taxonomyAreaKey: score.taxonomyAreaKey,
+      YTrend: null,
+      ZTrend: null,
+      normalizedScore: score.normalizedScore,
+      scoreOutOf100: score.scoreOutOf100,
+      direction: score.direction,
+      history: [],
+      multiWeekNormalizedScore: null,
+      multiWeekScoreOutOf100: null,
+      multiWeekDirection: null,
+      rank: null,
+    })),
+    strongestTaxonomy: null,
+    weakestTaxonomy: null,
+    coachPracticeRatings: summary.coachPracticeRatings.map((row) => ({
+      taxonomyAreaKey: row.taxonomyAreaKey,
+      rating: row.rating,
+      coachRatingNormalized: row.coachRatingNormalized,
+      coachRatingScoreOutOf100: row.coachRatingScoreOutOf100,
+      planStartDate: row.planStartDate,
+      planEndDate: row.planEndDate,
+    })),
+    practiceNormalizedScore: summary.practiceNormalizedScore,
+    practiceScoreOutOf100: summary.practiceScoreOutOf100,
+    coachPracticeNormalized: summary.coachPracticeNormalized,
+    coachPracticeScoreOutOf100: summary.coachPracticeScoreOutOf100,
+    practiceSideNormalized: summary.practiceSideNormalized,
+    practiceSideScoreOutOf100: summary.practiceSideScoreOutOf100,
+    competitionPerformance: summary.competitionPerformance,
+    overallGolferPerformance: summary.overallPerformance,
+    overallGolferPerformanceHistory: [],
+    raw: null,
+  };
+}
+
+function basketballHistoryItemAsPracticeView(
+  item: BasketballWeeklyHistoryItem,
+): SportMetricsGolfWeeklySummary | null {
+  if (!item.performance || !item.weekStart || !item.weekEnd) return null;
+  return basketballSummaryAsPracticeView(item.performance);
+}
+
+export async function loadBasketballPracticeHistoryWeeks(params: {
+  entityId: string;
+  athleteId: string;
+}): Promise<SportMetricsGolfWeeklySummary[]> {
+  const items = await fetchSportMetricsBasketballWeeklySummaryHistory(params);
+  return items.flatMap((item) => {
+    const view = basketballHistoryItemAsPracticeView(item);
+    return view ? [view] : [];
+  });
+}
 
 function formatLoadError(e: unknown): string {
   if (isNormalizedApiError(e)) return e.message;
@@ -700,12 +838,16 @@ export function AthleteWeeklyGoalPerformanceSection({
   trainingPlanVersionId,
   allowCoachPracticeRating = false,
   audience,
+  sportCode,
+  refreshKey,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   allowCoachPracticeRating?: boolean;
   audience?: "athlete" | "coach";
+  sportCode?: string | null;
+  refreshKey?: number;
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -720,9 +862,12 @@ export function AthleteWeeklyGoalPerformanceSection({
 
   const versionId = trainingPlanVersionId?.trim() ?? "";
   const hasIdentifiers = entityId.trim() !== "" && athleteId.trim() !== "";
+  const isBasketball = sportCode === "BASKETBALL";
   const fetchKey =
     hasIdentifiers && versionId !== ""
-      ? `${entityId.trim()}|${athleteId.trim()}|${versionId}|${reloadKey}`
+      ? `${entityId.trim()}|${athleteId.trim()}|${versionId}|${reloadKey}${
+          refreshKey === undefined ? "" : `|${String(refreshKey)}`
+        }`
       : "";
   const isLoading = fetchKey !== "" && fetchKey !== resolvedFetchKey;
 
@@ -732,11 +877,19 @@ export function AthleteWeeklyGoalPerformanceSection({
     let cancelled = false;
     void (async () => {
       try {
-        const nextSummary = await fetchSportMetricsGolfWeeklySummary({
-          entityId: entityId.trim(),
-          athleteId: athleteId.trim(),
-          trainingPlanVersionId: versionId,
-        });
+        const nextSummary = isBasketball
+          ? basketballSummaryAsPracticeView(
+              await fetchSportMetricsBasketballWeeklySummary({
+                entityId: entityId.trim(),
+                athleteId: athleteId.trim(),
+                trainingPlanVersionId: versionId,
+              }),
+            )
+          : await fetchSportMetricsGolfWeeklySummary({
+              entityId: entityId.trim(),
+              athleteId: athleteId.trim(),
+              trainingPlanVersionId: versionId,
+            });
         if (cancelled) return;
         setSummary(nextSummary);
         setError(null);
@@ -752,7 +905,7 @@ export function AthleteWeeklyGoalPerformanceSection({
     return () => {
       cancelled = true;
     };
-  }, [athleteId, entityId, fetchKey, hasIdentifiers, versionId]);
+  }, [athleteId, entityId, fetchKey, hasIdentifiers, isBasketball, versionId]);
 
   useEffect(() => {
     if (!summary) return;
@@ -770,21 +923,37 @@ export function AthleteWeeklyGoalPerformanceSection({
     setRatingError(null);
     void (async () => {
       try {
-        const nextSummary = await submitGolfCoachPracticeRatingThenRefetch({
-          postRating: () =>
-            postGolfCoachPracticeRating(entityId.trim(), athleteId.trim(), {
-              trainingPlanVersionId: versionId,
-              taxonomyAreaKey,
-              rating,
-            }),
-          refetchWeeklySummary: () =>
-            fetchSportMetricsGolfWeeklySummary({
-              entityId: entityId.trim(),
-              athleteId: athleteId.trim(),
-              trainingPlanVersionId: versionId,
-            }),
-        });
-        setSummary(nextSummary);
+        if (isBasketball) {
+          const trainingPlanVersionId =
+            summary?.trainingPlanVersionId?.trim() || versionId;
+          await postBasketballCoachPracticeRating(entityId.trim(), athleteId.trim(), {
+            trainingPlanVersionId,
+            taxonomyAreaKey,
+            rating,
+          });
+          const refetched = await fetchSportMetricsBasketballWeeklySummary({
+            entityId: entityId.trim(),
+            athleteId: athleteId.trim(),
+            trainingPlanVersionId: versionId,
+          });
+          setSummary(basketballSummaryAsPracticeView(refetched));
+        } else {
+          const nextSummary = await submitGolfCoachPracticeRatingThenRefetch({
+            postRating: () =>
+              postGolfCoachPracticeRating(entityId.trim(), athleteId.trim(), {
+                trainingPlanVersionId: versionId,
+                taxonomyAreaKey,
+                rating,
+              }),
+            refetchWeeklySummary: () =>
+              fetchSportMetricsGolfWeeklySummary({
+                entityId: entityId.trim(),
+                athleteId: athleteId.trim(),
+                trainingPlanVersionId: versionId,
+              }),
+          });
+          setSummary(nextSummary);
+        }
       } catch (e) {
         setRatingError(formatLoadError(e));
       } finally {

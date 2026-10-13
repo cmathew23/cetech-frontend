@@ -291,12 +291,14 @@ export function BasketballWeeklyPerformanceSection({
   trainingPlanVersionId,
   refreshKey = 0,
   titleClassName = ATHLETE_DASHBOARD_CARD_TITLE_CLASS,
+  sections = "all",
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   refreshKey?: number;
   titleClassName?: string;
+  sections?: "all" | "overall";
 }) {
   const versionId = trainingPlanVersionId?.trim() ?? "";
   const applicable =
@@ -337,6 +339,15 @@ export function BasketballWeeklyPerformanceSection({
   if (error) return <Alert variant="danger">{error}</Alert>;
   if (loading || summary === null) {
     return <p className="text-sm text-textSecondary">Loading basketball performance…</p>;
+  }
+
+  if (sections === "overall") {
+    return (
+      <BasketballOverallPerformanceCard
+        summary={summary}
+        titleClassName={titleClassName}
+      />
+    );
   }
 
   return (

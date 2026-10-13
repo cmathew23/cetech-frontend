@@ -30,7 +30,17 @@ describe("athlete Competitions page list", () => {
       new URL("../../../app/athlete/competitions/page.tsx", import.meta.url),
       "utf8",
     );
+    expect(page).toContain('sportCode === "BASKETBALL"');
+    expect(page).toContain('router.replace("/athlete/dashboard")');
     expect(page).toContain("<AthleteCompetitionsPageContent />");
+
+    const sidebar = readFileSync(
+      new URL("./AthleteSidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(sidebar).toContain(
+      "athleteSidebarNavItemsForSport(planningIds.ids?.sport ?? null)",
+    );
 
     const content = readFileSync(
       new URL("./AthleteCompetitionsPageContent.tsx", import.meta.url),

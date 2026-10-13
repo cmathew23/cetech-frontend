@@ -12,6 +12,7 @@ vi.mock("@/lib/api/chat", () => ({
 
 import {
   buildBasketballCoachEntryMessage,
+  displayChatMessageContent,
   parseBasketballCoachEntrySearchParams,
   resolveBasketballCoachEntryExercise,
   sendBasketballCoachEntryRequest,
@@ -85,6 +86,48 @@ describe("Basketball coach entry request", () => {
     ).rejects.toMatchObject({ code: "COACH_ENTRY_RECIPIENT_MISSING" });
     expect(createOrFindChatConversationMock).not.toHaveBeenCalled();
     expect(sendChatTextMessageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("athlete PeakConnect coach-entry notice", () => {
+  const content = buildBasketballCoachEntryMessage("http://localhost:3001", target);
+
+  it.each([
+    ["WF1", "Nina Cole"],
+    ["WF2A", "Greg Michaels"],
+    ["WF2B", "Nina Cole"],
+    ["WF3", "Owen Patel"],
+  ])("%s uses the message-history coachName", (workflow, coachName) => {
+    const shown = displayChatMessageContent({
+      content,
+      viewerRole: "ATHLETE",
+      coachName,
+    });
+
+    expect(shown).toBe(
+      `Information sent to ${coachName}, the coach responsible for this Skills plan.`,
+    );
+    expect(shown).not.toContain("/coach/athlete-performance");
+    expect(shown).not.toContain("Open this exercise");
+    expect(shown).not.toContain("Please enter the Basketball measurement");
+    expect(workflow).not.toBe("");
+  });
+
+  it("keeps the coach link and leaves other athlete messages unchanged", () => {
+    expect(
+      displayChatMessageContent({
+        content,
+        viewerRole: "COACH",
+        coachName: "Greg Michaels",
+      }),
+    ).toBe(content);
+    expect(
+      displayChatMessageContent({
+        content: "See you at practice",
+        viewerRole: "ATHLETE",
+        coachName: "Greg Michaels",
+      }),
+    ).toBe("See you at practice");
   });
 });
 

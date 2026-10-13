@@ -49,11 +49,16 @@ export function SkillsGolfHistoryComparisonProvider({
   entityId,
   athleteId,
   historyWeeks: injectedWeeks,
+  loadHistory,
   children,
 }: {
   entityId: string;
   athleteId: string;
   historyWeeks?: SportMetricsGolfWeeklySummary[];
+  loadHistory?: (params: {
+    entityId: string;
+    athleteId: string;
+  }) => Promise<SportMetricsGolfWeeklySummary[]>;
   children: ReactNode;
 }) {
   const [fetchedWeeks, setFetchedWeeks] = useState<
@@ -86,10 +91,15 @@ export function SkillsGolfHistoryComparisonProvider({
 
     void (async () => {
       try {
-        const weeks = await fetchSportMetricsGolfWeeklySummaryHistory({
-          entityId: trimmedEntityId,
-          athleteId: trimmedAthleteId,
-        });
+        const weeks = loadHistory
+          ? await loadHistory({
+              entityId: trimmedEntityId,
+              athleteId: trimmedAthleteId,
+            })
+          : await fetchSportMetricsGolfWeeklySummaryHistory({
+              entityId: trimmedEntityId,
+              athleteId: trimmedAthleteId,
+            });
         if (cancelled) return;
         setFetchedWeeks(weeks);
         setHistoryError(null);
@@ -109,7 +119,7 @@ export function SkillsGolfHistoryComparisonProvider({
     return () => {
       cancelled = true;
     };
-  }, [fetchKey, skipFetch, trimmedAthleteId, trimmedEntityId]);
+  }, [fetchKey, loadHistory, skipFetch, trimmedAthleteId, trimmedEntityId]);
 
   const historyWeeks = injectedWeeks ?? fetchedWeeks;
   const latestWeekKey =

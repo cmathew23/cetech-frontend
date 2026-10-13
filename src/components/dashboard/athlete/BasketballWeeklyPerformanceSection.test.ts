@@ -169,6 +169,20 @@ describe("Basketball weekly performance display", () => {
     });
     const submittedOverall = sectionHtml(submitted, "Overall Performance");
     expect(metricValue(submittedOverall, "Competition Performance")).toBe("75");
+
+    const returned = renderSummary({
+      competitionPerformance: 58.33,
+      competitionTaxonomyScores: [
+        { taxonomyAreaKey: "DRIBBLING", taxonomyCompetitionScore: 50 },
+        { taxonomyAreaKey: "PASSING", taxonomyCompetitionScore: 75 },
+        { taxonomyAreaKey: "SHOOTING", taxonomyCompetitionScore: 50 },
+      ],
+    });
+    const returnedOverall = sectionHtml(returned, "Overall Performance");
+    expect(metricValue(returnedOverall, "Competition Performance")).toBe("58.33");
+    expect(returnedOverall).toContain("DRIBBLING: 50");
+    expect(returnedOverall).toContain("PASSING: 75");
+    expect(returnedOverall).toContain("SHOOTING: 50");
     expect(submittedOverall).toContain("DRIBBLING: 75");
     expect(submittedOverall).toContain("PASSING: 50");
     expect(submittedOverall).toContain("SHOOTING: 100");
@@ -336,12 +350,24 @@ describe("Basketball and Golf performance wiring", () => {
     expect(golfAthlete).not.toContain("BasketballWeeklyPerformanceSection");
     expect(golfAthlete).not.toContain("sport-metrics/basketball");
 
+    expect(basketballAthlete).toContain("SkillsGolfHistoryComparisonProvider");
+    expect(basketballAthlete).toContain("<SkillsGolfHistoryWeekSelector />");
+    expect(basketballAthlete).toContain("loadHistory={loadBasketballPracticeHistoryWeeks}");
+    expect(basketballAthlete).toContain("<AthleteWeeklyGoalPerformanceSection");
+    expect(basketballAthlete).toContain('sportCode="BASKETBALL"');
+    expect(basketballAthlete).toContain('audience="athlete"');
+    expect(basketballAthlete).toContain("allowCoachPracticeRating={false}");
+    expect(basketballAthlete).toContain("<AthleteBasketballCompetitionPerformanceSection");
     expect(basketballAthlete).toContain("<BasketballWeeklyPerformanceSection");
-    expect(basketballAthlete).toContain("trainingPlanVersionId");
-    expect(basketballAthlete).not.toContain("Golf");
+    expect(basketballAthlete).toContain('sections="overall"');
+    expect(basketballAthlete).not.toContain("fetchSportMetricsGolf");
     expect(basketballAthlete).not.toContain("sport-metrics/golf");
+    expect(basketballAthlete).not.toContain("<SportMetricsSection");
+    expect(basketballAthlete).not.toContain("<OverallGolfPerformanceSection");
+    expect(basketballAthlete).not.toContain("<AthleteCompetitionPerformanceSection");
+    expect(golfAthlete).not.toContain("loadBasketballPracticeHistoryWeeks");
+    expect(golfAthlete).not.toContain("AthleteBasketballCompetitionPerformanceSection");
     expect(basketballMount).toContain("<AthleteBasketballWeeklyPerformance");
-    expect(basketballMount).not.toContain("SkillsGolfHistoryComparisonProvider");
     expect(basketballMount).not.toContain("OverallGolfPerformanceSection");
 
     expect(section).toContain("fetchSportMetricsBasketballWeeklySummary");
@@ -381,17 +407,44 @@ describe("Basketball and Golf performance wiring", () => {
     expect(golfCoach).not.toContain("setBasketballWeeklySummaryRefreshKey");
     expect(golfCoach).not.toContain("sport-metrics/basketball");
 
-    expect(basketballCoach).toContain("<BasketballWeeklyPerformanceSection");
+    expect(basketballCoach).toContain("<AthleteWeeklyGoalPerformanceSection");
+    expect(basketballCoach).toContain('sportCode="BASKETBALL"');
     expect(basketballCoach).toContain("<CoachBasketballCompetitionSection");
     expect(basketballCoach).toContain("refreshKey={basketballWeeklySummaryRefreshKey}");
+    expect(basketballCoach).toContain('<BasketballWeeklyPerformanceSection');
+    expect(basketballCoach).toContain('sections="overall"');
     expect(basketballCoach).toContain("onSubmitted={() => {");
+    expect(basketballCoach).toContain("<SkillsGolfHistoryWeekSelector />");
+    expect(basketballCoach).toContain("loadHistory={loadBasketballPracticeHistoryWeeks}");
+    expect(basketballCoach).toContain(
+      "allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(",
+    );
     expect(golfCoach).not.toContain("CoachBasketballCompetitionSection");
-    expect(basketballCoach).not.toContain("Golf");
-    expect(basketballCoach).not.toContain("SkillsGolfHistoryComparisonProvider");
+    expect(golfCoach).not.toContain("loadBasketballPracticeHistoryWeeks");
+    expect(basketballCoach).not.toContain("fetchSportMetricsGolf");
+    expect(basketballCoach).not.toContain("sport-metrics/golf");
     expect(basketballCoach).not.toContain("CoachCompetitionPerformanceSection");
     expect(basketballCoach).not.toContain("OverallGolfPerformanceSection");
     expect(basketballCoach).not.toContain("<SportMetricsSection");
     expect(section).toContain("fetchSportMetricsBasketballWeeklySummary");
+
+    const practice = readFileSync(
+      new URL("./AthleteWeeklyGoalPerformanceSection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(practice).toContain('sportCode === "BASKETBALL"');
+    expect(practice).toContain("fetchSportMetricsBasketballWeeklySummary");
+    expect(practice).toContain("fetchSportMetricsGolfWeeklySummary");
+    expect(practice).toContain("practiceScoreOutOf100: summary.practiceScoreOutOf100");
+    expect(practice).toContain("coachPracticeScoreOutOf100: summary.coachPracticeScoreOutOf100");
+    expect(practice).toContain("practiceSideScoreOutOf100: summary.practiceSideScoreOutOf100");
+    expect(practice).toContain("postBasketballCoachPracticeRating");
+    expect(practice).toContain("fetchSportMetricsBasketballWeeklySummaryHistory");
+    expect(practice).toContain("postGolfCoachPracticeRating");
+    expect(practice).not.toContain("allowCoachPracticeRating && !isBasketball");
+    expect(practice).toContain("refreshKey === undefined");
+    expect(practice).not.toContain("0.45");
+    expect(practice).not.toContain("0.55");
   });
 
   it("refetches Basketball weekly-summary after a successful coach Basketball entry", () => {
@@ -415,7 +468,6 @@ describe("Basketball and Golf performance wiring", () => {
   it("keeps Golf sport-metrics callers off the Basketball weekly-summary route", () => {
     const golfFiles = [
       "../../../lib/api/sportMetricsGolf.ts",
-      "./AthleteWeeklyGoalPerformanceSection.tsx",
       "./OverallGolfPerformanceCard.tsx",
       "./AthleteCompetitionPerformanceSection.tsx",
       "../SportMetricsSection.tsx",

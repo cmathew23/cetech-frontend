@@ -8,7 +8,7 @@ vi.mock("@/lib/apiClient", () => ({
   apiRequest: apiRequestMock,
 }));
 
-import { sendChatTextMessage } from "@/lib/api/chat";
+import { parseChatMessageHistory, sendChatTextMessage } from "@/lib/api/chat";
 
 describe("sendChatTextMessage", () => {
   beforeEach(() => {
@@ -38,5 +38,22 @@ describe("sendChatTextMessage", () => {
       messageType: "TEXT",
       content: "Please enter the measurement.",
     });
+  });
+
+  it("reads the conversation coachName returned with message history", () => {
+    const history = parseChatMessageHistory({
+      coachName: "Greg Michaels",
+      messages: [
+        {
+          id: "message-1",
+          conversationId: "conversation-1",
+          content: "Please enter the Basketball measurement for Strong-Hand Stationary Control Dribble.",
+          createdAt: "2026-10-13T12:20:00.000Z",
+        },
+      ],
+    });
+
+    expect(history.coachName).toBe("Greg Michaels");
+    expect(history.messages[0]?.createdAt).toBe("2026-10-13T12:20:00.000Z");
   });
 });

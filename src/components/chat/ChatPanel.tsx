@@ -4,6 +4,7 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getChatMessages, parseChatMessage, type ChatMessage } from "@/lib/api/chat";
+import { displayChatMessageContent } from "@/lib/basketball/coachEntryRequest";
 import { getChatSocket } from "@/lib/chatSocket";
 import { requestChatUnreadRefresh } from "@/hooks/useChatUnreadCount";
 import { DASHBOARD_MAJOR_OUTER_CARD_CLASS } from "@/components/dashboard/shared/dashboardOuterCardStyles";
@@ -57,6 +58,7 @@ export function ChatPanel({
   currentUserRole,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [recipientCoachName, setRecipientCoachName] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
@@ -86,10 +88,12 @@ export function ChatPanel({
       try {
         const history = await getChatMessages(conversationId);
         if (cancelled) return;
-        setMessages(history);
+        setRecipientCoachName(history.coachName);
+        setMessages(history.messages);
         requestChatUnreadRefresh();
       } catch (error) {
         if (cancelled) return;
+        setRecipientCoachName("");
         setMessages([]);
         setHistoryError(
           error instanceof Error
@@ -145,7 +149,8 @@ export function ChatPanel({
       void getChatMessages(conversationId)
         .then((history) => {
           if (reconnectHistoryCancelled) return;
-          setMessages(history);
+          setRecipientCoachName(history.coachName);
+          setMessages(history.messages);
           requestChatUnreadRefresh();
         })
         .catch(() => {});
@@ -233,6 +238,11 @@ export function ChatPanel({
             const isOwnMessage =
               message.senderRoleSnapshot.trim().toUpperCase() === currentUserRole;
             const timestamp = formatTimestamp(message.createdAt);
+            const visibleContent = displayChatMessageContent({
+              content: message.content,
+              viewerRole: currentUserRole,
+              coachName: recipientCoachName,
+            });
             return (
               <div
                 key={message.id}
@@ -249,7 +259,7 @@ export function ChatPanel({
                       : "border border-slate-200 bg-white text-slate-900",
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+                  <p className="whitespace-pre-wrap break-words text-sm">{visibleContent}</p>
                   {timestamp ? (
                     <p
                       className={cn(

@@ -17,10 +17,12 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
   createBasketballCompetitionAssessment,
+  fetchBasketballCompetitionAssessment,
   fetchBasketballCompetitionAssessments,
   fetchSportMetricsBasketballWeeklySummary,
   submitBasketballCompetitionAssessment,
   type BasketballCompetitionAssessment,
+  type BasketballCompetitionTaxonomyScore,
 } from "@/lib/api/sportMetricsBasketball";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
@@ -51,14 +53,18 @@ function integerRating(value: string): number | null {
   return Number(value);
 }
 
+function formatReturnedCompetitionPerformance(value: number): string {
+  return value.toFixed(2);
+}
+
 export function CoachBasketballCompetitionForm({
   taxonomyKeys,
-  creating,
-  onCreate,
+  submitting,
+  onSubmitCompetition,
 }: {
   taxonomyKeys: string[];
-  creating: boolean;
-  onCreate: (input: {
+  submitting: boolean;
+  onSubmitCompetition: (input: {
     competitionName: string;
     competitionDate: string;
     taxonomyRatings: Record<string, number>;
@@ -84,8 +90,8 @@ export function CoachBasketballCompetitionForm({
       className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!complete || creating) return;
-        onCreate({
+        if (!complete || submitting) return;
+        onSubmitCompetition({
           competitionName: competitionName.trim(),
           competitionDate,
           taxonomyRatings,
@@ -96,7 +102,7 @@ export function CoachBasketballCompetitionForm({
         <Input
           id="competition-name"
           value={competitionName}
-          disabled={creating}
+          disabled={submitting}
           onChange={(event: { target: { value: string } }) =>
             setCompetitionName(event.target.value)
           }
@@ -108,7 +114,7 @@ export function CoachBasketballCompetitionForm({
           id="competition-date"
           type="date"
           value={competitionDate}
-          disabled={creating}
+          disabled={submitting}
           onChange={(event: { target: { value: string } }) =>
             setCompetitionDate(event.target.value)
           }
@@ -120,7 +126,7 @@ export function CoachBasketballCompetitionForm({
           <Select
             id={`basketball-taxonomy-${key}`}
             value={ratings[key] ?? ""}
-            disabled={creating}
+            disabled={submitting}
             onChange={(event: { target: { value: string } }) =>
               setRatings((current) => ({ ...current, [key]: event.target.value }))
             }
@@ -134,8 +140,8 @@ export function CoachBasketballCompetitionForm({
           </Select>
         </FormField>
       ))}
-      <Button type="submit" loading={creating} disabled={creating || !complete}>
-        Create draft
+      <Button type="submit" disabled={submitting || !complete}>
+        {submitting ? "Submitting..." : "Submit Competition"}
       </Button>
     </form>
   );
@@ -149,7 +155,10 @@ export function CoachBasketballCompetitionResult({
   return (
     <>
       {assessment.competitionPerformance !== null ? (
-        <p>Competition Performance: {String(assessment.competitionPerformance)}</p>
+        <p>
+          Competition Performance:{" "}
+          {formatReturnedCompetitionPerformance(assessment.competitionPerformance)}
+        </p>
       ) : null}
       {assessment.normalizedTaxonomyScores
         ? Object.entries(assessment.normalizedTaxonomyScores).map(([key, score]) => (
@@ -199,7 +208,7 @@ export function CoachBasketballCompetitionCards({
             {assessment.competitionName || "Competition"}
           </h4>
           {assessment.status ? (
-            <p className={DASHBOARD_METRIC_STATUS_CLASS}>{assessment.status}</p>
+            <p className={DASHBOARD_METRIC_STATUS_CLASS}>Status: {assessment.status}</p>
           ) : null}
           <div className={DASHBOARD_METRIC_SUPPORTING_CLASS}>
             <p>{formatDateOnly(assessment.competitionDate)}</p>
@@ -236,12 +245,18 @@ export function CoachBasketballCompetitionSection({
   const [seasonCycleId, setSeasonCycleId] = useState<string | null>(null);
   const [seasonYear, setSeasonYear] = useState<number | null>(null);
   const [taxonomyKeys, setTaxonomyKeys] = useState<string[]>([]);
+  const [competitionPerformance, setCompetitionPerformance] = useState<number | null>(
+    null,
+  );
+  const [competitionTaxonomyScores, setCompetitionTaxonomyScores] = useState<
+    BasketballCompetitionTaxonomyScore[]
+  >([]);
   const [assessments, setAssessments] = useState<BasketballCompetitionAssessment[]>([]);
   const [openAssessmentId, setOpenAssessmentId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [recoverableDraftId, setRecoverableDraftId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -261,6 +276,8 @@ export function CoachBasketballCompetitionSection({
         const nextSeasonCycleId = summary.seasonCycleId?.trim() || null;
         setSeasonCycleId(nextSeasonCycleId);
         setSeasonYear(summary.seasonYear);
+        setCompetitionPerformance(summary.competitionPerformance);
+        setCompetitionTaxonomyScores(summary.competitionTaxonomyScores);
         setTaxonomyKeys(taxonomyKeysFromSummary(summary.competitionTaxonomyScores));
         if (!nextSeasonCycleId) {
           setAssessments([]);
@@ -311,46 +328,58 @@ export function CoachBasketballCompetitionSection({
     setOpenAssessmentId(next.id);
   }
 
-  async function onCreate(input: {
+  async function replaceWithRefetchedAssessment(fallback: BasketballCompetitionAssessment) {
+    try {
+      replaceAssessment(
+        await fetchBasketballCompetitionAssessment({
+          entityId: resolvedEntityId,
+          athleteId: resolvedAthleteId,
+          assessmentId: fallback.id,
+        }),
+      );
+    } catch {
+      replaceAssessment(fallback);
+    }
+  }
+
+  async function onSubmitCompetition(input: {
     competitionName: string;
     competitionDate: string;
     taxonomyRatings: Record<string, number>;
   }) {
-    if (!seasonCycleId || creating) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const created = await createBasketballCompetitionAssessment(
-        resolvedEntityId,
-        resolvedAthleteId,
-        {
-          seasonCycleId,
-          competitionName: input.competitionName,
-          competitionDate: input.competitionDate,
-          taxonomyRatings: input.taxonomyRatings,
-        },
-      );
-      replaceAssessment(created);
-      setShowCreate(false);
-      setReloadKey((current) => current + 1);
-    } catch (createError) {
-      setError(formatError(createError));
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  async function onSubmit(assessmentId: string) {
-    if (submitting) return;
+    if (!seasonCycleId || submitting) return;
     setSubmitting(true);
     setError(null);
+    let assessmentId = recoverableDraftId;
     try {
+      if (!assessmentId) {
+        const created = await createBasketballCompetitionAssessment(
+          resolvedEntityId,
+          resolvedAthleteId,
+          {
+            seasonCycleId,
+            competitionName: input.competitionName,
+            competitionDate: input.competitionDate,
+            taxonomyRatings: input.taxonomyRatings,
+          },
+        );
+        assessmentId = created.id;
+        setRecoverableDraftId(created.id);
+        replaceAssessment(created);
+      }
       const submitted = await submitBasketballCompetitionAssessment({
         entityId: resolvedEntityId,
         athleteId: resolvedAthleteId,
         assessmentId,
       });
+      if (submitted.status !== "SUBMITTED") {
+        setError("Unable to save Competition.");
+        return;
+      }
       replaceAssessment(submitted);
+      setRecoverableDraftId(null);
+      setShowCreate(false);
+      await replaceWithRefetchedAssessment(submitted);
       setReloadKey((current) => current + 1);
       onSubmitted?.();
     } catch (submitError) {
@@ -384,6 +413,18 @@ export function CoachBasketballCompetitionSection({
       }
     >
       <div className="space-y-4">
+        {competitionTaxonomyScores.map((score, index) =>
+          score.taxonomyCompetitionScore === null ? null : (
+            <p key={`${score.taxonomyAreaKey ?? "taxonomy"}-${index}`}>
+              {score.taxonomyAreaKey ?? "Taxonomy"}: {String(score.taxonomyCompetitionScore)}
+            </p>
+          ),
+        )}
+        {competitionPerformance !== null ? (
+          <p>
+            Competition Performance: {formatReturnedCompetitionPerformance(competitionPerformance)}
+          </p>
+        ) : null}
         {error ? <Alert variant="danger">{error}</Alert> : null}
         {loading ? (
           <p className="text-sm text-textSecondary">Loading competitions…</p>
@@ -394,9 +435,9 @@ export function CoachBasketballCompetitionSection({
         {showCreate && seasonCycleId ? (
           <CoachBasketballCompetitionForm
             taxonomyKeys={taxonomyKeys}
-            creating={creating}
-            onCreate={(input) => {
-              void onCreate(input);
+            submitting={submitting}
+            onSubmitCompetition={(input) => {
+              void onSubmitCompetition(input);
             }}
           />
         ) : null}
@@ -417,25 +458,16 @@ export function CoachBasketballCompetitionSection({
         {openAssessment ? (
           <div className="space-y-3 rounded-md border border-primary/80 bg-card p-4">
             {openAssessment.status ? (
-              <p className={DASHBOARD_METRIC_STATUS_CLASS}>{openAssessment.status}</p>
+              <p className={DASHBOARD_METRIC_STATUS_CLASS}>
+                Status: {openAssessment.status}
+              </p>
             ) : null}
             <CoachBasketballCompetitionResult assessment={openAssessment} />
             {openAssessment.status === "SUBMITTED" ? (
               <Alert variant="success" role="status">
                 Competition submitted. This entry is read-only.
               </Alert>
-            ) : (
-              <Button
-                type="button"
-                loading={submitting}
-                disabled={submitting}
-                onClick={() => {
-                  void onSubmit(openAssessment.id);
-                }}
-              >
-                Submit competition
-              </Button>
-            )}
+            ) : null}
           </div>
         ) : null}
       </div>

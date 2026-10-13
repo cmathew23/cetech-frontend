@@ -58,6 +58,17 @@ export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/settings", label: "Settings", icon: Settings },
 ];
 
+export function athleteSidebarNavItemsForSport(
+  sportCode: string | null,
+): DashboardNavItem[] {
+  if (sportCode === "BASKETBALL") {
+    return athleteSidebarNavItems.filter(
+      (item) => item.href !== "/athlete/competitions",
+    );
+  }
+  return athleteSidebarNavItems;
+}
+
 function normalizePathname(pathname: string): string {
   const path = pathname.split("?")[0].split("#")[0];
   if (path.length > 1 && path.endsWith("/")) return path.slice(0, -1);

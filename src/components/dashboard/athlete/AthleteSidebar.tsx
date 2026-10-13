@@ -4,8 +4,9 @@ import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame
 import { useAthletePageReady } from "@/components/dashboard/athlete/AthletePageReadyContext";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
-import { athleteSidebarNavItems } from "@/config/dashboardNav";
+import { athleteSidebarNavItemsForSport } from "@/config/dashboardNav";
 import { designSystem } from "@/config/design-system";
+import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,8 +15,18 @@ export function AthleteSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
   const { isPageReady } = useAthletePageReady();
-  const { invitationAccessLocked, pendingCount, isGateReady } =
-    useAthleteInvitationGate();
+  const {
+    invitationAccessLocked,
+    pendingCount,
+    isGateReady,
+    accessContext,
+    accessGateReady,
+  } = useAthleteInvitationGate();
+  const planningIds = useAthletePlanningIdentifiers({
+    accessContext,
+    accessGateReady,
+  });
+  const navItems = athleteSidebarNavItemsForSport(planningIds.ids?.sport ?? null);
   const athleteChatRoute = "/athlete/chat";
   const { unreadCount: chatUnreadCount } = useChatUnreadCount({
     enabled: isPageReady,
@@ -36,7 +47,7 @@ export function AthleteSidebar() {
         </>
       }
     >
-      {athleteSidebarNavItems.map((item) => {
+      {navItems.map((item) => {
         const Icon = item.icon;
         const invitationRoute = "/athlete/dashboard/invitations";
         const gatedOff =

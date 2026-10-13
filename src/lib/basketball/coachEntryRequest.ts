@@ -95,6 +95,26 @@ export function buildBasketballCoachEntryPath(target: BasketballCoachEntryTarget
   return `/coach/athlete-performance?${params.toString()}`;
 }
 
+export function isBasketballCoachEntryInstruction(content: string): boolean {
+  return (
+    content.includes("Please enter the Basketball measurement for ") &&
+    content.includes("Open this exercise:") &&
+    content.includes("/coach/athlete-performance")
+  );
+}
+
+export function displayChatMessageContent(input: {
+  content: string;
+  viewerRole: "ATHLETE" | "COACH";
+  coachName: string;
+}): string {
+  if (input.viewerRole !== "ATHLETE") return input.content;
+  if (!isBasketballCoachEntryInstruction(input.content)) return input.content;
+  const coachName = input.coachName.trim();
+  if (coachName === "") return input.content;
+  return `Information sent to ${coachName}, the coach responsible for this Skills plan.`;
+}
+
 export function buildBasketballCoachEntryMessage(
   origin: string,
   target: BasketballCoachEntryTarget,

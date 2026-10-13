@@ -13,12 +13,16 @@ import {
   buildBasketballCompetitionAssessmentCreateBody,
   buildBasketballSportMetricRecordRequestBody,
   createBasketballCompetitionAssessment,
+  fetchBasketballCompetitionAssessment,
   fetchBasketballCompetitionAssessments,
   fetchSportMetricsBasketballWeeklySummary,
+  fetchSportMetricsBasketballWeeklySummaryHistory,
   parseBasketballCompetitionAssessmentPayload,
   parseSportMetricsBasketballWeeklySummaryPayload,
+  postBasketballCoachPracticeRating,
   postBasketballSportMetricRecord,
   submitBasketballCompetitionAssessment,
+  updateBasketballCompetitionAssessment,
 } from "@/lib/api/sportMetricsBasketball";
 
 function parsePostJsonBody(options: Record<string, unknown>): Record<string, unknown> {
@@ -305,6 +309,24 @@ describe("parseSportMetricsBasketballWeeklySummaryPayload", () => {
 
     expect(parsed.practiceScoreOutOf100).toBe(40);
     expect(parsed.competitionPerformance).toBe(69.38);
+
+    const submitted = parseSportMetricsBasketballWeeklySummaryPayload({
+      success: true,
+      data: {
+        competitionPerformance: 58.33,
+        competitionTaxonomyScores: [
+          { taxonomyAreaKey: "DRIBBLING", taxonomyCompetitionScore: 50 },
+          { taxonomyAreaKey: "PASSING", taxonomyCompetitionScore: 75 },
+          { taxonomyAreaKey: "SHOOTING", taxonomyCompetitionScore: 50 },
+        ],
+      },
+    });
+    expect(submitted.competitionPerformance).toBe(58.33);
+    expect(submitted.competitionTaxonomyScores).toEqual([
+      { taxonomyAreaKey: "DRIBBLING", taxonomyCompetitionScore: 50 },
+      { taxonomyAreaKey: "PASSING", taxonomyCompetitionScore: 75 },
+      { taxonomyAreaKey: "SHOOTING", taxonomyCompetitionScore: 50 },
+    ]);
     expect(parsed.overallPerformance).toBe(81.25);
     expect(parsed.taxonomyScores[0]?.scoreOutOf100).toBe(62.5);
     expect(parsed.competitionTaxonomyScores[0]?.taxonomyCompetitionScore).toBe(91.67);
@@ -351,10 +373,91 @@ describe("parseSportMetricsBasketballWeeklySummaryPayload", () => {
     expect(source).not.toContain("|| 0");
     expect(source).not.toContain("/sport-metrics/golf/");
     expect(source).toContain("athleteSportMetricsBasketballWeeklySummary");
+    expect(source).toContain("athleteSportMetricsBasketballWeeklySummaryHistory");
+    expect(source).toContain("athleteSportMetricsBasketballCoachPracticeRatings");
     expect(source).toContain("athleteSportMetricsBasketballCompetitionAssessments");
     expect(source).toContain("athleteSportMetricsBasketballCompetitionAssessmentSubmit");
+    expect(source).toContain("athleteSportMetricsBasketballCompetitionAssessment(");
     expect(source).not.toContain("(rating - 1)");
     expect(source).not.toContain("/ 4");
+    expect(source).not.toContain("toFixed");
+  });
+});
+
+describe("basketball coach practice rating and history", () => {
+  beforeEach(() => {
+    apiRequestMock.mockReset();
+  });
+
+  it("POSTs only the Basketball coach practice rating contract", async () => {
+    apiRequestMock.mockResolvedValue({ success: true, data: {} });
+
+    await postBasketballCoachPracticeRating("entity-1", "athlete-1", {
+      trainingPlanVersionId: "version-1",
+      taxonomyAreaKey: "DRIBBLING",
+      rating: 4,
+    });
+
+    const [path, options] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(path).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/basketball/coach-practice-ratings",
+    );
+    expect(options.method).toBe("POST");
+    expect(parsePostJsonBody(options)).toEqual({
+      trainingPlanVersionId: "version-1",
+      taxonomyAreaKey: "DRIBBLING",
+      rating: 4,
+    });
+  });
+
+  it("reads Basketball history weeks from the performance snapshot", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          id: "week-1",
+          athleteId: "athlete-1",
+          weekStart: "2026-09-01",
+          weekEnd: "2026-09-07",
+          trainingPlanId: "plan-1",
+          trainingPlanVersionId: "version-1",
+          seasonCycleId: "season-1",
+          performance: {
+            goalEvidence: [],
+            exerciseTrends: [],
+            taxonomyScores: [],
+            coachPracticeRatings: [
+              { taxonomyAreaKey: "PASSING", rating: 4, coachRatingScoreOutOf100: 75 },
+            ],
+            practiceScoreOutOf100: 50,
+            coachPracticeScoreOutOf100: 75,
+            practiceSideScoreOutOf100: 62.5,
+            competitionPerformance: 58.33,
+            competitionTaxonomyScores: [],
+            overallPerformance: 54.58,
+          },
+        },
+      ],
+    });
+
+    const weeks = await fetchSportMetricsBasketballWeeklySummaryHistory({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+    });
+
+    expect(apiRequestMock.mock.calls[0]?.[0]).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/basketball/weekly-summary/history",
+    );
+    expect(weeks[0]?.weekStart).toBe("2026-09-01");
+    expect(weeks[0]?.trainingPlanVersionId).toBe("version-1");
+    expect(weeks[0]?.performance?.weekStartDate).toBe("2026-09-01");
+    expect(weeks[0]?.performance?.coachPracticeRatings[0]?.rating).toBe(4);
+    expect(weeks[0]?.performance?.coachPracticeScoreOutOf100).toBe(75);
+    expect(weeks[0]?.performance?.practiceSideScoreOutOf100).toBe(62.5);
+    expect(weeks[0]?.performance?.overallPerformance).toBe(54.58);
   });
 });
 
@@ -487,6 +590,131 @@ describe("basketball competition assessments", () => {
     expect(options.cache).toBe("no-store");
     expect(assessments[0]?.competitionName).toBe("League fixture");
     expect(assessments[0]?.competitionPerformance).toBe(75);
+  });
+
+  it("copies list scores returned for LBA LOCAL 1", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        basketballCompetitionAssessments: [
+          {
+            id: "assessment-1",
+            competitionName: "LBA LOCAL 1",
+            status: "SUBMITTED",
+            taxonomyRatings: { DRIBBLING: 3, PASSING: 4, SHOOTING: 3 },
+            normalizedTaxonomyScores: { DRIBBLING: 50, PASSING: 75, SHOOTING: 50 },
+            competitionPerformance: 58.33,
+          },
+        ],
+      },
+    });
+
+    const assessments = await fetchBasketballCompetitionAssessments({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      seasonCycleId: "season-1",
+    });
+
+    expect(assessments[0]?.status).toBe("SUBMITTED");
+    expect(assessments[0]?.competitionPerformance).toBe(58.33);
+    expect(assessments[0]?.normalizedTaxonomyScores).toEqual({
+      DRIBBLING: 50,
+      PASSING: 75,
+      SHOOTING: 50,
+    });
+  });
+
+  it("GETs the competition record and keeps returned draft scores", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        basketballCompetitionAssessment: {
+          id: "assessment-1",
+          competitionName: "LBA LOCAL 1",
+          status: "DRAFT",
+          taxonomyRatings: { DRIBBLING: 3, PASSING: 4, SHOOTING: 3 },
+          normalizedTaxonomyScores: { DRIBBLING: "50", PASSING: "75", SHOOTING: "50" },
+          competitionPerformance: "58.33",
+        },
+      },
+    });
+
+    const saved = await fetchBasketballCompetitionAssessment({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      assessmentId: "assessment-1",
+    });
+
+    const [path, options] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(path).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/basketball/competition-assessments/assessment-1",
+    );
+    expect(path).not.toContain("/golf/");
+    expect(options.method).toBe("GET");
+    expect(options.cache).toBe("no-store");
+    expect(saved.status).toBe("DRAFT");
+    expect(saved.competitionPerformance).toBe(58.33);
+    expect(saved.normalizedTaxonomyScores).toEqual({
+      DRIBBLING: 50,
+      PASSING: 75,
+      SHOOTING: 50,
+    });
+  });
+
+  it("PATCHes ratings only, then refetches the competition record", async () => {
+    apiRequestMock
+      .mockResolvedValueOnce({ success: true, data: {} })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          basketballCompetitionAssessment: {
+            id: "assessment-1",
+            competitionName: "LBA LOCAL 1",
+            status: "DRAFT",
+            taxonomyRatings: { DRIBBLING: 3, PASSING: 4, SHOOTING: 3 },
+            normalizedTaxonomyScores: { DRIBBLING: 50, PASSING: 75, SHOOTING: 50 },
+            competitionPerformance: 58.33,
+          },
+        },
+      });
+
+    const saved = await updateBasketballCompetitionAssessment({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      assessmentId: "assessment-1",
+      payload: { notes: "Saved again" },
+    });
+
+    expect(apiRequestMock).toHaveBeenCalledTimes(2);
+    const [patchPath, patchOptions] = apiRequestMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    const [recordPath, recordOptions] = apiRequestMock.mock.calls[1] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(patchPath).toBe(
+      "/entities/entity-1/athletes/athlete-1/sport-metrics/basketball/competition-assessments/assessment-1",
+    );
+    expect(patchPath).not.toContain("/golf/");
+    expect(patchOptions.method).toBe("PATCH");
+    const body = parsePostJsonBody(patchOptions);
+    expect(body).toEqual({ notes: "Saved again" });
+    expect(body).not.toHaveProperty("normalizedTaxonomyScores");
+    expect(body).not.toHaveProperty("competitionPerformance");
+    expect(recordPath).toBe(patchPath);
+    expect(recordOptions.method).toBe("GET");
+    expect(saved.status).toBe("DRAFT");
+    expect(saved.competitionPerformance).toBe(58.33);
+    expect(saved.normalizedTaxonomyScores).toEqual({
+      DRIBBLING: 50,
+      PASSING: 75,
+      SHOOTING: 50,
+    });
   });
 
   it("rejects rating math and non 1-5 ratings before the request", () => {

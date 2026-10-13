@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   athleteSidebarNavItems,
+  athleteSidebarNavItemsForSport,
   coachSidebarNavItems,
   isCoachSidebarNavItemActive,
   isCoachTrainingPlanRoute,
@@ -120,5 +121,23 @@ describe("PeakConnect module labels", () => {
     expect(
       coachSidebarNavItems.find((item) => item.href === "/coach/competitions"),
     ).toBeUndefined();
+  });
+
+  it("keeps athlete Competitions for golf and hides it for basketball", () => {
+    expect(
+      athleteSidebarNavItemsForSport("GOLF").find(
+        (item) => item.href === "/athlete/competitions",
+      )?.label,
+    ).toBe("Competitions");
+    expect(
+      athleteSidebarNavItemsForSport(null).map((item) => item.href),
+    ).toEqual(athleteSidebarNavItems.map((item) => item.href));
+    expect(
+      athleteSidebarNavItemsForSport("BASKETBALL").map((item) => item.href),
+    ).toEqual(
+      athleteSidebarNavItems
+        .filter((item) => item.href !== "/athlete/competitions")
+        .map((item) => item.href),
+    );
   });
 });

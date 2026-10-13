@@ -45,7 +45,7 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(source).toContain('athleteSport === "BASKETBALL"');
     expect(source).toContain("<AthleteBasketballWeeklyPerformance");
     expect(source).not.toContain(">Basketball</p>");
-    expect(source).not.toContain("allowCoachPracticeRating");
+    expect(source).toContain("allowCoachPracticeRating={false}");
   });
 
   it("does not execute the commented legacy SportMetricsSection path", () => {

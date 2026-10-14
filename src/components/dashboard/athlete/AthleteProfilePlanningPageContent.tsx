@@ -191,9 +191,17 @@ export const BASKETBALL_POSITION_OPTIONS = [
   { value: "", label: "Select position" },
   { value: "POINT_GUARD", label: "Point Guard" },
 ] as const;
+export const FOOTBALL_POSITION_OPTIONS = [
+  { value: "", label: "Select position" },
+  { value: "GOALKEEPER", label: "Goalkeeper" },
+] as const;
 
 function isBasketballPrimarySport(sport: PlanningFormValue | undefined): boolean {
   return typeof sport === "string" && sport.trim().toUpperCase() === "BASKETBALL";
+}
+
+function isFootballPrimarySport(sport: PlanningFormValue | undefined): boolean {
+  return typeof sport === "string" && sport.trim() === "FOOTBALL";
 }
 const HEALTHY_INJURY_STATUS = "HEALTHY";
 const INJURED_INJURY_STATUS = "INJURED";
@@ -387,7 +395,7 @@ function planningNumberInputLimits(
 function toFieldLabel(field: string, primarySport?: string): string {
   if (
     field === "disciplineOrEvent"
-    && isBasketballPrimarySport(primarySport)
+    && (isBasketballPrimarySport(primarySport) || isFootballPrimarySport(primarySport))
   ) {
     return "Position";
   }
@@ -806,6 +814,7 @@ export function AthleteProfilePlanningPageContent() {
   ) {
     const type = getPlanningFieldType(group, field, record);
     const isBasketball = isBasketballPrimarySport(draft.sportContext.primarySport);
+    const isFootball = isFootballPrimarySport(draft.sportContext.primarySport);
     const label = toFieldLabel(
       field,
       typeof draft.sportContext.primarySport === "string"
@@ -816,7 +825,7 @@ export function AthleteProfilePlanningPageContent() {
     const required =
       isPlanningProfileFieldRequired(group, field)
       || (
-        isBasketball
+        (isBasketball || isFootball)
         && group === "sportContext"
         && field === "disciplineOrEvent"
       );
@@ -1153,6 +1162,34 @@ export function AthleteProfilePlanningPageContent() {
       );
     }
 
+    if (isFootball && group === "sportContext" && field === "disciplineOrEvent") {
+      return (
+        <FormField
+          key={`${group}-${field}`}
+          id={`${group}-${field}`}
+          label={label}
+          required={required}
+          error={fieldError}
+          {...PLANNING_FORM_FIELD_LABEL}
+        >
+          <Select
+            id={`${group}-${field}`}
+            value={typeof value === "string" ? value : ""}
+            disabled={readOnly}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+              updateField(group, field, e.target.value)
+            }
+          >
+            {FOOTBALL_POSITION_OPTIONS.map((option) => (
+              <option key={option.value || "__empty"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      );
+    }
+
     if (group === "sportContext" && field === "selfReportedLevel") {
       const rawSelected =
         typeof value === "string" ? value.trim() : "";
@@ -1225,6 +1262,7 @@ export function AthleteProfilePlanningPageContent() {
 
     if (group === "sportPerformance" && field === SPORT_PERFORMANCE_RANKING_FIELD) {
       if (isBasketball) return null;
+      if (isFootball) return null;
       const levelValue =
         typeof draft.sportPerformance[SPORT_PERFORMANCE_LEVEL_FIELD] === "string"
           ? draft.sportPerformance[SPORT_PERFORMANCE_LEVEL_FIELD]

@@ -77,6 +77,8 @@ export interface RoleSelectionRequest {
 export interface AthleteProfileRequest {
   sport: string;
   level?: string;
+  /** Team-sport position. Sent for Football only (`GOALKEEPER`). */
+  disciplineOrEvent?: string;
 }
 
 /** POST /onboarding/coach-profile */

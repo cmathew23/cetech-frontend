@@ -16,6 +16,7 @@ import { AcademyAdminSetupForm } from "@/components/onboarding/AcademyAdminSetup
 import { createEntity, type CreateEntityPayload } from "@/lib/api/entities";
 import {
   submitAcademySetup as submitAcademySetupApi,
+  toAthleteProfilePayload,
   type AthleteProfilePayload,
   type CoachProfilePayload,
   type AcademySetupPayload,
@@ -164,14 +165,37 @@ function AthleteProfileForm({
 }) {
   const [sport, setSport] = useState("");
   const [level, setLevel] = useState("");
+  const [disciplineOrEvent, setDisciplineOrEvent] = useState("");
+  const isFootball = sport === "FOOTBALL";
+  const levelOptions = isFootball
+    ? ATHLETE_LEVELS.filter(
+        (athleteLevel) =>
+          athleteLevel === "BEGINNER" ||
+          athleteLevel === "INTERMEDIATE" ||
+          athleteLevel === "ADVANCED",
+      )
+    : ATHLETE_LEVELS;
+
+  function handleSportChange(nextSport: string) {
+    setSport(nextSport);
+    if (nextSport !== "FOOTBALL") {
+      setDisciplineOrEvent("");
+      return;
+    }
+    setLevel((current) =>
+      current === "BEGINNER" ||
+      current === "INTERMEDIATE" ||
+      current === "ADVANCED"
+        ? current
+        : "",
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const payload: AthleteProfilePayload = { sport };
-    if (level.trim() !== "") {
-      payload.level = level;
-    }
-    await onSubmit(payload);
+    await onSubmit(
+      toAthleteProfilePayload({ sport, level, disciplineOrEvent }),
+    );
   }
 
   return (
@@ -189,7 +213,7 @@ function AthleteProfileForm({
             value={sport}
             disabled={disabled}
             onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-              setSport(e.target.value)
+              handleSportChange(e.target.value)
             }
           >
             <option value="">Select a sport</option>
@@ -197,13 +221,34 @@ function AthleteProfileForm({
               <option
                 key={s}
                 value={s}
-                disabled={s !== "GOLF" && s !== "BASKETBALL"}
+                disabled={s !== "GOLF" && s !== "BASKETBALL" && s !== "FOOTBALL"}
               >
                 {s.replace(/_/g, " ")}
               </option>
             ))}
           </Select>
         </FormField>
+        {isFootball ? (
+          <FormField
+            id="athlete-discipline"
+            label="Position"
+            required
+          >
+            <Select
+              id="athlete-discipline"
+              name="disciplineOrEvent"
+              required
+              value={disciplineOrEvent}
+              disabled={disabled}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                setDisciplineOrEvent(e.target.value)
+              }
+            >
+              <option value="">Select position</option>
+              <option value="GOALKEEPER">Goalkeeper</option>
+            </Select>
+          </FormField>
+        ) : null}
         <FormField
           id="athlete-level"
           label="Level"
@@ -219,7 +264,7 @@ function AthleteProfileForm({
             }
           >
             <option value="">—</option>
-            {ATHLETE_LEVELS.map((l) => (
+            {levelOptions.map((l) => (
               <option key={l} value={l}>
                 {l.charAt(0) + l.slice(1).toLowerCase()}
               </option>

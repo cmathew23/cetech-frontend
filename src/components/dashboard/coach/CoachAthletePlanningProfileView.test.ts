@@ -22034,13 +22034,16 @@ describe("Goal Library validated level source", () => {
     expect(fetchEffect).not.toContain('sport: "GOLF"');
     expect(fetchEffect).not.toContain('sport: "BASKETBALL"');
     expect(source).toContain(
-      'if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL")',
+      'if (\n      athleteSportCode !== "GOLF" &&\n      athleteSportCode !== "BASKETBALL" &&\n      athleteSportCode !== "FOOTBALL"\n    )',
     );
     const guard = source.slice(
-      source.indexOf('if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL")'),
+      source.indexOf('athleteSportCode !== "GOLF" &&'),
       source.indexOf("const library = await fetchGoalLibrary({"),
     );
     expect(guard).toContain("return;");
     expect(guard).not.toContain("fetchGoalLibrary");
+    expect(fetchEffect).not.toContain("disciplineOrEvent");
+    expect(fetchEffect).not.toContain("athleteStage");
+    expect(fetchEffect).not.toContain("sex");
   });
 });

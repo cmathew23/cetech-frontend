@@ -164,6 +164,71 @@ describe("fetchGoalLibrary", () => {
       },
     });
   });
+
+  it("requests Football with the Basketball query shape and keeps returned categories", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        sportCode: "FOOTBALL",
+        providerKey: "footballGoalLibrary.provider",
+        version: "v1",
+        categories: [
+          {
+            categoryKey: "handling_shot_stopping",
+            categoryLabel: "Handling / Shot Stopping",
+            levels: {
+              BEGINNER: [],
+              INTERMEDIATE: [
+                {
+                  libraryGoalId: "football-gk-handling-intermediate-001",
+                  goalName: "Improve secure handling while moving",
+                  goalType: "PERFORMANCE",
+                  goalCategory: "TRAINING",
+                  defaultDomain: "SKILLS",
+                  categoryKey: "handling_shot_stopping",
+                  categoryLabel: "Handling / Shot Stopping",
+                  taxonomyAreaKey: "HANDLING_SHOT_STOPPING",
+                  athleteLevel: "INTERMEDIATE",
+                  seasonPhases: ["PRE_SEASON"],
+                  successCriteria: ["Maintain secure handling as deliveries vary."],
+                  metricsToWatch: ["secure_handling_execution_rate"],
+                  capabilityCodes: ["COORDINATION"],
+                  recommendedDomains: ["SKILLS"],
+                },
+              ],
+              ADVANCED: [],
+              ELITE: [],
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await fetchGoalLibrary({
+      sport: "FOOTBALL",
+      seasonPhase: "PRE_SEASON",
+      level: "INTERMEDIATE",
+    });
+
+    const [path] = apiRequestMock.mock.calls[0] as [string];
+    expect(path).toBe(
+      "/goal-library?sport=FOOTBALL&seasonPhase=PRE_SEASON&level=INTERMEDIATE",
+    );
+    expect(path).not.toContain("sex=");
+    expect(path).not.toContain("athleteStage=");
+    expect(path).not.toContain("disciplineOrEvent=");
+    expect(path).not.toContain("BASKETBALL");
+    expect(path).not.toContain("GOLF");
+    expect(result.sportCode).toBe("FOOTBALL");
+    expect(result.categories).toHaveLength(1);
+    expect(result.categories[0]?.categoryLabel).toBe("Handling / Shot Stopping");
+    expect(result.categories[0]?.levels.INTERMEDIATE[0]).toMatchObject({
+      libraryGoalId: "football-gk-handling-intermediate-001",
+      athleteLevel: "INTERMEDIATE",
+      seasonPhases: ["PRE_SEASON"],
+      defaultDomain: "SKILLS",
+    });
+  });
 });
 
 describe("createPhaseAwareGoal", () => {

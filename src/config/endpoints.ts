@@ -181,6 +181,8 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/golf/records`,
     athleteSportMetricsBasketballRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/records`,
+    athleteSportMetricsFootballRecords: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/records`,
     athleteSportMetricsBasketballWeeklySummary: (
       entityId: string,
       athleteId: string,

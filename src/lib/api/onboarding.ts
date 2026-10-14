@@ -11,11 +11,33 @@ import type {
  * Contracts: cetech-backend onboarding module (validator + controller).
  * GET /onboarding/status -> successResponse data shape (activeOnboardingRole, availableRoles, …)
  * POST /onboarding/athlete-profile -> { sport } required; { level } optional
+ * Football also sends existing disciplineOrEvent (GOALKEEPER). Golf and Basketball do not.
  * POST /onboarding/coach-profile -> optional { academyId }; {} valid
  */
 
 export type AthleteProfilePayload = AthleteProfileRequest;
 export type CoachProfilePayload = CoachProfileRequest;
+
+const FOOTBALL_ONBOARDING_SPORT = "FOOTBALL";
+
+/** Maps the athlete profile form onto the existing POST /onboarding/athlete-profile body. */
+export function toAthleteProfilePayload(
+  payload: AthleteProfilePayload,
+): AthleteProfilePayload {
+  const sport = payload.sport.trim();
+  const body: AthleteProfilePayload = { sport };
+  const level = payload.level?.trim() ?? "";
+  if (level !== "") {
+    body.level = level;
+  }
+  if (sport === FOOTBALL_ONBOARDING_SPORT) {
+    const disciplineOrEvent = payload.disciplineOrEvent?.trim() ?? "";
+    if (disciplineOrEvent !== "") {
+      body.disciplineOrEvent = disciplineOrEvent;
+    }
+  }
+  return body;
+}
 
 export async function getOnboardingStatus() {
   return apiRequest(paths.onboarding.status, { method: "GET" });
@@ -30,15 +52,9 @@ export async function selectRole(role: RegistrationRole) {
 }
 
 export async function createAthleteProfile(payload: AthleteProfilePayload) {
-  const body: { sport: string; level?: string } = {
-    sport: payload.sport.trim(),
-  };
-  if (payload.level !== undefined && payload.level.trim() !== "") {
-    body.level = payload.level.trim();
-  }
   return apiRequest(paths.onboarding.athleteProfile, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(toAthleteProfilePayload(payload)),
   });
 }
 

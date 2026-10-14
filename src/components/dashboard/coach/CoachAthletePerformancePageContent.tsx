@@ -266,8 +266,14 @@ export function CoachAthletePerformancePageContent({
     return resolveBasketballCoachEntryExercise(weeklyJournal, coachEntryQuery);
   }, [coachEntryNotice, coachEntryQuery, selectedAthleteId, weeklyJournal]);
 
+  const coachEntryMeasurementSport =
+    selectedAthleteSport === null
+      ? null
+      : selectedAthleteSport === "FOOTBALL"
+        ? "FOOTBALL"
+        : "BASKETBALL";
   const coachEntryContext: SportMetricsDrillLogContext | null =
-    coachEntryQuery && resolvedCoachEntry?.ok
+    coachEntryQuery && resolvedCoachEntry?.ok && coachEntryMeasurementSport
       ? {
           entityId,
           athleteId: coachEntryQuery.athleteId,
@@ -276,7 +282,7 @@ export function CoachAthletePerformancePageContent({
           dayDate: resolvedCoachEntry.exercise.dayDate || coachEntryQuery.date || "",
           sessionTitle: resolvedCoachEntry.exercise.sessionTitle,
           sectionKey: "skill",
-          sport: "BASKETBALL",
+          sport: coachEntryMeasurementSport,
           drill: resolvedCoachEntry.exercise.drill,
           itemIndex: resolvedCoachEntry.exercise.itemIndex,
         }
@@ -349,7 +355,13 @@ export function CoachAthletePerformancePageContent({
           padding="compact"
           className={cn("space-y-3", DASHBOARD_MAJOR_OUTER_CARD_CLASS)}
         >
-          <p className="text-sm font-medium text-textPrimary">Basketball measurement</p>
+          <p className="text-sm font-medium text-textPrimary">
+            {selectedAthleteSport === "FOOTBALL"
+              ? "Football measurement"
+              : selectedAthleteSport === null
+                ? "Measurement"
+                : "Basketball measurement"}
+          </p>
           <p className="text-sm text-textSecondary">
             {coachEntryQuery.label || coachEntryQuery.skillCode}
           </p>

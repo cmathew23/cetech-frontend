@@ -4,6 +4,7 @@ import {
   ALLERGY_INTOLERANCE_CHOICES_DISABLED,
   ALLERGY_OPTIONS,
   BASKETBALL_POSITION_OPTIONS,
+  FOOTBALL_POSITION_OPTIONS,
   INTOLERANCE_OPTIONS,
   SPECIAL_SELECTABLE_OPTIONS,
   SPORT_PERFORMANCE_LEVEL_OPTIONS,
@@ -141,5 +142,20 @@ describe("Basketball APP sport fields", () => {
     expect(source).toContain("if (isBasketball) return null;");
     expect(source).toContain('value: "POINT_GUARD"');
     expect(source).toContain('field === "disciplineOrEvent"');
+  });
+
+  it("shows goalkeeper for football and keeps basketball point guard", () => {
+    expect(FOOTBALL_POSITION_OPTIONS.map((option) => option.value)).toEqual([
+      "",
+      "GOALKEEPER",
+    ]);
+    expect(BASKETBALL_POSITION_OPTIONS.map((option) => option.value)).toEqual([
+      "",
+      "POINT_GUARD",
+    ]);
+    expect(source).toContain("{FOOTBALL_POSITION_OPTIONS.map((option) => (");
+    expect(source).toContain('if (isFootball) return null;');
+    expect(source).toContain("if (isBasketball) return null;");
+    expect(source).not.toContain("SOCCER");
   });
 });

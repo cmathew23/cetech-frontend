@@ -1248,13 +1248,29 @@ type CoachEntryRequestState = {
   message?: string;
 };
 
+function normalizedJournalSport(sport: string | null | undefined): string {
+  return typeof sport === "string" ? sport.trim().toUpperCase() : "";
+}
+
+function footballMeasurementReporterRequiresCoach(
+  drill: Record<string, unknown>,
+): boolean {
+  return (
+    typeof drill.measurementReporter === "string" &&
+    drill.measurementReporter.trim().toUpperCase() === "COACH_OR_OBSERVER"
+  );
+}
+
 export function athleteCanOpenLogSportResult(
   sport: string | null | undefined,
   drill: Record<string, unknown>,
 ): boolean {
-  const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
+  const normalized = normalizedJournalSport(sport);
   if (normalized === "GOLF") return true;
-  if (normalized !== "BASKETBALL") return false;
+  if (normalized !== "BASKETBALL" && normalized !== "FOOTBALL") return false;
+  if (normalized === "FOOTBALL" && footballMeasurementReporterRequiresCoach(drill)) {
+    return false;
+  }
   return (
     drill.athleteSelfEntryAllowed === true &&
     drill.externalObservationRequired === false
@@ -1265,8 +1281,11 @@ export function athleteNeedsCoachEntry(
   sport: string | null | undefined,
   drill: Record<string, unknown>,
 ): boolean {
-  const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
-  if (normalized !== "BASKETBALL") return false;
+  const normalized = normalizedJournalSport(sport);
+  if (normalized !== "BASKETBALL" && normalized !== "FOOTBALL") return false;
+  if (normalized === "FOOTBALL" && footballMeasurementReporterRequiresCoach(drill)) {
+    return true;
+  }
   return (
     drill.externalObservationRequired === true ||
     drill.athleteSelfEntryAllowed !== true
@@ -3101,6 +3120,10 @@ export function AthleteWeeklyPlanJournalPageContent() {
           coachProfileId: planGeneratorCoachProfileId,
           origin: window.location.origin,
           target,
+          sportLabel:
+            normalizedJournalSport(athleteSport) === "FOOTBALL"
+              ? "Football"
+              : "Basketball",
         });
         setCoachEntryRequestByKey((current) => ({
           ...current,
@@ -3120,7 +3143,7 @@ export function AthleteWeeklyPlanJournalPageContent() {
         }));
       }
     })();
-  }, [planGeneratorCoachProfileId]);
+  }, [athleteSport, planGeneratorCoachProfileId]);
   const skillsSportMetricsBase =
     journal &&
     skillsTrainingPlanVersionId !== "" &&

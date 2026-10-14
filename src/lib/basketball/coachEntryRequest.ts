@@ -97,7 +97,8 @@ export function buildBasketballCoachEntryPath(target: BasketballCoachEntryTarget
 
 export function isBasketballCoachEntryInstruction(content: string): boolean {
   return (
-    content.includes("Please enter the Basketball measurement for ") &&
+    (content.includes("Please enter the Basketball measurement for ") ||
+      content.includes("Please enter the Football measurement for ")) &&
     content.includes("Open this exercise:") &&
     content.includes("/coach/athlete-performance")
   );
@@ -118,12 +119,14 @@ export function displayChatMessageContent(input: {
 export function buildBasketballCoachEntryMessage(
   origin: string,
   target: BasketballCoachEntryTarget,
+  sportLabel = "Basketball",
 ): string {
   const normalizedOrigin = origin.trim().replace(/\/$/, "");
   const url = `${normalizedOrigin}${buildBasketballCoachEntryPath(target)}`;
   const label = target.label.trim() || target.skillCode.trim();
+  const measurementSport = sportLabel.trim() || "Basketball";
   return [
-    `Please enter the Basketball measurement for ${label}.`,
+    `Please enter the ${measurementSport} measurement for ${label}.`,
     "",
     "Open this exercise:",
     url,
@@ -143,6 +146,7 @@ export async function sendBasketballCoachEntryRequest(input: {
   coachProfileId: string | null | undefined;
   origin: string;
   target: BasketballCoachEntryTarget;
+  sportLabel?: string;
 }): Promise<{ conversationId: string; content: string }> {
   const coachProfileId = input.coachProfileId?.trim() ?? "";
   if (coachProfileId === "") {
@@ -160,7 +164,11 @@ export async function sendBasketballCoachEntryRequest(input: {
       code: "COACH_ENTRY_SKILL_MISSING",
     };
   }
-  const content = buildBasketballCoachEntryMessage(input.origin, input.target);
+  const content = buildBasketballCoachEntryMessage(
+    input.origin,
+    input.target,
+    input.sportLabel,
+  );
   const conversation = await createOrFindChatConversation({ coachProfileId });
   await sendChatTextMessage(conversation.conversationId, content);
   return { conversationId: conversation.conversationId, content };

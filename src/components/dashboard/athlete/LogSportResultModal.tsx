@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Alert } from "@/components/ui/Alert";
 import { postBasketballSportMetricRecord } from "@/lib/api/sportMetricsBasketball";
+import { postFootballSportMetricRecord } from "@/lib/api/sportMetricsFootball";
 import { postGolfSportMetricRecord } from "@/lib/api/sportMetricsGolf";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import {
@@ -53,9 +54,11 @@ export type SportMetricsDrillLogContext = {
 
 export function resolveLoggedResultSport(
   sport: string | null | undefined,
-): "GOLF" | "BASKETBALL" | null {
+): "GOLF" | "BASKETBALL" | "FOOTBALL" | null {
   const normalized = typeof sport === "string" ? sport.trim().toUpperCase() : "";
-  if (normalized === "GOLF" || normalized === "BASKETBALL") return normalized;
+  if (normalized === "GOLF" || normalized === "BASKETBALL" || normalized === "FOOTBALL") {
+    return normalized;
+  }
   return null;
 }
 
@@ -332,7 +335,7 @@ export function LogSportResultModal({
     if (!context || submitting) return;
 
     const sport = resolveLoggedResultSport(context.sport);
-    if (sport === "BASKETBALL") {
+    if (sport === "BASKETBALL" || sport === "FOOTBALL") {
       const measurementEntryContract = readMeasurementEntryContract(context.drill);
       if (hasMeasurementEntryContractPayload(context.drill) && !measurementEntryContract) {
         setError(
@@ -373,7 +376,11 @@ export function LogSportResultModal({
       setSubmitting(true);
       setError(null);
       try {
-        const response = await postBasketballSportMetricRecord(
+        const submitRecord =
+          sport === "FOOTBALL"
+            ? postFootballSportMetricRecord
+            : postBasketballSportMetricRecord;
+        const response = await submitRecord(
           context.entityId,
           context.athleteId,
           {
@@ -501,7 +508,10 @@ export function LogSportResultModal({
   if (!open || !context) return null;
 
   const drillTitle = drillLabelFromContext(context);
-  const isBasketball = resolveLoggedResultSport(context.sport) === "BASKETBALL";
+  const loggedSport = resolveLoggedResultSport(context.sport);
+  const isBasketball = loggedSport === "BASKETBALL";
+  const isFootball = loggedSport === "FOOTBALL";
+  const usesSharedMeasurementEntry = isBasketball || isFootball;
   const measurementEntryContract = readMeasurementEntryContract(context.drill);
   const contractPayloadPresent = hasMeasurementEntryContractPayload(context.drill);
   const contractUnreadable = contractPayloadPresent && !measurementEntryContract;
@@ -541,7 +551,7 @@ export function LogSportResultModal({
             <DrillClassificationDisplay drill={context.drill} />
           </section>
 
-          {isBasketball ? null : (
+          {usesSharedMeasurementEntry ? null : (
           <fieldset className="space-y-2">
             <legend className="text-xs font-semibold text-textPrimary">
               Where are you doing this?
@@ -676,7 +686,7 @@ export function LogSportResultModal({
               contract property is missing or invalid. Result fields cannot be
               shown until the contract is complete.
             </Alert>
-          ) : isBasketball ? (
+          ) : usesSharedMeasurementEntry ? (
             <Alert variant="danger">
               This exercise does not include a measurement entry contract.
             </Alert>

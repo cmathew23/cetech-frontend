@@ -237,6 +237,8 @@ const ALLOWED_SPORT_COMPETITION_LEVEL_VALUES = new Set([
 ]);
 const BASKETBALL_PRIMARY_SPORT = "BASKETBALL";
 const BASKETBALL_POSITION_VALUE = "POINT_GUARD";
+const FOOTBALL_PRIMARY_SPORT = "FOOTBALL";
+const FOOTBALL_POSITION_VALUE = "GOALKEEPER";
 const ALLOWED_INJURY_STATUS_VALUES = new Set(["HEALTHY", "INJURED", "IN_REHAB"]);
 const REQUIRED_PLANNING_FIELDS: Partial<
   Record<PlanningProfileGroupName, Set<string>>
@@ -619,6 +621,11 @@ function isBasketballPlanningDraft(draft: PlanningProfileFormState): boolean {
     typeof sport === "string"
     && sport.trim().toUpperCase() === BASKETBALL_PRIMARY_SPORT
   );
+}
+
+function isFootballPlanningDraft(draft: PlanningProfileFormState): boolean {
+  const sport = draft.sportContext.primarySport;
+  return typeof sport === "string" && sport.trim() === FOOTBALL_PRIMARY_SPORT;
 }
 
 function isBloodGlucoseField(
@@ -1265,7 +1272,11 @@ export function buildPlanningProfileCreateBody(
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
     if (groupName === "derivedPlanningInputs") continue;
-    if (groupName === "sportPerformance" && !isBasketballPlanningDraft(draft)) {
+    if (
+      groupName === "sportPerformance"
+      && !isBasketballPlanningDraft(draft)
+      && !isFootballPlanningDraft(draft)
+    ) {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
       const levelTrimmed = valueAsString(
@@ -1287,7 +1298,7 @@ export function buildPlanningProfileCreateBody(
     }
     for (const [field, value] of Object.entries(draft[groupName])) {
       if (
-        isBasketballPlanningDraft(draft)
+        (isBasketballPlanningDraft(draft) || isFootballPlanningDraft(draft))
         && isSportPerformanceRankingField(groupName, field)
       ) {
         continue;
@@ -1311,7 +1322,11 @@ export function buildPlanningProfilePatchBody(
   const body: Record<string, unknown> = {};
   for (const groupName of PLANNING_PROFILE_GROUP_ORDER) {
     if (groupName === "derivedPlanningInputs") continue;
-    if (groupName === "sportPerformance" && !isBasketballPlanningDraft(draft)) {
+    if (
+      groupName === "sportPerformance"
+      && !isBasketballPlanningDraft(draft)
+      && !isFootballPlanningDraft(draft)
+    ) {
       const rawLevel = draft[groupName][SPORT_PERFORMANCE_LEVEL_FIELD] ?? "";
       const rawRanking = draft[groupName][SPORT_PERFORMANCE_RANKING_FIELD] ?? "";
       const levelChanged = !formValuesEqual(
@@ -1349,7 +1364,7 @@ export function buildPlanningProfilePatchBody(
     ]);
     for (const field of keys) {
       if (
-        isBasketballPlanningDraft(draft)
+        (isBasketballPlanningDraft(draft) || isFootballPlanningDraft(draft))
         && isSportPerformanceRankingField(groupName, field)
       ) {
         continue;
@@ -1575,6 +1590,7 @@ export function collectPlanningProfileValidationErrors(
     SPORT_PERFORMANCE_LEVEL_FIELD,
   );
   const isBasketball = isBasketballPlanningDraft(draft);
+  const isFootball = isFootballPlanningDraft(draft);
   if (isBasketball) {
     const position = readValue("sportContext", "disciplineOrEvent");
     if (position === "") {
@@ -1583,6 +1599,16 @@ export function collectPlanningProfileValidationErrors(
     } else if (position !== BASKETBALL_POSITION_VALUE) {
       errors[fieldErrorKey("sportContext", "disciplineOrEvent")] =
         "Position must be Point Guard.";
+    }
+  }
+  if (isFootball) {
+    const position = readValue("sportContext", "disciplineOrEvent");
+    if (position === "") {
+      errors[fieldErrorKey("sportContext", "disciplineOrEvent")] =
+        "Position is required.";
+    } else if (position !== FOOTBALL_POSITION_VALUE) {
+      errors[fieldErrorKey("sportContext", "disciplineOrEvent")] =
+        "Position must be Goalkeeper.";
     }
   }
   if (
@@ -1598,7 +1624,7 @@ export function collectPlanningProfileValidationErrors(
     errors[fieldErrorKey("sportPerformance", SPORT_PERFORMANCE_LEVEL_FIELD)] =
       "Competition level must be District, State, National, or International.";
   }
-  if (!isBasketball) {
+  if (!isBasketball && !isFootball) {
     const ranking = readValue("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD);
     if (
       shouldValidate("sportPerformance", SPORT_PERFORMANCE_RANKING_FIELD)

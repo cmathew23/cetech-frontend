@@ -14962,7 +14962,11 @@ export function CoachAthletePlanningProfileView({
       return;
     }
 
-    if (athleteSportCode !== "GOLF" && athleteSportCode !== "BASKETBALL") {
+    if (
+      athleteSportCode !== "GOLF" &&
+      athleteSportCode !== "BASKETBALL" &&
+      athleteSportCode !== "FOOTBALL"
+    ) {
       setGoalLibraryCategories([]);
       setGoalLibraryError(null);
       setGoalLibraryLoading(false);

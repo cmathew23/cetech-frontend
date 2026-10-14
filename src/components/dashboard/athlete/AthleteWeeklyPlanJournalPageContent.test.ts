@@ -71,9 +71,16 @@ describe("Log Sport Result planning-date guard", () => {
     expect(athleteCanOpenLogSportResult("BASKETBALL", selfEntry)).toBe(true);
     expect(athleteCanOpenLogSportResult("BASKETBALL", supervisory)).toBe(false);
     expect(athleteCanOpenLogSportResult("BASKETBALL", {})).toBe(false);
+    expect(athleteCanOpenLogSportResult("FOOTBALL", selfEntry)).toBe(true);
+    expect(athleteCanOpenLogSportResult("FOOTBALL", supervisory)).toBe(false);
+    expect(
+      athleteCanOpenLogSportResult("FOOTBALL", {
+        ...selfEntry,
+        measurementReporter: "COACH_OR_OBSERVER",
+      }),
+    ).toBe(false);
     expect(athleteCanOpenLogSportResult(null, selfEntry)).toBe(false);
     expect(athleteCanOpenLogSportResult("", selfEntry)).toBe(false);
-    expect(athleteCanOpenLogSportResult("FOOTBALL", selfEntry)).toBe(false);
 
     const journalSource = readFileSync(
       fileURLToPath(
@@ -103,10 +110,19 @@ describe("Log Sport Result planning-date guard", () => {
     expect(athleteNeedsCoachEntry("BASKETBALL", supervisory)).toBe(true);
     expect(athleteNeedsCoachEntry("BASKETBALL", { athleteSelfEntryAllowed: false })).toBe(true);
     expect(athleteNeedsCoachEntry("BASKETBALL", selfEntry)).toBe(false);
+    expect(athleteNeedsCoachEntry("FOOTBALL", supervisory)).toBe(true);
+    expect(athleteNeedsCoachEntry("FOOTBALL", { athleteSelfEntryAllowed: false })).toBe(true);
+    expect(athleteNeedsCoachEntry("FOOTBALL", selfEntry)).toBe(false);
+    expect(
+      athleteNeedsCoachEntry("FOOTBALL", {
+        athleteSelfEntryAllowed: true,
+        externalObservationRequired: false,
+        measurementReporter: "COACH_OR_OBSERVER",
+      }),
+    ).toBe(true);
     expect(athleteNeedsCoachEntry("GOLF", supervisory)).toBe(false);
     expect(athleteNeedsCoachEntry(null, supervisory)).toBe(false);
     expect(athleteNeedsCoachEntry("", supervisory)).toBe(false);
-    expect(athleteNeedsCoachEntry("FOOTBALL", supervisory)).toBe(false);
 
     const journalSource = readFileSync(
       fileURLToPath(
@@ -117,6 +133,9 @@ describe("Log Sport Result planning-date guard", () => {
     expect(journalSource).toContain("Request Coach Entry");
     expect(journalSource).toContain("planGeneratorCoachProfileId");
     expect(journalSource).toContain("sendBasketballCoachEntryRequest");
+    expect(journalSource).toContain('? "Football"');
+    expect(journalSource).toContain(': "Basketball"');
+    expect(journalSource).toContain("planGeneratorCoachProfileId");
     expect(journalSource).not.toContain("getAthleteChatCoaches");
     expect(journalSource).not.toContain("WF1");
     expect(journalSource).not.toContain("WF2A");

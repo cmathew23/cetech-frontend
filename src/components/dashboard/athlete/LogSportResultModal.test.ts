@@ -49,27 +49,34 @@ describe("logged result sport routing", () => {
   it("keeps Golf on the Golf path and refuses an unresolved sport", () => {
     expect(resolveLoggedResultSport("GOLF")).toBe("GOLF");
     expect(resolveLoggedResultSport("BASKETBALL")).toBe("BASKETBALL");
+    expect(resolveLoggedResultSport("FOOTBALL")).toBe("FOOTBALL");
     expect(resolveLoggedResultSport(null)).toBeNull();
     expect(resolveLoggedResultSport("")).toBeNull();
-    expect(resolveLoggedResultSport("FOOTBALL")).toBeNull();
 
     const modalSource = readFileSync(
       new URL("./LogSportResultModal.tsx", import.meta.url),
       "utf8",
     );
-    const basketballPost = modalSource.indexOf("await postBasketballSportMetricRecord(");
+    const teamPost = modalSource.indexOf('if (sport === "BASKETBALL" || sport === "FOOTBALL")');
     const unresolvedGuard = modalSource.indexOf('if (sport !== "GOLF")');
     const golfPost = modalSource.indexOf("await postGolfSportMetricRecord(");
-    expect(basketballPost).toBeGreaterThan(-1);
-    expect(unresolvedGuard).toBeGreaterThan(basketballPost);
+    expect(teamPost).toBeGreaterThan(-1);
+    expect(unresolvedGuard).toBeGreaterThan(teamPost);
     expect(golfPost).toBeGreaterThan(unresolvedGuard);
-    const basketballBranch = modalSource.slice(basketballPost, unresolvedGuard);
-    expect(basketballBranch).toContain('metricType: "DRILL_RESULT"');
-    expect(basketballBranch).not.toContain("postGolfSportMetricRecord");
-    expect(basketballBranch).not.toContain("buildGolfPrescribedContext");
-    expect(basketballBranch).not.toContain("validateGolfDrillV2Form");
-    expect(basketballBranch).not.toContain("validateGolfRoundSportMetricForm");
-    expect(modalSource).toContain("isBasketball ? null");
+    const teamBranch = modalSource.slice(teamPost, unresolvedGuard);
+    expect(teamBranch).toContain('metricType: "DRILL_RESULT"');
+    expect(teamBranch).toContain("postFootballSportMetricRecord");
+    expect(teamBranch).toContain("postBasketballSportMetricRecord");
+    expect(teamBranch).toContain('sport === "FOOTBALL"');
+    expect(teamBranch).toContain("measurementEntryContract");
+    expect(teamBranch).toContain("valueJson: valueResult.valueJson");
+    expect(teamBranch).not.toContain("postGolfSportMetricRecord");
+    expect(teamBranch).not.toContain("/sport-metrics/basketball/records");
+    expect(teamBranch).not.toContain("buildGolfPrescribedContext");
+    expect(teamBranch).not.toContain("validateGolfDrillV2Form");
+    expect(teamBranch).not.toContain("validateGolfRoundSportMetricForm");
+    expect(modalSource).toContain("usesSharedMeasurementEntry ? null");
+    expect(modalSource).toContain("<MeasurementEntryFields");
     expect(modalSource).toContain("Where are you doing this?");
   });
 });

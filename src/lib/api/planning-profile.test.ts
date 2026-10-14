@@ -912,3 +912,69 @@ describe("Basketball APP sport contract", () => {
     });
   });
 });
+
+describe("Football APP sport contract", () => {
+  function footballDraft(): PlanningProfileFormState {
+    const draft = completedDraft();
+    draft.sportContext.primarySport = "FOOTBALL";
+    draft.sportContext.disciplineOrEvent = "GOALKEEPER";
+    draft.sportContext.selfReportedLevel = "BEGINNER";
+    draft.sportPerformance = {
+      highestCompetitionLevelReachedPast12Months: "STATE",
+      highestRankingAchievedAtThatLevelPast12Months: "",
+    };
+    return draft;
+  }
+
+  it("creates a football profile with goalkeeper and without ranking", () => {
+    for (const level of ["BEGINNER", "INTERMEDIATE", "ADVANCED"] as const) {
+      const draft = footballDraft();
+      draft.sportContext.selfReportedLevel = level;
+
+      expect(collectPlanningProfileValidationErrors(draft)).toEqual({});
+      expect(buildPlanningProfileCreateBody(draft)).toMatchObject({
+        sportContext: {
+          primarySport: "FOOTBALL",
+          disciplineOrEvent: "GOALKEEPER",
+          selfReportedLevel: level,
+        },
+      });
+      expect(buildPlanningProfileCreateBody(draft).sportPerformance).toEqual({
+        highestCompetitionLevelReachedPast12Months: "STATE",
+      });
+      expect(buildPlanningProfileCreateBody(draft).sportPerformance).not.toHaveProperty(
+        "highestRankingAchievedAtThatLevelPast12Months",
+      );
+    }
+  });
+
+  it("requires goalkeeper and does not accept a basketball position", () => {
+    const missingPosition = footballDraft();
+    missingPosition.sportContext.disciplineOrEvent = "";
+    expect(
+      collectPlanningProfileValidationErrors(missingPosition)[
+        "sportContext.disciplineOrEvent"
+      ],
+    ).toBe("Position is required.");
+
+    const basketballPosition = footballDraft();
+    basketballPosition.sportContext.disciplineOrEvent = "POINT_GUARD";
+    expect(
+      collectPlanningProfileValidationErrors(basketballPosition)[
+        "sportContext.disciplineOrEvent"
+      ],
+    ).toBe("Position must be Goalkeeper.");
+  });
+
+  it("omits football ranking from a patch", () => {
+    const baseline = footballDraft();
+    baseline.sportContext.disciplineOrEvent = "";
+    const draft = structuredClone(baseline);
+    draft.sportPerformance.highestRankingAchievedAtThatLevelPast12Months = "4";
+    draft.sportContext.disciplineOrEvent = "GOALKEEPER";
+
+    expect(buildPlanningProfilePatchBody(baseline, draft)).toEqual({
+      sportContext: { disciplineOrEvent: "GOALKEEPER" },
+    });
+  });
+});

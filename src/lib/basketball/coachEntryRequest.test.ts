@@ -76,6 +76,41 @@ describe("Basketball coach entry request", () => {
     expect(result.conversationId).toBe("conversation-1");
   });
 
+  it("routes a Football exercise to the same plan generator without a Basketball label", async () => {
+    createOrFindChatConversationMock.mockResolvedValue({ conversationId: "conversation-1" });
+    sendChatTextMessageMock.mockResolvedValue({ id: "message-1" });
+
+    const footballTarget: BasketballCoachEntryTarget = {
+      ...target,
+      skillCode: "FBGK_HANDLING_001",
+      label: "Secure handling",
+    };
+    const result = await sendBasketballCoachEntryRequest({
+      coachProfileId: "plan-generator-coach",
+      origin: "https://peakflow.example",
+      target: footballTarget,
+      sportLabel: "Football",
+    });
+
+    expect(createOrFindChatConversationMock).toHaveBeenCalledWith({
+      coachProfileId: "plan-generator-coach",
+    });
+    const content = sendChatTextMessageMock.mock.calls[0]?.[1] as string;
+    expect(content).toContain("Please enter the Football measurement for Secure handling.");
+    expect(content).toContain("skillCode=FBGK_HANDLING_001");
+    expect(content).not.toContain("Basketball");
+    expect(result.conversationId).toBe("conversation-1");
+    expect(
+      displayChatMessageContent({
+        content,
+        viewerRole: "ATHLETE",
+        coachName: "Skills Coach",
+      }),
+    ).toBe(
+      "Information sent to Skills Coach, the coach responsible for this Skills plan.",
+    );
+  });
+
   it("does not choose another coach when the plan generator is missing", async () => {
     await expect(
       sendBasketballCoachEntryRequest({

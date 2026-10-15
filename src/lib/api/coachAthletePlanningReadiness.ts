@@ -453,6 +453,8 @@ export type CoachAthleteGeneratedDraftSession = {
 export type CoachAthleteGeneratedDraftDay = {
   dayIndex: number | null;
   date: string | null;
+  /** Backend weekday label when the plan sends one separately from `date`. */
+  weekday: string | null;
   dayFocus: string | null;
   notes: string | null;
   /** Authoritative rest-day flag from the backend; missing/non-boolean values parse as null. */
@@ -753,6 +755,8 @@ export type CoachPersistedTrainingPlanDetailSession = {
 export type CoachPersistedTrainingPlanDetailDay = {
   id: string;
   date: string | null;
+  /** Backend weekday label when the plan sends one separately from `date`. */
+  weekday: string | null;
   dayIndex: number | null;
   weekNumber: number | null;
   isRestDay: boolean | null;
@@ -1119,6 +1123,7 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
   const day: CoachAthleteGeneratedDraftDay = {
     dayIndex: readNumberKey([record], ["dayIndex", "dayNumber", "index"]),
     date: readStringKey([record], ["date", "dayDate"]),
+    weekday: readStringKey([record], ["weekday", "dayOfWeek", "dayName"]),
     dayFocus: readStringKey([record], ["dayFocus"]),
     notes: readStringKey([record], ["notes"]),
     isRestDay: readBooleanKey([record], ["isRestDay"]),
@@ -1144,6 +1149,7 @@ function parseGeneratedDraftDay(value: unknown): CoachAthleteGeneratedDraftDay |
   return (
     day.dayIndex !== null ||
     day.date ||
+    day.weekday ||
     day.dayFocus ||
     day.notes ||
     day.isRestDay !== null ||
@@ -1373,21 +1379,53 @@ function parseNutritionRevisionOptionItem(
  * verbatim so both REPLACEMENT and ADD_ITEM options flow through unchanged. Static action codes
  * are never synthesized here; only DB/catalog/current-plan backed entries survive.
  */
+function revisionOptionRawField(record: AnyRecord, keys: readonly string[]): unknown {
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+}
+
+/** TEMPORARY: diagnose Nutrition revision-option drops. Remove after the payload shape is confirmed. */
+function logRevisionOptionParseDecision(
+  record: AnyRecord | null,
+  accepted: boolean,
+  rejectedField: string | null,
+): void {
+  console.info("[revision-options] parseDomainDraftRevisionOption", {
+    id: record === null ? undefined : revisionOptionRawField(record, ["id", "optionId"]),
+    label: record === null ? undefined : revisionOptionRawField(record, ["label", "name", "title"]),
+    optionKind: record === null ? undefined : revisionOptionRawField(record, ["optionKind", "kind"]),
+    source: record === null ? undefined : revisionOptionRawField(record, ["source"]),
+    accepted,
+    rejectedField,
+  });
+}
+
 function parseDomainDraftRevisionOption(
   value: unknown,
 ): CoachAthleteDomainDraftRevisionOption | null {
   const record = asRecord(value);
-  if (!record) return null;
+  if (!record) {
+    logRevisionOptionParseDecision(null, false, "option");
+    return null;
+  }
   const records = [record];
   const id = readStringKey(records, ["id", "optionId"]);
   const label = readStringKey(records, ["label", "name", "title"]);
   const optionKind = readStringKey(records, ["optionKind", "kind"]);
-  if (id === null || label === null || optionKind === null) return null;
+  if (id === null || label === null || optionKind === null) {
+    const rejectedField = id === null ? "id" : label === null ? "label" : "optionKind";
+    logRevisionOptionParseDecision(record, false, rejectedField);
+    return null;
+  }
   const source = readStringKey(records, ["source"]);
   const normalizedSource = source ? (source.trim().toUpperCase() as CoachAthleteDomainDraftRevisionOptionSource) : null;
   if (normalizedSource === null || !DOMAIN_DRAFT_REVISION_OPTION_SOURCES.includes(normalizedSource)) {
+    logRevisionOptionParseDecision(record, false, "source");
     return null;
   }
+  logRevisionOptionParseDecision(record, true, null);
   const domain = readStringKey(records, ["domain", "generationDomain"]);
   const explicitExerciseCatalogItemId = readStringKey(records, ["exerciseCatalogItemId"]);
   const exerciseCatalogItemId =
@@ -1428,7 +1466,10 @@ function parseDomainDraftRevisionOptionsPayload(
   const adaptedRecord = asRecord(adapted) ?? {};
   const record = asRecord(adaptedRecord.data) ?? adaptedRecord;
   const records = [record];
-  const parsed = readFirstArray(records, ["options"])
+  const rawOptions = readFirstArray(records, ["options"]);
+  // TEMPORARY: raw Nutrition revision-options payload. Remove with the per-option parse log.
+  console.info("[revision-options] raw options", rawOptions);
+  const parsed = rawOptions
     .map(parseDomainDraftRevisionOption)
     .filter(
       (option): option is CoachAthleteDomainDraftRevisionOption => option !== null,
@@ -1691,7 +1732,8 @@ function parsePersistedTrainingPlanDetailDay(
     : [];
   return {
     id,
-    date: readStringKey([record], ["date"]),
+    date: readStringKey([record], ["date", "dayDate"]),
+    weekday: readStringKey([record], ["weekday", "dayOfWeek", "dayName"]),
     dayIndex: readNumberKey([record], ["dayIndex"]),
     weekNumber: readNumberKey([record], ["weekNumber"]),
     isRestDay: readBooleanKey([record], ["isRestDay"]),

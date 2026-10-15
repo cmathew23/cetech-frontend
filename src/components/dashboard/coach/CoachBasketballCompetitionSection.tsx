@@ -24,6 +24,14 @@ import {
   type BasketballCompetitionAssessment,
   type BasketballCompetitionTaxonomyScore,
 } from "@/lib/api/sportMetricsBasketball";
+import {
+  createFootballCompetitionAssessment,
+  fetchFootballCompetitionAssessment,
+  fetchFootballCompetitionAssessments,
+  fetchSportMetricsFootballWeeklySummary,
+  submitFootballCompetitionAssessment,
+  updateFootballCompetitionAssessment,
+} from "@/lib/api/sportMetricsFootball";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
@@ -230,15 +238,20 @@ export function CoachBasketballCompetitionSection({
   athleteId,
   trainingPlanVersionId,
   onSubmitted,
+  sportCode = "BASKETBALL",
+  allowEntry = true,
 }: {
   entityId: string;
   athleteId: string;
   trainingPlanVersionId?: string | null;
   onSubmitted?: () => void;
+  sportCode?: "BASKETBALL" | "FOOTBALL";
+  allowEntry?: boolean;
 }) {
   const resolvedEntityId = entityId.trim();
   const resolvedAthleteId = athleteId.trim();
   const versionId = trainingPlanVersionId?.trim() ?? "";
+  const isFootball = sportCode === "FOOTBALL";
   const applicable =
     resolvedEntityId !== "" && resolvedAthleteId !== "" && versionId !== "";
 
@@ -267,11 +280,17 @@ export function CoachBasketballCompetitionSection({
     setError(null);
     void (async () => {
       try {
-        const summary = await fetchSportMetricsBasketballWeeklySummary({
-          entityId: resolvedEntityId,
-          athleteId: resolvedAthleteId,
-          trainingPlanVersionId: versionId,
-        });
+        const summary = isFootball
+          ? await fetchSportMetricsFootballWeeklySummary({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              trainingPlanVersionId: versionId,
+            })
+          : await fetchSportMetricsBasketballWeeklySummary({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              trainingPlanVersionId: versionId,
+            });
         if (cancelled) return;
         const nextSeasonCycleId = summary.seasonCycleId?.trim() || null;
         setSeasonCycleId(nextSeasonCycleId);
@@ -283,11 +302,17 @@ export function CoachBasketballCompetitionSection({
           setAssessments([]);
           return;
         }
-        const nextAssessments = await fetchBasketballCompetitionAssessments({
-          entityId: resolvedEntityId,
-          athleteId: resolvedAthleteId,
-          seasonCycleId: nextSeasonCycleId,
-        });
+        const nextAssessments = isFootball
+          ? await fetchFootballCompetitionAssessments({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              seasonCycleId: nextSeasonCycleId,
+            })
+          : await fetchBasketballCompetitionAssessments({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              seasonCycleId: nextSeasonCycleId,
+            });
         if (cancelled) return;
         setAssessments((current) => {
           const retained = current.filter(
@@ -312,7 +337,7 @@ export function CoachBasketballCompetitionSection({
     return () => {
       cancelled = true;
     };
-  }, [applicable, resolvedAthleteId, resolvedEntityId, reloadKey, versionId]);
+  }, [applicable, isFootball, resolvedAthleteId, resolvedEntityId, reloadKey, versionId]);
 
   if (!applicable) return null;
 
@@ -331,11 +356,17 @@ export function CoachBasketballCompetitionSection({
   async function replaceWithRefetchedAssessment(fallback: BasketballCompetitionAssessment) {
     try {
       replaceAssessment(
-        await fetchBasketballCompetitionAssessment({
-          entityId: resolvedEntityId,
-          athleteId: resolvedAthleteId,
-          assessmentId: fallback.id,
-        }),
+        isFootball
+          ? await fetchFootballCompetitionAssessment({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              assessmentId: fallback.id,
+            })
+          : await fetchBasketballCompetitionAssessment({
+              entityId: resolvedEntityId,
+              athleteId: resolvedAthleteId,
+              assessmentId: fallback.id,
+            }),
       );
     } catch {
       replaceAssessment(fallback);
@@ -353,25 +384,54 @@ export function CoachBasketballCompetitionSection({
     let assessmentId = recoverableDraftId;
     try {
       if (!assessmentId) {
-        const created = await createBasketballCompetitionAssessment(
-          resolvedEntityId,
-          resolvedAthleteId,
-          {
-            seasonCycleId,
+        const created = isFootball
+          ? await createFootballCompetitionAssessment(
+              resolvedEntityId,
+              resolvedAthleteId,
+              {
+                seasonCycleId,
+                competitionName: input.competitionName,
+                competitionDate: input.competitionDate,
+                taxonomyRatings: input.taxonomyRatings,
+              },
+            )
+          : await createBasketballCompetitionAssessment(
+              resolvedEntityId,
+              resolvedAthleteId,
+              {
+                seasonCycleId,
+                competitionName: input.competitionName,
+                competitionDate: input.competitionDate,
+                taxonomyRatings: input.taxonomyRatings,
+              },
+            );
+        assessmentId = created.id;
+        setRecoverableDraftId(created.id);
+        replaceAssessment(created);
+      } else if (isFootball) {
+        const updated = await updateFootballCompetitionAssessment({
+          entityId: resolvedEntityId,
+          athleteId: resolvedAthleteId,
+          assessmentId,
+          payload: {
             competitionName: input.competitionName,
             competitionDate: input.competitionDate,
             taxonomyRatings: input.taxonomyRatings,
           },
-        );
-        assessmentId = created.id;
-        setRecoverableDraftId(created.id);
-        replaceAssessment(created);
+        });
+        replaceAssessment(updated);
       }
-      const submitted = await submitBasketballCompetitionAssessment({
-        entityId: resolvedEntityId,
-        athleteId: resolvedAthleteId,
-        assessmentId,
-      });
+      const submitted = isFootball
+        ? await submitFootballCompetitionAssessment({
+            entityId: resolvedEntityId,
+            athleteId: resolvedAthleteId,
+            assessmentId,
+          })
+        : await submitBasketballCompetitionAssessment({
+            entityId: resolvedEntityId,
+            athleteId: resolvedAthleteId,
+            assessmentId,
+          });
       if (submitted.status !== "SUBMITTED") {
         setError("Unable to save Competition.");
         return;
@@ -401,15 +461,17 @@ export function CoachBasketballCompetitionSection({
       )}
       titleClassName={DASHBOARD_CARD_TITLE_CLASS}
       actions={
-        <Button
-          type="button"
-          onClick={() => {
-            setOpenAssessmentId(null);
-            setShowCreate(true);
-          }}
-        >
-          + Add Competition
-        </Button>
+        allowEntry ? (
+          <Button
+            type="button"
+            onClick={() => {
+              setOpenAssessmentId(null);
+              setShowCreate(true);
+            }}
+          >
+            + Add Competition
+          </Button>
+        ) : undefined
       }
     >
       <div className="space-y-4">
@@ -432,7 +494,7 @@ export function CoachBasketballCompetitionSection({
         {!loading && !seasonCycleId ? (
           <p className="text-sm text-textSecondary">Season cycle unavailable</p>
         ) : null}
-        {showCreate && seasonCycleId ? (
+        {allowEntry && showCreate && seasonCycleId ? (
           <CoachBasketballCompetitionForm
             taxonomyKeys={taxonomyKeys}
             submitting={submitting}

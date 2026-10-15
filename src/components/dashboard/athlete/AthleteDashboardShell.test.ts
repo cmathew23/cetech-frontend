@@ -92,4 +92,78 @@ describe("athlete Sports Metrics legacy isolation", () => {
     expect(section).toContain("fetchSportMetricsGolfWeeklySummary");
     expect(section).toContain("<GolfSportsMetricsComparisonControls");
   });
+
+  it("mounts the Basketball sport-performance block for Football on Football data only", () => {
+    const shell = readRelative("./AthleteDashboardShell.tsx");
+    const goal = readRelative("./AthleteWeeklyGoalPerformanceSection.tsx");
+    const competition = readRelative("./AthleteBasketballCompetitionPerformanceSection.tsx");
+    const overall = readRelative("./BasketballWeeklyPerformanceSection.tsx");
+    const footballBlock = shell.slice(shell.indexOf("function AthleteFootballWeeklyPerformance"));
+    const golfBlock = shell.slice(
+      shell.indexOf("function AthleteSportMetricsWithPlanVersion"),
+      shell.indexOf("function AthleteBasketballWeeklyPerformance"),
+    );
+    const basketballBlock = shell.slice(
+      shell.indexOf("function AthleteBasketballWeeklyPerformance"),
+      shell.indexOf("export function AthleteDashboardShell"),
+    );
+    const footballFetch = goal.slice(goal.indexOf("const isFootball = sportCode === \"FOOTBALL\""));
+
+    expect(shell).toContain('athleteSport === "FOOTBALL"');
+    expect(shell).toContain("<AthleteFootballWeeklyPerformance");
+    expect(footballBlock).toContain("loadHistory={loadFootballPracticeHistoryWeeks}");
+    expect(footballBlock).toContain("<SkillsGolfHistoryWeekSelector />");
+    expect(footballBlock).toContain("<AthleteWeeklyGoalPerformanceSection");
+    expect(footballBlock).toContain('sportCode="FOOTBALL"');
+    expect(footballBlock).toContain('audience="athlete"');
+    expect(footballBlock).toContain("allowCoachPracticeRating={false}");
+    expect(footballBlock).toContain("<AthleteBasketballCompetitionPerformanceSection");
+    expect(footballBlock).toContain('sportCode="FOOTBALL"');
+    expect(footballBlock).toContain("<BasketballWeeklyPerformanceSection");
+    expect(footballBlock).toContain('sections="overall"');
+    expect(footballBlock.indexOf("<SkillsGolfHistoryWeekSelector />")).toBeLessThan(
+      footballBlock.indexOf("<AthleteWeeklyGoalPerformanceSection"),
+    );
+    expect(footballBlock.indexOf("<AthleteWeeklyGoalPerformanceSection")).toBeLessThan(
+      footballBlock.indexOf("<AthleteBasketballCompetitionPerformanceSection"),
+    );
+    expect(
+      footballBlock.indexOf("<AthleteBasketballCompetitionPerformanceSection"),
+    ).toBeLessThan(footballBlock.indexOf("<BasketballWeeklyPerformanceSection"));
+    expect(footballBlock).not.toContain("loadBasketballPracticeHistoryWeeks");
+    expect(footballBlock).not.toContain("fetchSportMetricsGolf");
+    expect(footballBlock).not.toContain("sport-metrics/golf");
+    expect(footballBlock).not.toContain("sport-metrics/basketball");
+
+    expect(goal).toContain("fetchSportMetricsFootballWeeklySummary");
+    expect(goal).toContain("fetchSportMetricsFootballWeeklySummaryHistory");
+    expect(goal).toContain("loadFootballPracticeHistoryWeeks");
+    expect(footballFetch.indexOf("fetchSportMetricsFootballWeeklySummary")).toBeLessThan(
+      footballFetch.indexOf("fetchSportMetricsGolfWeeklySummary"),
+    );
+    expect(goal).toContain("fetchSportMetricsBasketballWeeklySummary");
+    expect(goal).toContain("fetchSportMetricsGolfWeeklySummary");
+
+    expect(competition).toContain("fetchSportMetricsFootballWeeklySummary");
+    expect(competition).toContain("fetchFootballCompetitionAssessments");
+    expect(competition).toContain("fetchFootballCompetitionAssessment");
+    expect(competition).toContain("fetchSportMetricsBasketballWeeklySummary");
+    expect(competition).toContain("fetchBasketballCompetitionAssessments");
+    expect(competition).toContain("fetchBasketballCompetitionAssessment");
+    expect(competition).not.toContain("fetchSportMetricsGolf");
+
+    expect(overall).toContain("fetchSportMetricsFootballWeeklySummary");
+    expect(overall).toContain("fetchSportMetricsBasketballWeeklySummary");
+    expect(overall).not.toContain("fetchSportMetricsGolf");
+    expect(overall).not.toContain("sport-metrics/golf");
+
+    expect(golfBlock).toContain("<AthleteCompetitionPerformanceSection");
+    expect(golfBlock).toContain("<OverallGolfPerformanceSection");
+    expect(golfBlock).not.toContain("FOOTBALL");
+    expect(golfBlock).not.toContain("loadFootballPracticeHistoryWeeks");
+    expect(basketballBlock).toContain('sportCode="BASKETBALL"');
+    expect(basketballBlock).toContain("loadHistory={loadBasketballPracticeHistoryWeeks}");
+    expect(basketballBlock).not.toContain("FOOTBALL");
+    expect(basketballBlock).not.toContain("loadFootballPracticeHistoryWeeks");
+  });
 });

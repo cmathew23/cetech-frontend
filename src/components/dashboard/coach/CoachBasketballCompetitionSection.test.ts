@@ -146,4 +146,39 @@ describe("Coach basketball competition entry", () => {
     expect(source).not.toContain("PASSING");
     expect(source).not.toContain("SHOOTING");
   });
+
+  it("sends Football competition writes to Football endpoints and keeps Basketball writes", () => {
+    const source = readFileSync(
+      new URL("./CoachBasketballCompetitionSection.tsx", import.meta.url),
+      "utf8",
+    );
+    const footballCreate = source.slice(
+      source.indexOf("const created = isFootball"),
+      source.indexOf(": await createBasketballCompetitionAssessment"),
+    );
+    const footballEdit = source.slice(
+      source.indexOf("} else if (isFootball)"),
+      source.indexOf("const submitted = isFootball"),
+    );
+    const footballSubmit = source.slice(
+      source.indexOf("const submitted = isFootball"),
+      source.indexOf(": await submitBasketballCompetitionAssessment"),
+    );
+
+    expect(source).toContain("summary.competitionTaxonomyScores");
+    expect(source).toContain("taxonomyKeysFromSummary(summary.competitionTaxonomyScores)");
+    expect(source).toContain("allowEntry");
+    expect(footballCreate).toContain("createFootballCompetitionAssessment");
+    expect(footballCreate).not.toContain("createBasketballCompetitionAssessment");
+    expect(footballEdit).toContain("updateFootballCompetitionAssessment");
+    expect(footballEdit).not.toContain("updateBasketballCompetitionAssessment");
+    expect(footballSubmit).toContain("submitFootballCompetitionAssessment");
+    expect(source).toContain("createBasketballCompetitionAssessment");
+    expect(source).toContain("submitBasketballCompetitionAssessment");
+    expect(source).toContain("fetchSportMetricsBasketballWeeklySummary");
+    expect(source).toContain("setReloadKey((current) => current + 1)");
+    expect(source).toContain("onSubmitted?.()");
+    expect(source).not.toContain("sport-metrics/golf");
+    expect(source).not.toContain("fetchSportMetricsGolf");
+  });
 });

@@ -170,6 +170,38 @@ describe("buildWeeklyAdherenceMetricTiles", () => {
 });
 
 describe("session domain context lines", () => {
+  it("renders a Football skills response through the shared Basketball card fields", () => {
+    const summary = parseWeeklyAdherenceSummaryPayload({
+      athleteId: "athlete-1",
+      weekStart: "2026-10-12",
+      weekEnd: "2026-10-18",
+      domains: {
+        SKILL: {
+          adherencePercent: 20,
+          totalPrescribedItems: 5,
+          loggedItems: 1,
+          completedItems: 1,
+          unloggedItems: 4,
+          completionCredit: 1,
+          plannedMinutes: 61,
+          actualMinutes: 0,
+        },
+      },
+    });
+    const skill = summary.domains.SKILL;
+    expect(skill?.adherencePercent).toBe(20);
+    expect(skill?.context && "plannedItems" in skill.context).toBe(true);
+    if (!skill?.context || !("plannedItems" in skill.context)) return;
+
+    expect(formatAdherencePercentDisplay(skill.adherencePercent)).toBe("20%");
+    expect(
+      formatSessionItemCompletionLine("SKILL", skill.context, skill.plannedSessions),
+    ).toBe("1 of 5 prescribed skill drills completed");
+    expect(formatSessionMinutesContextLines(skill.context)).toContain(
+      "61 min planned · 0 min actual",
+    );
+  });
+
   it("renders skills item completion separately from minutes", () => {
     const itemLine = formatSessionItemCompletionLine(
       "SKILL",

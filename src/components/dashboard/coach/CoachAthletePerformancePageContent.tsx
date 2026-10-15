@@ -4,6 +4,7 @@ import { BasketballWeeklyPerformanceSection } from "@/components/dashboard/athle
 import {
   AthleteWeeklyGoalPerformanceSection,
   loadBasketballPracticeHistoryWeeks,
+  loadFootballPracticeHistoryWeeks,
 } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
 import { SportMetricsSection } from "@/components/dashboard/SportMetricsSection";
@@ -100,10 +101,13 @@ export function CoachAthletePerformancePageContent({
   const [adherenceLoading, setAdherenceLoading] = useState(false);
   const [adherenceError, setAdherenceError] = useState<string | null>(null);
   const [summary, setSummary] = useState<WeeklyAdherenceSummary | null>(null);
+  const [adherenceReloadKey, setAdherenceReloadKey] = useState(0);
   const [weekRange, setWeekRange] = useState<WeeklyAdherencePlanRange | null>(null);
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState<string | null>(null);
   const [golfWeeklySummaryRefreshKey, setGolfWeeklySummaryRefreshKey] = useState(0);
   const [basketballWeeklySummaryRefreshKey, setBasketballWeeklySummaryRefreshKey] =
+    useState(0);
+  const [footballWeeklySummaryRefreshKey, setFootballWeeklySummaryRefreshKey] =
     useState(0);
 
   const wearableViewerContext = resolveCoachWearableViewerContext({
@@ -206,7 +210,7 @@ export function CoachAthletePerformancePageContent({
     return () => {
       cancelled = true;
     };
-  }, [entityId, selectedAthleteId]);
+  }, [adherenceReloadKey, entityId, selectedAthleteId]);
 
   useEffect(() => {
     const athleteId = selectedAthleteId.trim();
@@ -520,6 +524,52 @@ export function CoachAthletePerformancePageContent({
             </SkillsGolfHistoryComparisonProvider>
           ) : null}
 
+          {!adherenceLoading &&
+          showSportMetrics &&
+          selectedAthleteId !== "" &&
+          selectedAthleteSport === "FOOTBALL" ? (
+            <SkillsGolfHistoryComparisonProvider
+              entityId={entityId}
+              athleteId={selectedAthleteId}
+              loadHistory={loadFootballPracticeHistoryWeeks}
+            >
+              <SkillsGolfHistoryWeekSelector />
+              <AthleteWeeklyGoalPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                audience="coach"
+                sportCode="FOOTBALL"
+                refreshKey={footballWeeklySummaryRefreshKey}
+                allowCoachPracticeRating={coachHasSkillsPlanGenerationAuthority(
+                  selectedAthlete,
+                )}
+                onFootballCoachRatingSubmitted={() => {
+                  setFootballWeeklySummaryRefreshKey((current) => current + 1);
+                }}
+              />
+              <CoachBasketballCompetitionSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                sportCode="FOOTBALL"
+                allowEntry={coachHasSkillsPlanGenerationAuthority(selectedAthlete)}
+                onSubmitted={() => {
+                  setFootballWeeklySummaryRefreshKey((current) => current + 1);
+                }}
+              />
+              <BasketballWeeklyPerformanceSection
+                entityId={entityId}
+                athleteId={selectedAthleteId}
+                trainingPlanVersionId={trainingPlanVersionId}
+                refreshKey={footballWeeklySummaryRefreshKey}
+                titleClassName={DASHBOARD_CARD_TITLE_CLASS}
+                sections="overall"
+                sportCode="FOOTBALL"
+              />
+            </SkillsGolfHistoryComparisonProvider>
+          ) : null}
+
           {showNutritionPerformance && weekRange ? (
             <NutritionPerformanceSection
               entityId={entityId}
@@ -562,6 +612,10 @@ export function CoachAthletePerformancePageContent({
           onSuccess={() => {
             setCoachMeasurementOpen(false);
             setBasketballWeeklySummaryRefreshKey((current) => current + 1);
+            setFootballWeeklySummaryRefreshKey((current) => current + 1);
+            if (selectedAthleteSport === "FOOTBALL") {
+              setAdherenceReloadKey((current) => current + 1);
+            }
           }}
         />
       ) : null}

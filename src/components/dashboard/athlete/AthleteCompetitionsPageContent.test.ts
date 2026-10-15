@@ -30,7 +30,7 @@ describe("athlete Competitions page list", () => {
       new URL("../../../app/athlete/competitions/page.tsx", import.meta.url),
       "utf8",
     );
-    expect(page).toContain('sportCode === "BASKETBALL"');
+    expect(page).toContain('sportCode === "BASKETBALL" || sportCode === "FOOTBALL"');
     expect(page).toContain('router.replace("/athlete/dashboard")');
     expect(page).toContain("<AthleteCompetitionsPageContent />");
 
@@ -58,8 +58,10 @@ describe("athlete Competitions page list", () => {
     expect(content).toContain("No competitions recorded for this season.");
     expect(content).toContain("+ Add Competition");
     expect(content).toContain('planningIds.ids?.sport === "BASKETBALL"');
-    expect(content).toContain("isBasketballAthlete ||");
-    expect(content).toContain("{!isBasketballAthlete && showWorkflow ? (");
+    expect(content).toContain('planningIds.ids?.sport === "FOOTBALL"');
+    expect(content).toContain("hidesLegacyCompetitions ||");
+    expect(content).toContain("{!hidesLegacyCompetitions && showWorkflow ? (");
+    expect(content).toContain("isBasketballAthlete || planningIds.ids?.sport === \"FOOTBALL\"");
   });
 
   it("renders DRAFT and SUBMITTED cards from backend list fields only", () => {

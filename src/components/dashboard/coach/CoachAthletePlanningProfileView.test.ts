@@ -329,11 +329,13 @@ import {
   domainReviewActiveDetailRenderKey,
   FYN_REVISION_MISSING_TARGET_MESSAGE,
   FYN_REVISION_OPTIONS_ERROR_MESSAGE,
+  fynRevisionOptionsFailureMessage,
   FYN_REVISION_SHOW_OPTIONS_LABEL,
   FYN_REVISION_PRESERVE_LINE,
   MAX_FYN_REVISION_CHANGES,
   NextCycleWorkspaceAction,
   PlanningContextWorkspaceAction,
+  SkillsPlanScheduleDayHeading,
   buildPendingPlanningContextHydrationStatePatch,
   resolvePlanningContextActivePhase,
   resolveAuthoritativePlanWindow,
@@ -10951,7 +10953,24 @@ describe("Training Plan Workspace lifecycle display", () => {
         throw new Error("boom");
       },
     });
-    expect(outcome).toEqual({ status: "ERROR", message: FYN_REVISION_OPTIONS_ERROR_MESSAGE });
+    expect(outcome).toEqual({ status: "ERROR", message: "boom" });
+
+    const apiOutcome = await fetchFynRevisionReplacementOptions({
+      entityId: "entity-1",
+      athleteId: "athlete-1",
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      coachRequest: "Replace the white rice.",
+      target: fynRevisionTargetOptions(fynDraftContext)[0]?.target ?? null,
+      fetchOptions: async () => {
+        throw { message: "Request timed out", status: 0 };
+      },
+    });
+    expect(apiOutcome).toEqual({
+      status: "ERROR",
+      message: fynRevisionOptionsFailureMessage({ message: "Request timed out", status: 0 }),
+    });
+    expect(apiOutcome).toEqual({ status: "ERROR", message: "0: Request timed out" });
   });
 
   it("blocks the request and returns a clarification when no target is matched", async () => {
@@ -22045,5 +22064,52 @@ describe("Goal Library validated level source", () => {
     expect(fetchEffect).not.toContain("disciplineOrEvent");
     expect(fetchEffect).not.toContain("athleteStage");
     expect(fetchEffect).not.toContain("sex");
+  });
+});
+
+describe("Skills Plan Schedule day heading", () => {
+  it("renders Football day number, weekday, and display date", () => {
+    const html = renderToStaticMarkup(
+      createElement(SkillsPlanScheduleDayHeading, {
+        dayNumber: 1,
+        date: "15/10/2026",
+        weekday: "Thursday",
+      }),
+    );
+
+    expect(html).toContain("Day 1");
+    expect(html).toContain("Thursday");
+    expect(html).toContain("15/10/2026");
+    expect(html).not.toContain("Unavailable");
+  });
+
+  it("keeps Golf ISO schedule dates on the existing weekday and DD/MM/YYYY format", () => {
+    const html = renderToStaticMarkup(
+      createElement(SkillsPlanScheduleDayHeading, {
+        dayNumber: 1,
+        date: "2026-05-04",
+        weekday: null,
+      }),
+    );
+
+    expect(html).toContain("Day 1");
+    expect(html).toContain("Monday");
+    expect(html).toContain("04/05/2026");
+    expect(html).not.toContain("2026-05-04");
+  });
+
+  it("keeps Basketball ISO schedule dates on the existing weekday and DD/MM/YYYY format", () => {
+    const html = renderToStaticMarkup(
+      createElement(SkillsPlanScheduleDayHeading, {
+        dayNumber: 2,
+        date: "2026-10-02",
+        weekday: null,
+      }),
+    );
+
+    expect(html).toContain("Day 2");
+    expect(html).toContain("Friday");
+    expect(html).toContain("02/10/2026");
+    expect(html).not.toContain("2026-10-02");
   });
 });

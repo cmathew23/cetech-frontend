@@ -18,6 +18,7 @@ import {
   type BasketballTaxonomyScore,
   type BasketballWeeklySummary,
 } from "@/lib/api/sportMetricsBasketball";
+import { fetchSportMetricsFootballWeeklySummary } from "@/lib/api/sportMetricsFootball";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, type ReactNode } from "react";
@@ -223,16 +224,22 @@ function TaxonomyPerformanceCard({
 function BasketballOverallPerformanceCard({
   summary,
   titleClassName,
+  sportCode = "BASKETBALL",
 }: {
   summary: BasketballWeeklySummary;
   titleClassName: string;
+  sportCode?: "BASKETBALL" | "FOOTBALL";
 }) {
+  const practicePerformance =
+    sportCode === "FOOTBALL"
+      ? summary.coachPracticeScoreOutOf100
+      : summary.practiceScoreOutOf100;
   return (
     <PerformanceCard title="Overall Performance" titleClassName={titleClassName}>
       <div className={athletePerformanceGridClass(3)}>
         <AthletePerformanceStat
           title="Practice Performance"
-          value={displayBasketballScore(summary.practiceScoreOutOf100)}
+          value={displayBasketballScore(practicePerformance)}
         />
         <AthletePerformanceStat
           title="Competition Performance"
@@ -262,9 +269,11 @@ function BasketballOverallPerformanceCard({
 export function BasketballWeeklyPerformanceContent({
   summary,
   titleClassName = ATHLETE_DASHBOARD_CARD_TITLE_CLASS,
+  sportCode = "BASKETBALL",
 }: {
   summary: BasketballWeeklySummary;
   titleClassName?: string;
+  sportCode?: "BASKETBALL" | "FOOTBALL";
 }) {
   return (
     <div className="space-y-4">
@@ -280,6 +289,7 @@ export function BasketballWeeklyPerformanceContent({
       <BasketballOverallPerformanceCard
         summary={summary}
         titleClassName={titleClassName}
+        sportCode={sportCode}
       />
     </div>
   );
@@ -292,6 +302,7 @@ export function BasketballWeeklyPerformanceSection({
   refreshKey = 0,
   titleClassName = ATHLETE_DASHBOARD_CARD_TITLE_CLASS,
   sections = "all",
+  sportCode = "BASKETBALL",
 }: {
   entityId: string;
   athleteId: string;
@@ -299,10 +310,12 @@ export function BasketballWeeklyPerformanceSection({
   refreshKey?: number;
   titleClassName?: string;
   sections?: "all" | "overall";
+  sportCode?: "BASKETBALL" | "FOOTBALL";
 }) {
   const versionId = trainingPlanVersionId?.trim() ?? "";
   const applicable =
     entityId.trim() !== "" && athleteId.trim() !== "" && versionId !== "";
+  const isFootball = sportCode === "FOOTBALL";
   const [summary, setSummary] = useState<BasketballWeeklySummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -315,11 +328,17 @@ export function BasketballWeeklyPerformanceSection({
     setSummary(null);
     void (async () => {
       try {
-        const next = await fetchSportMetricsBasketballWeeklySummary({
-          entityId: entityId.trim(),
-          athleteId: athleteId.trim(),
-          trainingPlanVersionId: versionId,
-        });
+        const next = isFootball
+          ? await fetchSportMetricsFootballWeeklySummary({
+              entityId: entityId.trim(),
+              athleteId: athleteId.trim(),
+              trainingPlanVersionId: versionId,
+            })
+          : await fetchSportMetricsBasketballWeeklySummary({
+              entityId: entityId.trim(),
+              athleteId: athleteId.trim(),
+              trainingPlanVersionId: versionId,
+            });
         if (cancelled) return;
         setSummary(next);
       } catch (loadError) {
@@ -338,7 +357,11 @@ export function BasketballWeeklyPerformanceSection({
   if (!applicable) return null;
   if (error) return <Alert variant="danger">{error}</Alert>;
   if (loading || summary === null) {
-    return <p className="text-sm text-textSecondary">Loading basketball performance…</p>;
+    return (
+      <p className="text-sm text-textSecondary">
+        {isFootball ? "Loading performance…" : "Loading basketball performance…"}
+      </p>
+    );
   }
 
   if (sections === "overall") {
@@ -346,6 +369,7 @@ export function BasketballWeeklyPerformanceSection({
       <BasketballOverallPerformanceCard
         summary={summary}
         titleClassName={titleClassName}
+        sportCode={sportCode}
       />
     );
   }
@@ -354,6 +378,7 @@ export function BasketballWeeklyPerformanceSection({
     <BasketballWeeklyPerformanceContent
       summary={summary}
       titleClassName={titleClassName}
+      sportCode={sportCode}
     />
   );
 }

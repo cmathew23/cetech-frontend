@@ -189,6 +189,68 @@ describe("Basketball weekly performance display", () => {
     expect(metricValue(submittedOverall, "Overall Performance")).toBe("81.25");
   });
 
+  it("does not use a coach practice score when Practice and Overall are null", () => {
+    const html = renderSummary({
+      coachPracticeScoreOutOf100: 50,
+      practiceScoreOutOf100: null,
+      competitionPerformance: null,
+      overallPerformance: null,
+      exerciseTrends: [],
+      goalEvidence: [],
+      taxonomyScores: [],
+    });
+    const overall = sectionHtml(html, "Overall Performance");
+
+    expect(metricValue(overall, "Practice Performance")).toBe("NO RESULT YET");
+    expect(metricValue(overall, "Overall Performance")).toBe("NO RESULT YET");
+    expect(overall).not.toContain(">50<");
+  });
+
+  it("renders Football Practice Performance from coachPracticeScoreOutOf100", () => {
+    const html = renderToStaticMarkup(
+      createElement(BasketballWeeklyPerformanceContent, {
+        sportCode: "FOOTBALL",
+        summary: summaryFrom({
+          coachPracticeScoreOutOf100: 50,
+          practiceScoreOutOf100: null,
+          practiceSideScoreOutOf100: null,
+          competitionPerformance: 50,
+          overallPerformance: null,
+          exerciseTrends: [],
+          goalEvidence: [],
+          taxonomyScores: [],
+        }),
+      }),
+    );
+    const overall = sectionHtml(html, "Overall Performance");
+
+    expect(metricValue(overall, "Practice Performance")).toBe("50");
+    expect(metricValue(overall, "Competition Performance")).toBe("50");
+    expect(metricValue(overall, "Overall Performance")).toBe("NO RESULT YET");
+  });
+
+  it("renders Football Overall Performance from backend overallPerformance", () => {
+    const html = renderToStaticMarkup(
+      createElement(BasketballWeeklyPerformanceContent, {
+        sportCode: "FOOTBALL",
+        summary: summaryFrom({
+          coachPracticeScoreOutOf100: 50,
+          practiceScoreOutOf100: null,
+          competitionPerformance: 50,
+          overallPerformance: 50,
+          exerciseTrends: [],
+          goalEvidence: [],
+          taxonomyScores: [],
+        }),
+      }),
+    );
+    const overall = sectionHtml(html, "Overall Performance");
+
+    expect(metricValue(overall, "Practice Performance")).toBe("50");
+    expect(metricValue(overall, "Competition Performance")).toBe("50");
+    expect(metricValue(overall, "Overall Performance")).toBe("50");
+  });
+
   it("renders null Practice, Competition, and Overall in one Golf-style card as NO RESULT YET", () => {
     const html = renderSummary(firstExercise);
     const overall = sectionHtml(html, "Overall Performance");
@@ -379,6 +441,7 @@ describe("Basketball and Golf performance wiring", () => {
     expect(section).not.toContain("|| 0");
     expect(section).not.toContain("0.45");
     expect(section).not.toContain("0.55");
+    expect(section).toContain("displayBasketballScore(summary.overallPerformance)");
     expect(section).toContain("NO RESULT YET");
     expect(section).toContain("athletePerformanceGridClass(3)");
     expect(section).not.toContain("DRIBBLING");

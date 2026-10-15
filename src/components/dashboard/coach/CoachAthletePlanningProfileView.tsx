@@ -2318,6 +2318,84 @@ export function resolveDomainReviewSurfaceIdentity(input: {
   };
 }
 
+const SKILLS_PLAN_DISPLAY_DATE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+
+function skillsPlanWeekdayFromCalendar(year: number, monthIndex: number, day: number): string | null {
+  const parsed = new Date(Date.UTC(year, monthIndex, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== monthIndex ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function skillsPlanWeekdayFromDate(date: string | null | undefined): string | null {
+  const value = date?.trim() ?? "";
+  if (value === "") return null;
+  const displayDate = SKILLS_PLAN_DISPLAY_DATE.exec(value);
+  if (displayDate) {
+    return skillsPlanWeekdayFromCalendar(
+      Number(displayDate[3]),
+      Number(displayDate[2]) - 1,
+      Number(displayDate[1]),
+    );
+  }
+  const parsed = new Date(value.includes("T") ? value : `${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+/** Weekday + date lines for a Skills Plan Schedule day. ISO dates stay on the existing formatters. */
+export function skillsPlanScheduleDayHeading(input: {
+  date: string | null | undefined;
+  weekday?: string | null;
+}): { weekday: string | null; date: string | null } {
+  const explicitWeekday = input.weekday?.trim() ?? "";
+  const rawDate = input.date?.trim() ?? "";
+  const date =
+    rawDate === ""
+      ? null
+      : SKILLS_PLAN_DISPLAY_DATE.test(rawDate)
+        ? rawDate
+        : formatDateOnly(rawDate);
+  return {
+    weekday: explicitWeekday !== "" ? explicitWeekday : skillsPlanWeekdayFromDate(rawDate),
+    date,
+  };
+}
+
+export function SkillsPlanScheduleDayHeading({
+  dayNumber,
+  date,
+  weekday,
+}: {
+  dayNumber: number;
+  date: string | null | undefined;
+  weekday?: string | null;
+}) {
+  const heading = skillsPlanScheduleDayHeading({ date, weekday });
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h5 className="text-base font-medium text-textPrimary">Day {dayNumber}</h5>
+      {heading.weekday ? (
+        <span className="text-sm text-textSecondary">{heading.weekday}</span>
+      ) : null}
+      {heading.date ? (
+        <span className="text-sm text-textSecondary">{heading.date}</span>
+      ) : null}
+    </div>
+  );
+}
+
 export function domainReviewScheduleDescription(
   workflowStatus: AssistantDomainWorkflowStatus,
 ): string {
@@ -3160,9 +3238,25 @@ export const FYN_REVISION_NO_ADD_FOOD_OPTIONS_MESSAGE =
 export const FYN_REVISION_MISSING_TARGET_MESSAGE =
   "I could not match that to a plan item. Please mention the day and item more clearly.";
 
-/** Shown when the revision-options request fails. */
+/** Shown when the revision-options request fails and the client returned no message. */
 export const FYN_REVISION_OPTIONS_ERROR_MESSAGE =
   "Fyn could not load approved options right now. Try again.";
+
+/** Surfaces the API client's message and status instead of a generic replacement. */
+export function fynRevisionOptionsFailureMessage(error: unknown): string {
+  if (isNormalizedApiError(error)) {
+    const text = error.message.trim();
+    const status = Number.isFinite(error.status) ? String(error.status) : "";
+    if (text !== "" && status !== "") return `${status}: ${text}`;
+    if (text !== "") return text;
+    if (status !== "") return status;
+  }
+  if (error instanceof Error) {
+    const text = error.message.trim();
+    if (text !== "") return text;
+  }
+  return FYN_REVISION_OPTIONS_ERROR_MESSAGE;
+}
 
 export const FYN_REVISION_SHOW_OPTIONS_LABEL = "Show approved options";
 
@@ -5739,8 +5833,8 @@ export async function fetchFynRevisionReplacementOptions(input: {
             : FYN_REVISION_NO_OPTIONS_MESSAGE
           : null,
     };
-  } catch {
-    return { status: "ERROR", message: FYN_REVISION_OPTIONS_ERROR_MESSAGE };
+  } catch (error) {
+    return { status: "ERROR", message: fynRevisionOptionsFailureMessage(error) };
   }
 }
 
@@ -22068,17 +22162,6 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  function formatDrawerWeekdayName(date: string | null | undefined): string | null {
-    const value = date?.trim() ?? "";
-    if (value === "") return null;
-    const parsed = new Date(value.includes("T") ? value : `${value}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return new Intl.DateTimeFormat("en-US", {
-      weekday: "long",
-      timeZone: "UTC",
-    }).format(parsed);
-  }
-
   function renderDomainReviewDrawerFact(label: string, value: ReactNode) {
     return (
       <div className="min-w-0 space-y-0.5">
@@ -22321,7 +22404,6 @@ export function CoachAthletePlanningProfileView({
           <div className="divide-y divide-border/70">
             {sortedDays.map((day, dayOffset) => {
               const dayNumber = day.dayIndex ?? dayOffset + 1;
-              const weekdayName = formatDrawerWeekdayName(day.date);
               const dayFocus = (day as { dayFocus?: DisplayableValue }).dayFocus;
               const nutritionDayTotals = showNutritionCalories
                 ? summarizeNutritionItems(
@@ -22338,17 +22420,11 @@ export function CoachAthletePlanningProfileView({
               return (
                 <section key={day.id ?? `day-${dayOffset}`} className="space-y-3 py-5 first:pt-0">
                   <div className="space-y-1">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <h5 className="text-base font-medium text-textPrimary">Day {dayNumber}</h5>
-                      {weekdayName ? (
-                        <span className="text-sm text-textSecondary">{weekdayName}</span>
-                      ) : null}
-                      {day.date ? (
-                        <span className="text-sm text-textSecondary">
-                          {formatDateOnly(day.date)}
-                        </span>
-                      ) : null}
-                    </div>
+                    <SkillsPlanScheduleDayHeading
+                      dayNumber={dayNumber}
+                      date={day.date}
+                      weekday={day.weekday}
+                    />
                     {hasRenderableValue(dayFocus) ? (
                       <div className="text-sm text-textSecondary">Focus: {displayValue(dayFocus)}</div>
                     ) : null}
@@ -22411,7 +22487,6 @@ export function CoachAthletePlanningProfileView({
           <div className="divide-y divide-border/70">
             {sortedDays.map((day, dayOffset) => {
               const dayNumber = day.dayIndex ?? dayOffset + 1;
-              const weekdayName = formatDrawerWeekdayName(day.date);
               const nutritionDayTotals = showNutritionCalories
                 ? summarizeNutritionItems(
                     day.sessions.flatMap((session, sessionOffset) =>
@@ -22433,17 +22508,11 @@ export function CoachAthletePlanningProfileView({
                   className="space-y-3 py-5 first:pt-0"
                 >
                   <div className="space-y-1">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <h5 className="text-base font-medium text-textPrimary">Day {dayNumber}</h5>
-                      {weekdayName ? (
-                        <span className="text-sm text-textSecondary">{weekdayName}</span>
-                      ) : null}
-                      {day.date ? (
-                        <span className="text-sm text-textSecondary">
-                          {formatDateOnly(day.date)}
-                        </span>
-                      ) : null}
-                    </div>
+                    <SkillsPlanScheduleDayHeading
+                      dayNumber={dayNumber}
+                      date={day.date}
+                      weekday={day.weekday}
+                    />
                     {hasRenderableValue(day.dayFocus) ? (
                       <div className="text-sm text-textSecondary">
                         Focus: {displayValue(day.dayFocus)}

@@ -45,6 +45,11 @@ import {
   type BasketballWeeklyHistoryItem,
   type BasketballWeeklySummary,
 } from "@/lib/api/sportMetricsBasketball";
+import {
+  fetchSportMetricsFootballWeeklySummary,
+  fetchSportMetricsFootballWeeklySummaryHistory,
+  postFootballCoachPracticeRating,
+} from "@/lib/api/sportMetricsFootball";
 import { isNormalizedApiError } from "@/lib/apiClient";
 import { formatDateOnly } from "@/lib/dateTime";
 import { cn } from "@/lib/utils";
@@ -175,6 +180,17 @@ export async function loadBasketballPracticeHistoryWeeks(params: {
   athleteId: string;
 }): Promise<SportMetricsGolfWeeklySummary[]> {
   const items = await fetchSportMetricsBasketballWeeklySummaryHistory(params);
+  return items.flatMap((item) => {
+    const view = basketballHistoryItemAsPracticeView(item);
+    return view ? [view] : [];
+  });
+}
+
+export async function loadFootballPracticeHistoryWeeks(params: {
+  entityId: string;
+  athleteId: string;
+}): Promise<SportMetricsGolfWeeklySummary[]> {
+  const items = await fetchSportMetricsFootballWeeklySummaryHistory(params);
   return items.flatMap((item) => {
     const view = basketballHistoryItemAsPracticeView(item);
     return view ? [view] : [];
@@ -840,6 +856,7 @@ export function AthleteWeeklyGoalPerformanceSection({
   audience,
   sportCode,
   refreshKey,
+  onFootballCoachRatingSubmitted,
 }: {
   entityId: string;
   athleteId: string;
@@ -848,6 +865,7 @@ export function AthleteWeeklyGoalPerformanceSection({
   audience?: "athlete" | "coach";
   sportCode?: string | null;
   refreshKey?: number;
+  onFootballCoachRatingSubmitted?: () => void;
 }) {
   const [summary, setSummary] = useState<SportMetricsGolfWeeklySummary | null>(
     null,
@@ -863,6 +881,7 @@ export function AthleteWeeklyGoalPerformanceSection({
   const versionId = trainingPlanVersionId?.trim() ?? "";
   const hasIdentifiers = entityId.trim() !== "" && athleteId.trim() !== "";
   const isBasketball = sportCode === "BASKETBALL";
+  const isFootball = sportCode === "FOOTBALL";
   const fetchKey =
     hasIdentifiers && versionId !== ""
       ? `${entityId.trim()}|${athleteId.trim()}|${versionId}|${reloadKey}${
@@ -877,19 +896,27 @@ export function AthleteWeeklyGoalPerformanceSection({
     let cancelled = false;
     void (async () => {
       try {
-        const nextSummary = isBasketball
+        const nextSummary = isFootball
           ? basketballSummaryAsPracticeView(
-              await fetchSportMetricsBasketballWeeklySummary({
+              await fetchSportMetricsFootballWeeklySummary({
                 entityId: entityId.trim(),
                 athleteId: athleteId.trim(),
                 trainingPlanVersionId: versionId,
               }),
             )
-          : await fetchSportMetricsGolfWeeklySummary({
-              entityId: entityId.trim(),
-              athleteId: athleteId.trim(),
-              trainingPlanVersionId: versionId,
-            });
+          : isBasketball
+            ? basketballSummaryAsPracticeView(
+                await fetchSportMetricsBasketballWeeklySummary({
+                  entityId: entityId.trim(),
+                  athleteId: athleteId.trim(),
+                  trainingPlanVersionId: versionId,
+                }),
+              )
+            : await fetchSportMetricsGolfWeeklySummary({
+                entityId: entityId.trim(),
+                athleteId: athleteId.trim(),
+                trainingPlanVersionId: versionId,
+              });
         if (cancelled) return;
         setSummary(nextSummary);
         setError(null);
@@ -905,7 +932,7 @@ export function AthleteWeeklyGoalPerformanceSection({
     return () => {
       cancelled = true;
     };
-  }, [athleteId, entityId, fetchKey, hasIdentifiers, isBasketball, versionId]);
+  }, [athleteId, entityId, fetchKey, hasIdentifiers, isBasketball, isFootball, versionId]);
 
   useEffect(() => {
     if (!summary) return;
@@ -923,7 +950,22 @@ export function AthleteWeeklyGoalPerformanceSection({
     setRatingError(null);
     void (async () => {
       try {
-        if (isBasketball) {
+        if (isFootball) {
+          const trainingPlanVersionId =
+            summary?.trainingPlanVersionId?.trim() || versionId;
+          await postFootballCoachPracticeRating(entityId.trim(), athleteId.trim(), {
+            trainingPlanVersionId,
+            taxonomyAreaKey,
+            rating,
+          });
+          const refetched = await fetchSportMetricsFootballWeeklySummary({
+            entityId: entityId.trim(),
+            athleteId: athleteId.trim(),
+            trainingPlanVersionId: versionId,
+          });
+          setSummary(basketballSummaryAsPracticeView(refetched));
+          onFootballCoachRatingSubmitted?.();
+        } else if (isBasketball) {
           const trainingPlanVersionId =
             summary?.trainingPlanVersionId?.trim() || versionId;
           await postBasketballCoachPracticeRating(entityId.trim(), athleteId.trim(), {

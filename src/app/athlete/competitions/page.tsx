@@ -16,15 +16,16 @@ export default function AthleteCompetitionsPage() {
     accessGateReady,
   });
   const sportCode = planningIds.phase === "ready" ? planningIds.ids.sport : null;
-  const isBasketballAthlete = sportCode === "BASKETBALL";
+  const hidesLegacyCompetitions =
+    sportCode === "BASKETBALL" || sportCode === "FOOTBALL";
 
   useEffect(() => {
-    if (!isBasketballAthlete) return;
+    if (!hidesLegacyCompetitions) return;
     router.replace("/athlete/dashboard");
-  }, [isBasketballAthlete, router]);
+  }, [hidesLegacyCompetitions, router]);
 
   if (
-    isBasketballAthlete ||
+    hidesLegacyCompetitions ||
     planningIds.phase === "loading" ||
     (planningIds.phase === "ready" && sportCode === null)
   ) {

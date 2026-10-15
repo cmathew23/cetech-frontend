@@ -183,6 +183,44 @@ export const paths = {
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/basketball/records`,
     athleteSportMetricsFootballRecords: (entityId: string, athleteId: string) =>
       `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/records`,
+    athleteSportMetricsFootballWeeklySummary: (
+      entityId: string,
+      athleteId: string,
+      query: { trainingPlanVersionId: string },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/weekly-summary`;
+      const params = new URLSearchParams();
+      params.set("trainingPlanVersionId", query.trainingPlanVersionId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsFootballWeeklySummaryHistory: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/weekly-summary/history`,
+    athleteSportMetricsFootballCompetitionAssessments: (
+      entityId: string,
+      athleteId: string,
+      query?: { seasonCycleId?: string | null },
+    ) => {
+      const base = `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/competition-assessments`;
+      const seasonCycleId = query?.seasonCycleId?.trim() ?? "";
+      if (seasonCycleId === "") return base;
+      const params = new URLSearchParams();
+      params.set("seasonCycleId", seasonCycleId);
+      return `${base}?${params.toString()}`;
+    },
+    athleteSportMetricsFootballCompetitionAssessment: (
+      entityId: string,
+      athleteId: string,
+      assessmentId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/competition-assessments/${encodeURIComponent(assessmentId)}`,
+    athleteSportMetricsFootballCompetitionAssessmentSubmit: (
+      entityId: string,
+      athleteId: string,
+      assessmentId: string,
+    ) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/competition-assessments/${encodeURIComponent(assessmentId)}/submit`,
+    athleteSportMetricsFootballCoachPracticeRatings: (entityId: string, athleteId: string) =>
+      `/entities/${encodeURIComponent(entityId)}/athletes/${encodeURIComponent(athleteId)}/sport-metrics/football/coach-practice-ratings`,
     athleteSportMetricsBasketballWeeklySummary: (
       entityId: string,
       athleteId: string,

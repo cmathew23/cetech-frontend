@@ -139,5 +139,15 @@ describe("PeakConnect module labels", () => {
         .filter((item) => item.href !== "/athlete/competitions")
         .map((item) => item.href),
     );
+    expect(
+      athleteSidebarNavItemsForSport("FOOTBALL").map((item) => item.href),
+    ).toEqual(
+      athleteSidebarNavItemsForSport("BASKETBALL").map((item) => item.href),
+    );
+    expect(
+      athleteSidebarNavItemsForSport("FOOTBALL").find(
+        (item) => item.href === "/athlete/competitions",
+      ),
+    ).toBeUndefined();
   });
 });

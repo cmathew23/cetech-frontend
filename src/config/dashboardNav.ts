@@ -61,7 +61,7 @@ export const athleteSidebarNavItems: DashboardNavItem[] = [
 export function athleteSidebarNavItemsForSport(
   sportCode: string | null,
 ): DashboardNavItem[] {
-  if (sportCode === "BASKETBALL") {
+  if (sportCode === "BASKETBALL" || sportCode === "FOOTBALL") {
     return athleteSidebarNavItems.filter(
       (item) => item.href !== "/athlete/competitions",
     );

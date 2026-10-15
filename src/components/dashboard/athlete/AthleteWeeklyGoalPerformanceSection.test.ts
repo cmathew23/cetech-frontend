@@ -1030,6 +1030,49 @@ describe("Athlete Sports Metrics Step 4B", () => {
     expect(html).not.toContain("Exercise evidence recorded");
   });
 
+  it("renders Football Practice Performance from the same coach score field as Basketball", () => {
+    const shared = {
+      practiceScoreOutOf100: null,
+      coachPracticeScoreOutOf100: 50,
+      practiceSideScoreOutOf100: null,
+      exerciseTrends: [],
+      coachPracticeRatings: [
+        {
+          taxonomyAreaKey: "HANDLING_SHOT_STOPPING",
+          rating: 3,
+          coachRatingScoreOutOf100: 50,
+        },
+      ],
+    };
+    const football = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: { ...shared, sport: "FOOTBALL" },
+    });
+    const basketball = parseSportMetricsGolfWeeklySummaryPayload({
+      success: true,
+      data: { ...shared, sport: "BASKETBALL" },
+    });
+    const footballHtml = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, {
+        audience: "coach",
+        summary: football,
+      }),
+    );
+    const basketballHtml = renderToStaticMarkup(
+      createElement(AthletePracticePerformanceContent, {
+        audience: "coach",
+        summary: basketball,
+      }),
+    );
+
+    expect(football.practiceScoreOutOf100).toBeNull();
+    expect(football.coachPracticeScoreOutOf100).toBe(50);
+    expect(footballHtml).toContain(">50<");
+    expect(basketballHtml).toContain(">50<");
+    expect(footballHtml).not.toContain("NO RESULT YET");
+    expect(basketballHtml).not.toContain("NO RESULT YET");
+  });
+
   const currentCoachPracticeDataset = {
     practiceScoreOutOf100: null,
     coachPracticeScoreOutOf100: 50,

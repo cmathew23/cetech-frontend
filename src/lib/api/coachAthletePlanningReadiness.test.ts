@@ -2018,6 +2018,81 @@ describe("training plan generation timeouts and helpers", () => {
     expect(result.days[0]?.sessions[0]?.items[0]?.reps).toBe("12");
   });
 
+  it("keeps Football weekday and display date on the generated Skills day", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-football",
+        trainingPlanVersionId: "version-skills-football",
+        days: [
+          {
+            dayIndex: 1,
+            date: "15/10/2026",
+            weekday: "Thursday",
+            dayFocus: "Finishing",
+            notes: "Keep the shape.",
+            sessions: [{ sessionIndex: 1, title: "Technical", items: [{ label: "Passing" }] }],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "15/10/2026",
+      weekday: "Thursday",
+      dayFocus: "Finishing",
+      notes: "Keep the shape.",
+    });
+  });
+
+  it("leaves Golf and Basketball ISO day dates unchanged when weekday is absent", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-golf",
+        trainingPlanVersionId: "version-skills-golf",
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-05-04",
+            dayFocus: "Putting",
+            sessions: [{ sessionIndex: 1, title: "Short game", items: [{ label: "Ladder" }] }],
+          },
+          {
+            dayIndex: 2,
+            dayDate: "2026-10-02",
+            dayFocus: "Finishing",
+            sessions: [{ sessionIndex: 1, title: "Court", items: [{ label: "Layups" }] }],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "2026-05-04",
+      weekday: null,
+      dayFocus: "Putting",
+    });
+    expect(result.days[1]).toMatchObject({
+      dayIndex: 2,
+      date: "2026-10-02",
+      weekday: null,
+      dayFocus: "Finishing",
+    });
+  });
+
   it("maps latest draft fields to persist-draft result shape", () => {
     expect(
       persistDraftResultFromLatestDomainDraft({

@@ -76,6 +76,8 @@ export function AthleteCompetitionsPageContent() {
   const entityId = planningIds.ids?.entityId ?? "";
   const athleteId = planningIds.ids?.athleteId ?? "";
   const isBasketballAthlete = planningIds.ids?.sport === "BASKETBALL";
+  const hidesLegacyCompetitions =
+    isBasketballAthlete || planningIds.ids?.sport === "FOOTBALL";
   const [trainingPlanVersionId, setTrainingPlanVersionId] = useState("");
   const [seasonCycleId, setSeasonCycleId] = useState<string | null>(null);
   const [seasonYear, setSeasonYear] = useState<number | null>(null);
@@ -117,7 +119,7 @@ export function AthleteCompetitionsPageContent() {
   useEffect(() => {
     const versionId = trainingPlanVersionId.trim();
     if (
-      isBasketballAthlete ||
+      hidesLegacyCompetitions ||
       entityId === "" ||
       athleteId === "" ||
       versionId === ""
@@ -161,7 +163,7 @@ export function AthleteCompetitionsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [entityId, athleteId, isBasketballAthlete, trainingPlanVersionId, listReloadKey]);
+  }, [entityId, athleteId, hidesLegacyCompetitions, trainingPlanVersionId, listReloadKey]);
 
   const showWorkflow = showCreate || openCompetitionId !== null;
 
@@ -174,7 +176,7 @@ export function AthleteCompetitionsPageContent() {
         }
         trailing={<AthleteHeaderIdentityMetadata />}
         actions={
-          isBasketballAthlete ? null : (
+          hidesLegacyCompetitions ? null : (
             <Button
               type="button"
               onClick={() => {
@@ -192,14 +194,14 @@ export function AthleteCompetitionsPageContent() {
       {listLoading ? (
         <p className="text-sm text-textSecondary">Loading competitions…</p>
       ) : null}
-      {!isBasketballAthlete &&
+      {!hidesLegacyCompetitions &&
       !listLoading &&
       trainingPlanVersionId.trim() !== "" &&
       !seasonCycleId ? (
         <p className="text-sm text-textSecondary">Season cycle unavailable</p>
       ) : null}
 
-      {!isBasketballAthlete && showWorkflow ? (
+      {!hidesLegacyCompetitions && showWorkflow ? (
         <AthleteCompetitionEntrySection
           key={openCompetitionId ?? "create"}
           entityId={entityId}
@@ -212,7 +214,7 @@ export function AthleteCompetitionsPageContent() {
         />
       ) : null}
 
-      {!isBasketballAthlete && !listLoading && seasonCycleId && competitions.length === 0 ? (
+      {!hidesLegacyCompetitions && !listLoading && seasonCycleId && competitions.length === 0 ? (
         <div className="space-y-3">
           <p className="text-sm text-textSecondary">
             No competitions recorded for this season.
@@ -229,7 +231,7 @@ export function AthleteCompetitionsPageContent() {
         </div>
       ) : null}
 
-      {!isBasketballAthlete && competitions.length > 0 ? (
+      {!hidesLegacyCompetitions && competitions.length > 0 ? (
         <AthleteSeasonCompetitionCards
           competitions={competitions}
           onSelect={(competitionId) => {

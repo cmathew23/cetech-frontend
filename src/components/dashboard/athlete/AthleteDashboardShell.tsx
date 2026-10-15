@@ -15,6 +15,7 @@ import { AthleteBasketballCompetitionPerformanceSection } from "@/components/das
 import {
   AthleteWeeklyGoalPerformanceSection,
   loadBasketballPracticeHistoryWeeks,
+  loadFootballPracticeHistoryWeeks,
 } from "@/components/dashboard/athlete/AthleteWeeklyGoalPerformanceSection";
 import { BasketballWeeklyPerformanceSection } from "@/components/dashboard/athlete/BasketballWeeklyPerformanceSection";
 import { OverallGolfPerformanceSection } from "@/components/dashboard/athlete/OverallGolfPerformanceCard";
@@ -255,6 +256,11 @@ export function AthleteDashboardShell() {
               entityId={entityId}
               athleteId={athleteId}
             />
+          ) : athleteSport === "FOOTBALL" ? (
+            <AthleteFootballWeeklyPerformance
+              entityId={entityId}
+              athleteId={athleteId}
+            />
           ) : null}
 
           <AthleteNutritionPerformanceWithPlanWindow
@@ -268,5 +274,45 @@ export function AthleteDashboardShell() {
         </div>
       </AthleteWeeklyAdherenceProvider>
     </DashboardLayout>
+  );
+}
+
+function AthleteFootballWeeklyPerformance({
+  entityId,
+  athleteId,
+}: {
+  entityId: string;
+  athleteId: string;
+}) {
+  const { trainingPlanVersionId } = useAthleteWeeklyAdherence();
+  return (
+    <SkillsGolfHistoryComparisonProvider
+      entityId={entityId}
+      athleteId={athleteId}
+      loadHistory={loadFootballPracticeHistoryWeeks}
+    >
+      <SkillsGolfHistoryWeekSelector />
+      <AthleteWeeklyGoalPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+        sportCode="FOOTBALL"
+        audience="athlete"
+        allowCoachPracticeRating={false}
+      />
+      <AthleteBasketballCompetitionPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+        sportCode="FOOTBALL"
+      />
+      <BasketballWeeklyPerformanceSection
+        entityId={entityId}
+        athleteId={athleteId}
+        trainingPlanVersionId={trainingPlanVersionId}
+        sections="overall"
+        sportCode="FOOTBALL"
+      />
+    </SkillsGolfHistoryComparisonProvider>
   );
 }

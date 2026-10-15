@@ -481,8 +481,14 @@ function parseSessionDomainContext(raw: Record<string, unknown>): SessionDomainC
       "exerciseCompletionCredit",
       "drillCompletionCredit",
     ]),
-    plannedDurationMinutes: readNonNegInt(raw.plannedDurationMinutes),
-    actualDurationMinutes: readNonNegInt(raw.actualDurationMinutes),
+    plannedDurationMinutes: readNonNegIntFromKeys(raw, [
+      "plannedDurationMinutes",
+      "plannedMinutes",
+    ]),
+    actualDurationMinutes: readNonNegIntFromKeys(raw, [
+      "actualDurationMinutes",
+      "actualMinutes",
+    ]),
     averageSessionLoad: readOptionalFiniteNumber(
       raw.averageSessionLoad ?? raw.averageWeeklySessionLoad,
     ),
@@ -587,6 +593,8 @@ function sessionContextHasSignal(raw: Record<string, unknown>): boolean {
     "weightedCompletionCredit",
     "plannedDurationMinutes",
     "actualDurationMinutes",
+    "plannedMinutes",
+    "actualMinutes",
     "averageSessionLoad",
     "averageWeeklySessionLoad",
     "averageSessionDurationMinutes",

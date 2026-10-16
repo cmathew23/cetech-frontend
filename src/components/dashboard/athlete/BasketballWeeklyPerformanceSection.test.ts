@@ -250,7 +250,8 @@ describe("Basketball weekly performance display", () => {
       taxonomyScores: [
         { taxonomyAreaKey: "SHOOTING", scoreOutOf100: 62.5, direction: "UP" },
       ],
-      practiceScoreOutOf100: 40,
+      practiceScoreOutOf100: null,
+      coachPracticeScoreOutOf100: 40,
       competitionPerformance: 69.38,
       competitionTaxonomyScores: [
         { taxonomyAreaKey: "SHOOTING", taxonomyCompetitionScore: 91.67 },
@@ -269,6 +270,24 @@ describe("Basketball weekly performance display", () => {
     expect(metricValue(overall, "Overall Performance")).toBe("81.25");
     expect(html).not.toContain("Overall Golf");
     expect(html).not.toContain("Golfer");
+  });
+
+  it("renders Overall Practice Performance from coachPracticeScoreOutOf100", () => {
+    const html = renderSummary({
+      coachPracticeScoreOutOf100: 50,
+      practiceScoreOutOf100: null,
+      competitionPerformance: 58.33,
+      overallPerformance: 54.58,
+      exerciseTrends: [],
+      goalEvidence: [],
+      taxonomyScores: [],
+    });
+    const overall = sectionHtml(html, "Overall Performance");
+
+    expect(metricValue(overall, "Practice Performance")).toBe("50");
+    expect(metricValue(overall, "Competition Performance")).toBe("58.33");
+    expect(metricValue(overall, "Overall Performance")).toBe("54.58");
+    expect(overall).not.toContain("NO RESULT YET");
   });
 
   it("renders every returned taxonomy, including null scores, without a hardcoded list", () => {

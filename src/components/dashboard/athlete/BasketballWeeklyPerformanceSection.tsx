@@ -232,7 +232,7 @@ function BasketballOverallPerformanceCard({
       <div className={athletePerformanceGridClass(3)}>
         <AthletePerformanceStat
           title="Practice Performance"
-          value={displayBasketballScore(summary.practiceScoreOutOf100)}
+          value={displayBasketballScore(summary.coachPracticeScoreOutOf100)}
         />
         <AthletePerformanceStat
           title="Competition Performance"

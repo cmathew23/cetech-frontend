@@ -29,7 +29,12 @@ export function RootShell({ children }: { children: React.ReactNode }) {
     pathname === "/coach" ||
     pathname?.startsWith("/coach/");
 
-  if (isAuthRoute || isRoleDashboardRoute) {
+  /**
+   * `/` must not use the marketing shell. That shell is the onboarding chrome, and
+   * it painted before auth resolved, so logged-out visits flashed onboarding.
+   * The home page adds the header only after a confirmed session.
+   */
+  if (isAuthRoute || isRoleDashboardRoute || pathname === "/") {
     return <div className={designSystem.layout.outerShell}>{children}</div>;
   }
 

@@ -1076,6 +1076,92 @@ describe("parseReadinessPayload", () => {
     );
   });
 
+  it("keeps a Golf S&C day date when the revision candidate includes one", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+      versionNumber: 2,
+      generatedPlannerCandidate: {
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-10-19",
+            dayFocus: "Strength",
+            notes: "Keep the brace.",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-squat",
+                    label: "Back squat",
+                    sets: 3,
+                    reps: 8,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Shorten the squat.",
+    });
+
+    expect(result.generatedPlannerCandidate?.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "2026-10-19",
+      dayFocus: "Strength",
+      notes: "Keep the brace.",
+    });
+    expect(result.generatedPlannerCandidate?.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      exerciseCatalogItemId: "exercise-squat",
+      label: "Back squat",
+      sets: "3",
+      reps: "8",
+    });
+  });
+
+  it("leaves a Golf S&C day date empty when the revision candidate omits it", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "sandc-plan-1",
+      trainingPlanVersionId: "sandc-version-2",
+      generatedPlannerCandidate: {
+        days: [
+          {
+            dayIndex: 1,
+            dayFocus: "Strength",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                items: [{ exerciseCatalogItemId: "exercise-squat", label: "Back squat" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await reviseSandcPlan("entity-1", "athlete-1", {
+      trainingPlanId: "sandc-plan-1",
+      versionId: "sandc-version-1",
+      coachFeedback: "Shorten the squat.",
+    });
+
+    expect(result.generatedPlannerCandidate?.days[0]?.date).toBeNull();
+    expect(result.generatedPlannerCandidate?.days[0]?.dayFocus).toBe("Strength");
+    expect(result.generatedPlannerCandidate?.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      exerciseCatalogItemId: "exercise-squat",
+      label: "Back squat",
+    });
+  });
+
   it("passes the exact Skills Add Drill revisionPatch through to the revise endpoint", async () => {
     apiRequestMock.mockResolvedValue({
       trainingPlanId: "skills-plan-1",
@@ -1161,6 +1247,82 @@ describe("parseReadinessPayload", () => {
         ],
       },
     });
+  });
+
+  it("keeps a Golf skills day date when the revision candidate includes one", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+      versionNumber: 2,
+      generatedPlannerCandidate: {
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-10-19",
+            dayFocus: "Skills Focus 1",
+            notes: "Keep the address.",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Driver Window Foundations",
+                items: [{ label: "Mirror Posture Check Drill", reps: "8-10" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Shorten the mirror drill.",
+    });
+
+    expect(result.generatedPlannerCandidate?.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "2026-10-19",
+      dayFocus: "Skills Focus 1",
+      notes: "Keep the address.",
+    });
+    expect(result.generatedPlannerCandidate?.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      label: "Mirror Posture Check Drill",
+      reps: "8-10",
+    });
+  });
+
+  it("leaves Golf skills day date empty when the revision candidate omits it", async () => {
+    apiRequestMock.mockResolvedValue({
+      trainingPlanId: "skills-plan-1",
+      trainingPlanVersionId: "skills-version-2",
+      generatedPlannerCandidate: {
+        days: [
+          {
+            dayIndex: 1,
+            dayFocus: "Skills Focus 1",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Driver Window Foundations",
+                items: [{ label: "Mirror Posture Check Drill" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await reviseSkillsPlan("entity-1", "athlete-1", {
+      trainingPlanId: "skills-plan-1",
+      versionId: "skills-version-1",
+      coachFeedback: "Shorten the mirror drill.",
+    });
+
+    expect(result.generatedPlannerCandidate?.days[0]?.date).toBeNull();
+    expect(result.generatedPlannerCandidate?.days[0]?.dayFocus).toBe("Skills Focus 1");
+    expect(result.generatedPlannerCandidate?.days[0]?.sessions[0]?.title).toBe(
+      "Driver Window Foundations",
+    );
   });
 
   it("passes the exact Skills Remove Drill revisionPatch through to the revise endpoint", async () => {
@@ -1944,6 +2106,66 @@ describe("training plan generation timeouts and helpers", () => {
     });
   });
 
+  it("keeps Golf S&C day number, date, focus, and exercises on the initial latest draft", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-sandc-golf",
+        trainingPlanVersionId: "version-sandc-golf",
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-10-19",
+            dayFocus: "Strength",
+            notes: "Keep the brace.",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Lower body",
+                objective: "Build strength",
+                plannedDurationMinutes: 45,
+                items: [
+                  {
+                    exerciseCatalogItemId: "exercise-squat",
+                    label: "Back squat",
+                    sets: 3,
+                    reps: 8,
+                    durationMinutes: 20,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "S_AND_C",
+    );
+
+    expect(result.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "2026-10-19",
+      dayFocus: "Strength",
+      notes: "Keep the brace.",
+    });
+    expect(result.days[0]?.sessions[0]).toMatchObject({
+      title: "Lower body",
+      objective: "Build strength",
+      plannedDurationMinutes: 45,
+    });
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      exerciseCatalogItemId: "exercise-squat",
+      label: "Back squat",
+      sets: "3",
+      reps: "8",
+      durationMinutes: 20,
+    });
+  });
+
   it("keeps response-only S&C videos on parsed generated draft items", async () => {
     apiRequestMock.mockResolvedValue({
       data: {
@@ -2010,6 +2232,62 @@ describe("training plan generation timeouts and helpers", () => {
     );
 
     expect(result.days[0]?.sessions[0]?.items[0]?.reps).toBe("12");
+  });
+
+  it("keeps Golf skills day number, date, focus, and drills on the initial latest draft", async () => {
+    apiRequestMock.mockResolvedValue({
+      data: {
+        trainingPlanId: "plan-skills-golf",
+        trainingPlanVersionId: "version-skills-golf",
+        status: "AI_GENERATED",
+        days: [
+          {
+            dayIndex: 1,
+            date: "2026-10-19",
+            dayFocus: "Skills Focus 1",
+            notes: "Keep the address.",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Driver Window Foundations",
+                objective: "Build a repeatable driver setup",
+                plannedDurationMinutes: 85,
+                items: [
+                  {
+                    label: "Mirror Posture Check Drill",
+                    reps: "8-10",
+                    notes: "Confirm the same athletic address before each rehearsal.",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await fetchLatestCoachAthleteDomainDraft(
+      "entity-1",
+      "athlete-1",
+      "SKILLS",
+    );
+
+    expect(result.days[0]).toMatchObject({
+      dayIndex: 1,
+      date: "2026-10-19",
+      dayFocus: "Skills Focus 1",
+      notes: "Keep the address.",
+    });
+    expect(result.days[0]?.sessions[0]).toMatchObject({
+      title: "Driver Window Foundations",
+      objective: "Build a repeatable driver setup",
+      plannedDurationMinutes: 85,
+    });
+    expect(result.days[0]?.sessions[0]?.items[0]).toMatchObject({
+      label: "Mirror Posture Check Drill",
+      reps: "8-10",
+      notes: "Confirm the same athletic address before each rehearsal.",
+    });
   });
 
   it("maps latest draft fields to persist-draft result shape", () => {

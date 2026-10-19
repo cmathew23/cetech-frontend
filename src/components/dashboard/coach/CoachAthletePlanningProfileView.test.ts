@@ -260,6 +260,7 @@ import {
   skillsRevisionSelectionBelongsToOptions,
   resolveSkillsSelectedRevisionOption,
   skillsDraftFromRevisionResult,
+  preserveSkillsRevisionDayDates,
   sandCDraftFromRevisionResult,
   resolveSandCLatestDraftAfterRevisionReload,
   projectSkillsFynContextAfterRevision,
@@ -374,6 +375,7 @@ import type {
   CoachPersistedTrainingPlanActiveDetail,
 } from "@/lib/api/coachAthletePlanningReadiness";
 import type { GoalSummary } from "@/lib/api/coachAthleteGoalsSeasonSetup";
+import { formatDateOnly } from "@/lib/dateTime";
 import type { TrainingPlanWorkspace } from "@/types/trainingPlanWorkspace";
 
 describe("NextCycleWorkspaceAction", () => {
@@ -6322,6 +6324,247 @@ describe("Training Plan Workspace lifecycle display", () => {
       expect(draft?.days).toBe(days);
       expect(draft?.days[0]?.sessions[0]?.items).toEqual(candidateItems);
       expect(draft?.trainingPlanVersionId).toBe("skills-v5");
+    });
+
+    it("preserves Golf skills weekday and date from the original schedule after revision", () => {
+      const sessions = [
+        {
+          sessionIndex: 1,
+          title: "Driver Window Foundations",
+          objective: "Build a repeatable driver setup",
+          plannedDurationMinutes: 85,
+          intensity: "MODERATE",
+          items: [
+            {
+              label: "Mirror Posture Check Drill",
+              reps: "8-10",
+              notes: "Confirm the same athletic address before each rehearsal.",
+            },
+          ],
+        },
+      ];
+      const revised = {
+        trainingPlanId: "skills-plan-1",
+        trainingPlanVersionId: "skills-v2",
+        versionNumber: 2,
+        status: "AI_GENERATED",
+        source: "REVISION",
+        revision: { feedback: null, changeSummary: ["Updated Day 1 drill"] },
+        durationDays: 2,
+        daysCreated: 2,
+        sessionsCreated: 2,
+        itemsPersisted: 2,
+        days: [
+          {
+            dayIndex: 1,
+            date: null,
+            dayFocus: "Skills Focus 1",
+            notes: "Keep the address.",
+            isRestDay: false,
+            sessions,
+          },
+          {
+            dayIndex: 2,
+            date: null,
+            dayFocus: "Skills Focus 2",
+            notes: null,
+            isRestDay: false,
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Approach",
+                items: [{ label: "Distance window", reps: "10" }],
+              },
+            ],
+          },
+        ],
+        raw: { source: "generatedPlannerCandidate" },
+      } as CoachAthleteLatestDomainDraft;
+      const originalSchedule = [
+        {
+          dayIndex: 1,
+          date: "2026-10-19",
+          dayFocus: "Skills Focus 1",
+          notes: "Original note",
+        },
+        {
+          dayIndex: 2,
+          date: "2026-10-20",
+        },
+      ];
+
+      const preserved = preserveSkillsRevisionDayDates(revised, [
+        originalSchedule,
+        [{ dayIndex: 1, date: "2026-01-01" }],
+      ]);
+
+      expect(preserved.days[0]).toMatchObject({
+        dayIndex: 1,
+        date: "2026-10-19",
+        dayFocus: "Skills Focus 1",
+        notes: "Keep the address.",
+        isRestDay: false,
+      });
+      expect(preserved.days[0]?.sessions).toBe(sessions);
+      expect(preserved.days[1]).toMatchObject({
+        dayIndex: 2,
+        date: "2026-10-20",
+        dayFocus: "Skills Focus 2",
+      });
+      expect(preserved.trainingPlanId).toBe("skills-plan-1");
+      expect(preserved.trainingPlanVersionId).toBe("skills-v2");
+      expect(preserved.revision).toEqual(revised.revision);
+      expect(formatDateOnly(preserved.days[0]?.date)).toBe("19/10/2026");
+      expect(
+        new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(
+          new Date("2026-10-19T00:00:00Z"),
+        ),
+      ).toBe("Monday");
+
+      const alreadyDated = {
+        ...revised,
+        days: [{ ...revised.days[0], date: "2026-10-21" }, revised.days[1]],
+      } as CoachAthleteLatestDomainDraft;
+      expect(
+        preserveSkillsRevisionDayDates(alreadyDated, [originalSchedule]).days[0]?.date,
+      ).toBe("2026-10-21");
+
+      const fromPersistedRevisedVersion = preserveSkillsRevisionDayDates(
+        { ...revised, days: [revised.days[0]] } as CoachAthleteLatestDomainDraft,
+        [[], [], [{ dayIndex: 1, date: "2026-10-19" }]],
+      );
+      expect(fromPersistedRevisedVersion.days[0]?.date).toBe("2026-10-19");
+      expect(fromPersistedRevisedVersion.days[0]?.sessions[0]?.items[0]).toMatchObject({
+        label: "Mirror Posture Check Drill",
+        reps: "8-10",
+      });
+    });
+
+    it("restores Golf skills dates only in the skills revision apply path", () => {
+      const source = readFileSync(
+        new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+        "utf8",
+      );
+      const skillsHandler = source.slice(
+        source.indexOf("async function handleReviseSkillsPlan("),
+        source.indexOf("function publishRequestRevisionFeedback("),
+      );
+      const nutritionHandler = source.slice(
+        source.indexOf("async function handleReviseNutritionPlan("),
+        source.indexOf("async function handleReviseSandCPlan("),
+      );
+      const sandCHandler = source.slice(source.indexOf("async function handleReviseSandCPlan("));
+      const draftSchedule = source.slice(
+        source.indexOf("function renderLatestDomainDraftDaySchedule("),
+        source.indexOf("function renderDomainReviewDrawer("),
+      );
+      const persistedSchedule = source.slice(
+        source.indexOf("function renderDomainPlanDaySchedule("),
+        source.indexOf("function renderLatestDomainDraftDaySchedule("),
+      );
+
+      expect(skillsHandler).toContain("preserveSkillsRevisionDayDates");
+      expect(skillsHandler).toContain("skillsDraftFromRevisionResult(reviseResult)");
+      expect(nutritionHandler).not.toContain("preserveSkillsRevisionDayDates");
+      expect(nutritionHandler).toContain('loadLatestSkillsDraft("NUTRITION"');
+      expect(sandCHandler).toContain("preserveSkillsRevisionDayDates(revisedCandidate");
+      expect(sandCHandler).toContain("preserveSkillsRevisionDayDates(selectedDraft");
+      expect(sandCHandler).toContain("sandCDraftFromRevisionResult(reviseResult)");
+      expect(draftSchedule).toContain("formatDrawerWeekdayName(day.date)");
+      expect(draftSchedule).toContain("formatDateOnly(day.date)");
+      expect(draftSchedule).toContain("Focus: {displayValue(day.dayFocus)}");
+      expect(persistedSchedule).toContain("formatDrawerWeekdayName(day.date)");
+      expect(persistedSchedule).toContain("formatDateOnly(day.date)");
+    });
+
+    it("preserves Golf S&C weekday and date from the original schedule after revision", () => {
+      const sessions = [
+        {
+          sessionIndex: 1,
+          title: "Lower body",
+          objective: "Build strength",
+          plannedDurationMinutes: 45,
+          intensity: "MODERATE",
+          items: [
+            {
+              exerciseCatalogItemId: "exercise-squat",
+              label: "Back squat",
+              sets: "3",
+              reps: "8",
+              durationMinutes: 20,
+            },
+          ],
+        },
+      ];
+      const revised = {
+        trainingPlanId: "sandc-plan-1",
+        trainingPlanVersionId: "sandc-v2",
+        versionNumber: 2,
+        status: "AI_GENERATED",
+        source: "REVISION",
+        revision: { feedback: null, changeSummary: ["Updated Day 1 exercise"] },
+        durationDays: 1,
+        daysCreated: 1,
+        sessionsCreated: 1,
+        itemsPersisted: 1,
+        days: [
+          {
+            dayIndex: 1,
+            date: null,
+            dayFocus: "Strength",
+            notes: "Keep the brace.",
+            isRestDay: false,
+            sessions,
+          },
+        ],
+        raw: { source: "generatedPlannerCandidate" },
+      } as CoachAthleteLatestDomainDraft;
+
+      const preserved = preserveSkillsRevisionDayDates(revised, [
+        [{ dayIndex: 1, date: "2026-10-19", dayFocus: "Original focus" }],
+      ]);
+
+      expect(preserved.days[0]).toMatchObject({
+        dayIndex: 1,
+        date: "2026-10-19",
+        dayFocus: "Strength",
+        notes: "Keep the brace.",
+        isRestDay: false,
+      });
+      expect(preserved.days[0]?.sessions).toBe(sessions);
+      expect(preserved.days[0]?.sessions[0]?.items[0]).toMatchObject({
+        exerciseCatalogItemId: "exercise-squat",
+        label: "Back squat",
+        sets: "3",
+        reps: "8",
+        durationMinutes: 20,
+      });
+      expect(formatDateOnly(preserved.days[0]?.date)).toBe("19/10/2026");
+      expect(
+        new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(
+          new Date(`${preserved.days[0]?.date}T00:00:00Z`),
+        ),
+      ).toBe("Monday");
+
+      const alreadyDated = {
+        ...revised,
+        days: [{ ...revised.days[0], date: "2026-10-21" }],
+      } as CoachAthleteLatestDomainDraft;
+      expect(
+        preserveSkillsRevisionDayDates(alreadyDated, [
+          [{ dayIndex: 1, date: "2026-10-19" }],
+        ]).days[0]?.date,
+      ).toBe("2026-10-21");
+
+      const reloadedWithoutDate = {
+        ...revised,
+        trainingPlanVersionId: "sandc-v3",
+        days: [{ ...revised.days[0], date: null, sessions }],
+      } as CoachAthleteLatestDomainDraft;
+      const hydrated = preserveSkillsRevisionDayDates(reloadedWithoutDate, [preserved.days]);
+      expect(hydrated.days[0]?.date).toBe("2026-10-19");
+      expect(hydrated.days[0]?.sessions).toBe(sessions);
+      expect(hydrated.trainingPlanVersionId).toBe("sandc-v3");
     });
 
     it("does not reload or replace the current plan when the Skills revision request fails", async () => {

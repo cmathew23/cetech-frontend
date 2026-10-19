@@ -4462,6 +4462,53 @@ export function skillsDraftFromRevisionResult(
   };
 }
 
+function skillsRevisionDayDateKey(dayIndex: number | null, index: number): number {
+  return typeof dayIndex === "number" && Number.isFinite(dayIndex) ? dayIndex : index + 1;
+}
+
+/**
+ * Skills revision candidates replace the plan graph but omit calendar dates.
+ * Copy the original schedule date onto a revised day only when that day has none.
+ * dayIndex is the match key; days without one use 1-based position.
+ * A date already on the revised day, and every other day field, stay as returned.
+ */
+export function preserveSkillsRevisionDayDates(
+  revised: CoachAthleteLatestDomainDraft,
+  scheduleSources: ReadonlyArray<
+    ReadonlyArray<{ dayIndex: number | null; date: string | null }>
+  >,
+): CoachAthleteLatestDomainDraft {
+  const dateByDayKey = new Map<number, string>();
+  for (const source of scheduleSources) {
+    source.forEach((day, index) => {
+      const date = day.date?.trim() ?? "";
+      if (date === "" || typeof day.dayIndex !== "number" || !Number.isFinite(day.dayIndex)) {
+        return;
+      }
+      if (!dateByDayKey.has(day.dayIndex)) dateByDayKey.set(day.dayIndex, date);
+    });
+    source.forEach((day, index) => {
+      const date = day.date?.trim() ?? "";
+      if (date === "" || (typeof day.dayIndex === "number" && Number.isFinite(day.dayIndex))) {
+        return;
+      }
+      const key = skillsRevisionDayDateKey(null, index);
+      if (!dateByDayKey.has(key)) dateByDayKey.set(key, date);
+    });
+  }
+  if (dateByDayKey.size === 0) return revised;
+
+  let changed = false;
+  const days = revised.days.map((day, index) => {
+    if ((day.date?.trim() ?? "") !== "") return day;
+    const preserved = dateByDayKey.get(skillsRevisionDayDateKey(day.dayIndex, index));
+    if (preserved === undefined) return day;
+    changed = true;
+    return { ...day, date: preserved };
+  });
+  return changed ? { ...revised, days } : revised;
+}
+
 export function projectSkillsFynContextAfterRevision(
   context: CoachAthleteDomainDraftRevisionContext | null,
   result: TrainingPlanReviseResult,
@@ -19912,10 +19959,16 @@ export function CoachAthletePlanningProfileView({
         const nextVersionId =
           nextSkillsRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
         const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
-        const revisedDraft = skillsDraftFromRevisionResult(reviseResult);
-        if (revisedDraft === null) {
+        const revisedCandidate = skillsDraftFromRevisionResult(reviseResult);
+        if (revisedCandidate === null) {
           throw new Error("Skills revision response did not include a usable generatedPlannerCandidate.");
         }
+        const revisedDraft = preserveSkillsRevisionDayDates(revisedCandidate, [
+          headCoachDomainPlanStates.SKILLS.latestDraft?.days ?? [],
+          latestDraftDomain === "SKILLS" ? (latestSkillsDraft?.days ?? []) : [],
+          persistedDetailDomain === "SKILLS" ? (persistedSkillsPlanDetail?.days ?? []) : [],
+          reviseResult.detail?.days ?? [],
+        ]);
 
         latestSkillsDraftRequestGenRef.current += 1;
         setSkillsActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
@@ -26265,6 +26318,11 @@ export function CoachAthletePlanningProfileView({
           coachFeedback,
         };
 
+    const sandCRevisionDateSources = [
+      headCoachDomainPlanStates.S_AND_C.latestDraft?.days ?? [],
+      latestDraftDomain === "S_AND_C" ? (latestSkillsDraft?.days ?? []) : [],
+      persistedDetailDomain === "S_AND_C" ? (persistedSkillsPlanDetail?.days ?? []) : [],
+    ];
     setReviseSandCLoading(true);
     setReviseSandCError(null);
     setReviseSandCSuccess(null);
@@ -26276,12 +26334,16 @@ export function CoachAthletePlanningProfileView({
         const nextVersionId =
           nextSandCRevisionVersionId(reviseResult) ?? activeReviseIds.versionId;
         const nextPlanId = reviseResult.planId?.trim() || activeReviseIds.trainingPlanId;
-        const revisedDraft = sandCDraftFromRevisionResult(reviseResult);
-        if (revisedDraft === null) {
+        const revisedCandidate = sandCDraftFromRevisionResult(reviseResult);
+        if (revisedCandidate === null) {
           throw new Error(
             "S&C revision response did not include a usable generatedPlannerCandidate.",
           );
         }
+        const revisedDraft = preserveSkillsRevisionDayDates(revisedCandidate, [
+          ...sandCRevisionDateSources,
+          reviseResult.detail?.days ?? [],
+        ]);
 
         latestSkillsDraftRequestGenRef.current += 1;
         setSandCActiveReviseIds({ trainingPlanId: nextPlanId, versionId: nextVersionId });
@@ -26387,18 +26449,25 @@ export function CoachAthletePlanningProfileView({
       }
       setReviseSandCSuccess(null);
     } else {
-      const postRevisionDraft = sandCDraftFromRevisionResult(outcome.result);
-      if (postRevisionDraft !== null) {
+      const revisedCandidate = sandCDraftFromRevisionResult(outcome.result);
+      if (revisedCandidate !== null) {
+        const postRevisionDraft = preserveSkillsRevisionDayDates(revisedCandidate, [
+          ...sandCRevisionDateSources,
+          outcome.result.detail?.days ?? [],
+        ]);
         let reloadedLatestDraft: CoachAthleteLatestDomainDraft | null = null;
         try {
           reloadedLatestDraft = await fetchCoalescedLatestDraft("S_AND_C", true);
         } catch {
           reloadedLatestDraft = null;
         }
-        const hydratedDraft = resolveSandCLatestDraftAfterRevisionReload({
+        const selectedDraft = resolveSandCLatestDraftAfterRevisionReload({
           postRevisionDraft,
           reloadedLatestDraft,
         });
+        const hydratedDraft = preserveSkillsRevisionDayDates(selectedDraft, [
+          postRevisionDraft.days,
+        ]);
         if (hydratedDraft !== postRevisionDraft) {
           const nextPlanId =
             hydratedDraft.trainingPlanId?.trim() ||

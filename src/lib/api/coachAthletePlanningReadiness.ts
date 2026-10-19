@@ -3117,11 +3117,16 @@ export async function fetchCoachAthleteDomainDraftRevisionOptions(
       sessionKey: payload.target.sessionKey ?? null,
       itemKey: payload.target.itemKey ?? null,
       itemType: payload.target.itemType ?? null,
-      currentId: payload.target.currentId ?? null,
       label: payload.target.label ?? null,
       // Draft items have no tags source yet; the UI defaults this to [].
       tags,
     };
+    // Item lookup uses itemKey. The backend derives currentId from that item, so a
+    // schedule currentId must not be sent beside it.
+    const itemKey = typeof payload.target.itemKey === "string" ? payload.target.itemKey.trim() : "";
+    if (itemKey === "") {
+      target.currentId = payload.target.currentId ?? null;
+    }
   }
   const limit =
     typeof payload.limit === "number" && Number.isFinite(payload.limit) && payload.limit > 0

@@ -2369,10 +2369,10 @@ describe("fetchCoachAthleteDomainDraftRevisionOptions", () => {
       sessionKey: "session-1",
       itemKey: "item-1",
       itemType: "DRILL",
-      currentId: "drill-1",
       label: "Target serve drill",
       tags: [],
     });
+    expect(body.target).not.toHaveProperty("currentId");
     // Contract sends trainingPlanVersionId, never versionId.
     expect(body).not.toHaveProperty("versionId");
   });

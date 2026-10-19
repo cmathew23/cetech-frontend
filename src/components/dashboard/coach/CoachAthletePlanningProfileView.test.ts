@@ -242,6 +242,8 @@ import {
   buildFynRevisionAddItemChangeText,
   fynRevisionActionOptionKind,
   fynRevisionAddItemSessionTarget,
+  loadRevisionOptionsTargetMapIfMissing,
+  resolveAuthoritativeRevisionOptionsTarget,
   fynRevisionContextPlaceholder,
   fetchFynRevisionReplacementOptions,
   buildFynRevisionOptionsRequestSelectionKey,
@@ -11495,6 +11497,264 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(expectedPayload.target).not.toHaveProperty("currentId");
     expect(Object.values(expectedPayload.target)).not.toContain(null);
     expect(fetchOptions).toHaveBeenCalledWith("entity-1", "athlete-1", expectedPayload);
+  });
+
+  const backendRevisionTargetMap = {
+    days: [
+      {
+        dayIndex: 1,
+        dayKey: "2026-04-21",
+        date: "1999-01-01",
+        sessions: [
+          {
+            sessionIndex: 1,
+            sessionKey: "2026-04-21:1",
+            title: "Driver Window Foundations",
+            items: [
+              {
+                order: 0,
+                itemKey: "2026-04-21:1:0",
+                itemType: "NUTRITION",
+                currentId: "backend-current-id",
+                nutritionCatalogItemId: "map-catalog",
+                label: "Backend oats",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  function renderedRevisionSelection(domain: "SKILLS" | "S_AND_C" | "NUTRITION") {
+    return fynRevisionLeveledTargetOptions(
+      makeRevisionContext({ generationDomain: domain, targetMap: null, draft: null }),
+      {
+        domain,
+        scheduleDays: [
+          {
+            dayIndex: 1,
+            date: "1999-01-01",
+            sessions: [
+              {
+                sessionIndex: 1,
+                title: "Rendered title",
+                items: [
+                  {
+                    order: 0,
+                    itemType: "FOOD",
+                    label: "Rendered rice",
+                    nutritionCatalogItemId: "rendered-catalog",
+                    skillCode: "rendered-skill",
+                    exerciseCatalogItemId: "rendered-exercise",
+                  },
+                  {
+                    order: 1,
+                    itemType: "FOOD",
+                    label: "Second item",
+                    nutritionCatalogItemId: "rendered-catalog-2",
+                    skillCode: "rendered-skill-2",
+                    exerciseCatalogItemId: "rendered-exercise-2",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    );
+  }
+
+  it("sends the Skills targetMap sessionKey for ADD_ITEM and not the schedule index", () => {
+    const selected = renderedRevisionSelection("SKILLS").find((option) => option.level === "SESSION");
+    expect(selected?.target.dayKey).toBe("1");
+    expect(selected?.target.sessionKey).toBe("1");
+    const resolved = resolveAuthoritativeRevisionOptionsTarget({
+      domain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      selected: selected!,
+      targetMap: backendRevisionTargetMap,
+    });
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "SKILLS",
+      reviseIds: fynReviseIds,
+      target: resolved!,
+      coachRequest: "add another drill",
+      optionKind: "ADD_ITEM",
+    });
+    expect(payload.target).toEqual({
+      dayKey: "2026-04-21",
+      sessionKey: "2026-04-21:1",
+      itemType: "SKILL",
+      label: "Driver Window Foundations",
+      tags: [],
+    });
+    expect(payload.target.dayKey).not.toBe("1");
+    expect(payload.target.sessionKey).not.toBe("1");
+    expect(payload.target).not.toHaveProperty("itemKey");
+    expect(payload.target).not.toHaveProperty("currentId");
+  });
+
+  it("sends the S&C targetMap sessionKey for ADD_ITEM and not the schedule index", () => {
+    const selected = renderedRevisionSelection("S_AND_C").find((option) => option.level === "SESSION");
+    expect(selected?.target.sessionKey).toBe("1");
+    const resolved = resolveAuthoritativeRevisionOptionsTarget({
+      domain: "S_AND_C",
+      optionKind: "ADD_ITEM",
+      selected: selected!,
+      targetMap: backendRevisionTargetMap,
+    });
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "S_AND_C",
+      reviseIds: fynReviseIds,
+      target: resolved!,
+      coachRequest: "add another exercise",
+      optionKind: "ADD_ITEM",
+    });
+    expect(payload.target).toEqual({
+      dayKey: "2026-04-21",
+      sessionKey: "2026-04-21:1",
+      itemType: "EXERCISE",
+      label: "Driver Window Foundations",
+      tags: [],
+    });
+    expect(payload.target.sessionKey).not.toBe("1");
+  });
+
+  it("sends the Nutrition targetMap sessionKey for ADD_ITEM and not the meal position", () => {
+    const selected = renderedRevisionSelection("NUTRITION").find((option) => option.level === "SESSION");
+    expect(selected?.target.sessionKey).toBe("1");
+    const resolved = resolveAuthoritativeRevisionOptionsTarget({
+      domain: "NUTRITION",
+      optionKind: "ADD_ITEM",
+      selected: selected!,
+      targetMap: backendRevisionTargetMap,
+    });
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      target: resolved!,
+      coachRequest: "add another food item",
+      optionKind: "ADD_ITEM",
+    });
+    expect(payload.target).toEqual({
+      dayKey: "2026-04-21",
+      sessionKey: "2026-04-21:1",
+      itemType: "NUTRITION",
+      label: "Driver Window Foundations",
+      tags: [],
+    });
+    expect(payload.target.sessionKey).not.toBe("1");
+  });
+
+  it("sends the Nutrition targetMap itemKey for REPLACEMENT and omits a schedule currentId", () => {
+    const selected = renderedRevisionSelection("NUTRITION").find((option) => option.level === "ITEM");
+    expect(selected?.target.itemKey).toBe("0");
+    expect(selected?.target.currentId).toBe("rendered-catalog");
+    const resolved = resolveAuthoritativeRevisionOptionsTarget({
+      domain: "NUTRITION",
+      optionKind: "REPLACEMENT",
+      selected: selected!,
+      targetMap: backendRevisionTargetMap,
+    });
+    const payload = buildFynRevisionOptionsPayload({
+      domain: "NUTRITION",
+      reviseIds: fynReviseIds,
+      target: resolved!,
+      coachRequest: "replace this food item",
+      optionKind: "REPLACEMENT",
+    });
+    expect(payload.target).toEqual({
+      dayKey: "2026-04-21",
+      sessionKey: "2026-04-21:1",
+      itemKey: "2026-04-21:1:0",
+      itemType: "NUTRITION",
+      label: "Backend oats",
+      tags: [],
+    });
+    expect(payload.target).not.toHaveProperty("currentId");
+    expect(payload.target.itemKey).not.toBe("0");
+    expect(JSON.stringify(payload.target)).not.toContain("rendered-catalog");
+    expect(JSON.stringify(payload.target)).not.toContain("backend-current-id");
+  });
+
+  it("loads the current revision context when targetMap was cleared instead of using schedule keys", async () => {
+    const selected = renderedRevisionSelection("SKILLS").find((option) => option.level === "SESSION");
+    expect(
+      resolveAuthoritativeRevisionOptionsTarget({
+        domain: "SKILLS",
+        optionKind: "ADD_ITEM",
+        selected: selected!,
+        targetMap: null,
+      }),
+    ).toBeNull();
+    const loadContext = vi.fn(async () => ({ targetMap: backendRevisionTargetMap }));
+    const loadedMap = await loadRevisionOptionsTargetMapIfMissing({
+      targetMap: null,
+      loadContext,
+    });
+    expect(loadContext).toHaveBeenCalledTimes(1);
+    const resolved = resolveAuthoritativeRevisionOptionsTarget({
+      domain: "SKILLS",
+      optionKind: "ADD_ITEM",
+      selected: selected!,
+      targetMap: loadedMap,
+    });
+    expect(resolved?.dayKey).toBe("2026-04-21");
+    expect(resolved?.sessionKey).toBe("2026-04-21:1");
+    const kept = await loadRevisionOptionsTargetMapIfMissing({
+      targetMap: backendRevisionTargetMap,
+      loadContext,
+    });
+    expect(loadContext).toHaveBeenCalledTimes(1);
+    expect(kept).toBe(backendRevisionTargetMap);
+  });
+
+  it("keeps remove and parameter-change patches on plan positions", () => {
+    const skillsItem = renderedRevisionSelection("SKILLS").find((option) => option.level === "ITEM");
+    expect(
+      buildSkillsRevisionPatch({ target: skillsItem!, actionKey: "REMOVE_ITEM" }),
+    ).toEqual({
+      operation: "REMOVE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: { skillCode: "rendered-skill" },
+    });
+    expect(
+      buildSkillsRevisionPatch({
+        target: skillsItem!,
+        actionKey: "UPDATE_ITEM",
+        durationMinutes: 20,
+      }),
+    ).toEqual({
+      operation: "UPDATE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: { skillCode: "rendered-skill", durationMinutes: 20 },
+    });
+    const nutritionItem = renderedRevisionSelection("NUTRITION").find(
+      (option) => option.level === "ITEM",
+    );
+    expect(
+      buildNutritionRevisionPatch({ target: nutritionItem!, actionKey: "REMOVE_ITEM" }),
+    ).toEqual({
+      operation: "REMOVE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+    });
+    const sandCItem = renderedRevisionSelection("S_AND_C").find((option) => option.level === "ITEM");
+    expect(
+      buildSandCRevisionPatch({ target: sandCItem!, actionKey: "REMOVE_ITEM" }),
+    ).toEqual({
+      type: "REMOVE_ITEM",
+      dayIndex: 1,
+      sessionIndex: 1,
+      itemIndex: 1,
+      item: { exerciseCatalogItemId: "rendered-exercise" },
+    });
   });
 
   it("maps an S&C item target to its parent session when sending ADD_ITEM", async () => {

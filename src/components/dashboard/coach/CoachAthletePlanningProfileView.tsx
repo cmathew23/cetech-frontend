@@ -5587,6 +5587,130 @@ export function nutritionRemoveItemTargetStillPresent(
   return false;
 }
 
+function revisionOptionsTargetTags(record: FynTargetRecord, fallback: string[]): string[] {
+  const value = record.tags;
+  if (!Array.isArray(value)) return fallback;
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Reads revision-options identity from the current backend targetMap only.
+ * dayKey/sessionKey/itemKey are copied from those fields. Index, order, title, and catalog id
+ * are never written into the request.
+ */
+export function resolveAuthoritativeRevisionOptionsTarget(input: {
+  domain: TrainingPlanGenerationDomain;
+  optionKind: CoachAthleteDomainDraftRevisionOptionKind;
+  selected: FynRevisionTargetOption;
+  targetMap: unknown;
+}): CoachAthleteDomainDraftRevisionOptionTarget | null {
+  const days = fynTargetMapCandidateArray(input.targetMap);
+  let indexed: { day: FynTargetRecord; session: FynTargetRecord } | null = null;
+  for (const dayValue of days) {
+    const day = fynTargetAsRecord(dayValue);
+    if (day === null) continue;
+    const dayIndex = fynTargetReadNumber(day, ["dayIndex", "dayNumber"]);
+    for (const sessionValue of fynTargetReadArray(day, ["sessions"])) {
+      const session = fynTargetAsRecord(sessionValue);
+      if (session === null) continue;
+      const dayKey =
+        fynTargetReadString(session, ["dayKey"]) ?? fynTargetReadString(day, ["dayKey"]);
+      const sessionKey = fynTargetReadString(session, ["sessionKey"]);
+      const sessionIndex = fynTargetReadNumber(session, ["sessionIndex", "sessionNumber"]);
+      const indexMatch =
+        input.selected.indices.dayIndex !== null &&
+        input.selected.indices.sessionIndex !== null &&
+        dayIndex === input.selected.indices.dayIndex &&
+        sessionIndex === input.selected.indices.sessionIndex;
+      if (dayKey === null || sessionKey === null) {
+        if (indexMatch) return null;
+        continue;
+      }
+      if (
+        input.selected.target.dayKey === dayKey &&
+        input.selected.target.sessionKey === sessionKey
+      ) {
+        return revisionOptionsTargetFromMapEntry(input, session, dayKey, sessionKey);
+      }
+      if (indexMatch && indexed === null) indexed = { day, session };
+    }
+  }
+  if (indexed === null) return null;
+  const dayKey =
+    fynTargetReadString(indexed.session, ["dayKey"]) ??
+    fynTargetReadString(indexed.day, ["dayKey"]);
+  const sessionKey = fynTargetReadString(indexed.session, ["sessionKey"]);
+  if (dayKey === null || sessionKey === null) return null;
+  return revisionOptionsTargetFromMapEntry(input, indexed.session, dayKey, sessionKey);
+}
+
+function revisionOptionsTargetFromMapEntry(
+  input: {
+    domain: TrainingPlanGenerationDomain;
+    optionKind: CoachAthleteDomainDraftRevisionOptionKind;
+    selected: FynRevisionTargetOption;
+  },
+  session: FynTargetRecord,
+  dayKey: string,
+  sessionKey: string,
+): CoachAthleteDomainDraftRevisionOptionTarget | null {
+  const fallbackTags = input.selected.target.tags ?? [];
+  if (input.optionKind === "ADD_ITEM") {
+    return {
+      dayKey,
+      sessionKey,
+      itemType: domainDraftAddItemTargetItemType(input.domain),
+      label:
+        fynTargetReadString(session, ["sessionLabel", "title", "label", "name"]) ??
+        input.selected.sessionLabel ??
+        input.selected.target.label,
+      tags: revisionOptionsTargetTags(session, fallbackTags),
+    };
+  }
+  const items = fynTargetSessionItems(session);
+  const selectedItemKey = input.selected.target.itemKey?.trim() ?? "";
+  let item: FynTargetRecord | null = null;
+  if (selectedItemKey !== "") {
+    for (const itemValue of items) {
+      const candidate = fynTargetAsRecord(itemValue);
+      if (candidate === null) continue;
+      if (fynTargetReadString(candidate, ["itemKey"]) === selectedItemKey) {
+        item = candidate;
+        break;
+      }
+    }
+  }
+  if (item === null) {
+    const itemIndex = input.selected.indices.itemIndex;
+    if (itemIndex === null || itemIndex < 1) return null;
+    item = fynTargetAsRecord(items[itemIndex - 1]);
+  }
+  if (item === null) return null;
+  const itemKey = fynTargetReadString(item, ["itemKey"]);
+  if (itemKey === null) return null;
+  return {
+    dayKey,
+    sessionKey,
+    itemKey,
+    itemType: fynTargetReadString(item, ["itemType"]),
+    label:
+      fynTargetReadString(item, ["label", "summary", "name", "title"]) ??
+      input.selected.itemLabel ??
+      input.selected.target.label,
+    tags: revisionOptionsTargetTags(item, fallbackTags),
+  };
+}
+
+/** When the local revision context has no targetMap, load the current one. Never synthesize keys. */
+export async function loadRevisionOptionsTargetMapIfMissing(input: {
+  targetMap: unknown;
+  loadContext: () => Promise<{ targetMap: unknown } | null>;
+}): Promise<unknown | null> {
+  if (input.targetMap != null) return input.targetMap;
+  const loaded = await input.loadContext();
+  return loaded?.targetMap ?? null;
+}
+
 /**
  * Reshapes any target into the clean SESSION-level target ADD_ITEM requires: dayKey + sessionKey +
  * label are kept, `itemType` is set to the domain-specific string (SKILL / NUTRITION / EXERCISE),
@@ -20350,13 +20474,20 @@ export function CoachAthletePlanningProfileView({
       fynRevisionOptionsRequestRef.current[domain] = request;
     }
     let target = selectedTargetOption?.target ?? null;
-    // For ADD_ITEM, target the parent session/meal and label it with the session name so the
-    // payload carries a SESSION-level target even when an item was selected (S&C).
-    if (optionKind === "ADD_ITEM" && target !== null && selectedTargetOption !== null) {
-      target = {
-        ...target,
-        label: selectedTargetOption.sessionLabel ?? target.label,
-      };
+    if (optionKind === "ADD_ITEM" || optionKind === "REPLACEMENT") {
+      const optionsTargetMap = await loadRevisionOptionsTargetMapIfMissing({
+        targetMap: fynRevisionContexts[domain]?.context?.targetMap ?? null,
+        loadContext: () => loadFynRevisionContext(domain),
+      });
+      target =
+        selectedTargetOption === null
+          ? null
+          : resolveAuthoritativeRevisionOptionsTarget({
+              domain,
+              optionKind,
+              selected: selectedTargetOption,
+              targetMap: optionsTargetMap,
+            });
     }
     setFynRevisionOptionStates((current) => ({
       ...current,
@@ -20474,8 +20605,10 @@ export function CoachAthletePlanningProfileView({
     );
   }
 
-  async function loadFynRevisionContext(domain: TrainingPlanGenerationDomain): Promise<boolean> {
-    if (entityId === "" || athleteIdTrimmed === "") return false;
+  async function loadFynRevisionContext(
+    domain: TrainingPlanGenerationDomain,
+  ): Promise<CoachAthleteDomainDraftRevisionContext | null> {
+    if (entityId === "" || athleteIdTrimmed === "") return null;
     setFynRevisionContexts((current) => ({
       ...current,
       [domain]: {
@@ -20520,7 +20653,7 @@ export function CoachAthletePlanningProfileView({
           }),
         );
       }
-      return true;
+      return context;
     } catch {
       setFynRevisionContexts((current) => ({
         ...current,
@@ -20530,7 +20663,7 @@ export function CoachAthletePlanningProfileView({
           error: "Fyn guidance could not load.",
         },
       }));
-      return false;
+      return null;
     }
   }
 

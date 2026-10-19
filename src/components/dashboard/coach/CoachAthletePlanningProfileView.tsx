@@ -23299,7 +23299,18 @@ export function CoachAthletePlanningProfileView({
                         variant="secondary"
                         disabled={persistedSkillsPlanLoading}
                         onClick={() => {
-                          void openReleasedDomainPlanViewer(reviewDomain, viewPlanContext);
+                          handleDomainCoachWorkspaceTabSelect({
+                            tab: "plan-viewer",
+                            setTab: setDomainCoachWorkspaceTab,
+                            planViewerAvailable: true,
+                            hasViewPlanContext: true,
+                            openPlanViewer: () => {
+                              void openReleasedDomainPlanViewer(reviewDomain, viewPlanContext);
+                            },
+                            loadPlanHistory: () => {
+                              void loadDomainPlanHistory(reviewDomain);
+                            },
+                          });
                         }}
                       >
                         View in Plan Viewer

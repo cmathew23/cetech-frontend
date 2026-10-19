@@ -3848,6 +3848,52 @@ describe("Training Plan Workspace lifecycle display", () => {
     expect(loadPlanHistory).not.toHaveBeenCalled();
   });
 
+  it("opens the existing Plan Viewer tab from the released review action", () => {
+    const source = readFileSync(
+      new URL("./CoachAthletePlanningProfileView.tsx", import.meta.url),
+      "utf8",
+    );
+    const actionStart = source.indexOf(
+      "drawerWorkflowActions.canShowViewPlan && viewPlanContext !== null",
+    );
+    const actionEnd = source.indexOf("View in Plan Viewer", actionStart);
+    const releasedAction = source.slice(actionStart, actionEnd);
+
+    expect(actionStart).toBeGreaterThan(-1);
+    expect(releasedAction).toContain('tab: "plan-viewer"');
+    expect(releasedAction).toContain("handleDomainCoachWorkspaceTabSelect");
+    expect(releasedAction).toContain("setTab: setDomainCoachWorkspaceTab");
+    expect(releasedAction).toContain(
+      "openReleasedDomainPlanViewer(reviewDomain, viewPlanContext)",
+    );
+    expect(releasedAction).not.toContain("planningProfileHrefForAthlete");
+
+    const manualTabStart = source.indexOf("DOMAIN_COACH_WORKSPACE_TABS.map((tab) =>");
+    const manualTab = source.slice(manualTabStart, manualTabStart + 900);
+    expect(manualTab).toContain("handleDomainCoachWorkspaceTabSelect");
+    expect(manualTab).toContain("tab: tab.key");
+
+    const releaseStart = source.indexOf("{drawerWorkflowActions.canShowReleaseAction ? (");
+    const releaseButton = source.slice(releaseStart, releaseStart + 700);
+    expect(releaseButton).toContain('handlePersistedGovernedPlanAction("RELEASE"');
+    expect(releaseButton).not.toContain('tab: "plan-viewer"');
+
+    const setTab = vi.fn();
+    const openPlanViewer = vi.fn();
+    const loadPlanHistory = vi.fn();
+    handleDomainCoachWorkspaceTabSelect({
+      tab: "plan-viewer",
+      setTab,
+      planViewerAvailable: true,
+      hasViewPlanContext: true,
+      openPlanViewer,
+      loadPlanHistory,
+    });
+    expect(setTab).toHaveBeenCalledWith("plan-viewer");
+    expect(openPlanViewer).toHaveBeenCalledTimes(1);
+    expect(loadPlanHistory).not.toHaveBeenCalled();
+  });
+
   it("does not render an expired completed released plan as active Plan Viewer content", () => {
     const viewPlanContext = {
       planId: "completed-plan-1",

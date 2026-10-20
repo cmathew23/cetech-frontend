@@ -7236,6 +7236,30 @@ export function domainIntegrationAvailableActionLabels(input: {
   return actions;
 }
 
+export function resolveDomainIntegrationReviewButtonVisible(input: {
+  workflowStatus: AssistantDomainWorkflowStatus;
+  canShowViewPlan: boolean;
+  hasActionContext: boolean;
+  canShowSubmitForReview: boolean;
+  canShowReviseAction: boolean;
+  canShowApproveAction: boolean;
+  canShowRequestRevisionAction: boolean;
+}): boolean {
+  if (!input.hasActionContext || !input.canShowViewPlan) return false;
+  if (
+    input.workflowStatus === "draft_generated" ||
+    input.workflowStatus === "revision_requested"
+  ) {
+    return (
+      input.canShowSubmitForReview ||
+      input.canShowReviseAction ||
+      input.canShowApproveAction ||
+      input.canShowRequestRevisionAction
+    );
+  }
+  return true;
+}
+
 export type DomainReviewDrawerWorkflowActions = {
   canShowViewPlan: boolean;
   canShowSubmitForReview: boolean;
@@ -21940,6 +21964,15 @@ export function CoachAthletePlanningProfileView({
       ? generateDisplayState.availableActionLabels
       : availableActionLabels;
     const displayedNextActionLabel = generateDisplayState.nextActionLabel;
+    const reviewButtonVisible = resolveDomainIntegrationReviewButtonVisible({
+      workflowStatus,
+      canShowViewPlan,
+      hasActionContext: actionContext !== null,
+      canShowSubmitForReview: reviewModel.canShowSubmitForReview,
+      canShowReviseAction: reviewModel.canShowReviseAction,
+      canShowApproveAction: reviewModel.canShowApproveAction,
+      canShowRequestRevisionAction: reviewModel.canShowRequestRevisionAction,
+    });
 
     return (
       <tr key={domain} className="border-t border-border/70 align-top first:border-t-0">
@@ -22035,7 +22068,7 @@ export function CoachAthletePlanningProfileView({
               >
                 {viewDomainInPlanViewerLabel(domain)}
               </Button>
-            ) : actionContext !== null && canShowViewPlan ? (
+            ) : reviewButtonVisible && actionContext !== null ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -22100,6 +22133,19 @@ export function CoachAthletePlanningProfileView({
       workflowStatus: reviewModel.workflowStatus,
       canShowGenerateAction: reviewModel.canShowGenerateAction,
       skillsCreateVisible: headCoachSkillsCreateVisible,
+    });
+    const inspectorReviewButtonVisible = resolveDomainIntegrationReviewButtonVisible({
+      workflowStatus: reviewModel.workflowStatus,
+      canShowViewPlan:
+        reviewModel.canShowViewPlan ||
+        reviewModel.actionContext !== null ||
+        reviewModel.activeDetail !== null,
+      hasActionContext:
+        reviewModel.actionContext !== null || reviewModel.activeDetail !== null,
+      canShowSubmitForReview: reviewModel.canShowSubmitForReview,
+      canShowReviseAction: reviewModel.canShowReviseAction,
+      canShowApproveAction: reviewModel.canShowApproveAction,
+      canShowRequestRevisionAction: reviewModel.canShowRequestRevisionAction,
     });
 
     return (
@@ -22210,7 +22256,7 @@ export function CoachAthletePlanningProfileView({
                   {viewDomainInPlanViewerLabel(reviewDomain)}
                 </Button>
               ) : null}
-              {reviewModel.actionContext !== null || reviewModel.activeDetail !== null ? (
+              {inspectorReviewButtonVisible ? (
                 <Button
                   type="button"
                   variant={

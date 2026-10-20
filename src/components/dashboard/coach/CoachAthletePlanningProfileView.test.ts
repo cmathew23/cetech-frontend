@@ -119,6 +119,7 @@ import {
   assistantWorkflowStatusLabelForKind,
   domainIntegrationAvailableActionLabels,
   domainIntegrationNextActionLabel,
+  resolveDomainIntegrationReviewButtonVisible,
   resolveDomainReviseAvailability,
   resolveTrainingPlanWorkspaceDomainIntegrationComplete,
   resolveTrainingPlanWorkspaceHasReleasedDomain,
@@ -13301,6 +13302,61 @@ describe("resolveHeadCoachOwnedSkillsDraftApproveVisible", () => {
       }),
     ).toBe(true);
     expect(identity.versionId).toBe("skills-v2");
+  });
+
+  it("keeps Head Coach review closed until an assigned domain draft is submitted", () => {
+    const waitingForAssignedCoach = {
+      workflowStatus: "draft_generated" as const,
+      canShowViewPlan: true,
+      hasActionContext: true,
+      canShowSubmitForReview: false,
+      canShowReviseAction: false,
+      canShowApproveAction: false,
+      canShowRequestRevisionAction: false,
+    };
+
+    for (const workflowStatus of ["draft_generated", "revision_requested"] as const) {
+      expect(
+        resolveDomainIntegrationReviewButtonVisible({
+          ...waitingForAssignedCoach,
+          workflowStatus,
+        }),
+      ).toBe(false);
+    }
+
+    expect(
+      resolveDomainIntegrationReviewButtonVisible({
+        ...waitingForAssignedCoach,
+        workflowStatus: "submitted_for_review",
+        canShowApproveAction: true,
+        canShowRequestRevisionAction: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainIntegrationReviewButtonVisible({
+        ...waitingForAssignedCoach,
+        canShowApproveAction: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainIntegrationReviewButtonVisible({
+        ...waitingForAssignedCoach,
+        canShowSubmitForReview: true,
+        canShowReviseAction: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainIntegrationReviewButtonVisible({
+        ...waitingForAssignedCoach,
+        workflowStatus: "submitted_for_review",
+      }),
+    ).toBe(true);
+    expect(
+      resolveDomainIntegrationReviewButtonVisible({
+        ...waitingForAssignedCoach,
+        workflowStatus: "approved",
+      }),
+    ).toBe(true);
   });
 
   it("uses Head Coach approval next-action copy instead of submit copy", () => {

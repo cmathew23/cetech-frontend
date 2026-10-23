@@ -116,8 +116,7 @@ export default function LoginPage() {
   return (
     <AuthLayout sidePanelVariant="login">
       <AuthCard
-        title="Sign in"
-        subtitle="Access your dashboard and invitations."
+        title="Welcome to PeakFlow"
         footer={
           <div className="text-sm text-textSecondary">
             Don’t have an account?{" "}

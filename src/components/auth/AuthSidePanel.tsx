@@ -9,10 +9,11 @@ function AuthHeroPanel() {
   return (
     <div className="relative h-full w-full bg-black">
       <Image
-        src="/branding/peakflow-signin-hero.png"
+        src="/images/peakflow-login-hero.png"
         alt="PEAKFLOW — Plan Better. Coach Better. Perform Better."
         fill
         priority
+        unoptimized
         className="object-cover object-top md:object-contain md:object-center"
         sizes="(min-width: 768px) 40vw, 100vw"
       />

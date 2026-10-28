@@ -48,6 +48,7 @@ export const coachSidebarNavItems: DashboardNavItem[] = [
 
 export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/athlete/peakflow-swing", label: "PeakFlow Swing", icon: Activity },
   { href: "/athlete/weekly-plan", label: "Weekly Plan", icon: Calendar },
   { href: "/athlete/competitions", label: "Competitions", icon: Trophy },
   { href: "/athlete/chat", label: "PeakConnect", icon: MessageSquare },

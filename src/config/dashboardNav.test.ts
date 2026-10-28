@@ -112,6 +112,13 @@ describe("PeakConnect module labels", () => {
     ).toBe("PeakConnect");
   });
 
+  it("adds PeakFlow Swing to the athlete sidebar", () => {
+    expect(
+      athleteSidebarNavItems.find((item) => item.href === "/athlete/peakflow-swing")
+        ?.label,
+    ).toBe("PeakFlow Swing");
+  });
+
   it("adds a Competitions item to the athlete sidebar", () => {
     expect(
       athleteSidebarNavItems.find((item) => item.href === "/athlete/competitions")

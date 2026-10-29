@@ -59,6 +59,18 @@ export const athleteSidebarNavItems: DashboardNavItem[] = [
   { href: "/athlete/settings", label: "Settings", icon: Settings },
 ];
 
+export function isGolfSportCode(sportCode: string | null | undefined): boolean {
+  return sportCode === "GOLF";
+}
+
+/** PeakFlow Swing is golf-only. Other athlete nav items stay visible. */
+export function visibleAthleteSidebarNavItems(
+  sportCode: string | null | undefined,
+): DashboardNavItem[] {
+  if (isGolfSportCode(sportCode)) return athleteSidebarNavItems;
+  return athleteSidebarNavItems.filter((item) => item.href !== "/athlete/peakflow-swing");
+}
+
 function normalizePathname(pathname: string): string {
   const path = pathname.split("?")[0].split("#")[0];
   if (path.length > 1 && path.endsWith("/")) return path.slice(0, -1);

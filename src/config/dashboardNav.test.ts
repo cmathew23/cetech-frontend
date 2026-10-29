@@ -5,6 +5,7 @@ import {
   coachSidebarNavItems,
   isCoachSidebarNavItemActive,
   isCoachTrainingPlanRoute,
+  visibleAthleteSidebarNavItems,
 } from "@/config/dashboardNav";
 
 const TRAINING_PLAN = "/coach/training-plans";
@@ -117,6 +118,20 @@ describe("PeakConnect module labels", () => {
       athleteSidebarNavItems.find((item) => item.href === "/athlete/peakflow-swing")
         ?.label,
     ).toBe("PeakFlow Swing");
+  });
+
+  it("shows PeakFlow Swing only when sportCode is GOLF", () => {
+    expect(
+      visibleAthleteSidebarNavItems("GOLF").some(
+        (item) => item.href === "/athlete/peakflow-swing",
+      ),
+    ).toBe(true);
+
+    for (const sportCode of ["TENNIS", "CRICKET", "", null, undefined]) {
+      const items = visibleAthleteSidebarNavItems(sportCode);
+      expect(items.some((item) => item.href === "/athlete/peakflow-swing")).toBe(false);
+      expect(items.some((item) => item.href === "/athlete/dashboard")).toBe(true);
+    }
   });
 
   it("adds a Competitions item to the athlete sidebar", () => {

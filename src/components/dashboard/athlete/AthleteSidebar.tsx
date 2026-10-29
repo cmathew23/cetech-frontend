@@ -4,7 +4,8 @@ import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame
 import { useAthletePageReady } from "@/components/dashboard/athlete/AthletePageReadyContext";
 import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthleteInvitationGate";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
-import { athleteSidebarNavItems } from "@/config/dashboardNav";
+import { visibleAthleteSidebarNavItems } from "@/config/dashboardNav";
+import { useAthleteSportCode } from "@/components/dashboard/athlete/useAthleteSportCode";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -22,6 +23,8 @@ export function AthleteSidebar() {
     clearOnError: true,
   });
   const athleteNavLocked = isGateReady && invitationAccessLocked;
+  const { sportCode } = useAthleteSportCode();
+  const navItems = visibleAthleteSidebarNavItems(sportCode);
 
   return (
     <DashboardSidebarFrame
@@ -36,7 +39,7 @@ export function AthleteSidebar() {
         </>
       }
     >
-      {athleteSidebarNavItems.map((item) => {
+      {navItems.map((item) => {
         const Icon = item.icon;
         const invitationRoute = "/athlete/dashboard/invitations";
         const gatedOff =

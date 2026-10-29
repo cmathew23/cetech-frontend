@@ -1,12 +1,59 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { pmiUrl } from "@/config/pmiBackend";
+
+const peakflowGate = vi.hoisted(() => ({
+  sportCode: "GOLF" as string | null,
+  ready: true,
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/athlete/peakflow-swing",
   useRouter: () => ({ push() {}, replace() {}, refresh() {} }),
   useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("@/components/dashboard/athlete/useAthleteSportCode", () => ({
+  useAthleteSportCode: () => ({
+    sportCode: peakflowGate.sportCode,
+    ready: peakflowGate.ready,
+  }),
+}));
+
+vi.mock("@/components/dashboard/athlete/useAthleteInvitationGate", () => ({
+  useAthleteInvitationGate: () => ({
+    accessContext: {
+      user: { userId: "user-should-not-be-used", roles: ["ATHLETE"] },
+      activeRole: "ATHLETE",
+      academy: {
+        hasMembership: true,
+        membershipStatus: "ACTIVE",
+        trainingEntityId: "entity-1",
+        trainingEntityName: "Academy",
+      },
+      invitation: { hasPendingInvitation: false, pendingInvitationCount: 0 },
+      access: {
+        canAccessDashboard: true,
+        dashboardType: "ATHLETE",
+        reasonCode: "READY",
+      },
+      coachSummary: { assignedAthleteCount: 0 },
+      athleteProfile: {
+        athleteProfileId: "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426",
+        trainingEntityId: "entity-1",
+        trainingEntityName: "Academy",
+        membershipId: "membership-1",
+        membershipStatus: "ACTIVE",
+      },
+      assignedCoaches: [],
+    },
+    accessGateReady: true,
+    invitationAccessLocked: false,
+    isGateReady: true,
+    pendingCount: 0,
+  }),
 }));
 
 vi.mock("@/components/ui/Button", async () => {
@@ -29,7 +76,18 @@ function functionSource(name: string, nextName: string) {
   return source.slice(start, end);
 }
 
-const { AnalysisResults } = await import("./PeakFlowSwingPageContent");
+const {
+  AnalysisResults,
+  PeakFlowSwingPageContent,
+  buildPeakFlowSavePayload,
+  clearPeakFlowSwingDraft,
+  peakFlowSwingStateFromDraft,
+  PEAKFLOW_BODY_DRAFT_KEY,
+  PEAKFLOW_CLUB_DRAFT_KEY,
+  postPeakFlowSaveAnalysis,
+  readPeakFlowSwingDrafts,
+  writePeakFlowSwingDraft,
+} = await import("./PeakFlowSwingPageContent");
 
 const bodyAnalysis = {
   overlay_video_url: "/renders/body.mp4",
@@ -63,10 +121,24 @@ const clubAnalysis = {
   },
 };
 
-function renderResults(props: { bodyAnalysis?: object | null; clubAnalysis?: object | null; initialTab?: string }) {
+function renderResults(props: {
+  bodyAnalysis?: object | null;
+  clubAnalysis?: object | null;
+  initialTab?: string;
+  athleteProfileId?: string;
+  bodyTaxonomyAreaKey?: string;
+  clubTaxonomyAreaKey?: string;
+  initialBodySaveStatus?: string;
+  initialClubSaveStatus?: string;
+}) {
   return renderToStaticMarkup(
     createElement(AnalysisResults, { onReset() {}, ...props }),
   );
+}
+
+function saveButton(html: string, label: string) {
+  const match = html.match(new RegExp(`<button[^>]*>${label}<\\/button>`));
+  return match?.[0] ?? "";
 }
 
 describe("PeakFlow Swing result rendering", () => {
@@ -121,7 +193,9 @@ describe("PeakFlow Swing result rendering", () => {
 describe("PeakFlow Swing independent uploads", () => {
   it("posts the Body file to /analyze/body and does not start Club", () => {
     const body = functionSource("handleAnalyzeBody", "handleAnalyzeClub");
-    expect(body).toContain('postVideo("/analyze/body", file)');
+    expect(body).toContain(
+      'postVideo("/analyze/body", file, athleteProfileId, selectedTaxonomyAreaKey)',
+    );
     expect(body).toContain("data.analysis");
     expect(body).not.toContain("/analyze/club");
     expect(body).not.toContain("handleAnalyzeClub");
@@ -129,10 +203,18 @@ describe("PeakFlow Swing independent uploads", () => {
 
   it("posts the Club file to /analyze/club/upload", () => {
     const club = source.slice(source.indexOf("async function handleAnalyzeClub"));
-    expect(club).toContain('postVideo("/analyze/club/upload", file)');
+    expect(club).toContain(
+      'postVideo("/analyze/club/upload", file, athleteProfileId, selectedTaxonomyAreaKey)',
+    );
     expect(club).not.toContain('pmiUrl("/analyze/club")');
     expect(source).not.toContain("analysis_id");
+    expect(functionSource("postVideo", "postPeakFlowSaveAnalysis")).not.toContain("JSON.stringify");
+    expect(functionSource("handleAnalyzeBody", "handleAnalyzeClub")).not.toContain("JSON.stringify");
     expect(source).toContain('form.append("video", file)');
+    expect(source).toContain('form.append("athleteId", athleteProfileId)');
+    expect(source).toContain('form.append("taxonomyAreaKey", selectedTaxonomyAreaKey)');
+    expect(source).toContain("planningIds.ids?.athleteProfileId");
+    expect(source).toContain('taxonomyAreaKey === ""');
   });
 
   it("shows a Body result without a Club result, and a Club result without a Body result", () => {
@@ -150,5 +232,288 @@ describe("PeakFlow Swing independent uploads", () => {
     expect(source).toContain("✓ Side / Face-On View");
     expect(source).toContain("REQUIRED VIEW: Back / Down-the-Line View");
     expect(source).not.toContain('pmiUrl("/analyze/club")');
+  });
+});
+
+describe("PeakFlow Swing golf access and taxonomy", () => {
+  it("does not render the page for a non-Golf athlete", () => {
+    for (const sportCode of ["TENNIS", "CRICKET", "", null]) {
+      peakflowGate.sportCode = sportCode;
+      peakflowGate.ready = true;
+      const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+      expect(html).toBe("");
+    }
+    expect(source).toContain('router.replace("/athlete/dashboard")');
+    expect(source).toContain("if (!allowed) return null");
+    peakflowGate.sportCode = "GOLF";
+  });
+
+  it("renders the page for a Golf athlete with a required taxonomy on each card", () => {
+    peakflowGate.sportCode = "GOLF";
+    peakflowGate.ready = true;
+    const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(html).toContain("PeakFlow Swing");
+    expect(html).toContain("Analyze Body Movement");
+    expect(html).toContain("Analyze Club Tracking");
+    expect(html).toContain("Golf Taxonomy");
+    expect(html.split("tee_shots_driving").length - 1).toBe(2);
+    expect(html.split("course_management_decision_making").length - 1).toBe(2);
+    expect(html).not.toContain("user-should-not-be-used");
+    const analyzeButtons = html.match(/<button[^>]*>Analyze (?:Body Movement|Club Tracking)<\/button>/g) ?? [];
+    expect(analyzeButtons).toHaveLength(2);
+    for (const button of analyzeButtons) {
+      expect(button).toContain("disabled");
+    }
+  });
+});
+
+const athleteId = "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426";
+
+describe("PeakFlow Swing save analysis", () => {
+  it("shows Save Analysis only when a result is present", () => {
+    peakflowGate.sportCode = "GOLF";
+    peakflowGate.ready = true;
+    const page = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(page).not.toContain("Save Analysis");
+
+    const html = renderResults({ bodyAnalysis, clubAnalysis: null });
+    expect(saveButton(html, "Save Analysis")).not.toContain("disabled");
+    expect(html.match(/Save Analysis/g)).toHaveLength(1);
+  });
+
+  it("sends the frozen Body result, taxonomy, and overlay video URL", async () => {
+    const payload = buildPeakFlowSavePayload({
+      athleteId,
+      taxonomyAreaKey: "putting",
+      analysisType: "BODY",
+      result: bodyAnalysis,
+      resultVideoUrl: bodyAnalysis.overlay_video_url,
+    });
+    expect(payload).toEqual({
+      athleteId,
+      taxonomyAreaKey: "putting",
+      analysisType: "BODY",
+      result: bodyAnalysis,
+      resultVideoUrl: "/renders/body.mp4",
+    });
+    expect(source).toContain("setBodyTaxonomyAreaKey(selectedTaxonomyAreaKey)");
+    expect(source).toContain("taxonomyAreaKey: bodyTaxonomyAreaKey");
+    expect(source).toContain("analysisType: \"BODY\"");
+    expect(source).toContain("result: bodyAnalysis");
+    expect(source).toContain("resultVideoUrl: bodyAnalysis?.overlay_video_url");
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "saved-body",
+        athleteId,
+        taxonomyAreaKey: "putting",
+        analysisType: "BODY",
+        createdAt: "2026-10-29T00:00:00.000Z",
+        videoStorageKey: "videos/body.mp4",
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const saved = await postPeakFlowSaveAnalysis(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(pmiUrl("/analyses/save"));
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual(payload);
+    expect(saved).toMatchObject({ id: "saved-body", analysisType: "BODY" });
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the frozen Club response, taxonomy, and swingtrace video URL", async () => {
+    const payload = buildPeakFlowSavePayload({
+      athleteId,
+      taxonomyAreaKey: "wedge_play",
+      analysisType: "CLUB",
+      result: clubAnalysis,
+      resultVideoUrl: clubAnalysis.swingtrace_video_url,
+    });
+    expect(payload).toEqual({
+      athleteId,
+      taxonomyAreaKey: "wedge_play",
+      analysisType: "CLUB",
+      result: clubAnalysis,
+      resultVideoUrl: "/renders/club_swingtrace.mp4",
+    });
+    expect(source).toContain("setClubTaxonomyAreaKey(selectedTaxonomyAreaKey)");
+    expect(source).toContain("taxonomyAreaKey: clubTaxonomyAreaKey");
+    expect(source).toContain("analysisType: \"CLUB\"");
+    expect(source).toContain("result: clubAnalysis");
+    expect(source).toContain("resultVideoUrl: clubAnalysis?.swingtrace_video_url");
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "saved-club",
+        athleteId,
+        taxonomyAreaKey: "wedge_play",
+        analysisType: "CLUB",
+        createdAt: "2026-10-29T00:00:00.000Z",
+        videoStorageKey: "videos/club.mp4",
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await postPeakFlowSaveAnalysis(payload);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual(payload);
+    vi.unstubAllGlobals();
+  });
+
+  it("shows Saved ✓ and disables the button after success", () => {
+    const html = renderResults({
+      bodyAnalysis,
+      clubAnalysis: null,
+      initialBodySaveStatus: "saved",
+    });
+    const button = saveButton(html, "Saved ✓");
+    expect(button).toContain("disabled");
+    expect(html).toContain("12.3°");
+  });
+
+  it("shows Save failed and leaves the button enabled for retry", () => {
+    const html = renderResults({
+      bodyAnalysis: null,
+      clubAnalysis,
+      initialClubSaveStatus: "failed",
+    });
+    const button = saveButton(html, "Save failed");
+    expect(button).not.toContain("disabled");
+    expect(html).toContain("1.2345");
+  });
+});
+
+const savedBodyRecord = {
+  id: "saved-body",
+  athleteId,
+  taxonomyAreaKey: "putting",
+  analysisType: "BODY",
+  createdAt: "2026-10-29T00:00:00.000Z",
+  videoStorageKey: "videos/body.mp4",
+};
+
+function installSessionStorage() {
+  const store = new Map<string, string>();
+  vi.stubGlobal("sessionStorage", {
+    getItem(key: string) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, String(value));
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+  });
+}
+
+describe("PeakFlow Swing session drafts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("restores a Body result, its frozen taxonomy, and its save state after remount", () => {
+    installSessionStorage();
+    writePeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY, {
+      result: bodyAnalysis,
+      taxonomyAreaKey: "putting",
+      save: { status: "saved", record: savedBodyRecord },
+    });
+
+    const first = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    const second = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    for (const html of [first, second]) {
+      expect(html).toContain("/renders/body.mp4");
+      expect(html).toContain("12.3°");
+      expect(html).toContain("Saved ✓");
+      expect(html).not.toContain("Clubhead Path");
+    }
+    const restored = peakFlowSwingStateFromDraft(readPeakFlowSwingDrafts().body);
+    expect(restored.taxonomyAreaKey).toBe("putting");
+    expect(restored.result).toEqual(bodyAnalysis);
+    expect(restored.save).toEqual({ status: "saved", record: savedBodyRecord });
+  });
+
+  it("restores a Club result, its frozen taxonomy, and its save state after remount", () => {
+    installSessionStorage();
+    writePeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY, {
+      result: clubAnalysis,
+      taxonomyAreaKey: "wedge_play",
+      save: { status: "failed", record: null },
+    });
+
+    const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(html).toContain("/renders/club_swingtrace.mp4");
+    expect(html).toContain("1.2345");
+    expect(saveButton(html, "Save failed")).not.toContain("disabled");
+    const restored = peakFlowSwingStateFromDraft(readPeakFlowSwingDrafts().club);
+    expect(restored.taxonomyAreaKey).toBe("wedge_play");
+    expect(restored.result).toEqual(clubAnalysis);
+    expect(restored.save.status).toBe("failed");
+  });
+
+  it("restores Body and Club together without mixing save state", () => {
+    installSessionStorage();
+    writePeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY, {
+      result: bodyAnalysis,
+      taxonomyAreaKey: "putting",
+      save: { status: "saved", record: savedBodyRecord },
+    });
+    writePeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY, {
+      result: clubAnalysis,
+      taxonomyAreaKey: "chipping",
+      save: { status: "failed", record: null },
+    });
+
+    const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(html).toContain("Body Movement Modeling");
+    expect(html).toContain("Club Tracking");
+    expect(html).toContain("/renders/body.mp4");
+    expect(html).toContain("12.3°");
+    expect(html).toContain("Saved ✓");
+    expect(html).not.toContain("Save failed");
+
+    const drafts = readPeakFlowSwingDrafts();
+    expect(peakFlowSwingStateFromDraft(drafts.body).taxonomyAreaKey).toBe("putting");
+    expect(peakFlowSwingStateFromDraft(drafts.body).save.status).toBe("saved");
+    expect(peakFlowSwingStateFromDraft(drafts.club).taxonomyAreaKey).toBe("chipping");
+    expect(peakFlowSwingStateFromDraft(drafts.club).save.status).toBe("failed");
+    expect(drafts.club.result).toEqual(clubAnalysis);
+
+    clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
+    expect(readPeakFlowSwingDrafts().body).toBeNull();
+    expect(readPeakFlowSwingDrafts().club.result).toEqual(clubAnalysis);
+  });
+
+  it("does not call analysis or save APIs while restoring", () => {
+    installSessionStorage();
+    writePeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY, {
+      result: bodyAnalysis,
+      taxonomyAreaKey: "putting",
+      save: { status: "idle", record: null },
+    });
+    writePeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY, {
+      result: clubAnalysis,
+      taxonomyAreaKey: "chipping",
+      save: { status: "idle", record: null },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const restoreEffect = source.slice(
+      source.indexOf("const restored = readPeakFlowSwingDrafts()"),
+      source.indexOf("function persistBodySave"),
+    );
+    expect(restoreEffect).not.toContain("postVideo");
+    expect(restoreEffect).not.toContain("postPeakFlowSaveAnalysis");
+    expect(restoreEffect).not.toContain("/analyze/");
+    expect(restoreEffect).not.toContain("/analyses/save");
   });
 });

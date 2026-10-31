@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatTaxonomyAreaLabel } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
 import { pmiUrl } from "@/config/pmiBackend";
 
 const peakflowGate = vi.hoisted(() => ({
@@ -78,14 +79,24 @@ function functionSource(name: string, nextName: string) {
 
 const {
   AnalysisResults,
+  CloseUnsavedAnalysisDialog,
   PeakFlowSwingPageContent,
+  SavedAnalysesSection,
   buildPeakFlowSavePayload,
   clearPeakFlowSwingDraft,
+  fetchPeakFlowSavedAnalyses,
+  fetchPeakFlowSavedAnalysis,
+  formatSavedAnalysisTimestamp,
+  openedAnalysisView,
+  savedAnalysisTaxonomyLabel,
+  peakFlowAnalysesListUrl,
+  peakFlowAnalysisDetailUrl,
   peakFlowSwingStateFromDraft,
   PEAKFLOW_BODY_DRAFT_KEY,
   PEAKFLOW_CLUB_DRAFT_KEY,
   postPeakFlowSaveAnalysis,
   readPeakFlowSwingDrafts,
+  readSavedAnalysesList,
   writePeakFlowSwingDraft,
 } = await import("./PeakFlowSwingPageContent");
 
@@ -130,6 +141,8 @@ function renderResults(props: {
   clubTaxonomyAreaKey?: string;
   initialBodySaveStatus?: string;
   initialClubSaveStatus?: string;
+  bodyPlaybackUrl?: string | null;
+  clubPlaybackUrl?: string | null;
 }) {
   return renderToStaticMarkup(
     createElement(AnalysisResults, { onReset() {}, ...props }),
@@ -270,15 +283,74 @@ describe("PeakFlow Swing golf access and taxonomy", () => {
 const athleteId = "18f84b0f-f34e-4eb9-adb4-18ba3bc7e426";
 
 describe("PeakFlow Swing save analysis", () => {
-  it("shows Save Analysis only when a result is present", () => {
+  it("shows a separate save button only for the result that is present", () => {
     peakflowGate.sportCode = "GOLF";
     peakflowGate.ready = true;
     const page = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(page).not.toContain("Save Body Analysis");
+    expect(page).not.toContain("Save Club Analysis");
     expect(page).not.toContain("Save Analysis");
 
-    const html = renderResults({ bodyAnalysis, clubAnalysis: null });
-    expect(saveButton(html, "Save Analysis")).not.toContain("disabled");
-    expect(html.match(/Save Analysis/g)).toHaveLength(1);
+    const bodyHtml = renderResults({ bodyAnalysis, clubAnalysis: null });
+    expect(saveButton(bodyHtml, "Save Body Analysis")).not.toContain("disabled");
+    expect(bodyHtml.match(/Save Body Analysis/g)).toHaveLength(1);
+    expect(bodyHtml).not.toContain("Save Club Analysis");
+    expect(saveButton(bodyHtml, "Save Analysis")).toBe("");
+
+    const clubHtml = renderResults({ bodyAnalysis: null, clubAnalysis });
+    expect(saveButton(clubHtml, "Save Club Analysis")).not.toContain("disabled");
+    expect(clubHtml.match(/Save Club Analysis/g)).toHaveLength(1);
+    expect(clubHtml).not.toContain("Save Body Analysis");
+  });
+
+  it("keeps Body and Club save actions on their own stored results", () => {
+    const bodySave = source.slice(
+      source.indexOf("async function handleSaveBody"),
+      source.indexOf("async function handleSaveClub"),
+    );
+    expect(bodySave).toContain('analysisType: "BODY"');
+    expect(bodySave).toContain("result: bodyAnalysis");
+    expect(bodySave).toContain("resultVideoUrl: bodyAnalysis?.overlay_video_url");
+    expect(bodySave).toContain("setBodySaveState");
+    expect(bodySave).not.toContain("setClubSaveState");
+    expect(bodySave).not.toContain("clubAnalysis");
+    expect(bodySave).not.toContain('"CLUB"');
+
+    const clubSave = source.slice(
+      source.indexOf("async function handleSaveClub"),
+      source.indexOf("const frames"),
+    );
+    expect(clubSave).toContain('analysisType: "CLUB"');
+    expect(clubSave).toContain("result: clubAnalysis");
+    expect(clubSave).toContain("resultVideoUrl: clubAnalysis?.swingtrace_video_url");
+    expect(clubSave).toContain("setClubSaveState");
+    expect(clubSave).not.toContain("setBodySaveState");
+    expect(clubSave).not.toContain("bodyAnalysis");
+    expect(clubSave).not.toContain('"BODY"');
+
+    const savedBody = renderResults({
+      bodyAnalysis,
+      clubAnalysis,
+      initialTab: "body",
+      initialBodySaveStatus: "saved",
+      initialClubSaveStatus: "idle",
+    });
+    expect(saveButton(savedBody, "Saved ✓")).toContain("disabled");
+    expect(savedBody).not.toContain("Save Club Analysis");
+    expect(savedBody).toContain("/renders/body.mp4");
+    expect(savedBody).not.toContain("/renders/club_swingtrace.mp4");
+
+    const failedClub = renderResults({
+      bodyAnalysis,
+      clubAnalysis,
+      initialTab: "club",
+      initialBodySaveStatus: "saved",
+      initialClubSaveStatus: "failed",
+    });
+    expect(saveButton(failedClub, "Save failed — Retry")).not.toContain("disabled");
+    expect(failedClub).not.toContain("Saved ✓");
+    expect(failedClub).toContain("/renders/club_swingtrace.mp4");
+    expect(failedClub).not.toContain("/renders/body.mp4");
   });
 
   it("sends the frozen Body result, taxonomy, and overlay video URL", async () => {
@@ -376,15 +448,65 @@ describe("PeakFlow Swing save analysis", () => {
     expect(html).toContain("12.3°");
   });
 
-  it("shows Save failed and leaves the button enabled for retry", () => {
+  it("shows Save failed — Retry and leaves the button enabled for retry", () => {
     const html = renderResults({
       bodyAnalysis: null,
       clubAnalysis,
       initialClubSaveStatus: "failed",
     });
-    const button = saveButton(html, "Save failed");
+    const button = saveButton(html, "Save failed — Retry");
     expect(button).not.toContain("disabled");
     expect(html).toContain("1.2345");
+  });
+});
+
+describe("PeakFlow Swing tab video switching", () => {
+  it("only changes the displayed result and reloads that stored video", () => {
+    const player = source.slice(
+      source.indexOf("function Player"),
+      source.indexOf("function AnalyzedVideo"),
+    );
+    expect(player).toContain("setPlaying(false)");
+    expect(player).toContain("setPlaybackError(null)");
+    expect(player).toContain("video.src = src");
+    expect(player).toContain("video.load()");
+    expect(player).toContain("code === 1");
+    expect(player).not.toContain("setBodyAnalysis");
+    expect(player).not.toContain("setClubAnalysis");
+    expect(player).not.toContain("postVideo");
+    expect(player).not.toContain("postPeakFlowSaveAnalysis");
+    expect(source).not.toContain("key={src}");
+
+    const results = source.slice(
+      source.indexOf("export function AnalysisResults"),
+      source.indexOf("function VideoUpload"),
+    );
+    expect(results).toContain("onClick={() => setTab(item.id)}");
+    expect(results).toContain("bodyAnalysis?.overlay_video_url");
+    expect(results).toContain("clubAnalysis?.swingtrace_video_url");
+    expect(results).not.toContain("setBodyAnalysis");
+    expect(results).not.toContain("setClubAnalysis");
+    expect(results).not.toContain("clearPeakFlowSwingDraft");
+    expect(results).not.toContain("writePeakFlowSwingDraft");
+    expect(results).not.toContain("postVideo");
+
+    const actionRow = results.slice(
+      results.indexOf("New Analysis"),
+      results.indexOf('aria-label="Analysis views"'),
+    );
+    expect(actionRow).toContain("Share with Skills Coach");
+    expect(actionRow).not.toContain("handleSaveBody");
+    expect(actionRow).not.toContain("handleSaveClub");
+    expect(actionRow).not.toContain("saveAnalysisButtonLabel");
+
+    const bodyHtml = renderResults({ bodyAnalysis, clubAnalysis, initialTab: "body" });
+    expect(bodyHtml).toContain("/renders/body.mp4");
+    expect(bodyHtml).not.toContain("/renders/club_swingtrace.mp4");
+    expect(bodyHtml).toContain("Save Body Analysis");
+    const clubHtml = renderResults({ bodyAnalysis, clubAnalysis, initialTab: "club" });
+    expect(clubHtml).toContain("/renders/club_swingtrace.mp4");
+    expect(clubHtml).not.toContain("/renders/body.mp4");
+    expect(clubHtml).toContain("Save Club Analysis");
   });
 });
 
@@ -450,7 +572,7 @@ describe("PeakFlow Swing session drafts", () => {
     const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
     expect(html).toContain("/renders/club_swingtrace.mp4");
     expect(html).toContain("1.2345");
-    expect(saveButton(html, "Save failed")).not.toContain("disabled");
+    expect(saveButton(html, "Save failed — Retry")).not.toContain("disabled");
     const restored = peakFlowSwingStateFromDraft(readPeakFlowSwingDrafts().club);
     expect(restored.taxonomyAreaKey).toBe("wedge_play");
     expect(restored.result).toEqual(clubAnalysis);
@@ -515,5 +637,483 @@ describe("PeakFlow Swing session drafts", () => {
     expect(restoreEffect).not.toContain("postPeakFlowSaveAnalysis");
     expect(restoreEffect).not.toContain("/analyze/");
     expect(restoreEffect).not.toContain("/analyses/save");
+  });
+});
+
+const savedBodyId = "3a43f299-075c-4bb8-986c-f0248a9b16cc";
+const savedClubId = "a26a3e26-b3a8-4a92-aa72-c887b5e74e19";
+const savedCreatedAt = "2026-10-30T08:03:56.407Z";
+const bodyPlaybackUrl = "https://signed.example/body-playback";
+const clubPlaybackUrl = "https://signed.example/club-playback";
+
+const savedBodySummary = {
+  id: savedBodyId,
+  athleteId,
+  taxonomyAreaKey: "tee_shots_driving",
+  analysisType: "BODY",
+  createdAt: savedCreatedAt,
+};
+
+const savedClubSummary = {
+  id: savedClubId,
+  athleteId,
+  taxonomyAreaKey: "wedge_play",
+  analysisType: "CLUB",
+  createdAt: "2026-10-30T08:35:00.031Z",
+};
+
+describe("PeakFlow Swing saved analyses", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("formats a UTC createdAt in the local timezone", () => {
+    const createdAt = "2026-10-31T12:31:00.000Z";
+    const date = new Date(createdAt);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const hours24 = date.getHours();
+    const hours12 = hours24 % 12 || 12;
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const suffix = hours24 >= 12 ? "PM" : "AM";
+    const formatted = formatSavedAnalysisTimestamp(createdAt);
+    expect(formatted).toBe(
+      `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}, ${hours12}:${minutes} ${suffix}`,
+    );
+    expect(formatSavedAnalysisTimestamp("2026-10-31T12:31:00.000000")).toBe(formatted);
+    expect(formatSavedAnalysisTimestamp("2026-10-31T12:31:00")).toBe(formatted);
+  });
+
+  it("does not list saved analyses before an AthleteProfile id exists", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPeakFlowSavedAnalyses("")).rejects.toThrow("Saved analyses could not be loaded.");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const historyEffect = source.slice(
+      source.indexOf('if (!allowed || athleteProfileId === "") return;'),
+      source.indexOf("function refreshSavedAnalyses"),
+    );
+    expect(historyEffect).toContain("fetchPeakFlowSavedAnalyses(athleteProfileId)");
+    expect(historyEffect).toContain('athleteProfileId === ""');
+    expect(historyEffect).not.toContain("userId");
+    expect(historyEffect).not.toContain("trainingEntityId");
+    expect(historyEffect).not.toContain("setBodyAnalysis");
+    expect(historyEffect).not.toContain("setClubAnalysis");
+    expect(historyEffect).not.toContain("postVideo");
+    expect(historyEffect).not.toContain("postPeakFlowSaveAnalysis");
+    expect(historyEffect).not.toContain("fetchPeakFlowSavedAnalysis(");
+  });
+
+  it("lists saved analyses with the AthleteProfile id", async () => {
+    expect(peakFlowAnalysesListUrl(athleteId)).toBe(pmiUrl(`/analyses?athleteId=${athleteId}`));
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ analyses: [savedBodySummary, savedClubSummary] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const analyses = await fetchPeakFlowSavedAnalyses(athleteId);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(pmiUrl(`/analyses?athleteId=${athleteId}`));
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET" });
+    expect(analyses).toEqual([savedBodySummary, savedClubSummary]);
+    expect(readSavedAnalysesList({ analyses: [] })).toEqual([]);
+  });
+
+  it("shows athlete-facing saved analysis rows, the empty state, and a history error", () => {
+    const bodyRow = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [savedBodySummary],
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(bodyRow).toContain("Saved Analyses");
+    expect(bodyRow).toContain("Open a previous analysis to review the saved video and metrics.");
+    expect(bodyRow).toContain("Body Movement");
+    expect(bodyRow).toContain("Saved ✓");
+    expect(savedAnalysisTaxonomyLabel("tee_shots_driving")).toBe("Tee Shots / Driving");
+    expect(bodyRow).toContain("Tee Shots / Driving");
+    expect(formatTaxonomyAreaLabel("tee_shots_driving")).toBe("Tee Shots Driving");
+    expect(bodyRow).not.toContain("Tee Shots Driving");
+    expect(bodyRow).toContain(formatSavedAnalysisTimestamp(savedCreatedAt));
+    expect(formatSavedAnalysisTimestamp(savedCreatedAt)).toMatch(/Oct 2026/);
+    expect(formatSavedAnalysisTimestamp(savedCreatedAt)).not.toBe(savedCreatedAt);
+    expect(bodyRow).toContain("Open");
+    expect(bodyRow).not.toContain(savedBodyId);
+    expect(bodyRow).not.toContain(athleteId);
+    expect(bodyRow).not.toContain("tee_shots_driving");
+    expect(bodyRow).not.toContain(savedCreatedAt);
+    expect(bodyRow).not.toContain("playbackUrl");
+
+    const clubRow = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [savedClubSummary],
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(clubRow).toContain("Club Tracking");
+    expect(clubRow).toContain(savedAnalysisTaxonomyLabel("wedge_play"));
+    expect(clubRow).not.toContain("wedge_play");
+    expect(clubRow).not.toContain(savedClubId);
+
+    const empty = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [],
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(empty).toContain("No saved analyses yet.");
+    expect(empty).toContain("Saved Body Movement and Club Tracking analyses will appear here.");
+
+    const failed = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      error: true,
+      analyses: [savedBodySummary],
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(failed).toContain("Saved analyses could not be loaded.");
+    expect(saveButton(failed, "Retry")).not.toContain("disabled");
+    expect(failed).not.toContain("Analyze Body Movement");
+    expect(failed).not.toContain(savedBodyId);
+
+    const page = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(page.indexOf("Analyze Club Tracking")).toBeLessThan(page.indexOf("Saved Analyses"));
+    expect(page).toContain("Analyze Body Movement");
+    expect(page).toContain("Analyze Club Tracking");
+  });
+
+  it("opens a saved Body analysis from the detail route into the existing Body view", async () => {
+    const storedResult = {
+      frames: bodyAnalysis.frames,
+      metrics_summary: bodyAnalysis.metrics_summary,
+    };
+    const detail = {
+      ...savedBodySummary,
+      result: storedResult,
+      playbackUrl: bodyPlaybackUrl,
+    };
+    expect(peakFlowAnalysisDetailUrl(savedBodyId, athleteId)).toBe(
+      pmiUrl(`/analyses/${savedBodyId}?athleteId=${athleteId}`),
+    );
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => detail,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const opened = await fetchPeakFlowSavedAnalysis(savedBodyId, athleteId);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      pmiUrl(`/analyses/${savedBodyId}?athleteId=${athleteId}`),
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET" });
+    const view = openedAnalysisView(opened);
+    expect(view.tab).toBe("body");
+    expect(view.result).toBe(storedResult);
+    expect(view.playbackUrl).toBe(bodyPlaybackUrl);
+    expect(storedResult).not.toHaveProperty("playbackUrl");
+    expect(view.save.record).not.toHaveProperty("playbackUrl");
+    expect(view.save.record).not.toHaveProperty("result");
+    expect(view.save.status).toBe("saved");
+
+    const html = renderResults({
+      bodyAnalysis: view.result,
+      clubAnalysis,
+      initialTab: "body",
+      bodyPlaybackUrl: view.playbackUrl,
+      initialBodySaveStatus: "saved",
+    });
+    expect(html).toContain(bodyPlaybackUrl);
+    expect(html).toContain("12.3°");
+    expect(html).toContain("Body Movement Modeling");
+    expect(html).not.toContain("/renders/club_swingtrace.mp4");
+    expect(html).not.toContain("1.2345");
+
+    const openFn = source.slice(
+      source.indexOf("async function handleOpenSavedAnalysis"),
+      source.indexOf("if (!allowed) return null"),
+    );
+    const bodyBranch = openFn.slice(
+      openFn.indexOf('if (view.tab === "body")'),
+      openFn.indexOf('} else if (view.tab === "club")'),
+    );
+    expect(bodyBranch).toContain("setBodyAnalysis(view.result)");
+    expect(bodyBranch).toContain("setBodyPlaybackUrl(view.playbackUrl)");
+    expect(bodyBranch).toContain("clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY)");
+    expect(bodyBranch).not.toContain("writePeakFlowSwingDraft");
+    expect(openFn).toContain("setResultsView");
+    expect(openFn).toContain("tab: view.tab");
+    expect(bodyBranch).not.toContain("setClubAnalysis");
+    expect(bodyBranch).not.toContain("setClubPlaybackUrl");
+    expect(openFn).not.toContain("postVideo");
+    expect(openFn).not.toContain("postPeakFlowSaveAnalysis");
+    expect(openFn).not.toContain("/analyze/");
+    expect(openFn).not.toContain("/analyses/save");
+  });
+
+  it("opens a saved Club analysis from the detail route into the existing Club view", async () => {
+    const storedResult = clubAnalysis;
+    const detail = {
+      ...savedClubSummary,
+      result: storedResult,
+      playbackUrl: clubPlaybackUrl,
+    };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => detail,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const opened = await fetchPeakFlowSavedAnalysis(savedClubId, athleteId);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      pmiUrl(`/analyses/${savedClubId}?athleteId=${athleteId}`),
+    );
+    const view = openedAnalysisView(opened);
+    expect(view.tab).toBe("club");
+    expect(view.result).toBe(storedResult);
+    expect(view.playbackUrl).toBe(clubPlaybackUrl);
+    expect(view.save.record).not.toHaveProperty("playbackUrl");
+
+    const html = renderResults({
+      bodyAnalysis,
+      clubAnalysis: view.result,
+      initialTab: "club",
+      clubPlaybackUrl: view.playbackUrl,
+    });
+    expect(html).toContain(clubPlaybackUrl);
+    expect(html).toContain("1.2345");
+    expect(html).toContain("Club Tracking");
+    expect(html).not.toContain("/renders/body.mp4");
+    expect(html).not.toContain("12.3°");
+
+    const openFn = source.slice(
+      source.indexOf("async function handleOpenSavedAnalysis"),
+      source.indexOf("if (!allowed) return null"),
+    );
+    const clubBranch = openFn.slice(openFn.indexOf('} else if (view.tab === "club")'));
+    expect(clubBranch).toContain("setClubAnalysis(view.result)");
+    expect(clubBranch).toContain("setClubPlaybackUrl(view.playbackUrl)");
+    expect(clubBranch).toContain("clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY)");
+    expect(clubBranch).not.toContain("writePeakFlowSwingDraft");
+    expect(clubBranch).not.toContain("setBodyAnalysis");
+    expect(clubBranch).not.toContain("setBodyPlaybackUrl");
+    expect(openFn).not.toContain("postVideo");
+    expect(openFn).not.toContain("postPeakFlowSaveAnalysis");
+  });
+
+  it("keeps a failed open from replacing the current result and refreshes history only after save", () => {
+    const openFn = source.slice(
+      source.indexOf("async function handleOpenSavedAnalysis"),
+      source.indexOf("if (!allowed) return null"),
+    );
+    const openCatch = openFn.slice(openFn.lastIndexOf("} catch {"));
+    expect(openCatch).toContain("setOpenAnalysisErrorId(item.id)");
+    expect(openCatch).not.toContain("setBodyAnalysis");
+    expect(openCatch).not.toContain("setClubAnalysis");
+    expect(openCatch).not.toContain("setBodyPlaybackUrl");
+    expect(openCatch).not.toContain("setClubPlaybackUrl");
+    expect(openCatch).not.toContain("setBodyTaxonomyAreaKey");
+    expect(openCatch).not.toContain("setClubTaxonomyAreaKey");
+    expect(openCatch).not.toContain("setBodySave");
+    expect(openCatch).not.toContain("setClubSave");
+
+    const failedRow = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [savedBodySummary],
+      openAnalysisErrorId: savedBodyId,
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(failedRow).toContain("Saved analysis could not be opened.");
+    expect(saveButton(failedRow, "Open")).not.toContain("disabled");
+
+    const saveBody = source.slice(
+      source.indexOf("async function handleSaveBody"),
+      source.indexOf("async function handleSaveClub"),
+    );
+    const saveClub = source.slice(
+      source.indexOf("async function handleSaveClub"),
+      source.indexOf("const frames"),
+    );
+    expect(saveBody).toContain("onAnalysisSaved?.()");
+    expect(saveClub).toContain("onAnalysisSaved?.()");
+    expect(source).toContain("onAnalysisSaved={refreshSavedAnalyses}");
+    const refresh = source.slice(
+      source.indexOf("function refreshSavedAnalyses"),
+      source.indexOf("function persistBodySave"),
+    );
+    expect(refresh).toContain("setSavedAnalysesReload");
+    expect(refresh).not.toContain("fetchPeakFlowSavedAnalysis");
+    expect(refresh).not.toContain("postVideo");
+    expect(refresh).not.toContain("/analyses/save");
+    expect(refresh).not.toContain("/analyze/");
+  });
+
+  it("does not persist an opened saved analysis or its signed playback URL", () => {
+    installSessionStorage();
+    const historicalBody = {
+      ...bodyAnalysis,
+      overlay_video_url: "/renders/body.mp4",
+    };
+    writePeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY, {
+      result: historicalBody,
+      taxonomyAreaKey: "tee_shots_driving",
+      save: { status: "saved", record: savedBodySummary },
+    });
+    clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
+    expect(readPeakFlowSwingDrafts().body).toBeNull();
+    expect(sessionStorage.getItem(PEAKFLOW_BODY_DRAFT_KEY) ?? "").not.toContain(bodyPlaybackUrl);
+    expect(sessionStorage.getItem(PEAKFLOW_BODY_DRAFT_KEY) ?? "").not.toContain("/renders/body.mp4");
+
+    const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(html).not.toContain("/renders/body.mp4");
+    expect(html).not.toContain(bodyPlaybackUrl);
+
+    const historicalClub = {
+      ...clubAnalysis,
+      swingtrace_video_url: "/renders/club_swingtrace.mp4",
+    };
+    writePeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY, {
+      result: historicalClub,
+      taxonomyAreaKey: "wedge_play",
+      save: { status: "saved", record: savedClubSummary },
+    });
+    clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY);
+    const clubHtml = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
+    expect(clubHtml).not.toContain("/renders/club_swingtrace.mp4");
+    expect(clubHtml).not.toContain(clubPlaybackUrl);
+    expect(readPeakFlowSwingDrafts().club).toBeNull();
+  });
+});
+
+describe("PeakFlow Swing close analysis", () => {
+  function closeSource(name: string, nextName: string) {
+    return source.slice(source.indexOf(`function ${name}`), source.indexOf(`function ${nextName}`));
+  }
+
+  const clearBody = closeSource("clearBodyAnalysisState", "clearClubAnalysisState");
+  const clearClub = closeSource("clearClubAnalysisState", "requestCloseBody");
+  const closeBody = closeSource("requestCloseBody", "requestCloseClub");
+  const closeClub = closeSource("requestCloseClub", "keepAnalysis");
+  const keep = closeSource("keepAnalysis", "closeWithoutSaving");
+  const discard = closeSource("closeWithoutSaving", "handleReset");
+
+  it("shows a close action beside each result save action", () => {
+    const savedBody = renderResults({
+      bodyAnalysis,
+      clubAnalysis: null,
+      initialBodySaveStatus: "saved",
+    });
+    expect(saveButton(savedBody, "Close Body Analysis")).not.toBe("");
+    expect(saveButton(savedBody, "Saved ✓")).toContain("disabled");
+    expect(savedBody).not.toContain("Close unsaved analysis?");
+    expect(savedBody).not.toContain("Close Club Analysis");
+
+    const savedClub = renderResults({
+      bodyAnalysis: null,
+      clubAnalysis,
+      initialClubSaveStatus: "saved",
+    });
+    expect(saveButton(savedClub, "Close Club Analysis")).not.toBe("");
+    expect(saveButton(savedClub, "Saved ✓")).toContain("disabled");
+    expect(savedClub).not.toContain("Close Body Analysis");
+
+    const actionRow = source.slice(
+      source.indexOf("New Analysis"),
+      source.indexOf('aria-label="Analysis views"'),
+    );
+    expect(actionRow).not.toContain("Close Body Analysis");
+    expect(actionRow).not.toContain("Close Club Analysis");
+  });
+
+  it("closes a saved or opened analysis immediately and warns when it is unsaved or save failed", () => {
+    expect(closeBody).toContain('bodySave.status === "saved"');
+    expect(closeBody).toContain("clearBodyAnalysisState()");
+    expect(closeBody).toContain('setPendingClose("body")');
+    expect(closeClub).toContain('clubSave.status === "saved"');
+    expect(closeClub).toContain("clearClubAnalysisState()");
+    expect(closeClub).toContain('setPendingClose("club")');
+    expect(source).toContain('save: {\n      status: "saved",');
+
+    const unsavedBody = renderResults({ bodyAnalysis, clubAnalysis: null });
+    expect(saveButton(unsavedBody, "Close Body Analysis")).not.toBe("");
+    expect(saveButton(unsavedBody, "Save Body Analysis")).not.toContain("disabled");
+
+    const failedBody = renderResults({
+      bodyAnalysis,
+      clubAnalysis: null,
+      initialBodySaveStatus: "failed",
+    });
+    expect(saveButton(failedBody, "Save failed — Retry")).not.toContain("disabled");
+    expect(saveButton(failedBody, "Close Body Analysis")).not.toBe("");
+
+    const failedClub = renderResults({
+      bodyAnalysis: null,
+      clubAnalysis,
+      initialClubSaveStatus: "failed",
+    });
+    expect(saveButton(failedClub, "Save failed — Retry")).not.toContain("disabled");
+    expect(saveButton(failedClub, "Close Club Analysis")).not.toBe("");
+
+    const dialog = renderToStaticMarkup(createElement(CloseUnsavedAnalysisDialog, {
+      onKeep() {},
+      onDiscard() {},
+    }));
+    expect(dialog).toContain("Close unsaved analysis?");
+    expect(dialog).toContain("This analysis has not been saved. Closing it will discard the current video and metrics.");
+    expect(saveButton(dialog, "Keep Analysis")).not.toBe("");
+    expect(saveButton(dialog, "Close Without Saving")).not.toBe("");
+  });
+
+  it("keeps or discards only the targeted analysis and leaves history and the other side alone", () => {
+    expect(keep).toBe("function keepAnalysis() {\n    setPendingClose(null);\n  }\n\n  ");
+    expect(keep).not.toContain("clearBodyAnalysisState");
+    expect(keep).not.toContain("clearClubAnalysisState");
+    expect(keep).not.toContain("fetch");
+
+    expect(discard).toContain('pendingClose === "body"');
+    expect(discard).toContain("clearBodyAnalysisState()");
+    expect(discard).toContain('pendingClose === "club"');
+    expect(discard).toContain("clearClubAnalysisState()");
+    expect(discard).toContain("setPendingClose(null)");
+
+    expect(clearBody).toContain("setBodyAnalysis(null)");
+    expect(clearBody).toContain("setBodyPlaybackUrl(null)");
+    expect(clearBody).toContain('setBodyTaxonomyAreaKey("")');
+    expect(clearBody).toContain("setBodySave(EMPTY_SAVE)");
+    expect(clearBody).toContain('setBodyPhase("idle")');
+    expect(clearBody).toContain("clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY)");
+    expect(clearBody).not.toContain("setClubAnalysis");
+    expect(clearBody).not.toContain("setClubPlaybackUrl");
+    expect(clearBody).not.toContain("setClubTaxonomyAreaKey");
+    expect(clearBody).not.toContain("setClubSave");
+    expect(clearBody).not.toContain("PEAKFLOW_CLUB_DRAFT_KEY");
+    expect(clearBody).not.toContain("setSavedAnalyses");
+    expect(clearBody).not.toContain("fetch");
+    expect(clearBody).not.toContain("postVideo");
+    expect(clearBody).not.toContain("postPeakFlowSaveAnalysis");
+
+    expect(clearClub).toContain("setClubAnalysis(null)");
+    expect(clearClub).toContain("setClubPlaybackUrl(null)");
+    expect(clearClub).toContain('setClubTaxonomyAreaKey("")');
+    expect(clearClub).toContain("setClubSave(EMPTY_SAVE)");
+    expect(clearClub).toContain('setClubPhase("idle")');
+    expect(clearClub).toContain("clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY)");
+    expect(clearClub).not.toContain("setBodyAnalysis");
+    expect(clearClub).not.toContain("setBodyPlaybackUrl");
+    expect(clearClub).not.toContain("setBodyTaxonomyAreaKey");
+    expect(clearClub).not.toContain("setBodySave");
+    expect(clearClub).not.toContain("PEAKFLOW_BODY_DRAFT_KEY");
+    expect(clearClub).not.toContain("setSavedAnalyses");
+    expect(clearClub).not.toContain("fetch");
+    expect(clearClub).not.toContain("postVideo");
+    expect(clearClub).not.toContain("postPeakFlowSaveAnalysis");
+
+    for (const block of [clearBody, clearClub, closeBody, closeClub, keep, discard]) {
+      expect(block).not.toContain("DELETE");
+      expect(block).not.toContain("PATCH");
+      expect(block).not.toContain("fetchPeakFlowSavedAnalyses");
+      expect(block).not.toContain("fetchPeakFlowSavedAnalysis");
+    }
+
+    expect(source).toContain("onCloseBody={requestCloseBody}");
+    expect(source).toContain("onCloseClub={requestCloseClub}");
+    for (const block of [clearBody, clearClub, closeBody, closeClub, keep, discard]) {
+      expect(block).not.toContain("handleReset");
+    }
   });
 });

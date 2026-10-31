@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { FormField } from "@/components/ui/FormField";
 import { Select } from "@/components/ui/Select";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -136,8 +137,9 @@ function resultDownloadUrl(playbackUrl) {
   if (!playbackUrl) return null;
   let filename;
   try {
-    const pathname = new URL(playbackUrl, PMI_API_BASE).pathname;
-    filename = decodeURIComponent(pathname.split("/").pop() || "");
+    const parsed = new URL(playbackUrl, PMI_API_BASE);
+    if (parsed.origin !== new URL(PMI_API_BASE).origin) return null;
+    filename = decodeURIComponent(parsed.pathname.split("/").pop() || "");
   } catch {
     return null;
   }
@@ -243,6 +245,24 @@ function Player({ src }) {
   const [playing, setPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [playbackError, setPlaybackError] = useState(null);
+  const playbackRateRef = useRef(playbackRate);
+  const loadedSrcRef = useRef(null);
+  playbackRateRef.current = playbackRate;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (loadedSrcRef.current === src) return;
+    const firstLoad = loadedSrcRef.current == null;
+    loadedSrcRef.current = src;
+    if (firstLoad) return;
+    video.pause();
+    video.src = src;
+    video.load();
+    video.playbackRate = playbackRateRef.current;
+    setPlaying(false);
+    setPlaybackError(null);
+  }, [src]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -260,6 +280,14 @@ function Player({ src }) {
     } else {
       video.pause();
     }
+  }
+
+  function handleVideoError(event) {
+    const media = event.currentTarget;
+    const code = media?.error?.code;
+    if (code == null || code === 1) return;
+    if (media?.src && src && media.src !== src) return;
+    setPlaybackError("The analyzed video could not be played.");
   }
 
   function toggleFullscreen() {
@@ -283,7 +311,8 @@ function Player({ src }) {
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onError={() => setPlaybackError("The analyzed video could not be played.")}
+        onCanPlay={() => setPlaybackError(null)}
+        onError={handleVideoError}
       />
       {playbackError ? (
         <p className="border-t border-danger/30 bg-danger/10 px-4 py-2.5 text-sm text-danger" role="alert">
@@ -335,14 +364,14 @@ function AnalyzedVideo({ src }) {
       </div>
     );
   }
-  return <Player key={src} src={src} />;
+  return <Player src={src} />;
 }
 
-export function saveAnalysisButtonLabel(status) {
+export function saveAnalysisButtonLabel(status, analysisType = "BODY") {
   if (status === "saving") return "Saving...";
   if (status === "saved") return "Saved ✓";
-  if (status === "failed") return "Save failed";
-  return "Save Analysis";
+  if (status === "failed") return "Save failed — Retry";
+  return analysisType === "CLUB" ? "Save Club Analysis" : "Save Body Analysis";
 }
 
 export function saveAnalysisButtonDisabled(status) {
@@ -374,6 +403,128 @@ export async function postPeakFlowSaveAnalysis(payload) {
   const data = await readJson(response);
   if (!response.ok) throw new Error(errorMessage(data, response.status));
   return data;
+}
+
+export function peakFlowAnalysesListUrl(athleteId) {
+  return pmiUrl(`/analyses?${new URLSearchParams({ athleteId }).toString()}`);
+}
+
+export function peakFlowAnalysisDetailUrl(analysisId, athleteId) {
+  return pmiUrl(`/analyses/${encodeURIComponent(analysisId)}?${new URLSearchParams({ athleteId }).toString()}`);
+}
+
+export function savedAnalysisKindLabel(analysisType) {
+  if (analysisType === "BODY") return "Body Movement";
+  if (analysisType === "CLUB") return "Club Tracking";
+  return "";
+}
+
+export function savedAnalysisTaxonomyLabel(taxonomyAreaKey) {
+  const label = formatTaxonomyAreaLabel(taxonomyAreaKey);
+  const parts = label.split(" ").filter(Boolean);
+  if (parts.length < 2) return label;
+  const detail = parts.pop();
+  return `${parts.join(" ")} / ${detail}`;
+}
+
+export function formatSavedAnalysisTimestamp(createdAt) {
+  let instant = createdAt;
+  if (typeof createdAt === "string") {
+    const value = createdAt.trim();
+    const unzoned = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/);
+    instant = unzoned ? `${unzoned[1]}T${unzoned[2]}Z` : value;
+  }
+  const date = new Date(instant);
+  if (Number.isNaN(date.getTime())) return "";
+  const datePart = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+  return `${datePart}, ${timePart}`;
+}
+
+function readSavedAnalysisSummary(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null;
+  const { id, athleteId, taxonomyAreaKey, analysisType, createdAt } = record;
+  if (typeof id !== "string" || id === "") return null;
+  if (typeof athleteId !== "string" || athleteId === "") return null;
+  if (typeof taxonomyAreaKey !== "string" || taxonomyAreaKey === "") return null;
+  if (analysisType !== "BODY" && analysisType !== "CLUB") return null;
+  if (typeof createdAt !== "string" || createdAt === "") return null;
+  return { id, athleteId, taxonomyAreaKey, analysisType, createdAt };
+}
+
+export function readSavedAnalysesList(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.analyses)) {
+    throw new Error("Saved analyses could not be loaded.");
+  }
+  return data.analyses.map((item) => {
+    const summary = readSavedAnalysisSummary(item);
+    if (!summary) throw new Error("Saved analyses could not be loaded.");
+    return summary;
+  });
+}
+
+export function readOpenedAnalysis(data) {
+  const summary = readSavedAnalysisSummary(data);
+  if (!summary) throw new Error("Saved analysis could not be opened.");
+  if (!data.result || typeof data.result !== "object" || Array.isArray(data.result)) {
+    throw new Error("Saved analysis could not be opened.");
+  }
+  if (typeof data.playbackUrl !== "string" || data.playbackUrl === "") {
+    throw new Error("Saved analysis could not be opened.");
+  }
+  return {
+    ...summary,
+    result: data.result,
+    playbackUrl: data.playbackUrl,
+  };
+}
+
+export function openedAnalysisView(detail) {
+  const opened = readOpenedAnalysis(detail);
+  return {
+    tab: opened.analysisType === "BODY" ? "body" : "club",
+    result: opened.result,
+    playbackUrl: opened.playbackUrl,
+    taxonomyAreaKey: opened.taxonomyAreaKey,
+    save: {
+      status: "saved",
+      record: {
+        id: opened.id,
+        athleteId: opened.athleteId,
+        taxonomyAreaKey: opened.taxonomyAreaKey,
+        analysisType: opened.analysisType,
+        createdAt: opened.createdAt,
+      },
+    },
+  };
+}
+
+export async function fetchPeakFlowSavedAnalyses(athleteId) {
+  if (typeof athleteId !== "string" || athleteId === "") {
+    throw new Error("Saved analyses could not be loaded.");
+  }
+  const response = await fetch(peakFlowAnalysesListUrl(athleteId), { method: "GET" });
+  const data = await readJson(response);
+  if (!response.ok) throw new Error("Saved analyses could not be loaded.");
+  return readSavedAnalysesList(data);
+}
+
+export async function fetchPeakFlowSavedAnalysis(analysisId, athleteId) {
+  if (typeof analysisId !== "string" || analysisId === "" || typeof athleteId !== "string" || athleteId === "") {
+    throw new Error("Saved analysis could not be opened.");
+  }
+  const response = await fetch(peakFlowAnalysisDetailUrl(analysisId, athleteId), { method: "GET" });
+  const data = await readJson(response);
+  if (!response.ok) throw new Error("Saved analysis could not be opened.");
+  return readOpenedAnalysis(data);
 }
 
 export const PEAKFLOW_BODY_DRAFT_KEY = "peakflow-swing:body-draft";
@@ -463,6 +614,13 @@ export function AnalysisResults({
   clubSave,
   onBodySaveChange,
   onClubSaveChange,
+  bodyPlaybackUrl = null,
+  clubPlaybackUrl = null,
+  requestedTab = null,
+  requestedTabToken = 0,
+  onAnalysisSaved,
+  onCloseBody,
+  onCloseClub,
 }) {
   const hasBody = Boolean(bodyAnalysis);
   const hasClub = Boolean(clubAnalysis);
@@ -481,44 +639,60 @@ export function AnalysisResults({
   const setBodySaveState = onBodySaveChange ?? setFallbackBodySave;
   const setClubSaveState = onClubSaveChange ?? setFallbackClubSave;
   const active = hasBody && hasClub ? tab : hasBody ? "body" : "club";
-  const activeSave = active === "body" ? bodySaveState : clubSaveState;
 
   useEffect(() => {
     resultsRef.current?.scrollIntoView?.({ block: "start" });
   }, [bodyAnalysis, clubAnalysis]);
 
-  async function handleSave() {
-    if (saveAnalysisButtonDisabled(activeSave.status)) return;
-    const savingBody = active === "body";
-    const setSave = savingBody ? setBodySaveState : setClubSaveState;
-    const payload = savingBody
-      ? buildPeakFlowSavePayload({
-          athleteId: athleteProfileId,
-          taxonomyAreaKey: bodyTaxonomyAreaKey,
-          analysisType: "BODY",
-          result: bodyAnalysis,
-          resultVideoUrl: bodyAnalysis?.overlay_video_url,
-        })
-      : buildPeakFlowSavePayload({
-          athleteId: athleteProfileId,
-          taxonomyAreaKey: clubTaxonomyAreaKey,
-          analysisType: "CLUB",
-          result: clubAnalysis,
-          resultVideoUrl: clubAnalysis?.swingtrace_video_url,
-        });
-    setSave({ status: "saving", record: null });
+  useEffect(() => {
+    if (requestedTab === "body" || requestedTab === "club") setTab(requestedTab);
+  }, [requestedTab, requestedTabToken]);
+
+  async function handleSaveBody() {
+    if (!bodyAnalysis || saveAnalysisButtonDisabled(bodySaveState.status)) return;
+    const payload = buildPeakFlowSavePayload({
+      athleteId: athleteProfileId,
+      taxonomyAreaKey: bodyTaxonomyAreaKey,
+      analysisType: "BODY",
+      result: bodyAnalysis,
+      resultVideoUrl: bodyAnalysis?.overlay_video_url,
+    });
+    setBodySaveState({ status: "saving", record: null });
     try {
       const saved = await postPeakFlowSaveAnalysis(payload);
-      setSave({ status: "saved", record: saved });
+      setBodySaveState({ status: "saved", record: saved });
+      onAnalysisSaved?.();
     } catch {
-      setSave({ status: "failed", record: null });
+      setBodySaveState({ status: "failed", record: null });
     }
   }
+
+  async function handleSaveClub() {
+    if (!clubAnalysis || saveAnalysisButtonDisabled(clubSaveState.status)) return;
+    const payload = buildPeakFlowSavePayload({
+      athleteId: athleteProfileId,
+      taxonomyAreaKey: clubTaxonomyAreaKey,
+      analysisType: "CLUB",
+      result: clubAnalysis,
+      resultVideoUrl: clubAnalysis?.swingtrace_video_url,
+    });
+    setClubSaveState({ status: "saving", record: null });
+    try {
+      const saved = await postPeakFlowSaveAnalysis(payload);
+      setClubSaveState({ status: "saved", record: saved });
+      onAnalysisSaved?.();
+    } catch {
+      setClubSaveState({ status: "failed", record: null });
+    }
+  }
+
   const frames = Array.isArray(bodyAnalysis?.frames) ? bodyAnalysis.frames : [];
   const summary = bodyAnalysis?.metrics_summary && typeof bodyAnalysis.metrics_summary === "object"
     ? bodyAnalysis.metrics_summary
     : {};
-  const videoPath = active === "body" ? bodyAnalysis?.overlay_video_url : clubAnalysis?.swingtrace_video_url;
+  const videoPath = active === "body"
+    ? (bodyPlaybackUrl || bodyAnalysis?.overlay_video_url)
+    : (clubPlaybackUrl || clubAnalysis?.swingtrace_video_url);
   const videoSrc = resolvePmiUrl(videoPath);
 
   return (
@@ -527,16 +701,6 @@ export function AnalysisResults({
         <Button type="button" variant="secondary" onClick={onReset}>
           New Analysis
         </Button>
-        {hasBody || hasClub ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={saveAnalysisButtonDisabled(activeSave.status)}
-            onClick={handleSave}
-          >
-            {saveAnalysisButtonLabel(activeSave.status)}
-          </Button>
-        ) : null}
         <Button type="button" variant="secondary" disabled aria-describedby="share-unavailable">
           Share with Skills Coach
         </Button>
@@ -573,9 +737,39 @@ export function AnalysisResults({
       <div role="tabpanel" id={`panel-${active}`} aria-labelledby={hasBody && hasClub ? `tab-${active}` : undefined} className="flex flex-col gap-6">
         <AnalyzedVideo src={videoSrc} />
         {active === "body" ? (
-          <BodyMetrics frames={frames} summary={summary} />
+          <>
+            <BodyMetrics frames={frames} summary={summary} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saveAnalysisButtonDisabled(bodySaveState.status)}
+                onClick={handleSaveBody}
+              >
+                {saveAnalysisButtonLabel(bodySaveState.status, "BODY")}
+              </Button>
+              <Button type="button" variant="secondary" onClick={onCloseBody}>
+                Close Body Analysis
+              </Button>
+            </div>
+          </>
         ) : (
-          <ClubMetrics club={clubAnalysis?.swingtrace_club_metrics ?? null} />
+          <>
+            <ClubMetrics club={clubAnalysis?.swingtrace_club_metrics ?? null} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saveAnalysisButtonDisabled(clubSaveState.status)}
+                onClick={handleSaveClub}
+              >
+                {saveAnalysisButtonLabel(clubSaveState.status, "CLUB")}
+              </Button>
+              <Button type="button" variant="secondary" onClick={onCloseClub}>
+                Close Club Analysis
+              </Button>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -715,6 +909,95 @@ async function postVideo(path, file, athleteProfileId, selectedTaxonomyAreaKey) 
   return data;
 }
 
+export function SavedAnalysesSection({
+  pending = false,
+  loading = false,
+  error = false,
+  analyses = [],
+  openingAnalysisId = null,
+  openAnalysisErrorId = null,
+  onRetry,
+  onOpen,
+}) {
+  const showLoading = pending || loading;
+  return (
+    <section className={cn(panelClass, "space-y-4")} aria-busy={showLoading}>
+      <div className={designSystem.card.accent} />
+      <h3 className={designSystem.card.header.title}>Saved Analyses</h3>
+      <p className={designSystem.card.header.subtitle}>
+        Open a previous analysis to review the saved video and metrics.
+      </p>
+      {showLoading ? (
+        <p className="flex items-center gap-2 text-base font-medium text-primaryDark">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primaryLight border-t-primary" aria-hidden="true" />
+          Loading...
+        </p>
+      ) : error ? (
+        <div className="space-y-3">
+          <p className="text-sm text-danger" role="alert">Saved analyses could not be loaded.</p>
+          <Button type="button" variant="secondary" onClick={onRetry}>Retry</Button>
+        </div>
+      ) : analyses.length === 0 ? (
+        <div className="space-y-1 text-sm text-textSecondary">
+          <p>No saved analyses yet.</p>
+          <p>Saved Body Movement and Club Tracking analyses will appear here.</p>
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {analyses.map((item) => {
+            const opening = openingAnalysisId === item.id;
+            return (
+              <li key={item.id} className="flex flex-col gap-1 border-t border-border pt-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-base font-semibold text-textPrimary">{savedAnalysisKindLabel(item.analysisType)}</p>
+                  <p className="text-sm font-semibold text-primaryDark">Saved ✓</p>
+                </div>
+                <p className="text-sm text-textSecondary">{savedAnalysisTaxonomyLabel(item.taxonomyAreaKey)}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-textSecondary">{formatSavedAnalysisTimestamp(item.createdAt)}</p>
+                  <Button type="button" variant="secondary" disabled={opening} onClick={() => onOpen(item)}>
+                    {opening ? "Opening..." : "Open"}
+                  </Button>
+                </div>
+                {openAnalysisErrorId === item.id ? (
+                  <p className="text-sm text-danger" role="alert">Saved analysis could not be opened.</p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+export function CloseUnsavedAnalysisDialog({ onKeep, onDiscard }) {
+  return (
+    <Modal
+      className="w-full max-w-[480px] overflow-hidden rounded-2xl bg-card p-0 shadow-lg"
+      aria-labelledby="close-unsaved-analysis-title"
+      aria-describedby="close-unsaved-analysis-message"
+    >
+      <div className="flex flex-col items-center px-4 py-6 sm:px-8 sm:py-8">
+        <h2 id="close-unsaved-analysis-title" className="mb-3 text-center text-2xl font-semibold tracking-tight text-textPrimary">
+          Close unsaved analysis?
+        </h2>
+        <p id="close-unsaved-analysis-message" className="mb-6 max-w-[26rem] text-center text-base leading-relaxed text-textSecondary">
+          This analysis has not been saved. Closing it will discard the current video and metrics.
+        </p>
+        <div className="flex w-full flex-wrap justify-end gap-3 sm:gap-4">
+          <Button type="button" variant="secondary" onClick={onKeep}>
+            Keep Analysis
+          </Button>
+          <Button type="button" variant="primary" onClick={onDiscard}>
+            Close Without Saving
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function PeakFlowSwingPageContent() {
   const router = useRouter();
   const { sportCode, ready: sportReady } = useAthleteSportCode();
@@ -740,6 +1023,17 @@ export function PeakFlowSwingPageContent() {
   const [clubSave, setClubSave] = useState(clubFromDraft.save);
   const [bodyError, setBodyError] = useState(null);
   const [clubError, setClubError] = useState(null);
+  const [bodyPlaybackUrl, setBodyPlaybackUrl] = useState(null);
+  const [clubPlaybackUrl, setClubPlaybackUrl] = useState(null);
+  const [resultsView, setResultsView] = useState(null);
+  const [savedAnalyses, setSavedAnalyses] = useState([]);
+  const [savedAnalysesLoading, setSavedAnalysesLoading] = useState(athleteProfileId !== "");
+  const [savedAnalysesError, setSavedAnalysesError] = useState(false);
+  const [savedAnalysesReload, setSavedAnalysesReload] = useState(0);
+  const [openingAnalysisId, setOpeningAnalysisId] = useState(null);
+  const [openAnalysisErrorId, setOpenAnalysisErrorId] = useState(null);
+  const [pendingClose, setPendingClose] = useState(null);
+  const openRequestRef = useRef(0);
 
   useEffect(() => {
     if (!sportReady || allowed) return;
@@ -764,6 +1058,33 @@ export function PeakFlowSwingPageContent() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!allowed || athleteProfileId === "") return;
+    let cancelled = false;
+    setSavedAnalysesLoading(true);
+    setSavedAnalysesError(false);
+    fetchPeakFlowSavedAnalyses(athleteProfileId)
+      .then((analyses) => {
+        if (cancelled) return;
+        setSavedAnalyses(analyses);
+        setSavedAnalysesError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSavedAnalysesError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setSavedAnalysesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, athleteProfileId, savedAnalysesReload]);
+
+  function refreshSavedAnalyses() {
+    setSavedAnalysesReload((value) => value + 1);
+  }
+
   function persistBodySave(next) {
     setBodySave(next);
     if (!bodyAnalysis || next.status === "saving") return;
@@ -784,6 +1105,56 @@ export function PeakFlowSwingPageContent() {
     });
   }
 
+  function clearBodyAnalysisState() {
+    bodyRequestRef.current += 1;
+    bodyInFlightRef.current = false;
+    setBodyPhase("idle");
+    setBodyAnalysis(null);
+    setBodyTaxonomyAreaKey("");
+    setBodySave(EMPTY_SAVE);
+    setBodyPlaybackUrl(null);
+    setBodyError(null);
+    clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
+  }
+
+  function clearClubAnalysisState() {
+    clubRequestRef.current += 1;
+    clubInFlightRef.current = false;
+    setClubPhase("idle");
+    setClubAnalysis(null);
+    setClubTaxonomyAreaKey("");
+    setClubSave(EMPTY_SAVE);
+    setClubPlaybackUrl(null);
+    setClubError(null);
+    clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY);
+  }
+
+  function requestCloseBody() {
+    if (bodySave.status === "saved") {
+      clearBodyAnalysisState();
+      return;
+    }
+    setPendingClose("body");
+  }
+
+  function requestCloseClub() {
+    if (clubSave.status === "saved") {
+      clearClubAnalysisState();
+      return;
+    }
+    setPendingClose("club");
+  }
+
+  function keepAnalysis() {
+    setPendingClose(null);
+  }
+
+  function closeWithoutSaving() {
+    if (pendingClose === "body") clearBodyAnalysisState();
+    if (pendingClose === "club") clearClubAnalysisState();
+    setPendingClose(null);
+  }
+
   function handleReset() {
     bodyRequestRef.current += 1;
     clubRequestRef.current += 1;
@@ -797,6 +1168,9 @@ export function PeakFlowSwingPageContent() {
     setClubTaxonomyAreaKey("");
     setBodySave(EMPTY_SAVE);
     setClubSave(EMPTY_SAVE);
+    setBodyPlaybackUrl(null);
+    setClubPlaybackUrl(null);
+    setResultsView(null);
     clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
     clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY);
     setBodyError(null);
@@ -814,6 +1188,7 @@ export function PeakFlowSwingPageContent() {
     setBodyAnalysis(null);
     setBodyTaxonomyAreaKey("");
     setBodySave(EMPTY_SAVE);
+    setBodyPlaybackUrl(null);
     clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
     setBodyPhase("analyzing");
     try {
@@ -848,6 +1223,7 @@ export function PeakFlowSwingPageContent() {
     setClubAnalysis(null);
     setClubTaxonomyAreaKey("");
     setClubSave(EMPTY_SAVE);
+    setClubPlaybackUrl(null);
     clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY);
     setClubPhase("analyzing");
     try {
@@ -869,6 +1245,50 @@ export function PeakFlowSwingPageContent() {
       setClubError(err.message);
       setClubPhase("error");
       clubInFlightRef.current = false;
+    }
+  }
+
+  async function handleOpenSavedAnalysis(item) {
+    if (athleteProfileId === "" || !item?.id) return;
+    const requestId = openRequestRef.current + 1;
+    openRequestRef.current = requestId;
+    setOpeningAnalysisId(item.id);
+    setOpenAnalysisErrorId(null);
+    try {
+      const detail = await fetchPeakFlowSavedAnalysis(item.id, athleteProfileId);
+      if (openRequestRef.current !== requestId) return;
+      if (detail.analysisType !== item.analysisType) {
+        throw new Error("Saved analysis could not be opened.");
+      }
+      const view = openedAnalysisView(detail);
+      if (view.tab === "body") {
+        setBodyAnalysis(view.result);
+        setBodyPlaybackUrl(view.playbackUrl);
+        setBodyTaxonomyAreaKey(view.taxonomyAreaKey);
+        setBodySave(view.save);
+        setBodyPhase("ready");
+        setBodyError(null);
+        clearPeakFlowSwingDraft(PEAKFLOW_BODY_DRAFT_KEY);
+      } else if (view.tab === "club") {
+        setClubAnalysis(view.result);
+        setClubPlaybackUrl(view.playbackUrl);
+        setClubTaxonomyAreaKey(view.taxonomyAreaKey);
+        setClubSave(view.save);
+        setClubPhase("ready");
+        setClubError(null);
+        clearPeakFlowSwingDraft(PEAKFLOW_CLUB_DRAFT_KEY);
+      } else {
+        throw new Error("Saved analysis could not be opened.");
+      }
+      setResultsView((current) => ({
+        tab: view.tab,
+        token: (current?.token ?? 0) + 1,
+      }));
+    } catch {
+      if (openRequestRef.current !== requestId) return;
+      setOpenAnalysisErrorId(item.id);
+    } finally {
+      if (openRequestRef.current === requestId) setOpeningAnalysisId(null);
     }
   }
 
@@ -933,11 +1353,33 @@ export function PeakFlowSwingPageContent() {
           clubTaxonomyAreaKey={clubTaxonomyAreaKey}
           bodySave={bodySave}
           clubSave={clubSave}
+          bodyPlaybackUrl={bodyPlaybackUrl}
+          clubPlaybackUrl={clubPlaybackUrl}
+          requestedTab={resultsView?.tab ?? null}
+          requestedTabToken={resultsView?.token ?? 0}
           onBodySaveChange={persistBodySave}
           onClubSaveChange={persistClubSave}
+          onAnalysisSaved={refreshSavedAnalyses}
+          onCloseBody={requestCloseBody}
+          onCloseClub={requestCloseClub}
           onReset={handleReset}
         />
       ) : null}
+
+      {pendingClose ? (
+        <CloseUnsavedAnalysisDialog onKeep={keepAnalysis} onDiscard={closeWithoutSaving} />
+      ) : null}
+
+      <SavedAnalysesSection
+        pending={athleteProfileId === ""}
+        loading={savedAnalysesLoading}
+        error={savedAnalysesError}
+        analyses={savedAnalyses}
+        openingAnalysisId={openingAnalysisId}
+        openAnalysisErrorId={openAnalysisErrorId}
+        onRetry={refreshSavedAnalyses}
+        onOpen={handleOpenSavedAnalysis}
+      />
     </div>
   );
 }

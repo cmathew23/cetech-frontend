@@ -13,7 +13,9 @@ import {
   COACH_ME_DASHBOARD_TIMEOUT_MS,
   fetchCoachAssignedAthletes,
   fetchCoachMeDashboard,
+  fetchCoachPeakFlowAssignmentScope,
   parseAssignedAthleteRow,
+  parseCoachPeakFlowAssignmentScope,
 } from "@/lib/api/coachMe";
 
 describe("fetchCoachMeDashboard", () => {
@@ -55,6 +57,48 @@ describe("fetchCoachAssignedAthletes", () => {
     await fetchCoachAssignedAthletes();
 
     expect(COACH_ASSIGNED_ATHLETES_TIMEOUT_MS).toBe(30_000);
+    expect(apiRequestMock).toHaveBeenCalledWith("/coach/me/assigned-athletes", {
+      method: "GET",
+      cache: "no-store",
+      timeoutMs: 30_000,
+    });
+  });
+});
+
+describe("parseCoachPeakFlowAssignmentScope", () => {
+  it("reads the coach entity and athlete identity without a sport field", () => {
+    const scope = parseCoachPeakFlowAssignmentScope({
+      coach: { coachProfileId: "coach-1", trainingEntityId: "entity-1" },
+      athletes: [
+        { athleteId: "athlete-1", displayName: "Ada", sport: "TENNIS" },
+        { athleteId: "athlete-2", displayName: "  " },
+        { displayName: "Missing id" },
+      ],
+    });
+
+    expect(scope).toEqual({
+      trainingEntityId: "entity-1",
+      athletes: [
+        { athleteId: "athlete-1", displayName: "Ada" },
+        { athleteId: "athlete-2", displayName: "—" },
+      ],
+    });
+    expect(scope.athletes[0]).not.toHaveProperty("sport");
+  });
+
+  it("loads the existing assigned-athlete route", async () => {
+    apiRequestMock.mockResolvedValue({
+      success: true,
+      data: {
+        coach: { trainingEntityId: "entity-9" },
+        athletes: [{ athleteId: "athlete-9", displayName: "Golf Athlete" }],
+      },
+    });
+
+    await expect(fetchCoachPeakFlowAssignmentScope()).resolves.toEqual({
+      trainingEntityId: "entity-9",
+      athletes: [{ athleteId: "athlete-9", displayName: "Golf Athlete" }],
+    });
     expect(apiRequestMock).toHaveBeenCalledWith("/coach/me/assigned-athletes", {
       method: "GET",
       cache: "no-store",

@@ -37,6 +37,7 @@ export const adminSidebarNavItems: DashboardNavItem[] = [
 
 export const coachSidebarNavItems: DashboardNavItem[] = [
   { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/coach/peakflow-swing", label: "PeakFlow Swing", icon: Activity },
   { href: "/coach/athlete-performance", label: "Athlete Performance", icon: Activity },
   { href: "/coach/training-plans", label: "Athlete Training Plans", icon: Calendar },
   { href: "/coach/athletes", label: "Athletes", icon: Users },
@@ -69,6 +70,36 @@ export function visibleAthleteSidebarNavItems(
 ): DashboardNavItem[] {
   if (isGolfSportCode(sportCode)) return athleteSidebarNavItems;
   return athleteSidebarNavItems.filter((item) => item.href !== "/athlete/peakflow-swing");
+}
+
+const COACH_PEAKFLOW_HREF = "/coach/peakflow-swing";
+
+/**
+ * Season sports already stored for the coach's entity.
+ * Golf wins when present. An empty list is not a non-golf sport.
+ */
+export function coachPeakFlowSportCode(
+  seasonSports: Array<string | null | undefined>,
+): string {
+  const sports = [
+    ...new Set(
+      seasonSports
+        .map((sport) => sport?.trim() ?? "")
+        .filter((sport) => sport !== ""),
+    ),
+  ];
+  if (sports.some((sport) => isGolfSportCode(sport))) return "GOLF";
+  return sports[0] ?? "";
+}
+
+/** Hide PeakFlow Swing only when the entity sport context is a known non-golf sport. */
+export function visibleCoachSidebarNavItems(
+  sportCode: string | null | undefined,
+): DashboardNavItem[] {
+  if (sportCode != null && sportCode.trim() !== "" && !isGolfSportCode(sportCode)) {
+    return coachSidebarNavItems.filter((item) => item.href !== COACH_PEAKFLOW_HREF);
+  }
+  return coachSidebarNavItems;
 }
 
 function normalizePathname(pathname: string): string {

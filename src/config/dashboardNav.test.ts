@@ -5,7 +5,9 @@ import {
   coachSidebarNavItems,
   isCoachSidebarNavItemActive,
   isCoachTrainingPlanRoute,
+  coachPeakFlowSportCode,
   visibleAthleteSidebarNavItems,
+  visibleCoachSidebarNavItems,
 } from "@/config/dashboardNav";
 
 const TRAINING_PLAN = "/coach/training-plans";
@@ -132,6 +134,34 @@ describe("PeakConnect module labels", () => {
       expect(items.some((item) => item.href === "/athlete/peakflow-swing")).toBe(false);
       expect(items.some((item) => item.href === "/athlete/dashboard")).toBe(true);
     }
+  });
+
+  it("adds PeakFlow Swing to the golf coach sidebar", () => {
+    expect(
+      coachSidebarNavItems.find((item) => item.href === "/coach/peakflow-swing")?.label,
+    ).toBe("PeakFlow Swing");
+    expect(coachSidebarNavItems[1]?.href).toBe("/coach/peakflow-swing");
+    expect(coachPeakFlowSportCode(["TENNIS", "GOLF"])).toBe("GOLF");
+    expect(coachPeakFlowSportCode(["TENNIS"])).toBe("TENNIS");
+    expect(coachPeakFlowSportCode([])).toBe("");
+
+    expect(
+      visibleCoachSidebarNavItems("GOLF").some((item) => item.href === "/coach/peakflow-swing"),
+    ).toBe(true);
+    expect(
+      visibleCoachSidebarNavItems("").some((item) => item.href === "/coach/peakflow-swing"),
+    ).toBe(true);
+    expect(
+      visibleCoachSidebarNavItems(null).some((item) => item.href === "/coach/peakflow-swing"),
+    ).toBe(true);
+    expect(
+      visibleCoachSidebarNavItems("TENNIS").some((item) => item.href === "/coach/peakflow-swing"),
+    ).toBe(false);
+    expect(
+      visibleCoachSidebarNavItems("TENNIS").some((item) => item.href === "/coach/dashboard"),
+    ).toBe(true);
+    expect(isCoachSidebarNavItemActive("/coach/peakflow-swing", "/coach/peakflow-swing")).toBe(true);
+    expect(isCoachSidebarNavItemActive("/coach/peakflow-swing", "/coach/dashboard")).toBe(false);
   });
 
   it("adds a Competitions item to the athlete sidebar", () => {

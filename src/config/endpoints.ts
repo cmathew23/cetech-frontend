@@ -443,6 +443,15 @@ export const paths = {
     meDashboard: "/coach/me/dashboard",
     assignedAthletes: "/coach/me/assigned-athletes",
   },
+  /** Authenticated CETECH persistence for PeakFlow Swing. Analysis uploads stay on PMI. */
+  peakFlowSwing: {
+    save: "/analyses/save",
+    list: "/analyses",
+    byId: (analysisId: string) =>
+      `/analyses/${encodeURIComponent(analysisId)}`,
+    share: (analysisId: string) =>
+      `/analyses/${encodeURIComponent(analysisId)}/share`,
+  },
   trainingSessions: {
     plannedSessionAdherenceEvents: (plannedSessionId: string) =>
       `/training-sessions/planned-sessions/${encodeURIComponent(plannedSessionId)}/adherence-events`,

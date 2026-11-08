@@ -268,6 +268,42 @@ function assertAthletesArray(data: unknown): unknown[] {
   return [];
 }
 
+export type CoachPeakFlowAthleteOption = {
+  athleteId: string;
+  displayName: string;
+};
+
+export type CoachPeakFlowAssignmentScope = {
+  trainingEntityId: string;
+  athletes: CoachPeakFlowAthleteOption[];
+};
+
+/** Roster fields PeakFlow Swing is allowed to read. Sport is not part of this payload. */
+export function parseCoachPeakFlowAssignmentScope(data: unknown): CoachPeakFlowAssignmentScope {
+  const root = asRecord(data) ?? {};
+  const coach = asRecord(root.coach);
+  const trainingEntityId = coach ? readStringField(coach, "trainingEntityId") : "";
+  const athletes = assertAthletesArray(root).reduce<CoachPeakFlowAthleteOption[]>((acc, row) => {
+    const record = asRecord(row);
+    if (!record) return acc;
+    const athleteId = readStringField(record, "athleteId");
+    if (athleteId === "") return acc;
+    const displayName = readStringField(record, "displayName");
+    acc.push({ athleteId, displayName: displayName === "" ? "—" : displayName });
+    return acc;
+  }, []);
+  return { trainingEntityId, athletes };
+}
+
+export async function fetchCoachPeakFlowAssignmentScope(): Promise<CoachPeakFlowAssignmentScope> {
+  const raw = await apiRequest(paths.coach.assignedAthletes, {
+    method: "GET",
+    cache: "no-store",
+    timeoutMs: COACH_ASSIGNED_ATHLETES_TIMEOUT_MS,
+  });
+  return parseCoachPeakFlowAssignmentScope(adaptBackendSuccess(raw));
+}
+
 export async function fetchCoachAssignedAthletes(): Promise<CoachAssignedAthleteRow[]> {
   const raw = await apiRequest(paths.coach.assignedAthletes, {
     method: "GET",

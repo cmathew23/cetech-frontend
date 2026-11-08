@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatTaxonomyAreaLabel } from "@/components/dashboard/athlete/athleteSportsMetricsPresentation";
+import { API_BASE } from "@/config/endpoints";
 import { pmiUrl } from "@/config/pmiBackend";
 
 const peakflowGate = vi.hoisted(() => ({
@@ -95,6 +96,7 @@ const {
   PEAKFLOW_BODY_DRAFT_KEY,
   PEAKFLOW_CLUB_DRAFT_KEY,
   postPeakFlowSaveAnalysis,
+  postPeakFlowShareAnalysis,
   readPeakFlowSwingDrafts,
   readSavedAnalysesList,
   writePeakFlowSwingDraft,
@@ -143,6 +145,7 @@ function renderResults(props: {
   initialClubSaveStatus?: string;
   bodyPlaybackUrl?: string | null;
   clubPlaybackUrl?: string | null;
+  readOnly?: boolean;
 }) {
   return renderToStaticMarkup(
     createElement(AnalysisResults, { onReset() {}, ...props }),
@@ -221,7 +224,10 @@ describe("PeakFlow Swing independent uploads", () => {
     );
     expect(club).not.toContain('pmiUrl("/analyze/club")');
     expect(source).not.toContain("analysis_id");
-    expect(functionSource("postVideo", "postPeakFlowSaveAnalysis")).not.toContain("JSON.stringify");
+    expect(source.slice(
+      source.indexOf("async function postVideo"),
+      source.indexOf("export function SavedAnalysesSection"),
+    )).not.toContain("JSON.stringify");
     expect(functionSource("handleAnalyzeBody", "handleAnalyzeClub")).not.toContain("JSON.stringify");
     expect(source).toContain('form.append("video", file)');
     expect(source).toContain('form.append("athleteId", athleteProfileId)');
@@ -356,6 +362,7 @@ describe("PeakFlow Swing save analysis", () => {
   it("sends the frozen Body result, taxonomy, and overlay video URL", async () => {
     const payload = buildPeakFlowSavePayload({
       athleteId,
+      entityId: "entity-1",
       taxonomyAreaKey: "putting",
       analysisType: "BODY",
       result: bodyAnalysis,
@@ -363,6 +370,7 @@ describe("PeakFlow Swing save analysis", () => {
     });
     expect(payload).toEqual({
       athleteId,
+      entityId: "entity-1",
       taxonomyAreaKey: "putting",
       analysisType: "BODY",
       result: bodyAnalysis,
@@ -388,7 +396,7 @@ describe("PeakFlow Swing save analysis", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const saved = await postPeakFlowSaveAnalysis(payload);
-    expect(String(fetchMock.mock.calls[0][0])).toBe(pmiUrl("/analyses/save"));
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${API_BASE}/analyses/save`);
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -401,6 +409,7 @@ describe("PeakFlow Swing save analysis", () => {
   it("sends the frozen Club response, taxonomy, and swingtrace video URL", async () => {
     const payload = buildPeakFlowSavePayload({
       athleteId,
+      entityId: "entity-1",
       taxonomyAreaKey: "wedge_play",
       analysisType: "CLUB",
       result: clubAnalysis,
@@ -408,6 +417,7 @@ describe("PeakFlow Swing save analysis", () => {
     });
     expect(payload).toEqual({
       athleteId,
+      entityId: "entity-1",
       taxonomyAreaKey: "wedge_play",
       analysisType: "CLUB",
       result: clubAnalysis,
@@ -494,7 +504,10 @@ describe("PeakFlow Swing tab video switching", () => {
       results.indexOf("New Analysis"),
       results.indexOf('aria-label="Analysis views"'),
     );
-    expect(actionRow).toContain("Share with Skills Coach");
+    expect(actionRow).toContain("New Analysis");
+    expect(actionRow).not.toContain("Share with Skills Coach");
+    expect(source).not.toContain("Share with Skills Coach");
+    expect(source).not.toContain("PMI_INTERNAL_TOKEN");
     expect(actionRow).not.toContain("handleSaveBody");
     expect(actionRow).not.toContain("handleSaveClub");
     expect(actionRow).not.toContain("saveAnalysisButtonLabel");
@@ -705,7 +718,8 @@ describe("PeakFlow Swing saved analyses", () => {
   });
 
   it("lists saved analyses with the AthleteProfile id", async () => {
-    expect(peakFlowAnalysesListUrl(athleteId)).toBe(pmiUrl(`/analyses?athleteId=${athleteId}`));
+    expect(peakFlowAnalysesListUrl(athleteId)).toBe(`${API_BASE}/analyses?athleteId=${athleteId}`);
+    expect(peakFlowAnalysesListUrl(athleteId)).not.toContain("entityId=");
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -713,9 +727,13 @@ describe("PeakFlow Swing saved analyses", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const analyses = await fetchPeakFlowSavedAnalyses(athleteId);
-    expect(String(fetchMock.mock.calls[0][0])).toBe(pmiUrl(`/analyses?athleteId=${athleteId}`));
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${API_BASE}/analyses?athleteId=${athleteId}`);
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("entityId=");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET" });
-    expect(analyses).toEqual([savedBodySummary, savedClubSummary]);
+    expect(analyses).toEqual([
+      { ...savedBodySummary, entityId: null, shared: false, sharedAt: null, coachViewingStatus: [] },
+      { ...savedClubSummary, entityId: null, shared: false, sharedAt: null, coachViewingStatus: [] },
+    ]);
     expect(readSavedAnalysesList({ analyses: [] })).toEqual([]);
   });
 
@@ -789,7 +807,7 @@ describe("PeakFlow Swing saved analyses", () => {
       playbackUrl: bodyPlaybackUrl,
     };
     expect(peakFlowAnalysisDetailUrl(savedBodyId, athleteId)).toBe(
-      pmiUrl(`/analyses/${savedBodyId}?athleteId=${athleteId}`),
+      `${API_BASE}/analyses/${savedBodyId}?athleteId=${athleteId}`,
     );
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -799,7 +817,7 @@ describe("PeakFlow Swing saved analyses", () => {
     vi.stubGlobal("fetch", fetchMock);
     const opened = await fetchPeakFlowSavedAnalysis(savedBodyId, athleteId);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      pmiUrl(`/analyses/${savedBodyId}?athleteId=${athleteId}`),
+      `${API_BASE}/analyses/${savedBodyId}?athleteId=${athleteId}`,
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET" });
     const view = openedAnalysisView(opened);
@@ -861,7 +879,7 @@ describe("PeakFlow Swing saved analyses", () => {
     vi.stubGlobal("fetch", fetchMock);
     const opened = await fetchPeakFlowSavedAnalysis(savedClubId, athleteId);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      pmiUrl(`/analyses/${savedClubId}?athleteId=${athleteId}`),
+      `${API_BASE}/analyses/${savedClubId}?athleteId=${athleteId}`,
     );
     const view = openedAnalysisView(opened);
     expect(view.tab).toBe("club");
@@ -977,6 +995,154 @@ describe("PeakFlow Swing saved analyses", () => {
     expect(clubHtml).not.toContain("/renders/club_swingtrace.mp4");
     expect(clubHtml).not.toContain(clubPlaybackUrl);
     expect(readPeakFlowSwingDrafts().club).toBeNull();
+  });
+});
+
+describe("PeakFlow Swing sharing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows independent Shared and coach Viewed status for each saved analysis", () => {
+    const sharedBody = {
+      ...savedBodySummary,
+      shared: true,
+      sharedAt: "2026-10-31T12:31:00.000Z",
+      coachViewingStatus: [
+        {
+          coachId: "head-coach",
+          displayName: "Alex Head",
+          recipientRoles: ["HEAD_COACH"],
+          viewed: false,
+          viewedAt: null,
+        },
+        {
+          coachId: "skills-coach",
+          displayName: "Sam Skills",
+          recipientRoles: ["SKILLS_COACH"],
+          viewed: true,
+          viewedAt: "2026-10-31T13:00:00.000Z",
+        },
+      ],
+    };
+    const unsharedClub = {
+      ...savedClubSummary,
+      shared: false,
+      sharedAt: null,
+      coachViewingStatus: [
+        {
+          coachId: "head-coach",
+          displayName: "Alex Head",
+          recipientRoles: ["HEAD_COACH"],
+          viewed: true,
+          viewedAt: "2026-10-31T13:05:00.000Z",
+        },
+        {
+          coachId: "skills-coach",
+          displayName: "Sam Skills",
+          recipientRoles: ["SKILLS_COACH"],
+          viewed: false,
+          viewedAt: null,
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [sharedBody, unsharedClub],
+      showSharing: true,
+      onRetry() {},
+      onOpen() {},
+      onShare() {},
+    }));
+    expect(html.match(/>Shared</g)).toHaveLength(1);
+    expect(html.match(/>Not Shared</g)).toHaveLength(1);
+    expect(html).toContain("Alex Head · Head Coach · Not Viewed");
+    expect(html).toContain("Sam Skills · Skills Coach · Viewed");
+    expect(html).toContain("Alex Head · Head Coach · Viewed");
+    expect(html).toContain("Sam Skills · Skills Coach · Not Viewed");
+    expect(html).toContain("Share Analysis");
+    expect(html).toContain("Open");
+    const buttons = [...html.matchAll(/<button[^>]*>Share Analysis<\/button>/g)].map((match) => match[0]);
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toContain("disabled");
+    expect(buttons[1]).not.toContain("disabled");
+
+    const coachOnly = renderToStaticMarkup(createElement(SavedAnalysesSection, {
+      analyses: [sharedBody],
+      showSharing: false,
+      onRetry() {},
+      onOpen() {},
+    }));
+    expect(coachOnly).not.toContain("Share Analysis");
+    expect(coachOnly).toContain("Open");
+    expect(coachOnly).toContain("Sam Skills · Skills Coach · Viewed");
+    expect(coachOnly).toContain("Alex Head · Head Coach · Not Viewed");
+  });
+
+  it("opens a saved analysis in the existing viewer without save actions", () => {
+    const html = renderResults({
+      bodyAnalysis,
+      clubAnalysis: null,
+      readOnly: true,
+      bodyPlaybackUrl,
+      initialBodySaveStatus: "saved",
+    });
+    expect(html).toContain(bodyPlaybackUrl);
+    expect(html).toContain("12.3°");
+    expect(html).not.toContain("Save Body Analysis");
+    expect(html).not.toContain("New Analysis");
+    expect(html).not.toContain("Share Analysis");
+  });
+
+  it("shares with an empty body and retries once with the authoritative entity id", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          message: "entityId is required to share this legacy analysis",
+          errorCode: "ENTITY_CONTEXT_REQUIRED",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: savedBodyId, shared: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postPeakFlowShareAnalysis(savedBodyId, "entity-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${API_BASE}/analyses/${savedBodyId}/share`);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({});
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body))).toEqual({ entityId: "entity-1" });
+
+    const shareFn = source.slice(
+      source.indexOf("async function handleShareSavedAnalysis"),
+      source.indexOf("if (!allowed) return null"),
+    );
+    expect(shareFn).toContain("postPeakFlowShareAnalysis(item.id, entityId)");
+    expect(shareFn).toContain("refreshSavedAnalyses()");
+    expect(shareFn).not.toContain("trainingEntityId");
+  });
+
+  it("does not invent an entity when legacy share context is missing", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        message: "entityId is required to share this legacy analysis",
+        errorCode: "ENTITY_CONTEXT_REQUIRED",
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(postPeakFlowShareAnalysis(savedBodyId, "  ")).rejects.toThrow(
+      "entityId is required to share this legacy analysis",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({});
   });
 });
 

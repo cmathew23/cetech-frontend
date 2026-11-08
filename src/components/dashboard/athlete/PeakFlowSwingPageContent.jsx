@@ -13,6 +13,14 @@ import { useAthleteInvitationGate } from "@/components/dashboard/athlete/useAthl
 import { useAthleteSportCode } from "@/components/dashboard/athlete/useAthleteSportCode";
 import { isGolfSportCode } from "@/config/dashboardNav";
 import { PMI_API_BASE, pmiUrl, resolvePmiUrl } from "@/config/pmiBackend";
+import {
+  fetchPeakFlowSavedAnalysesRequest,
+  fetchPeakFlowSavedAnalysisRequest,
+  peakFlowAnalysesListUrl,
+  peakFlowAnalysisDetailUrl,
+  postPeakFlowSaveAnalysis as postCetechPeakFlowSaveAnalysis,
+  postPeakFlowShareAnalysis,
+} from "@/lib/api/peakFlowSwing";
 import { designSystem } from "@/config/design-system";
 import { useAthletePlanningIdentifiers } from "@/hooks/useAthletePlanningIdentifiers";
 import { cn } from "@/lib/utils";
@@ -108,9 +116,29 @@ async function readJson(response) {
   }
 }
 
+function errorDetail(detail) {
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (!Array.isArray(detail)) return null;
+  const messages = detail.map((item) => {
+    if (typeof item === "string" && item.trim()) return item.trim();
+    if (!item || typeof item !== "object") return "";
+    const raw = typeof item.msg === "string" ? item.msg.replace(/^Value error,\s*/i, "").trim() : "";
+    if (!raw) return "";
+    const loc = Array.isArray(item.loc)
+      ? item.loc
+          .filter((part) => part !== "body" && part !== "query" && part !== "path")
+          .map(String)
+          .join(".")
+      : "";
+    return loc ? `${loc}: ${raw}` : raw;
+  }).filter(Boolean);
+  return messages.length ? messages.join(" ") : null;
+}
+
 function errorMessage(data, status) {
-  const detail = data?.detail;
-  if (typeof detail === "string" && detail.trim()) return detail;
+  const detail = errorDetail(data?.detail);
+  if (detail) return detail;
+  if (status === 422) return "Validation failed (HTTP 422).";
   return `Server error ${status}`;
 }
 
@@ -380,6 +408,7 @@ export function saveAnalysisButtonDisabled(status) {
 
 export function buildPeakFlowSavePayload({
   athleteId,
+  entityId,
   taxonomyAreaKey,
   analysisType,
   result,
@@ -387,6 +416,7 @@ export function buildPeakFlowSavePayload({
 }) {
   return {
     athleteId,
+    entityId,
     taxonomyAreaKey,
     analysisType,
     result,
@@ -395,23 +425,10 @@ export function buildPeakFlowSavePayload({
 }
 
 export async function postPeakFlowSaveAnalysis(payload) {
-  const response = await fetch(pmiUrl("/analyses/save"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await readJson(response);
-  if (!response.ok) throw new Error(errorMessage(data, response.status));
-  return data;
+  return postCetechPeakFlowSaveAnalysis(payload);
 }
 
-export function peakFlowAnalysesListUrl(athleteId) {
-  return pmiUrl(`/analyses?${new URLSearchParams({ athleteId }).toString()}`);
-}
-
-export function peakFlowAnalysisDetailUrl(analysisId, athleteId) {
-  return pmiUrl(`/analyses/${encodeURIComponent(analysisId)}?${new URLSearchParams({ athleteId }).toString()}`);
-}
+export { peakFlowAnalysesListUrl, peakFlowAnalysisDetailUrl, postPeakFlowShareAnalysis };
 
 export function savedAnalysisKindLabel(analysisType) {
   if (analysisType === "BODY") return "Body Movement";
@@ -449,6 +466,37 @@ export function formatSavedAnalysisTimestamp(createdAt) {
   return `${datePart}, ${timePart}`;
 }
 
+function readCoachViewingStatus(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const coachId = typeof item.coachId === "string" ? item.coachId.trim() : "";
+    if (coachId === "") return [];
+    const recipientRoles = Array.isArray(item.recipientRoles)
+      ? item.recipientRoles.filter((role) => typeof role === "string" && role.trim() !== "")
+      : [];
+    const displayName = typeof item.displayName === "string" && item.displayName.trim() !== ""
+      ? item.displayName.trim()
+      : null;
+    return [{
+      coachId,
+      displayName,
+      recipientRoles,
+      viewed: item.viewed === true,
+      viewedAt: typeof item.viewedAt === "string" && item.viewedAt !== "" ? item.viewedAt : null,
+    }];
+  });
+}
+
+function coachRecipientLabel(coach) {
+  const roles = coach.recipientRoles.map((role) => {
+    if (role === "HEAD_COACH") return "Head Coach";
+    if (role === "SKILLS_COACH") return "Skills Coach";
+    return role;
+  });
+  return [coach.displayName, roles.join(", ")].filter(Boolean).join(" · ");
+}
+
 function readSavedAnalysisSummary(record) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;
   const { id, athleteId, taxonomyAreaKey, analysisType, createdAt } = record;
@@ -457,7 +505,17 @@ function readSavedAnalysisSummary(record) {
   if (typeof taxonomyAreaKey !== "string" || taxonomyAreaKey === "") return null;
   if (analysisType !== "BODY" && analysisType !== "CLUB") return null;
   if (typeof createdAt !== "string" || createdAt === "") return null;
-  return { id, athleteId, taxonomyAreaKey, analysisType, createdAt };
+  return {
+    id,
+    athleteId,
+    entityId: typeof record.entityId === "string" && record.entityId !== "" ? record.entityId : null,
+    taxonomyAreaKey,
+    analysisType,
+    createdAt,
+    shared: record.shared === true,
+    sharedAt: typeof record.sharedAt === "string" && record.sharedAt !== "" ? record.sharedAt : null,
+    coachViewingStatus: readCoachViewingStatus(record.coachViewingStatus),
+  };
 }
 
 export function readSavedAnalysesList(data) {
@@ -507,13 +565,11 @@ export function openedAnalysisView(detail) {
   };
 }
 
-export async function fetchPeakFlowSavedAnalyses(athleteId) {
+export async function fetchPeakFlowSavedAnalyses(athleteId, entityId = null) {
   if (typeof athleteId !== "string" || athleteId === "") {
     throw new Error("Saved analyses could not be loaded.");
   }
-  const response = await fetch(peakFlowAnalysesListUrl(athleteId), { method: "GET" });
-  const data = await readJson(response);
-  if (!response.ok) throw new Error("Saved analyses could not be loaded.");
+  const data = await fetchPeakFlowSavedAnalysesRequest(athleteId, entityId);
   return readSavedAnalysesList(data);
 }
 
@@ -521,9 +577,7 @@ export async function fetchPeakFlowSavedAnalysis(analysisId, athleteId) {
   if (typeof analysisId !== "string" || analysisId === "" || typeof athleteId !== "string" || athleteId === "") {
     throw new Error("Saved analysis could not be opened.");
   }
-  const response = await fetch(peakFlowAnalysisDetailUrl(analysisId, athleteId), { method: "GET" });
-  const data = await readJson(response);
-  if (!response.ok) throw new Error("Saved analysis could not be opened.");
+  const data = await fetchPeakFlowSavedAnalysisRequest(analysisId, athleteId);
   return readOpenedAnalysis(data);
 }
 
@@ -621,6 +675,8 @@ export function AnalysisResults({
   onAnalysisSaved,
   onCloseBody,
   onCloseClub,
+  entityId = "",
+  readOnly = false,
 }) {
   const hasBody = Boolean(bodyAnalysis);
   const hasClub = Boolean(clubAnalysis);
@@ -650,8 +706,13 @@ export function AnalysisResults({
 
   async function handleSaveBody() {
     if (!bodyAnalysis || saveAnalysisButtonDisabled(bodySaveState.status)) return;
+    if (typeof entityId !== "string" || entityId.trim() === "") {
+      setBodySaveState({ status: "failed", record: null });
+      return;
+    }
     const payload = buildPeakFlowSavePayload({
       athleteId: athleteProfileId,
+      entityId,
       taxonomyAreaKey: bodyTaxonomyAreaKey,
       analysisType: "BODY",
       result: bodyAnalysis,
@@ -669,8 +730,13 @@ export function AnalysisResults({
 
   async function handleSaveClub() {
     if (!clubAnalysis || saveAnalysisButtonDisabled(clubSaveState.status)) return;
+    if (typeof entityId !== "string" || entityId.trim() === "") {
+      setClubSaveState({ status: "failed", record: null });
+      return;
+    }
     const payload = buildPeakFlowSavePayload({
       athleteId: athleteProfileId,
+      entityId,
       taxonomyAreaKey: clubTaxonomyAreaKey,
       analysisType: "CLUB",
       result: clubAnalysis,
@@ -697,17 +763,13 @@ export function AnalysisResults({
 
   return (
     <div ref={resultsRef} className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="secondary" onClick={onReset}>
-          New Analysis
-        </Button>
-        <Button type="button" variant="secondary" disabled aria-describedby="share-unavailable">
-          Share with Skills Coach
-        </Button>
-        <span id="share-unavailable" className="sr-only">
-          Coach sharing is not available yet.
-        </span>
-      </div>
+      {readOnly ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="secondary" onClick={onReset}>
+            New Analysis
+          </Button>
+        </div>
+      )}
 
       {hasBody && hasClub ? (
         <div className="flex overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm" role="tablist" aria-label="Analysis views">
@@ -739,36 +801,40 @@ export function AnalysisResults({
         {active === "body" ? (
           <>
             <BodyMetrics frames={frames} summary={summary} />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={saveAnalysisButtonDisabled(bodySaveState.status)}
-                onClick={handleSaveBody}
-              >
-                {saveAnalysisButtonLabel(bodySaveState.status, "BODY")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={onCloseBody}>
-                Close Body Analysis
-              </Button>
-            </div>
+            {readOnly ? null : (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saveAnalysisButtonDisabled(bodySaveState.status)}
+                  onClick={handleSaveBody}
+                >
+                  {saveAnalysisButtonLabel(bodySaveState.status, "BODY")}
+                </Button>
+                <Button type="button" variant="secondary" onClick={onCloseBody}>
+                  Close Body Analysis
+                </Button>
+              </div>
+            )}
           </>
         ) : (
           <>
             <ClubMetrics club={clubAnalysis?.swingtrace_club_metrics ?? null} />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={saveAnalysisButtonDisabled(clubSaveState.status)}
-                onClick={handleSaveClub}
-              >
-                {saveAnalysisButtonLabel(clubSaveState.status, "CLUB")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={onCloseClub}>
-                Close Club Analysis
-              </Button>
-            </div>
+            {readOnly ? null : (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saveAnalysisButtonDisabled(clubSaveState.status)}
+                  onClick={handleSaveClub}
+                >
+                  {saveAnalysisButtonLabel(clubSaveState.status, "CLUB")}
+                </Button>
+                <Button type="button" variant="secondary" onClick={onCloseClub}>
+                  Close Club Analysis
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -788,6 +854,7 @@ function VideoUpload({
   taxonomyFieldId,
   athleteProfileId,
   onAnalyze,
+  teeShotOnly = false,
 }) {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -795,7 +862,8 @@ function VideoUpload({
   const [taxonomyAreaKey, setTaxonomyAreaKey] = useState("");
   const [fileError, setFileError] = useState(null);
   const busy = phase === "analyzing";
-  const analyzeDisabled = !file || taxonomyAreaKey === "" || athleteProfileId === "" || busy;
+  const teeShotRequired = teeShotOnly && taxonomyAreaKey !== "" && taxonomyAreaKey !== "tee_shots_driving";
+  const analyzeDisabled = !file || taxonomyAreaKey === "" || teeShotRequired || athleteProfileId === "" || busy;
 
   function handleFile(nextFile) {
     if (!nextFile) return;
@@ -863,6 +931,11 @@ function VideoUpload({
           ))}
         </Select>
       </FormField>
+      {teeShotRequired ? (
+        <p className="text-sm font-semibold text-primaryDark">
+          Club Tracking is available for Tee Shots Driving only.
+        </p>
+      ) : null}
       {busy ? (
         <p className="flex items-center gap-2 text-base font-medium text-primaryDark">
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primaryLight border-t-primary" aria-hidden="true" />
@@ -895,6 +968,8 @@ const CLUB_GUIDANCE = [
   "Clear full-body view recommended. Keep the camera stationary where practical.",
   "For best results, position the camera far enough away to capture the athlete’s full body, the ball, and the complete club swing throughout the movement.",
   "Club Tracking currently supports Back / Down-the-Line videos only.",
+  "Driver tee shots only. Club Tracking runs only when Golf Taxonomy is Tee Shots Driving.",
+  "Minimum source resolution: 1080p (1920×1080 landscape or 1080×1920 portrait).",
   "For best results, upload an MP4 recorded at 120 fps. Minimum supported frame rate: 29 fps.",
 ];
 
@@ -916,8 +991,13 @@ export function SavedAnalysesSection({
   analyses = [],
   openingAnalysisId = null,
   openAnalysisErrorId = null,
+  sharingAnalysisId = null,
+  shareErrorId = null,
+  shareErrorMessage = null,
+  showSharing = false,
   onRetry,
   onOpen,
+  onShare,
 }) {
   const showLoading = pending || loading;
   return (
@@ -946,6 +1026,8 @@ export function SavedAnalysesSection({
         <ul className="flex flex-col gap-3">
           {analyses.map((item) => {
             const opening = openingAnalysisId === item.id;
+            const sharing = sharingAnalysisId === item.id;
+            const shared = item.shared === true;
             return (
               <li key={item.id} className="flex flex-col gap-1 border-t border-border pt-3">
                 <div className="flex items-start justify-between gap-3">
@@ -953,14 +1035,40 @@ export function SavedAnalysesSection({
                   <p className="text-sm font-semibold text-primaryDark">Saved ✓</p>
                 </div>
                 <p className="text-sm text-textSecondary">{savedAnalysisTaxonomyLabel(item.taxonomyAreaKey)}</p>
-                <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-textPrimary">{shared ? "Shared" : "Not Shared"}</p>
+                {shared && item.sharedAt ? (
+                  <p className="text-sm text-textSecondary">{formatSavedAnalysisTimestamp(item.sharedAt)}</p>
+                ) : null}
+                {Array.isArray(item.coachViewingStatus) ? item.coachViewingStatus.map((coach) => (
+                  <p key={coach.coachId} className="text-sm text-textSecondary">
+                    {coachRecipientLabel(coach)}
+                    {coachRecipientLabel(coach) ? " · " : ""}
+                    {coach.viewed ? "Viewed" : "Not Viewed"}
+                  </p>
+                )) : null}
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm text-textSecondary">{formatSavedAnalysisTimestamp(item.createdAt)}</p>
-                  <Button type="button" variant="secondary" disabled={opening} onClick={() => onOpen(item)}>
-                    {opening ? "Opening..." : "Open"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" disabled={opening} onClick={() => onOpen(item)}>
+                      {opening ? "Opening..." : "Open"}
+                    </Button>
+                    {showSharing ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={shared || sharing || !onShare}
+                        onClick={() => onShare(item)}
+                      >
+                        {sharing ? "Sharing..." : "Share Analysis"}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
                 {openAnalysisErrorId === item.id ? (
                   <p className="text-sm text-danger" role="alert">Saved analysis could not be opened.</p>
+                ) : null}
+                {shareErrorId === item.id ? (
+                  <p className="text-sm text-danger" role="alert">{shareErrorMessage || "Analysis could not be shared."}</p>
                 ) : null}
               </li>
             );
@@ -1005,6 +1113,7 @@ export function PeakFlowSwingPageContent() {
   const { accessContext, accessGateReady } = useAthleteInvitationGate();
   const planningIds = useAthletePlanningIdentifiers({ accessContext, accessGateReady });
   const athleteProfileId = planningIds.ids?.athleteProfileId ?? "";
+  const entityId = planningIds.ids?.entityId ?? "";
   const bodyRequestRef = useRef(0);
   const clubRequestRef = useRef(0);
   const bodyInFlightRef = useRef(false);
@@ -1032,6 +1141,9 @@ export function PeakFlowSwingPageContent() {
   const [savedAnalysesReload, setSavedAnalysesReload] = useState(0);
   const [openingAnalysisId, setOpeningAnalysisId] = useState(null);
   const [openAnalysisErrorId, setOpenAnalysisErrorId] = useState(null);
+  const [sharingAnalysisId, setSharingAnalysisId] = useState(null);
+  const [shareErrorId, setShareErrorId] = useState(null);
+  const [shareErrorMessage, setShareErrorMessage] = useState(null);
   const [pendingClose, setPendingClose] = useState(null);
   const openRequestRef = useRef(0);
 
@@ -1215,6 +1327,7 @@ export function PeakFlowSwingPageContent() {
 
   async function handleAnalyzeClub(file, selectedTaxonomyAreaKey) {
     if (athleteProfileId === "" || selectedTaxonomyAreaKey === "") return;
+    if (selectedTaxonomyAreaKey !== "tee_shots_driving") return;
     if (clubInFlightRef.current) return;
     clubInFlightRef.current = true;
     const requestId = clubRequestRef.current + 1;
@@ -1292,6 +1405,22 @@ export function PeakFlowSwingPageContent() {
     }
   }
 
+  async function handleShareSavedAnalysis(item) {
+    if (!item?.id || item.shared === true || sharingAnalysisId) return;
+    setSharingAnalysisId(item.id);
+    setShareErrorId(null);
+    setShareErrorMessage(null);
+    try {
+      await postPeakFlowShareAnalysis(item.id, entityId);
+      refreshSavedAnalyses();
+    } catch (err) {
+      setShareErrorId(item.id);
+      setShareErrorMessage(err instanceof Error ? err.message : "Analysis could not be shared.");
+    } finally {
+      setSharingAnalysisId(null);
+    }
+  }
+
   if (!allowed) return null;
 
   return (
@@ -1336,6 +1465,7 @@ export function PeakFlowSwingPageContent() {
         error={clubError}
         taxonomyFieldId="club-taxonomy-area-key"
         athleteProfileId={athleteProfileId}
+        teeShotOnly
         onAnalyze={handleAnalyzeClub}
         viewNote={
           <p className="rounded-lg border border-primary/40 bg-primaryLight px-3 py-2 text-sm font-semibold text-primaryDark">
@@ -1363,6 +1493,7 @@ export function PeakFlowSwingPageContent() {
           onCloseBody={requestCloseBody}
           onCloseClub={requestCloseClub}
           onReset={handleReset}
+          entityId={entityId}
         />
       ) : null}
 
@@ -1377,8 +1508,13 @@ export function PeakFlowSwingPageContent() {
         analyses={savedAnalyses}
         openingAnalysisId={openingAnalysisId}
         openAnalysisErrorId={openAnalysisErrorId}
+        sharingAnalysisId={sharingAnalysisId}
+        shareErrorId={shareErrorId}
+        shareErrorMessage={shareErrorMessage}
+        showSharing
         onRetry={refreshSavedAnalyses}
         onOpen={handleOpenSavedAnalysis}
+        onShare={handleShareSavedAnalysis}
       />
     </div>
   );

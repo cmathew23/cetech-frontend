@@ -4,9 +4,10 @@ import { DashboardSidebarFrame } from "@/components/layout/DashboardSidebarFrame
 import { useCoachPageReady } from "@/components/dashboard/coach/CoachPageReadyContext";
 import { useChatUnreadCount } from "@/hooks/useChatUnreadCount";
 import {
-  coachSidebarNavItems,
   isCoachSidebarNavItemActive,
+  visibleCoachSidebarNavItems,
 } from "@/config/dashboardNav";
+import { useCoachSportCode } from "@/components/dashboard/coach/useCoachSportCode";
 import { designSystem } from "@/config/design-system";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -16,6 +17,11 @@ export function CoachSidebar() {
   const pathname = usePathname();
   const { link, linkActive } = designSystem.layout.sidebar;
   const { isPageReady } = useCoachPageReady();
+  const { sportCode, ready: sportReady } = useCoachSportCode();
+  const navItems = (sportReady
+    ? visibleCoachSidebarNavItems(sportCode)
+    : visibleCoachSidebarNavItems(null)
+  ).filter((item) => sportReady || item.href !== "/coach/peakflow-swing");
   const { unreadCount: chatUnreadCount } = useChatUnreadCount({
     enabled: isPageReady,
     clearOnError: true,
@@ -35,7 +41,7 @@ export function CoachSidebar() {
         </>
       }
     >
-      {coachSidebarNavItems.map((item) => {
+      {navItems.map((item) => {
         const active = isCoachSidebarNavItemActive(pathname, item.href);
         const Icon = item.icon;
         const linkClass = cn(link, "font-normal", active && linkActive, active && "!font-medium");

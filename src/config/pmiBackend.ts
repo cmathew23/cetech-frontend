@@ -1,14 +1,16 @@
 /**
  * PeakFlow Movement Intelligence backend.
  * Not the CETECH API. Override with NEXT_PUBLIC_PMI_API_BASE_URL (no trailing slash).
+ * When unset, PeakFlow Swing uses the deployed Railway PMI service.
  */
+const DEPLOYED_PMI_API_BASE = "https://pmi-production-0234.up.railway.app";
 
 function readPmiBaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_PMI_API_BASE_URL;
   if (typeof raw === "string" && raw.trim() !== "") {
     return raw.trim().replace(/\/+$/, "");
   }
-  return "http://localhost:8000";
+  return DEPLOYED_PMI_API_BASE;
 }
 
 export const PMI_API_BASE = readPmiBaseUrl();

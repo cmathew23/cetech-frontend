@@ -565,6 +565,10 @@ export function openedAnalysisView(detail) {
   };
 }
 
+/**
+ * @param {string} athleteId
+ * @param {string | null | undefined} [entityId]
+ */
 export async function fetchPeakFlowSavedAnalyses(athleteId, entityId = null) {
   if (typeof athleteId !== "string" || athleteId === "") {
     throw new Error("Saved analyses could not be loaded.");
@@ -654,6 +658,31 @@ export function clearPeakFlowSwingDraft(key) {
   }
 }
 
+/**
+ * @param {object} props
+ * @param {object | null | undefined} [props.bodyAnalysis]
+ * @param {object | null | undefined} [props.clubAnalysis]
+ * @param {Function} [props.onReset]
+ * @param {string} [props.initialTab]
+ * @param {string} [props.athleteProfileId]
+ * @param {string} [props.bodyTaxonomyAreaKey]
+ * @param {string} [props.clubTaxonomyAreaKey]
+ * @param {string} [props.initialBodySaveStatus]
+ * @param {string} [props.initialClubSaveStatus]
+ * @param {object | null | undefined} [props.bodySave]
+ * @param {object | null | undefined} [props.clubSave]
+ * @param {Function} [props.onBodySaveChange]
+ * @param {Function} [props.onClubSaveChange]
+ * @param {string | null | undefined} [props.bodyPlaybackUrl]
+ * @param {string | null | undefined} [props.clubPlaybackUrl]
+ * @param {string | null | undefined} [props.requestedTab]
+ * @param {number} [props.requestedTabToken]
+ * @param {Function} [props.onAnalysisSaved]
+ * @param {Function} [props.onCloseBody]
+ * @param {Function} [props.onCloseClub]
+ * @param {string} [props.entityId]
+ * @param {boolean} [props.readOnly]
+ */
 export function AnalysisResults({
   bodyAnalysis,
   clubAnalysis,
@@ -984,6 +1013,22 @@ async function postVideo(path, file, athleteProfileId, selectedTaxonomyAreaKey) 
   return data;
 }
 
+/**
+ * @param {object} props
+ * @param {boolean} [props.pending]
+ * @param {boolean} [props.loading]
+ * @param {boolean} [props.error]
+ * @param {any[]} [props.analyses]
+ * @param {string | null | undefined} [props.openingAnalysisId]
+ * @param {string | null | undefined} [props.openAnalysisErrorId]
+ * @param {string | null | undefined} [props.sharingAnalysisId]
+ * @param {string | null | undefined} [props.shareErrorId]
+ * @param {string | null | undefined} [props.shareErrorMessage]
+ * @param {boolean} [props.showSharing]
+ * @param {Function} [props.onRetry]
+ * @param {Function} [props.onOpen]
+ * @param {Function} [props.onShare]
+ */
 export function SavedAnalysesSection({
   pending = false,
   loading = false,

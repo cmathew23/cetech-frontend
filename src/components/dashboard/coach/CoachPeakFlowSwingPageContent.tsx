@@ -89,7 +89,7 @@ export function CoachPeakFlowSwingPageContent() {
         if (!cancelled) {
           setAnalyses(
             rows.filter(
-              (row) =>
+              (row: Record<string, unknown>) =>
                 row.shared === true &&
                 (row.analysisType === "BODY" || row.analysisType === "CLUB"),
             ),

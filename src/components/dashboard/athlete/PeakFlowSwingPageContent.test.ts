@@ -178,30 +178,44 @@ describe("PeakFlow Swing result rendering", () => {
     const html = renderResults({ bodyAnalysis: null, clubAnalysis });
     expect(html).toContain("/renders/club_swingtrace.mp4");
     expect(html).toContain("Clubhead Path");
-    expect(html).toContain("Peak Clubhead Speed");
-    expect(html).toContain("1.2345");
-    expect(html).toContain("frame-widths/s");
-    expect(html).toContain("2D Clubhead Path Deviation");
-    expect(html).toContain("2.50");
-    expect(html).toContain("% of frame width");
+    expect(html).not.toContain("Peak Clubhead Speed");
+    expect(html).not.toContain("1.2345");
+    expect(html).not.toContain("frame-widths/s");
+    expect(html).not.toContain("2D Clubhead Path Deviation");
+    expect(html).not.toContain("2.50");
+    expect(html).not.toContain("% of frame width");
     expect(html).not.toContain("Body Movement Modeling");
+    expect(html).not.toContain("Spine Tilt");
+  });
+
+  it("hides club numbers in the read-only results view used by coaches and reopened analyses", () => {
+    const html = renderResults({ bodyAnalysis: null, clubAnalysis, readOnly: true });
+    expect(html).toContain("/renders/club_swingtrace.mp4");
+    expect(html).toContain("Clubhead Path");
+    expect(html).not.toContain("Peak Clubhead Speed");
+    expect(html).not.toContain("1.2345");
+    expect(html).not.toContain("2D Clubhead Path Deviation");
+    expect(html).not.toContain("2.50");
+    expect(html).not.toContain("Save Club Analysis");
     expect(html).not.toContain("Spine Tilt");
   });
 
   it("renders both tabs and each stored result view", () => {
     const bodyHtml = renderResults({ bodyAnalysis, clubAnalysis, initialTab: "body" });
     expect(bodyHtml).toContain("Body Movement Modeling");
-    expect(bodyHtml).toContain("Club Tracking");
+    expect(bodyHtml).toContain("2D Club Tracking");
     expect(bodyHtml).toContain("/renders/body.mp4");
     expect(bodyHtml).toContain("12.3°");
     expect(bodyHtml).not.toContain("/renders/club_swingtrace.mp4");
 
     const clubHtml = renderResults({ bodyAnalysis, clubAnalysis, initialTab: "club" });
     expect(clubHtml).toContain("Body Movement Modeling");
-    expect(clubHtml).toContain("Club Tracking");
+    expect(clubHtml).toContain("2D Club Tracking");
     expect(clubHtml).toContain("/renders/club_swingtrace.mp4");
-    expect(clubHtml).toContain("1.2345");
-    expect(clubHtml).toContain("2.50");
+    expect(clubHtml).toContain("Clubhead Path");
+    expect(clubHtml).not.toContain("1.2345");
+    expect(clubHtml).not.toContain("2.50");
+    expect(clubHtml).not.toContain("Peak Clubhead Speed");
     expect(clubHtml).not.toContain("/renders/body.mp4");
   });
 });
@@ -233,7 +247,7 @@ describe("PeakFlow Swing independent uploads", () => {
     expect(source).toContain('form.append("athleteId", athleteProfileId)');
     expect(source).toContain('form.append("taxonomyAreaKey", selectedTaxonomyAreaKey)');
     expect(source).toContain("planningIds.ids?.athleteProfileId");
-    expect(source).toContain('taxonomyAreaKey === ""');
+    expect(source).toContain('selectedTaxonomyAreaKey === ""');
   });
 
   it("shows a Body result without a Club result, and a Club result without a Body result", () => {
@@ -246,7 +260,7 @@ describe("PeakFlow Swing independent uploads", () => {
 
   it("keeps the two upload cards and their view copy", () => {
     expect(source).toContain("Analyze Body Movement");
-    expect(source).toContain("Analyze Club Tracking");
+    expect(source).toContain("Analyze 2D Club Tracking");
     expect(source).toContain("✓ Back / Down-the-Line View");
     expect(source).toContain("✓ Side / Face-On View");
     expect(source).toContain("REQUIRED VIEW: Back / Down-the-Line View");
@@ -273,12 +287,31 @@ describe("PeakFlow Swing golf access and taxonomy", () => {
     const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
     expect(html).toContain("PeakFlow Swing");
     expect(html).toContain("Analyze Body Movement");
-    expect(html).toContain("Analyze Club Tracking");
+    expect(html).toContain("Analyze 2D Club Tracking");
     expect(html).toContain("Golf Taxonomy");
     expect(html.split("tee_shots_driving").length - 1).toBe(2);
     expect(html.split("course_management_decision_making").length - 1).toBe(2);
     expect(html).not.toContain("user-should-not-be-used");
-    const analyzeButtons = html.match(/<button[^>]*>Analyze (?:Body Movement|Club Tracking)<\/button>/g) ?? [];
+    const selectMarkup = (id: string) => {
+      const start = html.indexOf(`id="${id}"`);
+      return html.slice(start, html.indexOf("</select>", start));
+    };
+    const optionTags = (markup: string) => [...markup.matchAll(/<option\b[^>]*>/g)].map((match) => match[0]);
+    const bodyOptions = optionTags(selectMarkup("body-taxonomy-area-key"));
+    const clubOptions = optionTags(selectMarkup("club-taxonomy-area-key"));
+    expect(bodyOptions.every((option) => !option.includes("disabled"))).toBe(true);
+    expect(bodyOptions[0]).toContain('value=""');
+    expect(bodyOptions[0]).toContain("selected");
+    expect(bodyOptions).toHaveLength(clubOptions.length + 1);
+    expect(clubOptions.some((option) => option.includes('value=""'))).toBe(false);
+    const drivingOption = clubOptions.find((option) => option.includes('value="tee_shots_driving"'));
+    expect(drivingOption).toContain("selected");
+    expect(drivingOption).not.toContain("disabled");
+    expect(clubOptions.filter((option) => option !== drivingOption).every((option) => option.includes("disabled"))).toBe(true);
+    expect(source).toContain('teeShotOnly ? "tee_shots_driving" : taxonomyAreaKey');
+    expect(source).toContain('setTaxonomyAreaKey("tee_shots_driving")');
+    expect(source).toContain('event.target.value = "tee_shots_driving"');
+    const analyzeButtons = html.match(/<button[^>]*>Analyze (?:Body Movement|2D Club Tracking)<\/button>/g) ?? [];
     expect(analyzeButtons).toHaveLength(2);
     for (const button of analyzeButtons) {
       expect(button).toContain("disabled");
@@ -466,7 +499,8 @@ describe("PeakFlow Swing save analysis", () => {
     });
     const button = saveButton(html, "Save failed — Retry");
     expect(button).not.toContain("disabled");
-    expect(html).toContain("1.2345");
+    expect(html).toContain("/renders/club_swingtrace.mp4");
+    expect(html).not.toContain("1.2345");
   });
 });
 
@@ -584,7 +618,8 @@ describe("PeakFlow Swing session drafts", () => {
 
     const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
     expect(html).toContain("/renders/club_swingtrace.mp4");
-    expect(html).toContain("1.2345");
+    expect(html).not.toContain("1.2345");
+    expect(html).not.toContain("Peak Clubhead Speed");
     expect(saveButton(html, "Save failed — Retry")).not.toContain("disabled");
     const restored = peakFlowSwingStateFromDraft(readPeakFlowSwingDrafts().club);
     expect(restored.taxonomyAreaKey).toBe("wedge_play");
@@ -607,7 +642,7 @@ describe("PeakFlow Swing session drafts", () => {
 
     const html = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
     expect(html).toContain("Body Movement Modeling");
-    expect(html).toContain("Club Tracking");
+    expect(html).toContain("2D Club Tracking");
     expect(html).toContain("/renders/body.mp4");
     expect(html).toContain("12.3°");
     expect(html).toContain("Saved ✓");
@@ -766,7 +801,7 @@ describe("PeakFlow Swing saved analyses", () => {
       onRetry() {},
       onOpen() {},
     }));
-    expect(clubRow).toContain("Club Tracking");
+    expect(clubRow).toContain("2D Club Tracking");
     expect(clubRow).toContain(savedAnalysisTaxonomyLabel("wedge_play"));
     expect(clubRow).not.toContain("wedge_play");
     expect(clubRow).not.toContain(savedClubId);
@@ -777,7 +812,7 @@ describe("PeakFlow Swing saved analyses", () => {
       onOpen() {},
     }));
     expect(empty).toContain("No saved analyses yet.");
-    expect(empty).toContain("Saved Body Movement and Club Tracking analyses will appear here.");
+    expect(empty).toContain("Saved Body Movement and 2D Club Tracking analyses will appear here.");
 
     const failed = renderToStaticMarkup(createElement(SavedAnalysesSection, {
       error: true,
@@ -791,9 +826,9 @@ describe("PeakFlow Swing saved analyses", () => {
     expect(failed).not.toContain(savedBodyId);
 
     const page = renderToStaticMarkup(createElement(PeakFlowSwingPageContent));
-    expect(page.indexOf("Analyze Club Tracking")).toBeLessThan(page.indexOf("Saved Analyses"));
+    expect(page.indexOf("Analyze 2D Club Tracking")).toBeLessThan(page.indexOf("Saved Analyses"));
     expect(page).toContain("Analyze Body Movement");
-    expect(page).toContain("Analyze Club Tracking");
+    expect(page).toContain("Analyze 2D Club Tracking");
   });
 
   it("opens a saved Body analysis from the detail route into the existing Body view", async () => {
@@ -894,8 +929,10 @@ describe("PeakFlow Swing saved analyses", () => {
       clubPlaybackUrl: view.playbackUrl,
     });
     expect(html).toContain(clubPlaybackUrl);
-    expect(html).toContain("1.2345");
-    expect(html).toContain("Club Tracking");
+    expect(html).not.toContain("1.2345");
+    expect(html).not.toContain("Peak Clubhead Speed");
+    expect(html).not.toContain("2D Clubhead Path Deviation");
+    expect(html).toContain("2D Club Tracking");
     expect(html).not.toContain("/renders/body.mp4");
     expect(html).not.toContain("12.3°");
 

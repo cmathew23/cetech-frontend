@@ -47,7 +47,7 @@ const GOLF_TAXONOMY_AREA_KEYS = [
 
 const TABS = [
   { id: "body", label: "Body Movement Modeling" },
-  { id: "club", label: "Club Tracking" },
+  { id: "club", label: "2D Club Tracking" },
 ];
 
 const BODY_SECTIONS = [
@@ -241,28 +241,6 @@ function ClubMetrics({ club }) {
           description="Tracked clubhead trajectory through the analyzed swing."
         />
       </section>
-      <section>
-        <h3 className="mb-3 text-lg font-semibold text-textPrimary">Peak Clubhead Speed</h3>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
-          <MetricCard
-            label="Peak Clubhead Speed"
-            value={formatValue(club?.peak_normalized_speed_per_s, "speed")}
-            unit="frame-widths/s"
-            description="Peak image-space clubhead movement speed."
-          />
-        </div>
-      </section>
-      <section>
-        <h3 className="mb-3 text-lg font-semibold text-textPrimary">2D Clubhead Path Deviation</h3>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
-          <MetricCard
-            label="2D Clubhead Path Deviation"
-            value={formatValue(club?.path_deviation_pct_frame_width, "percentNumber")}
-            unit="% of frame width"
-            description="How much the tracked clubhead path varies from its best-fit 2D path."
-          />
-        </div>
-      </section>
     </div>
   );
 }
@@ -432,7 +410,7 @@ export { peakFlowAnalysesListUrl, peakFlowAnalysisDetailUrl, postPeakFlowShareAn
 
 export function savedAnalysisKindLabel(analysisType) {
   if (analysisType === "BODY") return "Body Movement";
-  if (analysisType === "CLUB") return "Club Tracking";
+  if (analysisType === "CLUB") return "2D Club Tracking";
   return "";
 }
 
@@ -888,11 +866,17 @@ function VideoUpload({
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState(null);
-  const [taxonomyAreaKey, setTaxonomyAreaKey] = useState("");
+  const [taxonomyAreaKey, setTaxonomyAreaKey] = useState(teeShotOnly ? "tee_shots_driving" : "");
   const [fileError, setFileError] = useState(null);
   const busy = phase === "analyzing";
-  const teeShotRequired = teeShotOnly && taxonomyAreaKey !== "" && taxonomyAreaKey !== "tee_shots_driving";
-  const analyzeDisabled = !file || taxonomyAreaKey === "" || teeShotRequired || athleteProfileId === "" || busy;
+  const selectedTaxonomyAreaKey = teeShotOnly ? "tee_shots_driving" : taxonomyAreaKey;
+  const analyzeDisabled = !file || selectedTaxonomyAreaKey === "" || athleteProfileId === "" || busy;
+
+  useEffect(() => {
+    if (teeShotOnly && taxonomyAreaKey !== "tee_shots_driving") {
+      setTaxonomyAreaKey("tee_shots_driving");
+    }
+  }, [teeShotOnly, taxonomyAreaKey]);
 
   function handleFile(nextFile) {
     if (!nextFile) return;
@@ -948,23 +932,26 @@ function VideoUpload({
       <FormField id={taxonomyFieldId} label="Golf Taxonomy" required>
         <Select
           id={taxonomyFieldId}
-          value={taxonomyAreaKey}
+          value={selectedTaxonomyAreaKey}
           disabled={busy}
-          onChange={(event) => setTaxonomyAreaKey(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (teeShotOnly && next !== "tee_shots_driving") {
+              event.target.value = "tee_shots_driving";
+              setTaxonomyAreaKey("tee_shots_driving");
+              return;
+            }
+            setTaxonomyAreaKey(next);
+          }}
         >
-          <option value="">Select taxonomy</option>
+          {teeShotOnly ? null : <option value="">Select taxonomy</option>}
           {GOLF_TAXONOMY_AREA_KEYS.map((key) => (
-            <option key={key} value={key}>
+            <option key={key} value={key} disabled={teeShotOnly && key !== "tee_shots_driving"}>
               {formatTaxonomyAreaLabel(key)}
             </option>
           ))}
         </Select>
       </FormField>
-      {teeShotRequired ? (
-        <p className="text-sm font-semibold text-primaryDark">
-          Club Tracking is available for Tee Shots Driving only.
-        </p>
-      ) : null}
       {busy ? (
         <p className="flex items-center gap-2 text-base font-medium text-primaryDark">
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primaryLight border-t-primary" aria-hidden="true" />
@@ -977,7 +964,7 @@ function VideoUpload({
         type="button"
         variant="primary"
         disabled={analyzeDisabled}
-        onClick={() => onAnalyze(file, taxonomyAreaKey)}
+        onClick={() => onAnalyze(file, selectedTaxonomyAreaKey)}
       >
         {buttonLabel}
       </Button>
@@ -993,11 +980,11 @@ const BODY_GUIDANCE = [
 ];
 
 const CLUB_GUIDANCE = [
-  "For Club Tracking, record the golfer from a Back / Down-the-Line camera position.",
+  "For 2D Club Tracking, record the golfer from a Back / Down-the-Line camera position.",
   "Clear full-body view recommended. Keep the camera stationary where practical.",
   "For best results, position the camera far enough away to capture the athlete’s full body, the ball, and the complete club swing throughout the movement.",
-  "Club Tracking currently supports Back / Down-the-Line videos only.",
-  "Driver tee shots only. Club Tracking runs only when Golf Taxonomy is Tee Shots Driving.",
+  "2D Club Tracking currently supports Back / Down-the-Line videos only.",
+  "Driver tee shots only. 2D Club Tracking runs only when Golf Taxonomy is Tee Shots Driving.",
   "Minimum source resolution: 1080p (1920×1080 landscape or 1080×1920 portrait).",
   "For best results, upload an MP4 recorded at 120 fps. Minimum supported frame rate: 29 fps.",
 ];
@@ -1065,7 +1052,7 @@ export function SavedAnalysesSection({
       ) : analyses.length === 0 ? (
         <div className="space-y-1 text-sm text-textSecondary">
           <p>No saved analyses yet.</p>
-          <p>Saved Body Movement and Club Tracking analyses will appear here.</p>
+          <p>Saved Body Movement and 2D Club Tracking analyses will appear here.</p>
         </div>
       ) : (
         <ul className="flex flex-col gap-3">
@@ -1475,7 +1462,7 @@ export function PeakFlowSwingPageContent() {
         subtitle="AI-assisted golf movement analysis"
         trailing={
           <p className="text-sm text-textSecondary">
-            Upload a golf swing to review body movement and club tracking.
+            Upload a golf swing to review body movement and 2D Club Tracking.
           </p>
         }
       />
@@ -1501,10 +1488,10 @@ export function PeakFlowSwingPageContent() {
       />
       <VideoUpload
         key={`club-${resetToken}`}
-        title="Club Tracking"
+        title="2D Club Tracking"
         description="Upload a golf swing video to track club movement through the swing."
-        dropLabel="Drop a Club Tracking video here"
-        buttonLabel="Analyze Club Tracking"
+        dropLabel="Drop a 2D Club Tracking video here"
+        buttonLabel="Analyze 2D Club Tracking"
         guidance={CLUB_GUIDANCE}
         phase={clubPhase}
         error={clubError}
